@@ -28,21 +28,24 @@ function oversizedResponse(status: number): {
   let pulls = 0;
   let cancelled = false;
   const response = new Response(
-    new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulls += 1;
-        if (pulls <= 16) {
-          controller.enqueue(new Uint8Array(64 * 1024));
-        } else if (pulls === 17) {
-          controller.enqueue(new Uint8Array([0]));
-        } else {
-          controller.error(new Error("response was read past the size limit"));
-        }
+    new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulls += 1;
+          if (pulls <= 16) {
+            controller.enqueue(new Uint8Array(64 * 1024));
+          } else if (pulls === 17) {
+            controller.enqueue(new Uint8Array([0]));
+          } else {
+            controller.error(new Error("response was read past the size limit"));
+          }
+        },
+        cancel() {
+          cancelled = true;
+        },
       },
-      cancel() {
-        cancelled = true;
-      },
-    }),
+      { highWaterMark: 0 },
+    ),
     { status, headers: { "content-type": "application/json" } },
   );
   return { response, wasCancelled: () => cancelled };

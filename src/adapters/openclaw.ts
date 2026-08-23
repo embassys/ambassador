@@ -23,13 +23,28 @@ export interface OpenClawWebhookOptions {
 }
 
 function safeRuntimeUrl(value: string): URL {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Runtime URL is invalid");
+  }
   const loopback =
-    url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    url.hostname === "localhost" ||
+    url.hostname === "[::1]" ||
+    /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
+  if (
+    (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
     throw new Error("Runtime URL must use HTTPS unless it is loopback");
   }
   return url;
+}
+
+async function discardBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 function retryAfterMs(response: Response): number | undefined {
@@ -42,13 +57,37 @@ function retryAfterMs(response: Response): number | undefined {
 async function readJson(response: Response): Promise<unknown> {
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    await discardBody(response);
     throw new Error("Runtime response is too large");
   }
-  const text = await response.text();
-  if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES)
-    throw new Error("Runtime response is too large");
+  if (response.body === null) throw new Error("Runtime response body is missing");
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    return JSON.parse(text) as unknown;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("Runtime response is too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
   } catch {
     throw new Error("Runtime returned invalid JSON");
   }
@@ -93,7 +132,12 @@ export class OpenClawWebhookAdapter implements WakeAdapter {
 
   async health(signal: AbortSignal): Promise<HealthResult> {
     try {
-      const response = await this.fetch(this.healthUrl, { method: "GET", signal });
+      const response = await this.fetch(this.healthUrl, {
+        method: "GET",
+        redirect: "error",
+        signal,
+      });
+      await discardBody(response);
       return response.ok
         ? { healthy: true }
         : { healthy: false, detailCode: "runtime_unavailable" };
@@ -119,6 +163,7 @@ export class OpenClawWebhookAdapter implements WakeAdapter {
         "idempotency-key": deliveryId,
       },
       body,
+      redirect: "error",
       signal,
     });
 
@@ -126,6 +171,7 @@ export class OpenClawWebhookAdapter implements WakeAdapter {
       const parsed = successSchema.parse(await readJson(response));
       return { protocol_version: 1, status: "accepted", session_id: parsed.runId };
     }
+    await discardBody(response);
     return statusResult(response);
   }
 }
