@@ -12,7 +12,7 @@ const idSchema = z
   .regex(/^[A-Za-z0-9._~-]+$/);
 const successSchema = z.strictObject({
   ok: z.literal(true),
-  runId: z.string().min(1).max(256),
+  runId: idSchema,
 });
 
 export interface OpenClawWebhookOptions {

@@ -3,6 +3,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Journal } from "./journal.js";
 import type { Relay } from "./relay.js";
 
+const SUCCESS_YIELD_MS = 100;
+
 export interface DaemonEvent {
   code: "relay_iteration_failed";
 }
@@ -28,6 +30,7 @@ export async function runDaemon(options: DaemonOptions, signal: AbortSignal): Pr
   while (!signal.aborted) {
     try {
       await options.relay.runOnce(signal);
+      if (!signal.aborted) await wait(SUCCESS_YIELD_MS, signal);
     } catch {
       if (signal.aborted) break;
       options.onEvent?.({ code: "relay_iteration_failed" });

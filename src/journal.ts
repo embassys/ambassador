@@ -308,7 +308,7 @@ function sameBatchNotification(left: Notification, right: Notification): boolean
 
 function validateWakeResult(result: RecordedWakeResult): void {
   if (result.sessionId !== undefined) {
-    boundedText(result.sessionId, "sessionId", 4_096);
+    protocolId(result.sessionId, "sessionId");
     if (result.status !== "accepted") {
       throw new TypeError("sessionId is allowed only for an accepted result");
     }
@@ -381,13 +381,22 @@ export class Journal {
     if (database.open) database.close();
   }
 
-  ingestPoll(response: PollResponse, capacity: number, persistedAtMs: number): IngestResult {
+  ingestPoll(
+    response: PollResponse,
+    capacity: number,
+    persistedAtMs: number,
+    controllerObservedAtMs: number = persistedAtMs,
+  ): IngestResult {
     const { database, idGenerator } = resourcesFor(this);
     if (response.protocol_version !== 1) throw new TypeError("unsupported poll protocol version");
     const queueCapacity = inputInteger(capacity, "capacity");
     const persistedAt = timestampMs(persistedAtMs, "persistedAtMs");
+    const controllerObservedAt = timestampMs(controllerObservedAtMs, "controllerObservedAtMs");
     const serverTime = parseTimestamp(response.server_time, "server_time");
-    const clockOffset = safeInteger(serverTime - persistedAt, "controller_clock_offset_ms");
+    const clockOffset = safeInteger(
+      serverTime - controllerObservedAt,
+      "controller_clock_offset_ms",
+    );
     protocolId(response.cursor, "cursor");
 
     const uniqueByNotification = new Map<string, ValidatedNotification>();
@@ -619,7 +628,7 @@ export class Journal {
         const update = database
           .prepare(`
             UPDATE deliveries
-            SET binding_fingerprint = COALESCE(binding_fingerprint, ?),
+            SET binding_fingerprint = ?,
                 state = 'waking',
                 attempt_count = attempt_count + 1
             WHERE delivery_id = ?
@@ -658,10 +667,6 @@ export class Journal {
         ) {
           throw new Error(`${result.status} requires an in-flight delivery`);
         }
-        if (result.status === "expired" && currentState === "waking") {
-          throw new Error("an in-flight delivery cannot expire before its wake result");
-        }
-
         const sequence = nextReportSequence(row);
         const state: DeliveryState = result.status === "retrying" ? "retry_wait" : result.status;
         const previousMayHaveReached =
@@ -864,6 +869,49 @@ export class Journal {
       });
   }
 
+  hasPendingAcknowledgement(deliveryId: string): boolean {
+    protocolId(deliveryId, "deliveryId");
+    const row = resourcesFor(this)
+      .database.prepare<[string], { pending: bigint }>(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM outbox
+          WHERE kind = 'ack'
+            AND delivery_id = ?
+            AND confirmed_at_ms IS NULL
+        ) AS pending
+      `)
+      .get(deliveryId);
+    if (row === undefined) throw new Error("failed to inspect acknowledgement state");
+    return safeInteger(row.pending, "pending acknowledgement") === 1;
+  }
+
+  nextActionAtMs(): number | null {
+    const { database } = resourcesFor(this);
+    const row = database
+      .prepare<[], { next_attempt_at_ms: bigint | null; expires_at_ms: bigint | null }>(`
+        SELECT
+          MIN(next_attempt_at_ms) AS next_attempt_at_ms,
+          MIN(expires_at_ms) AS expires_at_ms
+        FROM deliveries
+        WHERE state IN ('pending', 'retry_wait')
+      `)
+      .get();
+    if (row === undefined || row.next_attempt_at_ms === null || row.expires_at_ms === null) {
+      return null;
+    }
+    const nextAttempt = timestampMs(
+      safeInteger(row.next_attempt_at_ms, "next_attempt_at_ms"),
+      "next_attempt_at_ms",
+    );
+    const expiresAt = adjustedTimestamp(
+      timestampMs(safeInteger(row.expires_at_ms, "expires_at_ms"), "expires_at_ms"),
+      controllerClockOffset(database),
+      "subtract",
+    );
+    return Math.min(nextAttempt, expiresAt);
+  }
+
   confirmOutbox(id: string, confirmedAtMs: number): void {
     const { database } = resourcesFor(this);
     protocolId(id, "outbox id");
@@ -989,7 +1037,10 @@ function createVersionOneSchema(database: Database.Database): void {
           next_attempt_at_ms BETWEEN ${MIN_DATE_MS} AND ${MAX_DATE_MS}
         ),
         runtime_session_id TEXT CHECK (
-          runtime_session_id IS NULL OR length(runtime_session_id) BETWEEN 1 AND 4096
+          runtime_session_id IS NULL OR (
+            length(runtime_session_id) BETWEEN 1 AND 128
+            AND runtime_session_id NOT GLOB '*[^-A-Za-z0-9._~]*'
+          )
         ),
         may_have_reached_runtime INTEGER NOT NULL CHECK (may_have_reached_runtime IN (0, 1)),
         report_sequence INTEGER NOT NULL CHECK (

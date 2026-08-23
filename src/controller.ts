@@ -168,8 +168,24 @@ export class HttpControllerClient implements ControllerClient {
     );
   }
 
-  async poll(cursor: string | null, signal: AbortSignal): Promise<PollResponse> {
-    const requestAbort = withDeadline(signal, this.waitSeconds * 1_000 + this.requestTimeoutMs);
+  async poll(
+    cursor: string | null,
+    signal: AbortSignal,
+    options: PollRequestOptions = {},
+  ): Promise<PollResponse> {
+    const waitSeconds = options.waitSeconds ?? this.waitSeconds;
+    const maxNotifications = options.maxNotifications ?? this.maxNotifications;
+    if (!Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > this.waitSeconds) {
+      throw new Error("Controller poll override wait is invalid");
+    }
+    if (
+      !Number.isInteger(maxNotifications) ||
+      maxNotifications < 1 ||
+      maxNotifications > this.maxNotifications
+    ) {
+      throw new Error("Controller poll override batch size is invalid");
+    }
+    const requestAbort = withDeadline(signal, waitSeconds * 1_000 + this.requestTimeoutMs);
     const url = new URL("/v1/sidecar/notifications", this.baseUrl);
     if (cursor !== null) {
       if (!PROTOCOL_ID.test(cursor)) {
@@ -177,8 +193,8 @@ export class HttpControllerClient implements ControllerClient {
       }
       url.searchParams.set("cursor", cursor);
     }
-    url.searchParams.set("wait_seconds", String(this.waitSeconds));
-    url.searchParams.set("max_notifications", String(this.maxNotifications));
+    url.searchParams.set("wait_seconds", String(waitSeconds));
+    url.searchParams.set("max_notifications", String(maxNotifications));
 
     const response = await request(
       this.fetch,

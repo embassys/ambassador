@@ -6,7 +6,7 @@ import { PROTOCOL_VERSION } from "./protocol.js";
 
 const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 60_000;
-const ALL_OUTBOX_RECORDS = Number.MAX_SAFE_INTEGER;
+const OUTBOX_BATCH_SIZE = 1_000;
 
 const RETRYABLE_REASONS = new Set([
   "runtime_unavailable",
@@ -53,32 +53,55 @@ export class Relay {
   }
 
   async runOnce(signal: AbortSignal): Promise<void> {
-    if (this.journal.activeCount() < this.config.controller.queue_capacity) {
-      const response = await this.controller.poll(this.journal.getCursor(), signal);
-      this.journal.ingestPoll(response, this.config.controller.queue_capacity, this.now());
-    }
+    this.journal.recoverInFlight(this.now());
+    const attemptedOutboxIds = new Set<string>();
+    const initial = await this.serviceDurableWork(signal, attemptedOutboxIds);
+    if (initial.error !== null) throw initial.error;
 
-    for (const record of this.journal.listOutbox(ALL_OUTBOX_RECORDS)) {
-      if (record.kind !== "ack") continue;
+    const remainingCapacity = this.config.controller.queue_capacity - this.journal.activeCount();
+    if (remainingCapacity <= 0) return;
 
-      await this.controller.acknowledge(
-        {
-          protocol_version: PROTOCOL_VERSION,
-          notification_id: record.notificationId,
-          delivery_id: record.deliveryId,
-          status: "persisted",
-          persisted_at: record.persistedAt,
-        },
-        signal,
-      );
-      this.journal.confirmOutbox(record.id, this.now());
-    }
+    const now = this.now();
+    const nextActionAt = this.journal.nextActionAtMs();
+    const millisecondsUntilAction = nextActionAt === null ? null : Math.max(0, nextActionAt - now);
+    if (millisecondsUntilAction !== null && millisecondsUntilAction < 1_000) return;
+
+    const waitSeconds =
+      millisecondsUntilAction === null
+        ? this.config.controller.poll_wait_seconds
+        : Math.min(
+            this.config.controller.poll_wait_seconds,
+            Math.max(1, Math.floor(millisecondsUntilAction / 1_000)),
+          );
+    const pollStartedAt = this.now();
+    const response = await this.controller.poll(this.journal.getCursor(), signal, {
+      waitSeconds,
+      maxNotifications: Math.min(this.config.controller.max_notifications, remainingCapacity),
+    });
+    this.journal.ingestPoll(
+      response,
+      this.config.controller.queue_capacity,
+      this.now(),
+      pollStartedAt,
+    );
+
+    const afterPoll = await this.serviceDurableWork(signal, attemptedOutboxIds);
+    if (afterPoll.error !== null) throw afterPoll.error;
+  }
+
+  private async serviceDurableWork(
+    signal: AbortSignal,
+    attemptedOutboxIds: Set<string>,
+  ): Promise<{ error: unknown | null; reportFailed: boolean }> {
+    const blockedReportDeliveries = new Set<string>();
+    const initial = await this.flushOutbox(signal, attemptedOutboxIds, blockedReportDeliveries);
 
     const dueAtMs = this.now();
     this.journal.expireDue(dueAtMs);
     const dueDeliveries = this.journal.listDue(dueAtMs, this.config.controller.queue_capacity);
 
-    for (const dueDelivery of dueDeliveries) {
+    for (const dueDelivery of initial.reportFailed ? [] : dueDeliveries) {
+      if (this.journal.hasPendingAcknowledgement(dueDelivery.deliveryId)) continue;
       const claimAtMs = this.now();
       if (dueDelivery.expiresAtMs <= claimAtMs) {
         this.journal.expireDue(claimAtMs);
@@ -141,6 +164,17 @@ export class Relay {
             const reason = RETRYABLE_REASONS.has(response.code)
               ? response.code
               : "runtime_unavailable";
+            const mayHaveReachedRuntime = reason === "timeout" || reason === "outcome_unknown";
+            if (observedAtMs >= claim.delivery.expiresAtMs) {
+              result = mayHaveReachedRuntime
+                ? {
+                    status: "uncertain",
+                    reason: "retry_window_exhausted",
+                    mayHaveReachedRuntime: true,
+                  }
+                : { status: "expired" };
+              break;
+            }
             const cappedDelayMs = Math.min(
               RETRY_CAP_MS,
               RETRY_BASE_MS * 2 ** Math.max(0, claim.delivery.attemptCount - 1),
@@ -152,7 +186,7 @@ export class Relay {
               status: "retrying",
               reason,
               nextAttemptAtMs: Math.min(observedAtMs + retryDelayMs, claim.delivery.expiresAtMs),
-              mayHaveReachedRuntime: reason === "timeout" || reason === "outcome_unknown",
+              mayHaveReachedRuntime,
             };
             break;
           }
@@ -161,6 +195,15 @@ export class Relay {
         if (signal.aborted) throw error;
 
         observedAtMs = this.now();
+        if (observedAtMs >= claim.delivery.expiresAtMs) {
+          result = {
+            status: "uncertain",
+            reason: "retry_window_exhausted",
+            mayHaveReachedRuntime: true,
+          };
+          this.journal.recordWakeResult(claim.delivery.deliveryId, result, observedAtMs);
+          continue;
+        }
         const cappedDelayMs = Math.min(
           RETRY_CAP_MS,
           RETRY_BASE_MS * 2 ** Math.max(0, claim.delivery.attemptCount - 1),
@@ -179,24 +222,65 @@ export class Relay {
       this.journal.recordWakeResult(claim.delivery.deliveryId, result, observedAtMs);
     }
 
-    for (const record of this.journal.listOutbox(ALL_OUTBOX_RECORDS)) {
-      if (record.kind !== "report") continue;
+    const final = await this.flushOutbox(signal, attemptedOutboxIds, blockedReportDeliveries);
+    return {
+      error: initial.error ?? final.error,
+      reportFailed: initial.reportFailed || final.reportFailed,
+    };
+  }
 
-      await this.controller.report(
-        {
-          protocol_version: PROTOCOL_VERSION,
-          report_id: record.id,
-          sequence: record.sequence,
-          notification_id: record.notificationId,
-          delivery_id: record.deliveryId,
-          status: record.status,
-          ...(record.reason === undefined ? {} : { reason: record.reason }),
-          observed_at: record.observedAt,
-          ...(record.nextAttemptAt === undefined ? {} : { next_attempt_at: record.nextAttemptAt }),
-        },
-        signal,
-      );
-      this.journal.confirmOutbox(record.id, this.now());
+  private async flushOutbox(
+    signal: AbortSignal,
+    attemptedOutboxIds: Set<string>,
+    blockedReportDeliveries: Set<string>,
+  ): Promise<{ error: unknown | null; reportFailed: boolean }> {
+    let firstError: unknown | null = null;
+    let reportFailed = false;
+    for (const record of this.journal.listOutbox(OUTBOX_BATCH_SIZE)) {
+      if (attemptedOutboxIds.has(record.id)) continue;
+      if (record.kind === "report" && blockedReportDeliveries.has(record.deliveryId)) continue;
+      attemptedOutboxIds.add(record.id);
+
+      try {
+        if (record.kind === "ack") {
+          await this.controller.acknowledge(
+            {
+              protocol_version: PROTOCOL_VERSION,
+              notification_id: record.notificationId,
+              delivery_id: record.deliveryId,
+              status: "persisted",
+              persisted_at: record.persistedAt,
+            },
+            signal,
+          );
+        } else {
+          await this.controller.report(
+            {
+              protocol_version: PROTOCOL_VERSION,
+              report_id: record.id,
+              sequence: record.sequence,
+              notification_id: record.notificationId,
+              delivery_id: record.deliveryId,
+              status: record.status,
+              ...(record.reason === undefined ? {} : { reason: record.reason }),
+              observed_at: record.observedAt,
+              ...(record.nextAttemptAt === undefined
+                ? {}
+                : { next_attempt_at: record.nextAttemptAt }),
+            },
+            signal,
+          );
+        }
+        this.journal.confirmOutbox(record.id, this.now());
+      } catch (error) {
+        firstError ??= error;
+        if (record.kind === "report") {
+          reportFailed = true;
+          blockedReportDeliveries.add(record.deliveryId);
+        }
+      }
     }
+
+    return { error: firstError, reportFailed };
   }
 }
