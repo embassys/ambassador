@@ -28,6 +28,35 @@ function sameArtifact(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function secureExistingFile(path: string, invalidArtifact: () => Error): void {
+  let pathStats: Stats;
+  try {
+    pathStats = lstatSync(path);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return;
+    throw error;
+  }
+  if (!pathStats.isFile() || pathStats.nlink !== 1) throw invalidArtifact();
+
+  const descriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
+  try {
+    const descriptorStats = fstatSync(descriptor);
+    pathStats = lstatSync(path);
+    if (
+      !descriptorStats.isFile() ||
+      !pathStats.isFile() ||
+      descriptorStats.nlink !== 1 ||
+      pathStats.nlink !== 1 ||
+      !sameArtifact(descriptorStats, pathStats)
+    ) {
+      throw invalidArtifact();
+    }
+    if (POSIX) fchmodSync(descriptor, 0o600);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function preparePrivateSqliteArtifact(
   path: string,
   invalidArtifact: () => Error,
@@ -52,6 +81,10 @@ export function preparePrivateSqliteArtifact(
         throw invalidArtifact();
       }
       fchmodSync(directoryDescriptor, 0o700);
+    }
+
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      secureExistingFile(`${path}${suffix}`, invalidArtifact);
     }
 
     try {
