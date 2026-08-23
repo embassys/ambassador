@@ -123,6 +123,7 @@ describe("OpenClawWebhookAdapter", () => {
       { ok: true },
       { ok: false, runId: "run-local-42" },
       { ok: true, runId: "run-local-42", result: "forbidden" },
+      { ok: true, runId: "free-form runtime response" },
     ];
     for (const body of invalid) {
       const adapter = new OpenClawWebhookAdapter({

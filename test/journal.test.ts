@@ -183,9 +183,37 @@ test("uses controller clock offset for expiry and controller-facing timestamps",
     journal.listDue(localNow, 10).map(({ deliveryId }) => deliveryId),
     ["delivery-1"],
   );
+  assert.equal(journal.nextActionAtMs(), localNow - 60_000);
+  assert.equal(journal.hasPendingAcknowledgement("delivery-1"), true);
   assert.equal(ackRecords(journal)[0]?.persistedAt, new Date(controllerNow).toISOString());
   assert.equal(journal.expireDue(localNow + 59_999), 0);
   assert.equal(journal.expireDue(localNow + 60_000), 1);
+});
+
+test("uses the poll start time so response latency cannot extend controller expiry", (t) => {
+  const journal = temporaryJournal(t).open();
+  const pollStartedAt = Date.parse("2026-08-23T12:00:00Z");
+  const persistedAt = pollStartedAt + 10_000;
+  journal.ingestPoll(
+    {
+      protocol_version: 1,
+      cursor: "cursor-latency",
+      server_time: "2026-08-23T12:00:00Z",
+      notifications: [
+        notification({
+          issued_at: "2026-08-23T11:59:59Z",
+          expires_at: "2026-08-23T12:00:05Z",
+        }),
+      ],
+    },
+    10,
+    persistedAt,
+    pollStartedAt,
+  );
+
+  assert.equal(journal.getDelivery("delivery-1")?.expiresAtMs, pollStartedAt + 5_000);
+  assert.equal(journal.expireDue(persistedAt), 1);
+  assert.equal(journal.getDelivery("delivery-1")?.state, "expired");
 });
 
 test("rejects a notification ID conflict without committing earlier rows or the cursor", (t) => {
@@ -539,6 +567,62 @@ test("reports binding_changed instead of waking a different pinned binding after
     "not_due",
   );
   assert.equal(reportRecords(journal, "delivery-1").length, 2);
+});
+
+test("repins a changed binding while every earlier outcome is known not to have reached runtime", (t) => {
+  const journal = temporaryJournal(t).open();
+  journal.ingestPoll(poll("cursor-1", [notification()]), 10, NOW_MS);
+  journal.claimDelivery("delivery-1", "fingerprint-original", NOW_MS);
+  const firstRetryAt = NOW_MS + 1_000;
+  journal.recordWakeResult(
+    "delivery-1",
+    {
+      status: "retrying",
+      reason: "runtime_unavailable",
+      nextAttemptAtMs: firstRetryAt,
+      mayHaveReachedRuntime: false,
+    },
+    NOW_MS + 100,
+  );
+
+  const changedClaim = journal.claimDelivery(
+    "delivery-1",
+    "fingerprint-reconfigured",
+    firstRetryAt,
+  );
+  assert.equal(changedClaim.status, "claimed");
+  assert.equal(changedClaim.delivery?.bindingFingerprint, "fingerprint-reconfigured");
+  const secondRetryAt = NOW_MS + 2_000;
+  journal.recordWakeResult(
+    "delivery-1",
+    {
+      status: "retrying",
+      reason: "outcome_unknown",
+      nextAttemptAtMs: secondRetryAt,
+      mayHaveReachedRuntime: true,
+    },
+    firstRetryAt + 100,
+  );
+
+  assert.equal(
+    journal.claimDelivery("delivery-1", "fingerprint-reconfigured", secondRetryAt).status,
+    "claimed",
+  );
+});
+
+test("rejects non-protocol session IDs before they reach SQLite", (t) => {
+  const journal = temporaryJournal(t).open();
+  journal.ingestPoll(poll("cursor-1", [notification()]), 10, NOW_MS);
+  journal.claimDelivery("delivery-1", "fingerprint-1", NOW_MS);
+
+  assert.throws(() =>
+    journal.recordWakeResult(
+      "delivery-1",
+      { status: "accepted", sessionId: "free-form runtime response" },
+      NOW_MS + 100,
+    ),
+  );
+  assert.equal(journal.getDelivery("delivery-1")?.state, "waking");
 });
 
 test("hides confirmed outbox rows without recreating them or deleting delivery state", (t) => {

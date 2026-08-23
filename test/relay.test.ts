@@ -316,6 +316,7 @@ class ScriptedAdapter implements WakeAdapter {
   constructor(
     private readonly trace: string[],
     private readonly responses: WakeResponse[],
+    private readonly onWake?: () => void,
   ) {}
 
   async health(_signal: AbortSignal): Promise<HealthResult> {
@@ -325,6 +326,7 @@ class ScriptedAdapter implements WakeAdapter {
   async wake(input: WakeInput, _signal: AbortSignal): Promise<WakeResponse> {
     this.trace.push("adapter.wake");
     this.inputs.push({ ...input });
+    this.onWake?.();
     const response = this.responses.shift();
     if (!response) throw new Error("no scripted wake response");
     return response;
@@ -448,7 +450,7 @@ describe("Relay", () => {
 
     await relay.runOnce(AbortSignal.timeout(1_000));
 
-    assert.deepEqual(controller.pollOptions, [{ waitSeconds: 5, maxNotifications: 999 }]);
+    assert.deepEqual(controller.pollOptions, [{ waitSeconds: 5, maxNotifications: 50 }]);
   });
 
   test("does not start another wake while report delivery is failing", async () => {
@@ -567,6 +569,28 @@ describe("Relay", () => {
       observed_at: new Date(NOW_MS).toISOString(),
       next_attempt_at: new Date(NOW_MS + 5_000).toISOString(),
     });
+  });
+
+  test("reports a retryable response received at expiry as terminal", async () => {
+    const trace: string[] = [];
+    let nowMs = NOW_MS;
+    const expiresAtMs = NOW_MS + 100;
+    const journal = new MemoryJournal(trace, [delivery({ expiresAtMs })]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    const adapter = new ScriptedAdapter(
+      trace,
+      [{ protocol_version: 1, status: "retryable_error", code: "runtime_unavailable" }],
+      () => {
+        nowMs = expiresAtMs;
+      },
+    );
+    const relay = createRelay({ journal, controller, adapter, now: () => nowMs });
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "expired");
+    assert.equal(controller.reports.at(-1)?.status, "expired");
+    assert.equal(controller.reports.at(-1)?.reason, undefined);
   });
 
   test("records a permanent binding_not_found failure without calling an adapter", async () => {
