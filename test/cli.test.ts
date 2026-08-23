@@ -238,6 +238,79 @@ test("agent add stores a generic adapter with an environment secret reference", 
   assert.deepEqual(parsed, configWithAgents([genericAgent()]));
 });
 
+test("agent add stores Hermes and OpenClaw native adapter settings", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, configWithAgents());
+
+  const hermes = await invoke(
+    [
+      "agent",
+      "add",
+      "binding_hermes",
+      "--adapter",
+      "hermes",
+      "--url",
+      "http://127.0.0.1:8644/webhooks/a2a",
+      "--health-url",
+      "http://127.0.0.1:8644/health",
+      "--secret-env",
+      "A2A_HERMES_SECRET",
+      "--config",
+      configPath,
+      "--json",
+    ],
+    { cwd: directory },
+  );
+  assertJsonSuccess(hermes);
+
+  const openclaw = await invoke(
+    [
+      "agent",
+      "add",
+      "binding_openclaw",
+      "--adapter",
+      "openclaw",
+      "--url",
+      "http://127.0.0.1:18789/hooks/agent",
+      "--agent-id",
+      "agent_local",
+      "--token-env",
+      "A2A_OPENCLAW_TOKEN",
+      "--config",
+      configPath,
+      "--json",
+    ],
+    { cwd: directory },
+  );
+  assertJsonSuccess(openclaw);
+
+  const parsed: unknown = JSON.parse(await readFile(configPath, "utf8"));
+  assert.deepEqual(
+    parsed,
+    configWithAgents([
+      {
+        binding_id: "binding_hermes",
+        adapter: {
+          type: "hermes",
+          url: "http://127.0.0.1:8644/webhooks/a2a",
+          health_url: "http://127.0.0.1:8644/health",
+          secret: { source: "env", name: "A2A_HERMES_SECRET" },
+        },
+      },
+      {
+        binding_id: "binding_openclaw",
+        adapter: {
+          type: "openclaw",
+          url: "http://127.0.0.1:18789/hooks/agent",
+          agent_id: "agent_local",
+          token: { source: "env", name: "A2A_OPENCLAW_TOKEN" },
+        },
+      },
+    ]),
+  );
+});
+
 test("agent list has human output and a JSON data envelope", async (t) => {
   const directory = await temporaryDirectory(t);
   const configPath = join(directory, "config.json");
@@ -293,6 +366,40 @@ test("agent test probes the configured health endpoint", async (t) => {
   assert.equal(data.binding_id, "binding_local");
   assert.equal(data.healthy, true);
   assert.deepEqual(runtime.requests, ["/health"]);
+});
+
+test("agent test supports a native OpenClaw health probe", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const runtime = await listen(t, { status: 204 });
+  const configPath = join(directory, "config.json");
+  await writeConfig(
+    configPath,
+    configWithAgents([
+      {
+        binding_id: "binding_openclaw",
+        adapter: {
+          type: "openclaw",
+          url: `${runtime.baseUrl}/hooks/agent`,
+          health_url: `${runtime.baseUrl}/readyz`,
+          agent_id: "agent_local",
+          token: { source: "env", name: "A2A_OPENCLAW_TOKEN" },
+        },
+      },
+    ]),
+  );
+
+  const result = await invoke(
+    ["agent", "test", "binding_openclaw", "--config", configPath, "--json"],
+    {
+      cwd: directory,
+      env: { A2A_OPENCLAW_TOKEN: "openclaw-token" },
+    },
+  );
+
+  const data = assertJsonSuccess(result);
+  assert.equal(data.binding_id, "binding_openclaw");
+  assert.equal(data.healthy, true);
+  assert.deepEqual(runtime.requests, ["/readyz"]);
 });
 
 test("A2A_CONFIG_PATH overrides the platform default", async (t) => {
