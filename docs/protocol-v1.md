@@ -1,6 +1,6 @@
 # Sidecar protocol v1
 
-Status: draft for user review
+Status: accepted under delegated approval, user review pending
 
 This document defines behavior, not HTTP paths or implementation libraries. The controller team may map the controller operations to its own API. Runtime adapters map the wake contract to each runtime's API.
 
@@ -287,12 +287,6 @@ Reject any controller or runtime message containing fields such as `task`, `prom
 | S02 | Generic webhook has a bad signature or stale timestamp | Runtime rejects it without starting an agent session |
 | D01 | Inspect network, journal, logs, and diagnostics | Find no forbidden task or MCP fields |
 
-## Open decisions
+## Operating decisions
 
-The user must approve these before tests or implementation lock them in:
-
-- Controller credential issuance and refresh.
-- Poll wait and batch-size limits.
-- Default retry timing and maximum retry window.
-- Local journal retention.
-- Generic webhook header names and exact signature encoding.
+ADR `0009-operating-defaults.md` records the provisional values used by the implementation. Controller-managed credential issuance, OS credential vaults, and bounded journal cleanup remain deferred until their external contracts are available.
