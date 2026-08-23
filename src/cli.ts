@@ -60,7 +60,6 @@ const invalidConfig = new SidecarError("config_invalid", "Configuration is inval
 const authenticationFailure = new SidecarError("authentication_failed", "Authentication failed", 4);
 const runtimeFailure = new SidecarError("runtime_unavailable", "Local runtime is unavailable", 6);
 const stateFailure = new SidecarError("local_state_error", "Local state operation failed", 7);
-const notImplemented = new SidecarError("not_implemented", "Command is not implemented", 7);
 const internalError = new SidecarError("internal_error", "Unexpected internal error", 70);
 
 const bindingIdPattern = /^[A-Za-z0-9._~-]{1,128}$/;
@@ -512,6 +511,49 @@ async function service(
   };
 }
 
+async function status(args: string[], context: CliContext): Promise<CommandResult> {
+  const parsed = parseCommand(args, commonOptions, 0);
+  const path = configPath(parsed.values, context);
+  const config = await loadConfig(path);
+  const serviceStatus = await nativeServiceManager(context, path).status();
+  return {
+    data: { configured_agents: config.agents.length, service: serviceStatus },
+    human: `Configured agents: ${config.agents.length}\nService: ${serviceStatus.running ? "running" : serviceStatus.installed ? "stopped" : "not installed"}\n`,
+    json: jsonRequested(parsed.values),
+  };
+}
+
+async function doctor(args: string[], context: CliContext): Promise<CommandResult> {
+  const parsed = parseCommand(args, commonOptions, 0);
+  const config = await loadConfig(configPath(parsed.values, context));
+  try {
+    resolveSecret(config.controller.token, context.env);
+  } catch {
+    throw authenticationFailure;
+  }
+
+  const agents: Array<{ binding_id: string; adapter: string; healthy: boolean }> = [];
+  for (const agent of config.agents) {
+    let healthy = false;
+    try {
+      const adapter = createWakeAdapter(agent, { env: context.env });
+      healthy = (await adapter.health(AbortSignal.timeout(5_000))).healthy;
+    } catch {
+      throw runtimeFailure;
+    }
+    agents.push({ binding_id: agent.binding_id, adapter: agent.adapter.type, healthy });
+  }
+  if (agents.some((agent) => !agent.healthy)) throw runtimeFailure;
+
+  return {
+    data: { config_valid: true, controller_credential: true, agents },
+    human: `Configuration is valid\nController credential is available\n${agents
+      .map((agent) => `${agent.binding_id}: healthy`)
+      .join("\n")}${agents.length === 0 ? "" : "\n"}`,
+    json: jsonRequested(parsed.values),
+  };
+}
+
 function version(args: string[]): CommandResult {
   const parsed = parseCommand(args, commonOptions, 0);
   return {
@@ -519,11 +561,6 @@ function version(args: string[]): CommandResult {
     human: `a2a ${packageJson.version}\n`,
     json: jsonRequested(parsed.values),
   };
-}
-
-function explicitNotImplemented(args: string[], options = commonOptions): never {
-  parseCommand(args, options, 0);
-  throw notImplemented;
 }
 
 async function dispatch(args: string[], context: CliContext): Promise<CommandResult> {
@@ -553,8 +590,11 @@ async function dispatch(args: string[], context: CliContext): Promise<CommandRes
   if (command === "run") {
     return run(args.slice(1), context);
   }
-  if (command === "status" || command === "doctor") {
-    return explicitNotImplemented(args.slice(1));
+  if (command === "status") {
+    return status(args.slice(1), context);
+  }
+  if (command === "doctor") {
+    return doctor(args.slice(1), context);
   }
   if (command === "service") {
     const action = args[1];
