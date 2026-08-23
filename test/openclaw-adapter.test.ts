@@ -12,6 +12,33 @@ function requestFrom(input: string | URL | Request, init?: RequestInit): Request
   return input instanceof Request ? input : new Request(input, init);
 }
 
+function oversizedResponse(status: number): {
+  response: Response;
+  wasCancelled: () => boolean;
+} {
+  let pulls = 0;
+  let cancelled = false;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls <= 16) {
+          controller.enqueue(new Uint8Array(64 * 1024));
+        } else if (pulls === 17) {
+          controller.enqueue(new Uint8Array([0]));
+        } else {
+          controller.error(new Error("response was read past the size limit"));
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+  return { response, wasCancelled: () => cancelled };
+}
+
 describe("OpenClawWebhookAdapter", () => {
   test("sends a fixed content-blind instruction and idempotency key", async () => {
     let captured: Request | undefined;
@@ -35,6 +62,7 @@ describe("OpenClawWebhookAdapter", () => {
     assert.ok(captured);
     assert.equal(captured.method, "POST");
     assert.equal(captured.url, URL);
+    assert.equal(captured.redirect, "error");
     assert.equal(captured.headers.get("authorization"), `Bearer ${TOKEN}`);
     assert.equal(captured.headers.get("idempotency-key"), DELIVERY_ID);
     assert.deepEqual(JSON.parse(await captured.text()), {
@@ -62,6 +90,19 @@ describe("OpenClawWebhookAdapter", () => {
       });
       await assert.rejects(adapter.wake({ deliveryId: DELIVERY_ID }, AbortSignal.timeout(1_000)));
     }
+  });
+
+  test("cancels an oversized success body while reading it", async () => {
+    const oversized = oversizedResponse(200);
+    const adapter = new OpenClawWebhookAdapter({
+      url: URL,
+      token: TOKEN,
+      agentId: "agent-local",
+      fetch: async () => oversized.response,
+    });
+
+    await assert.rejects(adapter.wake({ deliveryId: DELIVERY_ID }, AbortSignal.timeout(1_000)));
+    assert.equal(oversized.wasCancelled(), true);
   });
 
   test("maps authentication, rate-limit, and unavailable statuses without exposing bodies", async () => {
@@ -128,5 +169,6 @@ describe("OpenClawWebhookAdapter", () => {
       [["GET", "http://127.0.0.1:18789/readyz"]],
     );
     assert.equal(requests[0]?.headers.has("authorization"), false);
+    assert.equal(requests[0]?.redirect, "error");
   });
 });

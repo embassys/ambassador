@@ -21,6 +21,33 @@ function json(value: unknown, status: number, headers?: Record<string, string>):
   });
 }
 
+function oversizedResponse(status: number): {
+  response: Response;
+  wasCancelled: () => boolean;
+} {
+  let pulls = 0;
+  let cancelled = false;
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls <= 16) {
+          controller.enqueue(new Uint8Array(64 * 1024));
+        } else if (pulls === 17) {
+          controller.enqueue(new Uint8Array([0]));
+        } else {
+          controller.error(new Error("response was read past the size limit"));
+        }
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+  return { response, wasCancelled: () => cancelled };
+}
+
 describe("HermesWebhookAdapter", () => {
   test("sends only the delivery ID with Hermes V2 authentication", async () => {
     let captured: Request | undefined;
@@ -46,6 +73,7 @@ describe("HermesWebhookAdapter", () => {
     assert.ok(captured);
     assert.equal(captured.method, "POST");
     assert.equal(captured.url, URL);
+    assert.equal(captured.redirect, "error");
     assert.equal(captured.headers.get("x-request-id"), DELIVERY_ID);
     const body = await captured.text();
     assert.equal(body, `{"delivery_id":"${DELIVERY_ID}"}`);
@@ -68,6 +96,18 @@ describe("HermesWebhookAdapter", () => {
       protocol_version: 1,
       status: "duplicate",
     });
+  });
+
+  test("cancels an oversized success body while reading it", async () => {
+    const oversized = oversizedResponse(202);
+    const adapter = new HermesWebhookAdapter({
+      url: URL,
+      secret: SECRET,
+      fetch: async () => oversized.response,
+    });
+
+    await assert.rejects(adapter.wake({ deliveryId: DELIVERY_ID }, AbortSignal.timeout(1_000)));
+    assert.equal(oversized.wasCancelled(), true);
   });
 
   test("maps authentication, rate-limit, and unavailable statuses without reading their bodies", async () => {
@@ -132,5 +172,6 @@ describe("HermesWebhookAdapter", () => {
       requests.map(({ method, url }) => [method, url]),
       [["GET", "http://127.0.0.1:8644/health"]],
     );
+    assert.equal(requests[0]?.redirect, "error");
   });
 });
