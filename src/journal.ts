@@ -1,3 +1,5 @@
+import { chmodSync, closeSync, openSync } from "node:fs";
+
 import Database from "better-sqlite3";
 
 import type { Notification, PollResponse, WakeReportStatus } from "./protocol.js";
@@ -359,6 +361,9 @@ function validateWakeResult(result: RecordedWakeResult): void {
 
 export class Journal {
   constructor(path: string, idGenerator: () => string = crypto.randomUUID) {
+    const descriptor = openSync(path, "a", 0o600);
+    closeSync(descriptor);
+    if (process.platform !== "win32") chmodSync(path, 0o600);
     const database = new Database(path, { timeout: BUSY_TIMEOUT_MS });
 
     try {

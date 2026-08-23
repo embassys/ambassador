@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { createWakeAdapter } from "./adapters/factory.js";
@@ -40,6 +40,7 @@ export class SidecarApplication {
 
     try {
       await mkdir(dirname(options.journalPath), { recursive: true, mode: 0o700 });
+      if (process.platform !== "win32") await chmod(dirname(options.journalPath), 0o700);
       journal = new Journal(options.journalPath, options.idGenerator);
       const controller = new HttpControllerClient({
         baseUrl: config.controller.base_url,
