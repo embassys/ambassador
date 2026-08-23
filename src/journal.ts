@@ -878,6 +878,10 @@ export class Journal {
       });
   }
 
+  markOutboxAttempt(_id: string): number {
+    throw new Error("markOutboxAttempt is not implemented");
+  }
+
   hasPendingAcknowledgement(deliveryId: string): boolean {
     protocolId(deliveryId, "deliveryId");
     const row = resourcesFor(this)

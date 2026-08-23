@@ -632,7 +632,10 @@ test("hides confirmed outbox rows without recreating them or deleting delivery s
 
   const acknowledgement = ackRecords(journal)[0];
   assert.ok(acknowledgement);
+  assert.equal(journal.markOutboxAttempt(acknowledgement.id), 1);
+  assert.equal(journal.markOutboxAttempt(acknowledgement.id), 2);
   journal.confirmOutbox(acknowledgement.id, NOW_MS + 1);
+  assert.throws(() => journal.markOutboxAttempt(acknowledgement.id));
   assert.deepEqual(journal.listOutbox(100), []);
 
   assert.deepEqual(journal.ingestPoll(poll("cursor-2", [{ ...notice }]), 10, NOW_MS + 1_000), {

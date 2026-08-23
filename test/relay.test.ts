@@ -254,6 +254,11 @@ class MemoryJournal {
     this.outbox.delete(id);
   }
 
+  markOutboxAttempt(id: string): number {
+    if (!this.outbox.has(id)) throw new Error("unknown outbox record");
+    return 1;
+  }
+
   activeCount(): number {
     return [...this.deliveries.values()].filter(
       (record) =>
