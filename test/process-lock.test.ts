@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { access, chmod, link, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -111,6 +122,30 @@ test("allows one owner and can be reacquired while retaining its artifact", asyn
   const second = await ProcessLock.acquire(path);
   await second.release();
   await access(path);
+});
+
+test("filesystem aliases cannot invalidate a same-process owner", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-lock-alias-test-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const realRoot = join(root, "real");
+  const aliasRoot = join(root, "alias");
+  const lockDirectory = join(realRoot, "locks");
+  await mkdir(lockDirectory, { recursive: true });
+  await symlink(realRoot, aliasRoot);
+  const path = join(lockDirectory, "daemon.lock");
+  const aliasPath = join(aliasRoot, "locks", "daemon.lock");
+  const owner = await ProcessLock.acquire(path);
+  t.after(() => owner.release());
+
+  await assert.rejects(ProcessLock.acquire(aliasPath), { code: "daemon_running" });
+  const contender = await startWorker(t, path);
+  const contenderOutcome = nextMessage(contender);
+  contender.child.send("acquire");
+  assert.deepEqual(await contenderOutcome, { type: "rejected", code: "daemon_running" });
+
+  await owner.release();
 });
 
 test("atomically selects one contender after its previous owner crashes", async (t) => {
