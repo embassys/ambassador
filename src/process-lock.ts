@@ -1,11 +1,11 @@
-import { chmod, lstat, mkdir, open } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import Database from "better-sqlite3";
 
 import { SidecarError } from "./errors.js";
+import { preparePrivateSqliteArtifact } from "./sqlite-artifact.js";
 
-const POSIX = process.platform !== "win32";
 const LOCK_HANDOFF_TIMEOUT_MS = 1_000;
 
 function errorCode(error: unknown): string | undefined {
@@ -15,23 +15,8 @@ function errorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-async function prepareArtifact(path: string): Promise<void> {
-  const directory = dirname(path);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  if (POSIX) await chmod(directory, 0o700);
-
-  try {
-    const handle = await open(path, "wx", 0o600);
-    await handle.close();
-  } catch (error) {
-    if (errorCode(error) !== "EEXIST") throw error;
-  }
-
-  const stats = await lstat(path);
-  if (!stats.isFile()) {
-    throw new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
-  }
-  if (POSIX) await chmod(path, 0o600);
+function invalidLockArtifact(): SidecarError {
+  return new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
 }
 
 export class ProcessLock {
@@ -40,16 +25,22 @@ export class ProcessLock {
   private constructor(private readonly database: Database.Database) {}
 
   static async acquire(path: string): Promise<ProcessLock> {
-    await prepareArtifact(path);
-    const database = new Database(path, { timeout: LOCK_HANDOFF_TIMEOUT_MS });
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const artifact = preparePrivateSqliteArtifact(path, invalidLockArtifact);
+    let database: Database.Database | undefined;
 
     try {
+      database = new Database(path, { timeout: LOCK_HANDOFF_TIMEOUT_MS });
+      artifact.validate();
+      // Closing another descriptor for this inode after BEGIN can release POSIX process locks.
+      artifact.releaseFile();
       database.pragma(`busy_timeout = ${LOCK_HANDOFF_TIMEOUT_MS}`);
       database.pragma("trusted_schema = OFF");
       database.exec("BEGIN EXCLUSIVE");
+      artifact.validateDirectory();
       return new ProcessLock(database);
     } catch (error) {
-      database.close();
+      database?.close();
       const code = errorCode(error);
       if (code?.startsWith("SQLITE_BUSY")) {
         throw new SidecarError("daemon_running", "The sidecar daemon is already running", 7);
@@ -58,6 +49,8 @@ export class ProcessLock {
         throw new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
       }
       throw error;
+    } finally {
+      artifact.close();
     }
   }
 

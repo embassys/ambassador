@@ -1,8 +1,7 @@
-import { closeSync, constants, fchmodSync, fstatSync, lstatSync, openSync } from "node:fs";
-
 import Database from "better-sqlite3";
 
 import type { Notification, PollResponse, WakeReportStatus } from "./protocol.js";
+import { preparePrivateSqliteArtifact } from "./sqlite-artifact.js";
 
 const SCHEMA_VERSION = 1;
 const BUSY_TIMEOUT_MS = 5_000;
@@ -363,45 +362,15 @@ function invalidJournalArtifact(): Error {
   return new Error("Journal path must be a regular file");
 }
 
-function errorCode(error: unknown): string | undefined {
-  return error !== null && typeof error === "object" && "code" in error
-    ? String(error.code)
-    : undefined;
-}
-
-function prepareJournalArtifact(path: string): void {
-  let descriptor: number | undefined;
-  try {
-    try {
-      descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
-    } catch (error) {
-      if (errorCode(error) !== "EEXIST") throw error;
-      if (!lstatSync(path).isFile()) throw invalidJournalArtifact();
-      descriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
-    }
-
-    const descriptorStats = fstatSync(descriptor);
-    const pathStats = lstatSync(path);
-    if (
-      !descriptorStats.isFile() ||
-      !pathStats.isFile() ||
-      descriptorStats.dev !== pathStats.dev ||
-      descriptorStats.ino !== pathStats.ino
-    ) {
-      throw invalidJournalArtifact();
-    }
-    if (process.platform !== "win32") fchmodSync(descriptor, 0o600);
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
 export class Journal {
   constructor(path: string, idGenerator: () => string = crypto.randomUUID) {
-    prepareJournalArtifact(path);
-    const database = new Database(path, { timeout: BUSY_TIMEOUT_MS });
+    const artifact = preparePrivateSqliteArtifact(path, invalidJournalArtifact);
+    let database: Database.Database | undefined;
 
     try {
+      database = new Database(path, { timeout: BUSY_TIMEOUT_MS });
+      artifact.validate();
+      artifact.releaseFile();
       database.defaultSafeIntegers(true);
       database.pragma("journal_mode = WAL");
       database.pragma("synchronous = FULL");
@@ -409,10 +378,13 @@ export class Journal {
       database.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
       database.pragma("trusted_schema = OFF");
       migrate(database);
+      artifact.validateDirectory();
       journalResources.set(this, { database, idGenerator });
     } catch (error) {
-      database.close();
+      database?.close();
       throw error;
+    } finally {
+      artifact.close();
     }
   }
 
