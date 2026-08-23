@@ -299,6 +299,7 @@ class RecordingController implements ControllerClient {
   readonly cursors: Array<string | null> = [];
   readonly pollOptions: Array<PollRequestOptions | undefined> = [];
   acknowledgementError: unknown;
+  onAcknowledge: (() => void) | undefined;
   failReports = 0;
 
   constructor(
@@ -326,6 +327,7 @@ class RecordingController implements ControllerClient {
   async acknowledge(message: PersistenceAcknowledgement, _signal: AbortSignal): Promise<void> {
     this.trace.push("controller.ack");
     this.acknowledgements.push(message);
+    this.onAcknowledge?.();
     if (this.acknowledgementError !== undefined) throw this.acknowledgementError;
   }
 
@@ -554,6 +556,44 @@ describe("Relay", () => {
     assert.equal(controller.cursors.length, 0);
     assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "pending");
     assert.equal(journal.getDelivery(expiredDeliveryId)?.state, "expired");
+  });
+
+  test("returns cancellation before scanning expired deliveries", async () => {
+    const trace: string[] = [];
+    const caller = new AbortController();
+    const expiredDeliveryId = "delivery_cancelled_expiry";
+    const pendingAcknowledgement: OutboxRecord = {
+      id: "ack_cancelled",
+      kind: "ack",
+      notificationId: "notification_old",
+      deliveryId: "delivery_old",
+      persistedAt: new Date(NOW_MS - 1_000).toISOString(),
+    };
+    const journal = new MemoryJournal(
+      trace,
+      [
+        delivery({
+          notificationId: "notification_cancelled_expiry",
+          deliveryId: expiredDeliveryId,
+          expiresAtMs: NOW_MS,
+        }),
+      ],
+      [pendingAcknowledgement],
+    );
+    const controller = new RecordingController(trace);
+    controller.onAcknowledge = () => caller.abort();
+    controller.acknowledgementError = new Error("cancelled controller request");
+    const adapter = new ScriptedAdapter(trace, []);
+    const relay = createRelay({ journal, controller, adapter });
+
+    await assert.rejects(relay.runOnce(caller.signal));
+
+    assert.equal(controller.acknowledgements.length, 1);
+    assert.equal(journal.getDelivery(expiredDeliveryId)?.state, "pending");
+    assert.deepEqual(journal.recordedResults, []);
+    assert.deepEqual(adapter.inputs, []);
+    assert.deepEqual(controller.reports, []);
+    assert.equal(controller.cursors.length, 0);
   });
 
   test("does not start another wake while report delivery is failing", async () => {
