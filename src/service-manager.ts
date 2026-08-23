@@ -27,6 +27,7 @@ export interface UserServiceManagerOptions {
   command: ServiceCommand;
   uid?: number;
   runCommand?: CommandRunner;
+  windowsDefinitionPath?: string;
 }
 
 export interface ServiceStatus {

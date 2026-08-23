@@ -61,7 +61,15 @@ test("builds a quoted per-user Windows task command", () => {
     name: "A2A Sidecar",
     commandLine:
       '"C:\\Program Files\\A2A\\node.exe" "C:\\Program Files\\A2A\\dist\\cli.js" run --config "C:\\Users\\local\\A2A Config\\config.json"',
+    content: definition.content,
   });
+  assert.match(definition.content ?? "", /<LogonTrigger>/);
+  assert.match(definition.content ?? "", /<RunLevel>LeastPrivilege<\/RunLevel>/);
+  assert.match(definition.content ?? "", /<RestartOnFailure>/);
+  assert.match(definition.content ?? "", /<Interval>PT5S<\/Interval>/);
+  assert.match(definition.content ?? "", /<Count>999<\/Count>/);
+  assert.match(definition.content ?? "", /<Command>C:\\Program Files\\A2A\\node\.exe<\/Command>/);
+  assert.match(definition.content ?? "", /<Arguments>.*A2A Config.*<\/Arguments>/);
 });
 
 test("rejects command arguments containing line breaks", () => {

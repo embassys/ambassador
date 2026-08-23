@@ -125,7 +125,9 @@ test("installs, enables, and controls a systemd user service", async (t) => {
   ]);
 });
 
-test("creates and controls a per-user Windows scheduled task", async () => {
+test("creates and controls a restarting per-user Windows scheduled task", async (t) => {
+  const home = await temporaryHome(t);
+  const definitionPath = join(home, "a2a-sidecar-task.xml");
   const commands = recorder([
     { exitCode: 0, stdout: "" },
     { exitCode: 0, stdout: "" },
@@ -138,15 +140,19 @@ test("creates and controls a per-user Windows scheduled task", async () => {
   const manager = new UserServiceManager({
     platform: "win32",
     env: {},
-    homeDirectory: "C:\\Users\\local",
+    homeDirectory: home,
     command: {
       executable: "C:\\Program Files\\A2A\\node.exe",
       arguments: ["C:\\Program Files\\A2A\\cli.js", "run"],
     },
     runCommand: commands.run,
+    windowsDefinitionPath: definitionPath,
   });
 
   await manager.install();
+  const definition = await readFile(definitionPath, "utf8");
+  assert.match(definition, /<RestartOnFailure>/);
+  assert.match(definition, /<Interval>PT5S<\/Interval>/);
   await manager.start();
   assert.deepEqual(await manager.status(), { installed: true, running: true });
   await manager.restart();
@@ -156,18 +162,7 @@ test("creates and controls a per-user Windows scheduled task", async () => {
   assert.deepEqual(commands.invocations, [
     {
       executable: "schtasks.exe",
-      arguments: [
-        "/Create",
-        "/SC",
-        "ONLOGON",
-        "/RL",
-        "LIMITED",
-        "/TN",
-        "A2A Sidecar",
-        "/TR",
-        '"C:\\Program Files\\A2A\\node.exe" "C:\\Program Files\\A2A\\cli.js" run',
-        "/F",
-      ],
+      arguments: ["/Create", "/TN", "A2A Sidecar", "/XML", definitionPath, "/F"],
     },
     { executable: "schtasks.exe", arguments: ["/Run", "/TN", "A2A Sidecar"] },
     { executable: "schtasks.exe", arguments: ["/Query", "/TN", "A2A Sidecar"] },
@@ -176,6 +171,7 @@ test("creates and controls a per-user Windows scheduled task", async () => {
     { executable: "schtasks.exe", arguments: ["/End", "/TN", "A2A Sidecar"] },
     { executable: "schtasks.exe", arguments: ["/Delete", "/TN", "A2A Sidecar", "/F"] },
   ]);
+  await assert.rejects(access(definitionPath), { code: "ENOENT" });
 });
 
 test("returns installed but stopped when the native status command is inactive", async (t) => {

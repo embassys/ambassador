@@ -15,6 +15,7 @@ export interface WindowsTaskDefinition {
   kind: "windows_task";
   name: "A2A Sidecar";
   commandLine: string;
+  content?: string;
 }
 
 export type ServiceDefinition = FileServiceDefinition | WindowsTaskDefinition;
