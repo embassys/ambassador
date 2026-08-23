@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { SidecarError } from "./errors.js";
 
 const POSIX = process.platform !== "win32";
+const LOCK_HANDOFF_TIMEOUT_MS = 1_000;
 
 function errorCode(error: unknown): string | undefined {
   if (error !== null && typeof error === "object" && "code" in error) {
@@ -40,10 +41,10 @@ export class ProcessLock {
 
   static async acquire(path: string): Promise<ProcessLock> {
     await prepareArtifact(path);
-    const database = new Database(path, { timeout: 0 });
+    const database = new Database(path, { timeout: LOCK_HANDOFF_TIMEOUT_MS });
 
     try {
-      database.pragma("busy_timeout = 0");
+      database.pragma(`busy_timeout = ${LOCK_HANDOFF_TIMEOUT_MS}`);
       database.pragma("trusted_schema = OFF");
       database.exec("BEGIN EXCLUSIVE");
       return new ProcessLock(database);
