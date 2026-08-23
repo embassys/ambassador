@@ -92,6 +92,21 @@ test("parsePollResponse rejects conflicting notification and delivery IDs", () =
   }
 });
 
+test("parsePollResponse rejects deliveries that do not expire after issue time", () => {
+  assertProtocolError(() =>
+    parsePollResponse({
+      ...pollResponse,
+      notifications: [{ ...notification, expires_at: notification.issued_at }],
+    }),
+  );
+  assertProtocolError(() =>
+    parsePollResponse({
+      ...pollResponse,
+      notifications: [{ ...notification, expires_at: "2026-08-23T11:59:57Z" }],
+    }),
+  );
+});
+
 test("parseWakeResponse accepts each valid status shape", () => {
   const responses = [
     { protocol_version: 1, status: "accepted" },
@@ -132,6 +147,12 @@ test("parseWakeResponse enforces status-specific fields", () => {
       status: "retryable_error",
       code: "timeout",
       retry_after_ms: -1,
+    },
+    {
+      protocol_version: 1,
+      status: "retryable_error",
+      code: "timeout",
+      retry_after_ms: 0,
     },
     {
       protocol_version: 1,

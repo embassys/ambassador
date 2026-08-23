@@ -115,6 +115,36 @@ test("parseConfig rejects duplicate binding IDs", () => {
   assertConfigError(() => parseConfig(duplicate));
 });
 
+test("parseConfig rejects unsafe transport URLs and invalid environment names", () => {
+  const invalidConfigs: unknown[] = [];
+
+  for (const base_url of [
+    "http://controller.example",
+    "file:///tmp/controller",
+    "https://user:password@controller.example",
+  ]) {
+    const candidate = structuredClone(config);
+    candidate.controller.base_url = base_url;
+    invalidConfigs.push(candidate);
+  }
+
+  for (const url of ["http://192.168.1.20:8644/wake", "ftp://127.0.0.1/wake"]) {
+    const candidate = structuredClone(config);
+    const adapter = candidate.agents[0]?.adapter;
+    assert.ok(adapter);
+    adapter.url = url;
+    invalidConfigs.push(candidate);
+  }
+
+  const invalidEnvironment = structuredClone(config);
+  invalidEnvironment.controller.token.name = "NOT A VALID ENVIRONMENT NAME";
+  invalidConfigs.push(invalidEnvironment);
+
+  for (const invalidConfig of invalidConfigs) {
+    assertConfigError(() => parseConfig(invalidConfig));
+  }
+});
+
 test("resolveSecret reads only the requested environment reference", () => {
   const secret = "controller-token-value";
   const reference = {
