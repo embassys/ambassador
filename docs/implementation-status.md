@@ -6,7 +6,7 @@ Status as of August 23, 2026.
 
 - Strict controller, wake, and configuration schemas.
 - Secure controller client with fixed v1 paths, bearer authentication, redirect rejection, bounded responses, operation deadlines, and controller retry semantics.
-- SQLite journal with atomic ingestion, durable acknowledgements and reports, queue capacity, atomic claims, crash recovery, conservative clock-offset handling, private regular-file enforcement, and terminal states.
+- SQLite journal with atomic ingestion, durable acknowledgements and reports, queue capacity, atomic claims, crash recovery, conservative clock-offset handling, private single-link SQLite artifacts, and terminal states.
 - Relay polling, wake dispatch, retry timing, expiry, duplicate normalization, bounded outbox replay, report-outage backpressure, and in-process recovery.
 - Generic HMAC webhook adapter.
 - Best-effort Hermes and OpenClaw adapters for the pinned researched contracts.
@@ -14,7 +14,7 @@ Status as of August 23, 2026.
 - CLI setup, agent management, health tests, status, diagnostics, foreground run, JSON output, and stable exit codes.
 - Per-user service definitions and lifecycle commands for `launchd`, `systemd --user`, and Windows Task Scheduler, including native restart-after-failure policies.
 - Linux, macOS, and Windows CI configuration.
-- 133 automated tests using local HTTP servers, real temporary SQLite files, and concurrent subprocess lock contention.
+- 138 automated tests using local HTTP servers, real temporary SQLite files, and concurrent subprocess lock contention.
 - Exact Node 24.19.0 and npm 11.19.0 checks, build, coverage, native SQLite loading, and production dependency audit pass locally.
 
 ## Partially complete
