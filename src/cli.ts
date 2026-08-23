@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -13,6 +13,7 @@ import { SidecarApplication } from "./application.js";
 import { type AgentConfig, parseConfig, resolveSecret, type SidecarConfig } from "./config.js";
 import { SidecarError } from "./errors.js";
 import { defaultPaths } from "./paths.js";
+import { UserServiceManager } from "./service-manager.js";
 
 export interface CliIo {
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -465,6 +466,52 @@ async function run(args: string[], context: CliContext): Promise<CommandResult> 
   };
 }
 
+function nativeServiceManager(context: CliContext, path: string): CliServiceManager {
+  if (context.serviceManager !== undefined) return context.serviceManager;
+  return new UserServiceManager({
+    platform: process.platform,
+    env: context.env,
+    homeDirectory: homeDirectory(context),
+    command: {
+      executable: process.execPath,
+      arguments: [fileURLToPath(import.meta.url), "run", "--config", path],
+    },
+  });
+}
+
+async function service(
+  action: "install" | "start" | "stop" | "restart" | "status" | "uninstall",
+  args: string[],
+  context: CliContext,
+): Promise<CommandResult> {
+  const parsed = parseCommand(args, commonOptions, 0);
+  const path = configPath(parsed.values, context);
+  if (action === "install" || action === "start" || action === "restart") {
+    await loadConfig(path);
+  }
+  const manager = nativeServiceManager(context, path);
+
+  if (action === "status") {
+    const status = await manager.status();
+    return {
+      data: status,
+      human: status.running
+        ? "Sidecar service is running\n"
+        : status.installed
+          ? "Sidecar service is stopped\n"
+          : "Sidecar service is not installed\n",
+      json: jsonRequested(parsed.values),
+    };
+  }
+
+  await manager[action]();
+  return {
+    data: { action },
+    human: `Service ${action} completed\n`,
+    json: jsonRequested(parsed.values),
+  };
+}
+
 function version(args: string[]): CommandResult {
   const parsed = parseCommand(args, commonOptions, 0);
   return {
@@ -519,7 +566,7 @@ async function dispatch(args: string[], context: CliContext): Promise<CommandRes
       action === "status" ||
       action === "uninstall"
     ) {
-      return explicitNotImplemented(args.slice(2));
+      return service(action, args.slice(2), context);
     }
   }
   throw invalidArguments;
