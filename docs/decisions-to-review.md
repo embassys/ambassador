@@ -15,5 +15,6 @@ On August 23, 2026, the user authorized provisional decisions so implementation 
 | `0009-operating-defaults.md` | HMAC encoding, retry schedule, poll limits, environment credentials, and conservative retention | Public beta operating defaults |
 | `0010-user-services.md` | Per-user launchd, systemd, and Task Scheduler lifecycle | Enabling service installation |
 | `0011-runtime-cli-flags.md` | Generic, Hermes, and OpenClaw agent-add flags | Public CLI release |
+| `0012-http-deadlines.md` | Bounded controller, wake, and health request deadlines | Public beta operating defaults |
 
 More rows will be added as implementation choices are made.
