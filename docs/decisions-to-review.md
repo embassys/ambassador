@@ -14,5 +14,6 @@ On August 23, 2026, the user authorized provisional decisions so implementation 
 | `0008-runtime-presets.md` | OpenClaw and Hermes native webhooks marked best-effort because dedupe is not durable | Claiming production support for either preset |
 | `0009-operating-defaults.md` | HMAC encoding, retry schedule, poll limits, environment credentials, and conservative retention | Public beta operating defaults |
 | `0010-user-services.md` | Per-user launchd, systemd, and Task Scheduler lifecycle | Enabling service installation |
+| `0011-runtime-cli-flags.md` | Generic, Hermes, and OpenClaw agent-add flags | Public CLI release |
 
 More rows will be added as implementation choices are made.
