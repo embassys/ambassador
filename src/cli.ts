@@ -9,8 +9,10 @@ import { parseArgs } from "node:util";
 
 import packageJson from "../package.json" with { type: "json" };
 import { GenericWebhookAdapter } from "./adapters/generic.js";
+import { SidecarApplication } from "./application.js";
 import { type AgentConfig, parseConfig, resolveSecret, type SidecarConfig } from "./config.js";
 import { SidecarError } from "./errors.js";
+import { defaultPaths } from "./paths.js";
 
 export interface CliIo {
   stdout: Pick<NodeJS.WriteStream, "write">;
@@ -44,6 +46,7 @@ const commonOptions = {
 
 const invalidArguments = new SidecarError("invalid_arguments", "Invalid command or arguments", 2);
 const invalidConfig = new SidecarError("config_invalid", "Configuration is invalid", 3);
+const authenticationFailure = new SidecarError("authentication_failed", "Authentication failed", 4);
 const runtimeFailure = new SidecarError("runtime_unavailable", "Local runtime is unavailable", 6);
 const stateFailure = new SidecarError("local_state_error", "Local state operation failed", 7);
 const notImplemented = new SidecarError("not_implemented", "Command is not implemented", 7);
@@ -165,6 +168,10 @@ function configPath(values: ParsedCommand["values"], context: CliContext): strin
 
   const root = context.env.XDG_CONFIG_HOME ?? join(home, ".config");
   return join(root, "a2a-sidecar", "config.json");
+}
+
+function homeDirectory(context: CliContext): string {
+  return context.env.HOME ?? context.env.USERPROFILE ?? homedir();
 }
 
 async function loadConfig(path: string): Promise<SidecarConfig> {
@@ -374,6 +381,57 @@ async function agentTest(args: string[], context: CliContext): Promise<CommandRe
   };
 }
 
+function daemonSignal(context: CliContext): { signal: AbortSignal; cleanup: () => void } {
+  if (context.signal !== undefined) return { signal: context.signal, cleanup: () => undefined };
+
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    },
+  };
+}
+
+async function run(args: string[], context: CliContext): Promise<CommandResult> {
+  const parsed = parseCommand(args, commonOptions, 0);
+  const config = await loadConfig(configPath(parsed.values, context));
+  try {
+    resolveSecret(config.controller.token, context.env);
+  } catch {
+    throw authenticationFailure;
+  }
+
+  const paths = defaultPaths(process.platform, context.env, homeDirectory(context));
+  const { signal, cleanup } = daemonSignal(context);
+  let application: SidecarApplication | undefined;
+  try {
+    application = await SidecarApplication.open({
+      config,
+      journalPath: paths.journalPath,
+      lockPath: paths.lockPath,
+      env: context.env,
+    });
+    await application.run(signal);
+  } catch (error) {
+    if (error instanceof SidecarError) throw error;
+    throw stateFailure;
+  } finally {
+    await application?.close().catch(() => undefined);
+    cleanup();
+  }
+
+  return {
+    data: { stopped: true },
+    human: "Sidecar stopped\n",
+    json: jsonRequested(parsed.values),
+  };
+}
+
 function version(args: string[]): CommandResult {
   const parsed = parseCommand(args, commonOptions, 0);
   return {
@@ -412,7 +470,10 @@ async function dispatch(args: string[], context: CliContext): Promise<CommandRes
     }
     throw invalidArguments;
   }
-  if (command === "run" || command === "status" || command === "doctor") {
+  if (command === "run") {
+    return run(args.slice(1), context);
+  }
+  if (command === "status" || command === "doctor") {
     return explicitNotImplemented(args.slice(1));
   }
   if (command === "service") {
