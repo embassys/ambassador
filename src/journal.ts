@@ -548,6 +548,10 @@ export class Journal {
     return row.poll_cursor;
   }
 
+  getControllerClockOffsetMs(): number {
+    return controllerClockOffset(resourcesFor(this).database);
+  }
+
   getDelivery(deliveryId: string): DeliveryRecord | undefined {
     protocolId(deliveryId, "deliveryId");
     const { database } = resourcesFor(this);

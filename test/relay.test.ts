@@ -151,6 +151,10 @@ class MemoryJournal {
     return this.cursor;
   }
 
+  getControllerClockOffsetMs(): number {
+    return 0;
+  }
+
   getDelivery(deliveryId: string): DeliveryRecord | undefined {
     return this.deliveries.get(deliveryId);
   }

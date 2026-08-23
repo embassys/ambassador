@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,6 +12,7 @@ import { createWakeAdapter } from "./adapters/factory.js";
 import { SidecarApplication } from "./application.js";
 import { type AgentConfig, parseConfig, resolveSecret, type SidecarConfig } from "./config.js";
 import { SidecarError } from "./errors.js";
+import { Journal } from "./journal.js";
 import { defaultPaths } from "./paths.js";
 import { UserServiceManager } from "./service-manager.js";
 
@@ -545,11 +546,37 @@ async function doctor(args: string[], context: CliContext): Promise<CommandResul
   }
   if (agents.some((agent) => !agent.healthy)) throw runtimeFailure;
 
+  const paths = defaultPaths(process.platform, context.env, homeDirectory(context));
+  let clockSkewMs: number | undefined;
+  try {
+    await access(paths.journalPath);
+    const journal = new Journal(paths.journalPath);
+    try {
+      clockSkewMs = journal.getControllerClockOffsetMs();
+    } finally {
+      journal.close();
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+      throw stateFailure;
+    }
+  }
+  const clockSkewSafe = clockSkewMs === undefined ? undefined : Math.abs(clockSkewMs) <= 300_000;
+
   return {
-    data: { config_valid: true, controller_credential: true, agents },
-    human: `Configuration is valid\nController credential is available\n${agents
-      .map((agent) => `${agent.binding_id}: healthy`)
-      .join("\n")}${agents.length === 0 ? "" : "\n"}`,
+    data: {
+      config_valid: true,
+      controller_credential: true,
+      ...(clockSkewMs === undefined
+        ? {}
+        : { clock_skew_ms: clockSkewMs, clock_skew_safe: clockSkewSafe }),
+      agents,
+    },
+    human: `Configuration is valid\nController credential is available\n${
+      clockSkewMs === undefined
+        ? ""
+        : `Controller clock skew: ${clockSkewMs} ms (${clockSkewSafe ? "safe" : "unsafe"})\n`
+    }${agents.map((agent) => `${agent.binding_id}: healthy`).join("\n")}${agents.length === 0 ? "" : "\n"}`,
     json: jsonRequested(parsed.values),
   };
 }
