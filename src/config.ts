@@ -49,30 +49,43 @@ export interface SidecarConfig {
 }
 
 const idSchema = z.string().regex(/^[A-Za-z0-9._~-]{1,128}$/);
+const environmentNameSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
+const endpointUrlSchema = z.url().refine((value) => {
+  const url = new URL(value);
+  const loopback =
+    url.hostname === "localhost" ||
+    url.hostname === "[::1]" ||
+    /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
+  return (
+    url.username === "" &&
+    url.password === "" &&
+    (url.protocol === "https:" || (url.protocol === "http:" && loopback))
+  );
+}, "URL must use HTTPS or loopback HTTP without embedded credentials");
 const secretReferenceSchema = z.strictObject({
   source: z.literal("env"),
-  name: z.string().min(1),
+  name: environmentNameSchema,
 });
 
 const genericAdapterSchema = z.strictObject({
   type: z.literal("generic"),
-  url: z.url(),
-  health_url: z.url().optional(),
+  url: endpointUrlSchema,
+  health_url: endpointUrlSchema.optional(),
   secret: secretReferenceSchema,
 });
 
 const hermesAdapterSchema = z.strictObject({
   type: z.literal("hermes"),
-  url: z.url(),
-  health_url: z.url().optional(),
+  url: endpointUrlSchema,
+  health_url: endpointUrlSchema.optional(),
   secret: secretReferenceSchema,
 });
 
 const openClawAdapterSchema = z.strictObject({
   type: z.literal("openclaw"),
-  url: z.url(),
-  health_url: z.url().optional(),
-  agent_id: z.string().min(1),
+  url: endpointUrlSchema,
+  health_url: endpointUrlSchema.optional(),
+  agent_id: idSchema,
   token: secretReferenceSchema,
 });
 
@@ -89,7 +102,7 @@ const sidecarConfigSchema = z
   .strictObject({
     version: z.literal(1),
     controller: z.strictObject({
-      base_url: z.url(),
+      base_url: endpointUrlSchema,
       token: secretReferenceSchema,
       poll_wait_seconds: z.number().int().min(1).max(300),
       max_notifications: z.number().int().min(1).max(1_000),

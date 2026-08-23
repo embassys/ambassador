@@ -69,13 +69,21 @@ const utcTimestampSchema = z.iso
   .datetime({ local: false, offset: false })
   .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/);
 
-const notificationSchema = z.strictObject({
-  notification_id: idSchema,
-  delivery_id: idSchema,
-  binding_id: idSchema,
-  issued_at: utcTimestampSchema,
-  expires_at: utcTimestampSchema,
-});
+const notificationSchema = z
+  .strictObject({
+    notification_id: idSchema,
+    delivery_id: idSchema,
+    binding_id: idSchema,
+    issued_at: utcTimestampSchema,
+    expires_at: utcTimestampSchema,
+  })
+  .refine(
+    (notification) => Date.parse(notification.expires_at) > Date.parse(notification.issued_at),
+    {
+      message: "expires_at must be after issued_at",
+      path: ["expires_at"],
+    },
+  );
 
 const pollResponseSchema = z.strictObject({
   protocol_version: z.literal(PROTOCOL_VERSION),
@@ -99,7 +107,7 @@ const wakeResponseSchema = z.discriminatedUnion("status", [
     protocol_version: z.literal(PROTOCOL_VERSION),
     status: z.literal("retryable_error"),
     code: idSchema,
-    retry_after_ms: z.number().int().nonnegative().optional(),
+    retry_after_ms: z.number().int().positive().optional(),
   }),
   z.strictObject({
     protocol_version: z.literal(PROTOCOL_VERSION),
