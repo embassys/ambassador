@@ -326,6 +326,7 @@ test("rejects a hard-linked journal without changing or opening its target", asy
       lockPath: join(root, "lock", "daemon.lock"),
       env: { CONTROLLER_TOKEN },
     }),
+    { message: "Journal path must be a regular file" },
   );
 
   assert.equal((await stat(targetPath)).size, 0);
@@ -367,4 +368,43 @@ test("rejects a symlinked state directory without changing its target", {
 
   assert.equal((await stat(targetDirectory)).mode & 0o777, 0o777);
   await assert.rejects(stat(join(targetDirectory, "journal.sqlite")), { code: "ENOENT" });
+});
+
+test("rejects a journal sidecar symlink without changing its target", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-application-sidecar-symlink-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const stateDirectory = join(root, "state");
+  const journalPath = join(stateDirectory, "journal.sqlite");
+  const targetPath = join(root, "target.sqlite");
+  await mkdir(stateDirectory);
+  await writeFile(journalPath, "", { mode: 0o600 });
+  await writeFile(targetPath, "", { mode: 0o644 });
+  await chmod(targetPath, 0o644);
+  await symlink(targetPath, `${journalPath}-wal`);
+  const config: SidecarConfig = {
+    version: 1,
+    controller: {
+      base_url: "http://127.0.0.1:1",
+      token: { source: "env", name: "CONTROLLER_TOKEN" },
+      poll_wait_seconds: 1,
+      max_notifications: 1,
+      queue_capacity: 1,
+    },
+    agents: [],
+  };
+
+  await assert.rejects(
+    SidecarApplication.open({
+      config,
+      journalPath,
+      lockPath: join(root, "lock", "daemon.lock"),
+      env: { CONTROLLER_TOKEN },
+    }),
+    { message: "Journal path must be a regular file" },
+  );
+
+  assert.equal((await stat(targetPath)).mode & 0o777, 0o644);
+  assert.equal((await stat(targetPath)).size, 0);
 });
