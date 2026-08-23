@@ -161,6 +161,33 @@ test("coalesces exact duplicates and keeps one stable acknowledgement", (t) => {
   assert.equal(originalAcknowledgements[0]?.persistedAt, new Date(NOW_MS).toISOString());
 });
 
+test("uses controller clock offset for expiry and controller-facing timestamps", (t) => {
+  const journal = temporaryJournal(t).open();
+  const localNow = Date.parse("2026-08-23T12:00:00Z");
+  const controllerNow = "2026-08-23T12:02:00Z";
+  const issuedAt = "2026-08-23T12:01:00Z";
+  const expiresAt = "2026-08-23T12:03:00Z";
+  const response = {
+    protocol_version: 1,
+    cursor: "cursor-skewed",
+    server_time: controllerNow,
+    notifications: [notification({ issued_at: issuedAt, expires_at: expiresAt })],
+  } satisfies PollResponse;
+
+  journal.ingestPoll(response, 10, localNow);
+
+  const stored = journal.getDelivery("delivery-1");
+  assert.equal(stored?.issuedAtMs, localNow - 60_000);
+  assert.equal(stored?.expiresAtMs, localNow + 60_000);
+  assert.deepEqual(
+    journal.listDue(localNow, 10).map(({ deliveryId }) => deliveryId),
+    ["delivery-1"],
+  );
+  assert.equal(ackRecords(journal)[0]?.persistedAt, controllerNow);
+  assert.equal(journal.expireDue(localNow + 59_999), 0);
+  assert.equal(journal.expireDue(localNow + 60_000), 1);
+});
+
 test("rejects a notification ID conflict without committing earlier rows or the cursor", (t) => {
   const journal = temporaryJournal(t).open();
   journal.ingestPoll(poll("cursor-before", [notification()]), 10, NOW_MS);
