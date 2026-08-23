@@ -1,6 +1,6 @@
 import type { WakeAdapter } from "./adapters/types.js";
 import { type AgentConfig, bindingFingerprint, type SidecarConfig } from "./config.js";
-import type { ControllerClient } from "./controller.js";
+import { type ControllerClient, ControllerRequestError } from "./controller.js";
 import type { Journal, RecordedWakeResult } from "./journal.js";
 import { PROTOCOL_VERSION } from "./protocol.js";
 
@@ -73,16 +73,15 @@ export class Relay {
             this.config.controller.poll_wait_seconds,
             Math.max(1, Math.floor(millisecondsUntilAction / 1_000)),
           );
-    const pollStartedAt = this.now();
-    const response = await this.controller.poll(this.journal.getCursor(), signal, {
+    const poll = await this.controller.poll(this.journal.getCursor(), signal, {
       waitSeconds,
       maxNotifications: Math.min(this.config.controller.max_notifications, remainingCapacity),
     });
     this.journal.ingestPoll(
-      response,
+      poll.response,
       this.config.controller.queue_capacity,
       this.now(),
-      pollStartedAt,
+      poll.receivedAtMs,
     );
 
     const afterPoll = await this.serviceDurableWork(signal, attemptedOutboxIds);
@@ -93,8 +92,13 @@ export class Relay {
     signal: AbortSignal,
     attemptedOutboxIds: Set<string>,
   ): Promise<{ error: unknown | null; reportFailed: boolean }> {
-    const blockedReportDeliveries = new Set<string>();
-    const initial = await this.flushOutbox(signal, attemptedOutboxIds, blockedReportDeliveries);
+    const initial = await this.flushOutbox(signal, attemptedOutboxIds);
+    if (
+      initial.error !== null &&
+      (signal.aborted || initial.error instanceof ControllerRequestError)
+    ) {
+      return initial;
+    }
 
     const dueAtMs = this.now();
     this.journal.expireDue(dueAtMs);
@@ -164,7 +168,10 @@ export class Relay {
             const reason = RETRYABLE_REASONS.has(response.code)
               ? response.code
               : "runtime_unavailable";
-            const mayHaveReachedRuntime = reason === "timeout" || reason === "outcome_unknown";
+            const mayHaveReachedRuntime =
+              claim.delivery.mayHaveReachedRuntime ||
+              reason === "timeout" ||
+              reason === "outcome_unknown";
             if (observedAtMs >= claim.delivery.expiresAtMs) {
               result = mayHaveReachedRuntime
                 ? {
@@ -222,7 +229,9 @@ export class Relay {
       this.journal.recordWakeResult(claim.delivery.deliveryId, result, observedAtMs);
     }
 
-    const final = await this.flushOutbox(signal, attemptedOutboxIds, blockedReportDeliveries);
+    if (initial.error !== null) return initial;
+
+    const final = await this.flushOutbox(signal, attemptedOutboxIds);
     return {
       error: initial.error ?? final.error,
       reportFailed: initial.reportFailed || final.reportFailed,
@@ -232,13 +241,9 @@ export class Relay {
   private async flushOutbox(
     signal: AbortSignal,
     attemptedOutboxIds: Set<string>,
-    blockedReportDeliveries: Set<string>,
   ): Promise<{ error: unknown | null; reportFailed: boolean }> {
-    let firstError: unknown | null = null;
-    let reportFailed = false;
     for (const record of this.journal.listOutbox(OUTBOX_BATCH_SIZE)) {
       if (attemptedOutboxIds.has(record.id)) continue;
-      if (record.kind === "report" && blockedReportDeliveries.has(record.deliveryId)) continue;
       attemptedOutboxIds.add(record.id);
 
       try {
@@ -274,14 +279,10 @@ export class Relay {
         }
         this.journal.confirmOutbox(record.id, this.now());
       } catch (error) {
-        firstError ??= error;
-        if (record.kind === "report") {
-          reportFailed = true;
-          blockedReportDeliveries.add(record.deliveryId);
-        }
+        return { error, reportFailed: record.kind === "report" };
       }
     }
 
-    return { error: firstError, reportFailed };
+    return { error: null, reportFailed: false };
   }
 }

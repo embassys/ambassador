@@ -137,9 +137,14 @@ export interface ControllerClient {
     cursor: string | null,
     signal: AbortSignal,
     options?: PollRequestOptions,
-  ): Promise<PollResponse>;
+  ): Promise<ControllerPollResult>;
   acknowledge(message: PersistenceAcknowledgement, signal: AbortSignal): Promise<void>;
   report(message: WakeReport, signal: AbortSignal): Promise<void>;
+}
+
+export interface ControllerPollResult {
+  response: PollResponse;
+  receivedAtMs: number;
 }
 
 export interface PollRequestOptions {
@@ -168,6 +173,7 @@ export interface HttpControllerOptions {
   maxNotifications: number;
   fetch?: FetchLike;
   requestTimeoutMs?: number;
+  now?: () => number;
 }
 
 export class HttpControllerClient implements ControllerClient {
@@ -177,6 +183,7 @@ export class HttpControllerClient implements ControllerClient {
   private readonly maxNotifications: number;
   private readonly fetch: FetchLike;
   private readonly requestTimeoutMs: number;
+  private readonly now: () => number;
 
   constructor(options: HttpControllerOptions) {
     this.baseUrl = parseControllerUrl(options.baseUrl);
@@ -207,13 +214,14 @@ export class HttpControllerClient implements ControllerClient {
       10_000,
       "Controller request timeout",
     );
+    this.now = options.now ?? Date.now;
   }
 
   async poll(
     cursor: string | null,
     signal: AbortSignal,
     options: PollRequestOptions = {},
-  ): Promise<PollResponse> {
+  ): Promise<ControllerPollResult> {
     const waitSeconds = options.waitSeconds ?? this.waitSeconds;
     const maxNotifications = options.maxNotifications ?? this.maxNotifications;
     if (!Number.isInteger(waitSeconds) || waitSeconds < 1 || waitSeconds > this.waitSeconds) {
@@ -249,6 +257,7 @@ export class HttpControllerClient implements ControllerClient {
       "Controller poll request",
       requestAbort,
     );
+    const receivedAtMs = this.now();
     if (!response.ok) {
       discardBody(response);
       throw responseError(response);
@@ -261,7 +270,7 @@ export class HttpControllerClient implements ControllerClient {
       throw safeRequestError("Controller poll response", signal);
     }
     try {
-      return parsePollResponse(input);
+      return { response: parsePollResponse(input), receivedAtMs };
     } catch {
       throw new ControllerRequestError("request_rejected", false);
     }

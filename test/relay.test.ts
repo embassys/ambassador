@@ -5,6 +5,7 @@ import type { HealthResult, WakeAdapter, WakeInput } from "../src/adapters/types
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
 import {
   type ControllerClient,
+  type ControllerPollResult,
   ControllerRequestError,
   type PollRequestOptions,
 } from "../src/controller.js";
@@ -304,18 +305,22 @@ class RecordingController implements ControllerClient {
     private readonly trace: string[],
     private readonly polls: PollResponse[] = [],
     private readonly onPoll?: () => void,
+    private readonly now: () => number = () => NOW_MS,
   ) {}
 
   async poll(
     cursor: string | null,
     _signal: AbortSignal,
     options?: PollRequestOptions,
-  ): Promise<PollResponse> {
+  ): Promise<ControllerPollResult> {
     this.trace.push("controller.poll");
     this.cursors.push(cursor);
     this.pollOptions.push(options);
     this.onPoll?.();
-    return this.polls.shift() ?? emptyPoll(`cursor_empty_${this.cursors.length}`);
+    return {
+      response: this.polls.shift() ?? emptyPoll(`cursor_empty_${this.cursors.length}`),
+      receivedAtMs: this.now(),
+    };
   }
 
   async acknowledge(message: PersistenceAcknowledgement, _signal: AbortSignal): Promise<void> {
@@ -494,6 +499,7 @@ describe("Relay", () => {
       () => {
         nowMs = responseReceivedAt;
       },
+      () => nowMs,
     );
     const adapter = new ScriptedAdapter(trace, []);
     const relay = createRelay({ journal, controller, adapter, now: () => nowMs });
@@ -512,7 +518,18 @@ describe("Relay", () => {
       deliveryId: "delivery_old",
       persistedAt: new Date(NOW_MS - 1_000).toISOString(),
     };
-    const journal = new MemoryJournal(trace, [delivery()], [pendingAcknowledgement]);
+    const laterAcknowledgement: OutboxRecord = {
+      id: "ack_must_wait",
+      kind: "ack",
+      notificationId: "notification_also_old",
+      deliveryId: "delivery_also_old",
+      persistedAt: new Date(NOW_MS - 500).toISOString(),
+    };
+    const journal = new MemoryJournal(
+      trace,
+      [delivery()],
+      [pendingAcknowledgement, laterAcknowledgement],
+    );
     const controller = new RecordingController(trace, [emptyPoll()]);
     controller.acknowledgementError = new ControllerRequestError("rate_limited", true, 60_000);
     const adapter = new ScriptedAdapter(trace, [{ protocol_version: 1, status: "accepted" }]);

@@ -111,7 +111,7 @@ describe("HttpControllerClient", () => {
       return jsonResponse(VALID_POLL);
     });
 
-    assert.deepEqual(await client.poll(null, AbortSignal.timeout(1_000)), VALID_POLL);
+    assert.deepEqual((await client.poll(null, AbortSignal.timeout(1_000))).response, VALID_POLL);
     await client.poll("cursor_01J6YQ", AbortSignal.timeout(1_000));
 
     assert.equal(requests.length, 2);
@@ -131,6 +131,40 @@ describe("HttpControllerClient", () => {
       "max_notifications",
       "wait_seconds",
     ]);
+  });
+
+  test("timestamps a poll when response headers arrive, before reading a slow body", async () => {
+    const responseReceivedAt = Date.parse("2026-08-23T12:00:00Z");
+    const bodyReadAt = responseReceivedAt + 10_000;
+    let nowMs = responseReceivedAt;
+    const body = new TextEncoder().encode(JSON.stringify(VALID_POLL));
+    const client = new HttpControllerClient({
+      baseUrl: BASE_URL,
+      token: TOKEN,
+      waitSeconds: 30,
+      maxNotifications: 50,
+      now: () => nowMs,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                nowMs = bodyReadAt;
+                controller.enqueue(body);
+                controller.close();
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    });
+
+    const result = await client.poll(null, AbortSignal.timeout(1_000));
+
+    assert.equal(result.receivedAtMs, responseReceivedAt);
+    assert.equal(nowMs, bodyReadAt);
+    assert.deepEqual(result.response, VALID_POLL);
   });
 
   test("uses fixed acknowledgement and report paths with exact JSON bodies", async () => {
