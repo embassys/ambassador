@@ -878,8 +878,34 @@ export class Journal {
       });
   }
 
-  markOutboxAttempt(_id: string): number {
-    throw new Error("markOutboxAttempt is not implemented");
+  markOutboxAttempt(id: string): number {
+    const { database } = resourcesFor(this);
+    protocolId(id, "outbox id");
+    return database
+      .transaction(() => {
+        const update = database
+          .prepare(`
+            UPDATE outbox
+            SET send_attempts = send_attempts + 1
+            WHERE id = ?
+              AND confirmed_at_ms IS NULL
+              AND send_attempts < ${MAX_SAFE_INTEGER}
+          `)
+          .run(id);
+        if (safeInteger(update.changes, "outbox attempt changes") !== 1) {
+          throw new Error("cannot mark an unavailable outbox record");
+        }
+        const row = database
+          .prepare<[string], { send_attempts: bigint }>(`
+            SELECT send_attempts
+            FROM outbox
+            WHERE id = ?
+          `)
+          .get(id);
+        if (row === undefined) throw new Error("outbox record disappeared");
+        return inputInteger(safeInteger(row.send_attempts, "send_attempts"), "send_attempts", 1);
+      })
+      .immediate();
   }
 
   hasPendingAcknowledgement(deliveryId: string): boolean {

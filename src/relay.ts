@@ -242,6 +242,7 @@ export class Relay {
       attemptedOutboxIds.add(record.id);
 
       try {
+        this.journal.markOutboxAttempt(record.id);
         if (record.kind === "ack") {
           await this.controller.acknowledge(
             {
