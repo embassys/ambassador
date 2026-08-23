@@ -100,6 +100,10 @@ test("allows one owner and can be reacquired while retaining its artifact", asyn
   const first = await ProcessLock.acquire(path);
 
   await assert.rejects(ProcessLock.acquire(path), { code: "daemon_running" });
+  const contender = await startWorker(t, path);
+  const contenderOutcome = nextMessage(contender);
+  contender.child.send("acquire");
+  assert.deepEqual(await contenderOutcome, { type: "rejected", code: "daemon_running" });
   await first.release();
   await first.release();
   await access(path);
