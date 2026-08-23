@@ -48,6 +48,7 @@ export class SidecarApplication {
         waitSeconds: config.controller.poll_wait_seconds,
         maxNotifications: config.controller.max_notifications,
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        ...(options.now === undefined ? {} : { now: options.now }),
       });
       const relay = new Relay({
         config,
