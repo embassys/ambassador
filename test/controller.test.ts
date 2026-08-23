@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import type { FetchLike } from "../src/adapters/types.js";
-import { HttpControllerClient } from "../src/controller.js";
+import { ControllerRequestError, HttpControllerClient } from "../src/controller.js";
 import type { PersistenceAcknowledgement, PollResponse, WakeReport } from "../src/protocol.js";
 
 const BASE_URL = "https://controller.example";
@@ -250,5 +250,34 @@ describe("HttpControllerClient", () => {
       assert.doesNotMatch(error.message, new RegExp(sensitive));
       return true;
     });
+  });
+
+  test("classifies controller rate limits and permanent authentication failures", async () => {
+    const rateLimited = createClient(
+      async () => new Response("private", { status: 429, headers: { "retry-after": "5" } }),
+    );
+    await assert.rejects(
+      rateLimited.report(REPORT, AbortSignal.timeout(1_000)),
+      (error: unknown) => {
+        assert.ok(error instanceof ControllerRequestError);
+        assert.equal(error.code, "rate_limited");
+        assert.equal(error.retryable, true);
+        assert.equal(error.retryAfterMs, 5_000);
+        assert.doesNotMatch(error.message, /private/);
+        return true;
+      },
+    );
+
+    const unauthorized = createClient(async () => new Response("private", { status: 401 }));
+    await assert.rejects(
+      unauthorized.acknowledge(ACKNOWLEDGEMENT, AbortSignal.timeout(1_000)),
+      (error: unknown) => {
+        assert.ok(error instanceof ControllerRequestError);
+        assert.equal(error.code, "authentication_failed");
+        assert.equal(error.retryable, false);
+        assert.equal(error.retryAfterMs, undefined);
+        return true;
+      },
+    );
   });
 });

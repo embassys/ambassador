@@ -120,6 +120,20 @@ export interface PollRequestOptions {
   maxNotifications?: number;
 }
 
+export class ControllerRequestError extends Error {
+  readonly code: "authentication_failed" | "rate_limited" | "request_rejected" | "unavailable";
+  readonly retryable: boolean;
+  readonly retryAfterMs: number | undefined;
+
+  constructor(code: ControllerRequestError["code"], retryable: boolean, retryAfterMs?: number) {
+    super("Controller request failed");
+    this.name = "ControllerRequestError";
+    this.code = code;
+    this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 export interface HttpControllerOptions {
   baseUrl: string;
   token: string;

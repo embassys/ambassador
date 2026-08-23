@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
+import { ControllerRequestError } from "../src/controller.js";
 import { type DaemonEvent, runDaemon } from "../src/daemon.js";
 
 test("recovers in-flight work before running relay iterations serially", async () => {
@@ -105,4 +105,45 @@ test("yields after a successful iteration so a full retry queue cannot spin", as
 
   assert.equal(iterations, 1);
   assert.deepEqual(delays, [100]);
+});
+
+test("honors controller retry delays and stops on permanent controller failures", async () => {
+  const retryController = new AbortController();
+  const delays: number[] = [];
+  let attempts = 0;
+  await runDaemon(
+    {
+      journal: { recoverInFlight: () => 0 },
+      relay: {
+        async runOnce() {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new ControllerRequestError("rate_limited", true, 5_000);
+          }
+          retryController.abort();
+        },
+      },
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds);
+      },
+    },
+    retryController.signal,
+  );
+  assert.deepEqual(delays, [5_000]);
+
+  await assert.rejects(
+    runDaemon(
+      {
+        journal: { recoverInFlight: () => 0 },
+        relay: {
+          async runOnce() {
+            throw new ControllerRequestError("authentication_failed", false);
+          },
+        },
+      },
+      new AbortController().signal,
+    ),
+    (error: unknown) =>
+      error instanceof ControllerRequestError && error.code === "authentication_failed",
+  );
 });
