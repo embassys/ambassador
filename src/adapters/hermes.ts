@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { z } from "zod";
 
+import { requestTimeout, withDeadline } from "../http.js";
 import type { WakeResponse } from "../protocol.js";
 import type { FetchLike, HealthResult, WakeAdapter, WakeInput } from "./types.js";
 
@@ -127,6 +128,8 @@ export class HermesWebhookAdapter implements WakeAdapter {
   private readonly secret: string;
   private readonly fetch: FetchLike;
   private readonly now: () => number;
+  private readonly wakeTimeoutMs: number;
+  private readonly healthTimeoutMs: number;
 
   constructor(options: HermesWebhookOptions) {
     this.url = safeRuntimeUrl(options.url);
@@ -137,14 +140,17 @@ export class HermesWebhookAdapter implements WakeAdapter {
     this.secret = options.secret;
     this.fetch = options.fetch ?? globalThis.fetch;
     this.now = options.now ?? Date.now;
+    this.wakeTimeoutMs = requestTimeout(options.wakeTimeoutMs, 10_000, "Runtime wake timeout");
+    this.healthTimeoutMs = requestTimeout(options.healthTimeoutMs, 5_000, "Runtime health timeout");
   }
 
   async health(signal: AbortSignal): Promise<HealthResult> {
+    const requestAbort = withDeadline(signal, this.healthTimeoutMs);
     try {
       const response = await this.fetch(this.healthUrl, {
         method: "GET",
         redirect: "error",
-        signal,
+        signal: requestAbort,
       });
       await discardBody(response);
       return response.ok
@@ -156,6 +162,7 @@ export class HermesWebhookAdapter implements WakeAdapter {
   }
 
   async wake(input: WakeInput, signal: AbortSignal): Promise<WakeResponse> {
+    const requestAbort = withDeadline(signal, this.wakeTimeoutMs);
     const deliveryId = idSchema.parse(input.deliveryId);
     const body = JSON.stringify({ delivery_id: deliveryId });
     const timestamp = String(Math.floor(this.now() / 1_000));
@@ -172,7 +179,7 @@ export class HermesWebhookAdapter implements WakeAdapter {
       },
       body,
       redirect: "error",
-      signal,
+      signal: requestAbort,
     });
 
     if (response.status === 202) {

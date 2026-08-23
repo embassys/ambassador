@@ -1,4 +1,5 @@
 import type { FetchLike } from "./adapters/types.js";
+import { requestTimeout, withDeadline } from "./http.js";
 import {
   type PersistenceAcknowledgement,
   type PollResponse,
@@ -125,6 +126,7 @@ export class HttpControllerClient implements ControllerClient {
   private readonly waitSeconds: number;
   private readonly maxNotifications: number;
   private readonly fetch: FetchLike;
+  private readonly requestTimeoutMs: number;
 
   constructor(options: HttpControllerOptions) {
     this.baseUrl = parseControllerUrl(options.baseUrl);
@@ -150,9 +152,15 @@ export class HttpControllerClient implements ControllerClient {
     this.waitSeconds = options.waitSeconds;
     this.maxNotifications = options.maxNotifications;
     this.fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.requestTimeoutMs = requestTimeout(
+      options.requestTimeoutMs,
+      10_000,
+      "Controller request timeout",
+    );
   }
 
   async poll(cursor: string | null, signal: AbortSignal): Promise<PollResponse> {
+    const requestAbort = withDeadline(signal, this.waitSeconds * 1_000 + this.requestTimeoutMs);
     const url = new URL("/v1/sidecar/notifications", this.baseUrl);
     if (cursor !== null) {
       if (!PROTOCOL_ID.test(cursor)) {
@@ -170,10 +178,10 @@ export class HttpControllerClient implements ControllerClient {
         method: "GET",
         headers: { authorization: `Bearer ${this.token}` },
         redirect: "error",
-        signal,
+        signal: requestAbort,
       },
       "Controller poll request",
-      signal,
+      requestAbort,
     );
     if (!response.ok) {
       discardBody(response);
@@ -194,6 +202,7 @@ export class HttpControllerClient implements ControllerClient {
   }
 
   async acknowledge(message: PersistenceAcknowledgement, signal: AbortSignal): Promise<void> {
+    const requestAbort = withDeadline(signal, this.requestTimeoutMs);
     const body = JSON.stringify({
       protocol_version: message.protocol_version,
       notification_id: message.notification_id,
@@ -216,10 +225,10 @@ export class HttpControllerClient implements ControllerClient {
         },
         body,
         redirect: "error",
-        signal,
+        signal: requestAbort,
       },
       "Controller acknowledgement request",
-      signal,
+      requestAbort,
     );
     discardBody(response);
     if (!response.ok) {
@@ -228,6 +237,7 @@ export class HttpControllerClient implements ControllerClient {
   }
 
   async report(message: WakeReport, signal: AbortSignal): Promise<void> {
+    const requestAbort = withDeadline(signal, this.requestTimeoutMs);
     const body = JSON.stringify({
       protocol_version: message.protocol_version,
       report_id: message.report_id,
@@ -253,10 +263,10 @@ export class HttpControllerClient implements ControllerClient {
         },
         body,
         redirect: "error",
-        signal,
+        signal: requestAbort,
       },
       "Controller wake report request",
-      signal,
+      requestAbort,
     );
     discardBody(response);
     if (!response.ok) {
