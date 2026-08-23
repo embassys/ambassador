@@ -487,6 +487,29 @@ describe("Relay", () => {
     assert.equal(controller.reports[0]?.reason, "binding_not_found");
   });
 
+  test("records invalid_config when adapter construction fails instead of stranding waking work", async () => {
+    const trace: string[] = [];
+    const journal = new MemoryJournal(trace, [delivery()]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    const adapter = new ScriptedAdapter(trace, []);
+    const relay = createRelay({
+      journal,
+      controller,
+      adapter,
+      createAdapter: () => {
+        throw new Error("missing runtime credential value must not be reported");
+      },
+    });
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "failed");
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.attemptCount, 1);
+    assert.equal(controller.reports[0]?.status, "failed");
+    assert.equal(controller.reports[0]?.reason, "invalid_config");
+    assert.equal(JSON.stringify(controller.reports).includes("credential"), false);
+  });
+
   test("expires a delivery before wake without contacting the runtime", async () => {
     const trace: string[] = [];
     const journal = new MemoryJournal(trace, [delivery({ expiresAtMs: NOW_MS })]);
