@@ -104,8 +104,17 @@ export class Relay {
 
       let adapter = this.adapters.get(agent.binding_id);
       if (adapter === undefined) {
-        adapter = this.createAdapter(agent);
-        this.adapters.set(agent.binding_id, adapter);
+        try {
+          adapter = this.createAdapter(agent);
+          this.adapters.set(agent.binding_id, adapter);
+        } catch {
+          this.journal.recordWakeResult(
+            claim.delivery.deliveryId,
+            { status: "failed", reason: "invalid_config" },
+            this.now(),
+          );
+          continue;
+        }
       }
 
       let result: RecordedWakeResult;
