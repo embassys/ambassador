@@ -478,7 +478,7 @@ test("run starts the assembled sidecar and releases its process lock on abort", 
   assert.equal(controller.requests.length, 1);
   const paths = defaultPaths(process.platform, env, directory);
   await access(paths.journalPath);
-  await assert.rejects(access(paths.lockPath), { code: "ENOENT" });
+  await access(paths.lockPath);
 });
 
 test("service commands call the selected native lifecycle operation", async (t) => {

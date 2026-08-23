@@ -1,119 +1,72 @@
-import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
+
+import Database from "better-sqlite3";
 
 import { SidecarError } from "./errors.js";
 
-export interface ProcessLockOptions {
-  pid?: number;
-  token?: string;
-  isProcessAlive?: (pid: number) => boolean;
+const POSIX = process.platform !== "win32";
+
+function errorCode(error: unknown): string | undefined {
+  if (error !== null && typeof error === "object" && "code" in error) {
+    return typeof error.code === "string" ? error.code : undefined;
+  }
+  return undefined;
 }
 
-interface LockRecord {
-  pid: number;
-  token: string;
-}
+async function prepareArtifact(path: string): Promise<void> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  if (POSIX) await chmod(directory, 0o700);
 
-function processIsAlive(pid: number): boolean {
   try {
-    process.kill(pid, 0);
-    return true;
+    const handle = await open(path, "wx", 0o600);
+    await handle.close();
   } catch (error) {
-    return !(
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "ESRCH"
-    );
+    if (errorCode(error) !== "EEXIST") throw error;
   }
-}
 
-function parseRecord(value: string): LockRecord {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value) as unknown;
-  } catch {
-    throw new SidecarError("lock_invalid", "The daemon lock file is invalid", 7);
-  }
-  if (
-    parsed === null ||
-    typeof parsed !== "object" ||
-    Array.isArray(parsed) ||
-    Object.keys(parsed).sort().join(",") !== "pid,token" ||
-    !("pid" in parsed) ||
-    !Number.isSafeInteger(parsed.pid) ||
-    Number(parsed.pid) <= 0 ||
-    !("token" in parsed) ||
-    typeof parsed.token !== "string" ||
-    parsed.token.length < 1 ||
-    parsed.token.length > 128
-  ) {
-    throw new SidecarError("lock_invalid", "The daemon lock file is invalid", 7);
-  }
-  return { pid: Number(parsed.pid), token: parsed.token };
-}
-
-async function existingRecord(path: string): Promise<LockRecord> {
   const stats = await lstat(path);
-  if (!stats.isFile() || stats.size > 4096) {
-    throw new SidecarError("lock_invalid", "The daemon lock file is invalid", 7);
+  if (!stats.isFile()) {
+    throw new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
   }
-  return parseRecord(await readFile(path, "utf8"));
+  if (POSIX) await chmod(path, 0o600);
 }
 
 export class ProcessLock {
   private released = false;
 
-  private constructor(
-    private readonly path: string,
-    private readonly record: LockRecord,
-  ) {}
+  private constructor(private readonly database: Database.Database) {}
 
-  static async acquire(path: string, options: ProcessLockOptions = {}): Promise<ProcessLock> {
-    const record = {
-      pid: options.pid ?? process.pid,
-      token: options.token ?? randomUUID(),
-    };
-    if (!Number.isSafeInteger(record.pid) || record.pid <= 0 || record.token.length === 0) {
-      throw new SidecarError("lock_invalid", "The daemon lock parameters are invalid", 7);
-    }
-    const isAlive = options.isProcessAlive ?? processIsAlive;
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  static async acquire(path: string): Promise<ProcessLock> {
+    await prepareArtifact(path);
+    const database = new Database(path, { timeout: 0 });
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const handle = await open(path, "wx", 0o600);
-        try {
-          await handle.writeFile(`${JSON.stringify(record)}\n`, "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        return new ProcessLock(path, record);
-      } catch (error) {
-        if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
-        const existing = await existingRecord(path);
-        if (isAlive(existing.pid)) {
-          throw new SidecarError("daemon_running", "The sidecar daemon is already running", 7);
-        }
-        await unlink(path);
+    try {
+      database.pragma("busy_timeout = 0");
+      database.pragma("trusted_schema = OFF");
+      database.exec("BEGIN EXCLUSIVE");
+      return new ProcessLock(database);
+    } catch (error) {
+      database.close();
+      const code = errorCode(error);
+      if (code?.startsWith("SQLITE_BUSY")) {
+        throw new SidecarError("daemon_running", "The sidecar daemon is already running", 7);
       }
+      if (code === "SQLITE_NOTADB" || code === "SQLITE_FORMAT" || code === "SQLITE_CORRUPT") {
+        throw new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
+      }
+      throw error;
     }
-
-    throw new SidecarError("lock_busy", "The sidecar daemon lock could not be acquired", 7);
   }
 
   async release(): Promise<void> {
     if (this.released) return;
     this.released = true;
     try {
-      const current = await existingRecord(this.path);
-      if (current.pid === this.record.pid && current.token === this.record.token) {
-        await unlink(this.path);
-      }
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
-      throw error;
+      this.database.exec("ROLLBACK");
+    } finally {
+      this.database.close();
     }
   }
 }
