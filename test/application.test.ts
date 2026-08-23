@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -204,4 +204,42 @@ test("refuses a second application before opening the shared journal", async (t)
       now: () => NOW_MS,
     }),
   );
+});
+
+test("repairs state-directory and SQLite permissions on POSIX", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-application-permissions-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const stateDirectory = join(root, "state");
+  const lockDirectory = join(root, "lock");
+  await mkdir(stateDirectory, { mode: 0o777 });
+  await chmod(stateDirectory, 0o777);
+  const config: SidecarConfig = {
+    version: 1,
+    controller: {
+      base_url: "http://127.0.0.1:1",
+      token: { source: "env", name: "CONTROLLER_TOKEN" },
+      poll_wait_seconds: 1,
+      max_notifications: 1,
+      queue_capacity: 1,
+    },
+    agents: [],
+  };
+  const journalPath = join(stateDirectory, "journal.sqlite");
+  const application = await SidecarApplication.open({
+    config,
+    journalPath,
+    lockPath: join(lockDirectory, "daemon.lock"),
+    env: { CONTROLLER_TOKEN },
+  });
+
+  try {
+    assert.equal((await stat(stateDirectory)).mode & 0o777, 0o700);
+    assert.equal((await stat(journalPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(`${journalPath}-wal`)).mode & 0o777, 0o600);
+    assert.equal((await stat(`${journalPath}-shm`)).mode & 0o777, 0o600);
+  } finally {
+    await application.close();
+  }
 });
