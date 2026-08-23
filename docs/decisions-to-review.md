@@ -16,5 +16,6 @@ On August 23, 2026, the user authorized provisional decisions so implementation 
 | `0010-user-services.md` | Per-user launchd, systemd, and Task Scheduler lifecycle | Enabling service installation |
 | `0011-runtime-cli-flags.md` | Generic, Hermes, and OpenClaw agent-add flags | Public CLI release |
 | `0012-http-deadlines.md` | Bounded controller, wake, and health request deadlines | Public beta operating defaults |
+| `0013-windows-restart-interval.md` | One-minute Task Scheduler crash restart, superseding ADR 0010's Windows delay | Enabling Windows service installation |
 
 More rows will be added as implementation choices are made.

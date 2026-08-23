@@ -66,8 +66,8 @@ test("builds a quoted per-user Windows task command", () => {
   assert.match(definition.content ?? "", /<LogonTrigger>/);
   assert.match(definition.content ?? "", /<RunLevel>LeastPrivilege<\/RunLevel>/);
   assert.match(definition.content ?? "", /<RestartOnFailure>/);
-  assert.match(definition.content ?? "", /<Interval>PT5S<\/Interval>/);
-  assert.match(definition.content ?? "", /<Count>999<\/Count>/);
+  assert.match(definition.content ?? "", /<Interval>PT1M<\/Interval>/);
+  assert.match(definition.content ?? "", /<Count>255<\/Count>/);
   assert.match(definition.content ?? "", /<Command>C:\\Program Files\\A2A\\node\.exe<\/Command>/);
   assert.match(definition.content ?? "", /<Arguments>.*A2A Config.*<\/Arguments>/);
 });

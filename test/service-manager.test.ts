@@ -152,7 +152,7 @@ test("creates and controls a restarting per-user Windows scheduled task", async 
   await manager.install();
   const definition = await readFile(definitionPath, "utf8");
   assert.match(definition, /<RestartOnFailure>/);
-  assert.match(definition, /<Interval>PT5S<\/Interval>/);
+  assert.match(definition, /<Interval>PT1M<\/Interval>/);
   await manager.start();
   assert.deepEqual(await manager.status(), { installed: true, running: true });
   await manager.restart();
