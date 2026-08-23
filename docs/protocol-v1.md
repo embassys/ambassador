@@ -28,6 +28,8 @@ The sidecar receives IDs and timing metadata only. The agent gets task content d
 - IDs are opaque and case-sensitive. They use 1 to 128 URI-unreserved ASCII characters: letters, digits, `.`, `_`, `~`, and `-`.
 - Timestamps use RFC 3339 UTC with a `Z` suffix.
 - The controller sends the same `notification_id`, `delivery_id`, and `binding_id` when it redelivers a notification.
+- One `delivery_id` maps to one `notification_id` in v1. A different notification ID for the same delivery is a protocol error.
+- Exact duplicates in one poll batch are coalesced and produce one stored notification and one acknowledgement.
 - The sidecar uses `delivery_id` as the runtime wake idempotency key.
 - Different payloads with the same ID are a protocol error.
 - The sidecar never sends a local runtime session ID to the controller.
@@ -97,6 +99,7 @@ The controller treats repeated acknowledgements for the same notification as suc
 {
   "protocol_version": 1,
   "report_id": "report_01J6YS",
+  "sequence": 1,
   "notification_id": "notice_01J6YR",
   "delivery_id": "delivery_01J6YP",
   "status": "retrying",
@@ -122,11 +125,13 @@ Allowed reasons:
 | --- | --- |
 | `retrying` | `runtime_unavailable`, `rate_limited`, `timeout`, `outcome_unknown` |
 | `failed` | `binding_not_found`, `unauthorized`, `invalid_config`, `unsupported_runtime`, `rejected` |
-| `uncertain` | `expired_after_attempt`, `retry_window_exhausted` |
+| `uncertain` | `expired_after_attempt`, `retry_window_exhausted`, `binding_changed` |
 
 `accepted` and `expired` omit `reason`. Only `retrying` includes `next_attempt_at`.
 
 The sidecar writes each report to its outbox before sending it. A retry keeps the same `report_id`. The controller treats a repeated report ID as success and rejects a reused report ID with different fields.
+
+`sequence` starts at `1` and increases for each new report about a notification. The controller applies only a sequence greater than the last one it accepted. It treats an older sequence as an idempotent stale report, and rejects a different report ID that reuses an accepted sequence. This prevents a delayed `retrying` report from replacing a later `accepted` report.
 
 ## Runtime wake contract
 
@@ -199,7 +204,13 @@ pending -> waking -> accepted
 
 The sidecar records `waking` before calling the runtime. Only one wake attempt for a delivery runs at a time. Different deliveries may run concurrently, and the protocol promises no ordering between them.
 
+The daemon holds a single-instance lock, and the journal claims due deliveries atomically. A second process must fail before it polls or wakes a runtime.
+
+The sidecar pins the binding configuration used for the first attempt. If that configuration changes after an uncertain outcome, the sidecar does not send the same delivery to a different runtime. It reports `uncertain` with reason `binding_changed`.
+
 `accepted`, `failed`, `expired`, and `uncertain` are terminal sidecar states. Task completion is not a sidecar state.
+
+Version 1 never reopens `failed` automatically. After the operator fixes configuration or credentials, the controller must issue a new delivery ID.
 
 ## Crash behavior
 
@@ -218,11 +229,15 @@ The protocol provides at-least-once wake delivery. It does not claim exactly-onc
 - Retry runtime unavailability, rate limits, timeouts, and unknown outcomes.
 - Honor a valid runtime or controller retry delay.
 - Use bounded exponential backoff with jitter when no delay is supplied. Exact timing remains a later implementation decision.
-- Do not retry a permanent error until configuration or credentials change.
+- Do not retry a permanent error. A corrected setup requires a new delivery ID in v1.
 - Do not start a new attempt after `expires_at`.
-- Report `expired` if no attempt may have reached the runtime.
+- An `accepted` response wins even if it arrives after `expires_at`.
+- A permanent error received after expiry remains `failed`.
+- Report `expired` if no attempt may have reached the runtime before the retry window closes.
 - Report `uncertain` if an earlier attempt may have reached the runtime but the retry window closes.
 - Stop polling when the durable local queue reaches its configured limit. Resume after it drains.
+- If a poll response would exceed queue capacity, commit none of that response, keep the old cursor, and send no acknowledgements.
+- Do not delete a notification, session mapping, or outbox row before the controller confirms its final report and the runtime's duplicate window has passed.
 
 The sidecar uses `server_time` to estimate controller clock offset for expiry checks. `doctor` reports unsafe clock skew.
 
@@ -249,6 +264,8 @@ Reject any controller or runtime message containing fields such as `task`, `prom
 | P03 | Unsupported protocol version | Fail closed and report a version error locally |
 | P04 | Conflicting payload for an existing ID | Stop processing and report a protocol violation locally |
 | P05 | Empty poll response | Store its cursor and poll again |
+| P06 | New notification ID reuses a delivery ID | Reject it as a protocol violation |
+| P07 | Exact duplicate appears twice in one batch | Store and acknowledge it once |
 | A01 | Crash before notification commit | Controller redelivery is processed normally |
 | A02 | Crash after commit but before acknowledgement | Sidecar resends the persistence acknowledgement |
 | A03 | Repeated acknowledgement | Controller returns success without changing delivery state |
@@ -260,8 +277,12 @@ Reject any controller or runtime message containing fields such as `task`, `prom
 | W06 | Permanent runtime rejection | Do not retry and report `failed` |
 | W07 | Delivery expires before an attempt | Do not call the runtime and report `expired` |
 | W08 | Delivery expires after an uncertain attempt | Do not call again and report `uncertain` |
+| W09 | Binding changes after an uncertain attempt | Do not route to the new runtime; report `binding_changed` |
 | O01 | Controller is unavailable after wake acceptance | Keep and retry the accepted report |
 | O02 | Repeated report ID | Controller returns success without applying it twice |
+| O03 | Older report arrives after a newer sequence | Controller accepts it as stale without changing state |
+| C01 | A second daemon starts on the same journal | It exits before polling or waking |
+| C02 | Poll batch would exceed queue capacity | Store none of it and keep the old cursor |
 | S01 | Secret appears in an error or response | Redact it before logs or diagnostics are written |
 | S02 | Generic webhook has a bad signature or stale timestamp | Runtime rejects it without starting an agent session |
 | D01 | Inspect network, journal, logs, and diagnostics | Find no forbidden task or MCP fields |

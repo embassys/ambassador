@@ -7,7 +7,8 @@ Before starting any task, read these files in order:
 1. `docs/product-vision-and-architecture.md`
 2. `docs/protocol-v1.md`
 3. `docs/implementation-plan.md`
-4. Relevant accepted records under `docs/adr/`
+4. `docs/decisions-to-review.md`
+5. Relevant accepted records under `docs/adr/`
 
 If your task conflicts with these documents, stop and ask. Do not expand the scope on your own.
 
