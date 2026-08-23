@@ -14,7 +14,7 @@ Status as of August 23, 2026.
 - CLI setup, agent management, health tests, status, diagnostics, foreground run, JSON output, and stable exit codes.
 - Per-user service definitions and lifecycle commands for `launchd`, `systemd --user`, and Windows Task Scheduler, including native restart-after-failure policies.
 - Linux, macOS, and Windows CI configuration.
-- 138 automated tests using local HTTP servers, real temporary SQLite files, and concurrent subprocess lock contention.
+- 139 automated tests using local HTTP servers, real temporary SQLite files, and concurrent subprocess lock contention.
 - Exact Node 24.19.0 and npm 11.19.0 checks, build, coverage, native SQLite loading, and production dependency audit pass locally.
 
 ## Partially complete
