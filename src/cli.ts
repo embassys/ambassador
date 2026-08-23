@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import packageJson from "../package.json" with { type: "json" };
-import { GenericWebhookAdapter } from "./adapters/generic.js";
+import { createWakeAdapter } from "./adapters/factory.js";
 import { SidecarApplication } from "./application.js";
 import { type AgentConfig, parseConfig, resolveSecret, type SidecarConfig } from "./config.js";
 import { SidecarError } from "./errors.js";
@@ -257,21 +257,17 @@ async function agentAdd(args: string[], context: CliContext): Promise<CommandRes
     {
       ...commonOptions,
       adapter: { type: "string" },
+      "agent-id": { type: "string" },
       "health-url": { type: "string" },
       "secret-env": { type: "string" },
+      "token-env": { type: "string" },
       url: { type: "string" },
     },
     1,
   );
   const bindingId = parsed.positionals[0];
   const adapterType = stringOption(parsed.values, "adapter");
-  const secretEnvironment = stringOption(parsed.values, "secret-env");
-  if (
-    bindingId === undefined ||
-    !bindingIdPattern.test(bindingId) ||
-    adapterType !== "generic" ||
-    !environmentNamePattern.test(secretEnvironment)
-  ) {
+  if (bindingId === undefined || !bindingIdPattern.test(bindingId)) {
     throw invalidArguments;
   }
 
@@ -282,14 +278,50 @@ async function agentAdd(args: string[], context: CliContext): Promise<CommandRes
   }
 
   const healthUrl = optionalStringOption(parsed.values, "health-url");
-  const agent: AgentConfig = {
-    binding_id: bindingId,
-    adapter: {
-      type: "generic",
-      url: stringOption(parsed.values, "url"),
+  const url = stringOption(parsed.values, "url");
+  const secretEnvironment = optionalStringOption(parsed.values, "secret-env");
+  const tokenEnvironment = optionalStringOption(parsed.values, "token-env");
+  const agentId = optionalStringOption(parsed.values, "agent-id");
+  let adapter: AgentConfig["adapter"];
+
+  if (adapterType === "generic" || adapterType === "hermes") {
+    if (
+      secretEnvironment === undefined ||
+      !environmentNamePattern.test(secretEnvironment) ||
+      tokenEnvironment !== undefined ||
+      agentId !== undefined
+    ) {
+      throw invalidArguments;
+    }
+    adapter = {
+      type: adapterType,
+      url,
       secret: { source: "env", name: secretEnvironment },
       ...(healthUrl === undefined ? {} : { health_url: healthUrl }),
-    },
+    };
+  } else if (adapterType === "openclaw") {
+    if (
+      tokenEnvironment === undefined ||
+      !environmentNamePattern.test(tokenEnvironment) ||
+      agentId === undefined ||
+      secretEnvironment !== undefined
+    ) {
+      throw invalidArguments;
+    }
+    adapter = {
+      type: "openclaw",
+      url,
+      agent_id: agentId,
+      token: { source: "env", name: tokenEnvironment },
+      ...(healthUrl === undefined ? {} : { health_url: healthUrl }),
+    };
+  } else {
+    throw invalidArguments;
+  }
+
+  const agent: AgentConfig = {
+    binding_id: bindingId,
+    adapter,
   };
   const updated = validatedConfig(
     { ...config, agents: [...config.agents, agent] },
@@ -355,17 +387,8 @@ async function agentTest(args: string[], context: CliContext): Promise<CommandRe
   if (agent === undefined) {
     throw invalidConfig;
   }
-  if (agent.adapter.type !== "generic") {
-    throw new SidecarError("unsupported_runtime", "Runtime adapter is not supported", 6);
-  }
-
   try {
-    const secret = resolveSecret(agent.adapter.secret, context.env);
-    const adapter = new GenericWebhookAdapter({
-      url: agent.adapter.url,
-      secret,
-      ...(agent.adapter.health_url === undefined ? {} : { healthUrl: agent.adapter.health_url }),
-    });
+    const adapter = createWakeAdapter(agent, { env: context.env });
     const result = await adapter.health(AbortSignal.timeout(5_000));
     if (!result.healthy) {
       throw runtimeFailure;
