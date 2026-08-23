@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 
 import { SidecarError } from "./errors.js";
 import {
@@ -91,6 +91,7 @@ export class UserServiceManager {
   private readonly definition: ServiceDefinition;
   private readonly runCommand: CommandRunner;
   private readonly launchdDomain: string | undefined;
+  private readonly windowsDefinitionPath: string | undefined;
 
   constructor(options: UserServiceManagerOptions) {
     this.platform = options.platform;
@@ -106,6 +107,13 @@ export class UserServiceManager {
       const uid = options.uid ?? process.getuid?.();
       if (uid === undefined || !Number.isSafeInteger(uid) || uid < 0) throw SERVICE_ERROR;
       this.launchdDomain = `gui/${uid}`;
+    }
+    if (options.platform === "win32") {
+      const stateRoot =
+        options.env.LOCALAPPDATA ?? win32.join(options.homeDirectory, "AppData", "Local");
+      this.windowsDefinitionPath =
+        options.windowsDefinitionPath ??
+        win32.join(stateRoot, "a2a-sidecar", "a2a-sidecar-task.xml");
     }
   }
 
@@ -134,17 +142,16 @@ export class UserServiceManager {
       return;
     }
     if (this.platform === "win32") {
-      if (this.definition.kind !== "windows_task") throw SERVICE_ERROR;
+      if (this.definition.kind !== "windows_task" || this.windowsDefinitionPath === undefined) {
+        throw SERVICE_ERROR;
+      }
+      await writeDefinition(this.windowsDefinitionPath, this.definition.content);
       await this.required("schtasks.exe", [
         "/Create",
-        "/SC",
-        "ONLOGON",
-        "/RL",
-        "LIMITED",
         "/TN",
         this.definition.name,
-        "/TR",
-        this.definition.commandLine,
+        "/XML",
+        this.windowsDefinitionPath,
         "/F",
       ]);
       return;
@@ -265,6 +272,11 @@ export class UserServiceManager {
     }
     if (this.platform === "win32") {
       await this.required("schtasks.exe", ["/Delete", "/TN", "A2A Sidecar", "/F"]);
+      if (this.windowsDefinitionPath !== undefined) {
+        await rm(this.windowsDefinitionPath, { force: true }).catch(() => {
+          throw SERVICE_ERROR;
+        });
+      }
       return;
     }
     throw SERVICE_ERROR;
