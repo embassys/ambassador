@@ -1,4 +1,5 @@
-import { NotImplementedError } from "./errors.js";
+import { setTimeout as delay } from "node:timers/promises";
+
 import type { Journal } from "./journal.js";
 import type { Relay } from "./relay.js";
 
@@ -14,6 +15,27 @@ export interface DaemonOptions {
   onEvent?: (event: DaemonEvent) => void;
 }
 
-export async function runDaemon(_options: DaemonOptions, _signal: AbortSignal): Promise<void> {
-  throw new NotImplementedError("runDaemon");
+async function sleep(milliseconds: number, signal: AbortSignal): Promise<void> {
+  await delay(milliseconds, undefined, { signal });
+}
+
+export async function runDaemon(options: DaemonOptions, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+
+  options.journal.recoverInFlight((options.now ?? Date.now)());
+  const wait = options.sleep ?? sleep;
+
+  while (!signal.aborted) {
+    try {
+      await options.relay.runOnce(signal);
+    } catch {
+      if (signal.aborted) break;
+      options.onEvent?.({ code: "relay_iteration_failed" });
+      try {
+        await wait(1_000, signal);
+      } catch {
+        if (!signal.aborted) throw new Error("Daemon retry delay failed");
+      }
+    }
+  }
 }
