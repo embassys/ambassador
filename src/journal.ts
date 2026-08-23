@@ -229,7 +229,24 @@ function reportStatus(value: string): WakeReportStatus {
   }
 }
 
-function deliveryRecord(row: DeliveryRow): DeliveryRecord {
+function adjustedTimestamp(value: number, offset: number, operation: "add" | "subtract"): number {
+  const adjusted = operation === "add" ? value + offset : value - offset;
+  return timestampMs(safeInteger(adjusted, "adjusted timestamp"), "adjusted timestamp");
+}
+
+function controllerClockOffset(database: Database.Database): number {
+  const row = database
+    .prepare<[], { controller_clock_offset_ms: bigint }>(`
+      SELECT controller_clock_offset_ms
+      FROM sidecar_state
+      WHERE singleton = 1
+    `)
+    .get();
+  if (row === undefined) throw new Error("journal state row is missing");
+  return safeInteger(row.controller_clock_offset_ms, "controller_clock_offset_ms");
+}
+
+function deliveryRecord(row: DeliveryRow, clockOffset: number): DeliveryRecord {
   const mayHaveReachedRuntime = safeInteger(
     row.may_have_reached_runtime,
     "may_have_reached_runtime",
@@ -243,8 +260,16 @@ function deliveryRecord(row: DeliveryRow): DeliveryRecord {
     deliveryId: row.delivery_id,
     bindingId: row.binding_id,
     ...(row.binding_fingerprint === null ? {} : { bindingFingerprint: row.binding_fingerprint }),
-    issuedAtMs: timestampMs(safeInteger(row.issued_at_ms, "issued_at_ms"), "issued_at_ms"),
-    expiresAtMs: timestampMs(safeInteger(row.expires_at_ms, "expires_at_ms"), "expires_at_ms"),
+    issuedAtMs: adjustedTimestamp(
+      timestampMs(safeInteger(row.issued_at_ms, "issued_at_ms"), "issued_at_ms"),
+      clockOffset,
+      "subtract",
+    ),
+    expiresAtMs: adjustedTimestamp(
+      timestampMs(safeInteger(row.expires_at_ms, "expires_at_ms"), "expires_at_ms"),
+      clockOffset,
+      "subtract",
+    ),
     state: deliveryState(row.state),
     attemptCount: inputInteger(safeInteger(row.attempt_count, "attempt_count"), "attempt_count"),
     nextAttemptAtMs: timestampMs(
@@ -474,13 +499,13 @@ export class Journal {
             notification.binding_id,
             issuedAtMs,
             expiresAtMs,
-            issuedAtMs,
+            adjustedTimestamp(issuedAtMs, clockOffset, "subtract"),
           );
           insertAcknowledgement.run(
             nextOutboxId(idGenerator),
             notification.notification_id,
             notification.delivery_id,
-            persistedAt,
+            adjustedTimestamp(persistedAt, clockOffset, "add"),
           );
         }
 
@@ -511,19 +536,22 @@ export class Journal {
 
   getDelivery(deliveryId: string): DeliveryRecord | undefined {
     protocolId(deliveryId, "deliveryId");
-    const row = resourcesFor(this)
-      .database.prepare<[string], DeliveryRow>(`
+    const { database } = resourcesFor(this);
+    const row = database
+      .prepare<[string], DeliveryRow>(`
         SELECT ${DELIVERY_COLUMNS}
         FROM deliveries
         WHERE delivery_id = ?
       `)
       .get(deliveryId);
-    return row === undefined ? undefined : deliveryRecord(row);
+    return row === undefined ? undefined : deliveryRecord(row, controllerClockOffset(database));
   }
 
   listDue(nowMs: number, limit: number): DeliveryRecord[] {
     const { database } = resourcesFor(this);
     const now = timestampMs(nowMs, "nowMs");
+    const clockOffset = controllerClockOffset(database);
+    const controllerNow = adjustedTimestamp(now, clockOffset, "add");
     const rowLimit = inputInteger(limit, "limit");
     if (rowLimit === 0) return [];
     return database
@@ -536,8 +564,8 @@ export class Journal {
         ORDER BY next_attempt_at_ms, issued_at_ms, rowid
         LIMIT ?
       `)
-      .all(now, now, rowLimit)
-      .map(deliveryRecord);
+      .all(now, controllerNow, rowLimit)
+      .map((row) => deliveryRecord(row, clockOffset));
   }
 
   claimDelivery(deliveryId: string, fingerprint: string, nowMs: number): ClaimResult {
@@ -545,6 +573,8 @@ export class Journal {
     protocolId(deliveryId, "deliveryId");
     boundedText(fingerprint, "fingerprint", 512);
     const now = timestampMs(nowMs, "nowMs");
+    const clockOffset = controllerClockOffset(database);
+    const controllerNow = adjustedTimestamp(now, clockOffset, "add");
 
     return database
       .transaction((): ClaimResult => {
@@ -553,7 +583,7 @@ export class Journal {
           row === undefined ||
           (row.state !== "pending" && row.state !== "retry_wait") ||
           safeInteger(row.next_attempt_at_ms, "next_attempt_at_ms") > now ||
-          safeInteger(row.expires_at_ms, "expires_at_ms") <= now
+          safeInteger(row.expires_at_ms, "expires_at_ms") <= controllerNow
         ) {
           return { status: "not_due" };
         }
@@ -580,7 +610,7 @@ export class Journal {
             sequence,
             "uncertain",
             "binding_changed",
-            now,
+            controllerNow,
             null,
           );
           return { status: "binding_changed" };
@@ -597,12 +627,12 @@ export class Journal {
               AND next_attempt_at_ms <= ?
               AND expires_at_ms > ?
           `)
-          .run(fingerprint, deliveryId, now, now);
+          .run(fingerprint, deliveryId, now, controllerNow);
         if (safeInteger(update.changes, "claim changes") !== 1) return { status: "not_due" };
 
         const claimed = getDeliveryRow(database, deliveryId);
         if (claimed === undefined) throw new Error("claimed delivery disappeared");
-        return { status: "claimed", delivery: deliveryRecord(claimed) };
+        return { status: "claimed", delivery: deliveryRecord(claimed, clockOffset) };
       })
       .immediate();
   }
@@ -612,6 +642,7 @@ export class Journal {
     protocolId(deliveryId, "deliveryId");
     validateWakeResult(result);
     const observedAt = timestampMs(observedAtMs, "observedAtMs");
+    const clockOffset = controllerClockOffset(database);
 
     database
       .transaction(() => {
@@ -670,8 +701,10 @@ export class Journal {
           sequence,
           result.status,
           result.reason ?? null,
-          observedAt,
-          result.nextAttemptAtMs ?? null,
+          adjustedTimestamp(observedAt, clockOffset, "add"),
+          result.nextAttemptAtMs === undefined
+            ? null
+            : adjustedTimestamp(result.nextAttemptAtMs, clockOffset, "add"),
         );
       })
       .immediate();
@@ -680,6 +713,8 @@ export class Journal {
   expireDue(nowMs: number): number {
     const { database, idGenerator } = resourcesFor(this);
     const now = timestampMs(nowMs, "nowMs");
+    const clockOffset = controllerClockOffset(database);
+    const controllerNow = adjustedTimestamp(now, clockOffset, "add");
     return database
       .transaction(() => {
         const rows = database
@@ -690,7 +725,7 @@ export class Journal {
               AND expires_at_ms <= ?
             ORDER BY expires_at_ms, rowid
           `)
-          .all(now);
+          .all(controllerNow);
         const update = database.prepare(`
           UPDATE deliveries
           SET state = ?, report_sequence = ?
@@ -704,7 +739,7 @@ export class Journal {
           const reason = mayHaveReachedRuntime ? "expired_after_attempt" : null;
           const sequence = nextReportSequence(row);
           update.run(status, sequence, row.delivery_id);
-          insertReport(database, idGenerator, row, sequence, status, reason, now, null);
+          insertReport(database, idGenerator, row, sequence, status, reason, controllerNow, null);
         }
         return rows.length;
       })
@@ -714,6 +749,8 @@ export class Journal {
   recoverInFlight(nowMs: number): number {
     const { database, idGenerator } = resourcesFor(this);
     const now = timestampMs(nowMs, "nowMs");
+    const clockOffset = controllerClockOffset(database);
+    const controllerNow = adjustedTimestamp(now, clockOffset, "add");
     return database
       .transaction(() => {
         const rows = database
@@ -734,7 +771,7 @@ export class Journal {
         `);
 
         for (const row of rows) {
-          const expired = safeInteger(row.expires_at_ms, "expires_at_ms") <= now;
+          const expired = safeInteger(row.expires_at_ms, "expires_at_ms") <= controllerNow;
           const status: WakeReportStatus = expired ? "uncertain" : "retrying";
           const reason = expired ? "expired_after_attempt" : "outcome_unknown";
           const nextAttemptAt = expired
@@ -754,8 +791,8 @@ export class Journal {
             sequence,
             status,
             reason,
-            now,
-            expired ? null : now,
+            controllerNow,
+            expired ? null : controllerNow,
           );
         }
         return rows.length;

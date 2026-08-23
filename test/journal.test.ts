@@ -183,7 +183,7 @@ test("uses controller clock offset for expiry and controller-facing timestamps",
     journal.listDue(localNow, 10).map(({ deliveryId }) => deliveryId),
     ["delivery-1"],
   );
-  assert.equal(ackRecords(journal)[0]?.persistedAt, controllerNow);
+  assert.equal(ackRecords(journal)[0]?.persistedAt, new Date(controllerNow).toISOString());
   assert.equal(journal.expireDue(localNow + 59_999), 0);
   assert.equal(journal.expireDue(localNow + 60_000), 1);
 });
