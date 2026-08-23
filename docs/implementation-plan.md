@@ -2,7 +2,7 @@
 
 ## Read before working
 
-Read `docs/product-vision-and-architecture.md`, this plan, and any accepted decisions in `docs/adr/` that affect your task. If your task conflicts with them, stop and ask. Do not quietly change the scope.
+Read `docs/product-vision-and-architecture.md`, `docs/protocol-v1.md`, this plan, and any accepted decisions in `docs/adr/` that affect your task. If your task conflicts with them, stop and ask. Do not quietly change the scope.
 
 ## Rules
 
@@ -20,13 +20,14 @@ Read `docs/product-vision-and-architecture.md`, this plan, and any accepted deci
 
 | ID | Agent | Task | Depends On | Result |
 | --- | --- | --- | --- | --- |
-| S1 | Protocol | Define notification, acknowledgement, wake, retry, and data-boundary behavior without choosing a framework | None | JSON examples and acceptance tests |
-| R1 | Hermes research | Test native webhook auth, duplicate handling, restart behavior, health checks, and fixed prompts | S1 | Compatibility notes |
-| R2 | OpenClaw research | Test session identity, duplicate handling, restart behavior, and immediate wake | S1 | Compatibility notes |
-| D1 | Tooling research | Compare the initial tooling options without selecting one | S1 | Options for user review |
-| UX1 | CLI design | Draft command names, flags, setup flow, output, errors, config behavior, and noninteractive use without writing code | S1 | CLI designs for user review |
-| DIST1 | Distribution research | Compare package registries, standalone files, native installers, package managers, and containers | S1 | Install and publishing options for user review |
-| LAB1 | Local test design | Compare host-side and all-container test setups, including controller and runtime networking | S1, R1, R2 | Local test design for user review |
+| S1 | Protocol | Draft notification, acknowledgement, wake, retry, and data-boundary behavior without choosing a framework | None | `docs/protocol-v1.md` |
+| G0 | User | Review and approve the protocol draft and acceptance cases | S1 | Approved protocol draft |
+| R1 | Hermes research | Test native webhook auth, duplicate handling, restart behavior, health checks, and fixed prompts | G0 | Compatibility notes |
+| R2 | OpenClaw research | Test session identity, duplicate handling, restart behavior, and immediate wake | G0 | Compatibility notes |
+| D1 | Tooling research | Compare the initial tooling options without selecting one | G0 | Options for user review |
+| UX1 | CLI design | Draft command names, flags, setup flow, output, errors, config behavior, and noninteractive use without writing code | G0 | CLI designs for user review |
+| DIST1 | Distribution research | Compare package registries, standalone files, native installers, package managers, and containers | G0 | Install and publishing options for user review |
+| LAB1 | Local test design | Compare host-side and all-container test setups, including controller and runtime networking | G0, R1, R2 | Local test design for user review |
 | G1 | User | Approve the tooling, CLI design, distribution direction, local test design, and supported OS matrix | D1, UX1, DIST1, LAB1 | Approved choices recorded in ADRs |
 
 Before `G1`, agents may add docs and research notes only. They may not add project tooling or dependencies.
