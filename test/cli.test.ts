@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 
 import { type CliServiceManager, runCli } from "../src/cli.js";
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
+import { Journal } from "../src/journal.js";
 import { defaultPaths } from "../src/paths.js";
+
+const NOW_MS = Date.parse("2026-08-23T12:00:00Z");
 
 interface Invocation {
   exitCode: number;
@@ -544,18 +547,41 @@ test("doctor validates credentials and health without exposing their values", as
   await writeConfig(configPath, configWithAgents([genericAgent(runtime.baseUrl)]));
   const controllerSecret = "doctor-controller-secret";
   const runtimeSecret = "doctor-runtime-secret";
+  const env = {
+    HOME: directory,
+    USERPROFILE: directory,
+    APPDATA: join(directory, "AppData", "Roaming"),
+    LOCALAPPDATA: join(directory, "AppData", "Local"),
+    XDG_CONFIG_HOME: join(directory, ".config"),
+    XDG_STATE_HOME: join(directory, ".state"),
+    A2A_CONTROLLER_TOKEN: controllerSecret,
+    A2A_RUNTIME_SECRET: runtimeSecret,
+  };
+  const paths = defaultPaths(process.platform, env, directory);
+  await mkdir(dirname(paths.journalPath), { recursive: true });
+  const journal = new Journal(paths.journalPath);
+  journal.ingestPoll(
+    {
+      protocol_version: 1,
+      cursor: "cursor_doctor",
+      server_time: new Date(NOW_MS + 301_000).toISOString(),
+      notifications: [],
+    },
+    10,
+    NOW_MS,
+  );
+  journal.close();
 
   const result = await invoke(["doctor", "--config", configPath, "--json"], {
     cwd: directory,
-    env: {
-      A2A_CONTROLLER_TOKEN: controllerSecret,
-      A2A_RUNTIME_SECRET: runtimeSecret,
-    },
+    env,
   });
 
   assert.deepEqual(assertJsonSuccess(result), {
     config_valid: true,
     controller_credential: true,
+    clock_skew_ms: 301_000,
+    clock_skew_safe: false,
     agents: [{ binding_id: "binding_local", adapter: "generic", healthy: true }],
   });
   assert.equal(`${result.stdout}${result.stderr}`.includes(controllerSecret), false);
