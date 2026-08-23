@@ -27,6 +27,8 @@ export interface HermesWebhookOptions {
   secret: string;
   fetch?: FetchLike;
   now?: () => number;
+  wakeTimeoutMs?: number;
+  healthTimeoutMs?: number;
 }
 
 function safeRuntimeUrl(value: string): URL {

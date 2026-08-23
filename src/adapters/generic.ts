@@ -92,6 +92,8 @@ export interface GenericWebhookOptions {
   secret: string;
   fetch?: FetchLike;
   now?: () => number;
+  wakeTimeoutMs?: number;
+  healthTimeoutMs?: number;
 }
 
 export class GenericWebhookAdapter implements WakeAdapter {

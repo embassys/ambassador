@@ -43,6 +43,46 @@ function oversizedResponse(status: number): {
 }
 
 describe("OpenClawWebhookAdapter", () => {
+  test("applies an internal wake deadline without aborting the caller signal", async () => {
+    const caller = new AbortController();
+    let requestSignal: AbortSignal | null = null;
+    const adapter = new OpenClawWebhookAdapter({
+      url: URL,
+      token: TOKEN,
+      agentId: "agent-local",
+      wakeTimeoutMs: 5,
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? null;
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener("abort", () => reject(requestSignal?.reason), {
+            once: true,
+          });
+        });
+      },
+    });
+    const operation = adapter.wake({ deliveryId: DELIVERY_ID }, caller.signal);
+    const settled = operation.then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(requestSignal);
+      assert.notEqual(requestSignal, caller.signal);
+      const result = await settled;
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.ok(result.error instanceof Error);
+        assert.equal(result.error.name, "TimeoutError");
+      }
+      assert.equal(caller.signal.aborted, false);
+    } finally {
+      caller.abort();
+      await settled;
+    }
+  });
+
   test("sends a fixed content-blind instruction and idempotency key", async () => {
     let captured: Request | undefined;
     const fetch: FetchLike = async (input, init) => {

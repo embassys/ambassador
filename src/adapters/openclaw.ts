@@ -20,6 +20,8 @@ export interface OpenClawWebhookOptions {
   token: string;
   agentId: string;
   fetch?: FetchLike;
+  wakeTimeoutMs?: number;
+  healthTimeoutMs?: number;
 }
 
 function safeRuntimeUrl(value: string): URL {

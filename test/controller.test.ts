@@ -63,6 +63,47 @@ function jsonResponse(value: unknown, status = 200): Response {
 }
 
 describe("HttpControllerClient", () => {
+  test("applies an internal deadline without aborting the caller signal", async () => {
+    const caller = new AbortController();
+    let requestSignal: AbortSignal | null = null;
+    const client = new HttpControllerClient({
+      baseUrl: BASE_URL,
+      token: TOKEN,
+      waitSeconds: 30,
+      maxNotifications: 50,
+      requestTimeoutMs: 5,
+      fetch: async (_input, init) => {
+        requestSignal = init?.signal ?? null;
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener("abort", () => reject(requestSignal?.reason), {
+            once: true,
+          });
+        });
+      },
+    });
+    const operation = client.acknowledge(ACKNOWLEDGEMENT, caller.signal);
+    const settled = operation.then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(requestSignal);
+      assert.notEqual(requestSignal, caller.signal);
+      const result = await settled;
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.ok(result.error instanceof Error);
+        assert.equal(result.error.name, "TimeoutError");
+      }
+      assert.equal(caller.signal.aborted, false);
+    } finally {
+      caller.abort();
+      await settled;
+    }
+  });
+
   test("uses the fixed poll path and query parameters with bearer authentication", async () => {
     const requests: Request[] = [];
     const client = createClient(async (input, init) => {

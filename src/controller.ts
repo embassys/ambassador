@@ -116,6 +116,7 @@ export interface HttpControllerOptions {
   waitSeconds: number;
   maxNotifications: number;
   fetch?: FetchLike;
+  requestTimeoutMs?: number;
 }
 
 export class HttpControllerClient implements ControllerClient {
