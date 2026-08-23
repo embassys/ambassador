@@ -1,11 +1,12 @@
 import {
+  type BigIntStats,
+  chmodSync,
   closeSync,
   constants,
   fchmodSync,
   fstatSync,
   lstatSync,
   openSync,
-  type Stats,
 } from "node:fs";
 import { dirname } from "node:path";
 
@@ -24,36 +25,28 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-function sameArtifact(left: Stats, right: Stats): boolean {
+function sameArtifact(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
 function secureExistingFile(path: string, invalidArtifact: () => Error): void {
-  let pathStats: Stats;
+  let pathStats: BigIntStats;
   try {
-    pathStats = lstatSync(path);
+    pathStats = lstatSync(path, { bigint: true });
   } catch (error) {
     if (errorCode(error) === "ENOENT") return;
     throw error;
   }
-  if (!pathStats.isFile() || pathStats.nlink !== 1) throw invalidArtifact();
+  if (!pathStats.isFile() || pathStats.nlink !== 1n) throw invalidArtifact();
 
-  const descriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
-  try {
-    const descriptorStats = fstatSync(descriptor);
-    pathStats = lstatSync(path);
-    if (
-      !descriptorStats.isFile() ||
-      !pathStats.isFile() ||
-      descriptorStats.nlink !== 1 ||
-      pathStats.nlink !== 1 ||
-      !sameArtifact(descriptorStats, pathStats)
-    ) {
-      throw invalidArtifact();
-    }
-    if (POSIX) fchmodSync(descriptor, 0o600);
-  } finally {
-    closeSync(descriptor);
+  if (POSIX) chmodSync(path, 0o600);
+  const currentStats = lstatSync(path, { bigint: true });
+  if (
+    !currentStats.isFile() ||
+    currentStats.nlink !== 1n ||
+    !sameArtifact(pathStats, currentStats)
+  ) {
+    throw invalidArtifact();
   }
 }
 
@@ -62,7 +55,7 @@ export function preparePrivateSqliteArtifact(
   invalidArtifact: () => Error,
 ): PreparedSqliteArtifact {
   const directoryPath = dirname(path);
-  const initialDirectoryStats = lstatSync(directoryPath);
+  const initialDirectoryStats = lstatSync(directoryPath, { bigint: true });
   if (!initialDirectoryStats.isDirectory()) throw invalidArtifact();
 
   let directoryDescriptor: number | undefined;
@@ -73,11 +66,14 @@ export function preparePrivateSqliteArtifact(
         directoryPath,
         constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
       );
-      const descriptorStats = fstatSync(directoryDescriptor);
-      const pathStats = lstatSync(directoryPath);
+      const descriptorStats = fstatSync(directoryDescriptor, { bigint: true });
+      const pathStats = lstatSync(directoryPath, { bigint: true });
       if (!descriptorStats.isDirectory() || !pathStats.isDirectory()) throw invalidArtifact();
       if (!sameArtifact(descriptorStats, pathStats)) throw invalidArtifact();
-      if (typeof process.getuid === "function" && descriptorStats.uid !== process.getuid()) {
+      if (
+        typeof process.getuid === "function" &&
+        descriptorStats.uid !== BigInt(process.getuid())
+      ) {
         throw invalidArtifact();
       }
       fchmodSync(directoryDescriptor, 0o700);
@@ -95,14 +91,17 @@ export function preparePrivateSqliteArtifact(
       );
     } catch (error) {
       if (errorCode(error) !== "EEXIST") throw error;
-      if (!lstatSync(path).isFile()) throw invalidArtifact();
+      const pathStats = lstatSync(path, { bigint: true });
+      if (!pathStats.isFile() || pathStats.nlink !== 1n) throw invalidArtifact();
       fileDescriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
     }
 
     const validateDirectory = () => {
-      const currentDirectoryStats = lstatSync(directoryPath);
+      const currentDirectoryStats = lstatSync(directoryPath, { bigint: true });
       const expectedDirectoryStats =
-        directoryDescriptor === undefined ? initialDirectoryStats : fstatSync(directoryDescriptor);
+        directoryDescriptor === undefined
+          ? initialDirectoryStats
+          : fstatSync(directoryDescriptor, { bigint: true });
       if (
         !currentDirectoryStats.isDirectory() ||
         !sameArtifact(expectedDirectoryStats, currentDirectoryStats)
@@ -111,13 +110,13 @@ export function preparePrivateSqliteArtifact(
       }
     };
     const validate = () => {
-      const descriptorStats = fstatSync(fileDescriptor as number);
-      const pathStats = lstatSync(path);
+      const descriptorStats = fstatSync(fileDescriptor as number, { bigint: true });
+      const pathStats = lstatSync(path, { bigint: true });
       if (
         !descriptorStats.isFile() ||
         !pathStats.isFile() ||
-        descriptorStats.nlink !== 1 ||
-        pathStats.nlink !== 1 ||
+        descriptorStats.nlink !== 1n ||
+        pathStats.nlink !== 1n ||
         !sameArtifact(descriptorStats, pathStats)
       ) {
         throw invalidArtifact();
