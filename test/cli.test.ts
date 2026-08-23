@@ -513,6 +513,55 @@ test("service commands call the selected native lifecycle operation", async (t) 
   assert.deepEqual(calls, ["install", "start", "stop", "restart", "uninstall", "status"]);
 });
 
+test("status reports service and configured binding counts", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, configWithAgents([genericAgent()]));
+  const serviceManager: CliServiceManager = {
+    install: async () => undefined,
+    start: async () => undefined,
+    stop: async () => undefined,
+    restart: async () => undefined,
+    status: async () => ({ installed: true, running: false }),
+    uninstall: async () => undefined,
+  };
+
+  const result = await invoke(["status", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+
+  assert.deepEqual(assertJsonSuccess(result), {
+    configured_agents: 1,
+    service: { installed: true, running: false },
+  });
+});
+
+test("doctor validates credentials and health without exposing their values", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const runtime = await listen(t, { status: 204 });
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, configWithAgents([genericAgent(runtime.baseUrl)]));
+  const controllerSecret = "doctor-controller-secret";
+  const runtimeSecret = "doctor-runtime-secret";
+
+  const result = await invoke(["doctor", "--config", configPath, "--json"], {
+    cwd: directory,
+    env: {
+      A2A_CONTROLLER_TOKEN: controllerSecret,
+      A2A_RUNTIME_SECRET: runtimeSecret,
+    },
+  });
+
+  assert.deepEqual(assertJsonSuccess(result), {
+    config_valid: true,
+    controller_credential: true,
+    agents: [{ binding_id: "binding_local", adapter: "generic", healthy: true }],
+  });
+  assert.equal(`${result.stdout}${result.stderr}`.includes(controllerSecret), false);
+  assert.equal(`${result.stdout}${result.stderr}`.includes(runtimeSecret), false);
+});
+
 test("an unknown command exits 2 with a JSON error envelope", async (t) => {
   const directory = await temporaryDirectory(t);
   const result = await invoke(["unknown-command", "--json"], { cwd: directory });
