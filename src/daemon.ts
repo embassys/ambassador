@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 
+import { ControllerRequestError } from "./controller.js";
 import type { Journal } from "./journal.js";
 import type { Relay } from "./relay.js";
 
@@ -31,11 +32,17 @@ export async function runDaemon(options: DaemonOptions, signal: AbortSignal): Pr
     try {
       await options.relay.runOnce(signal);
       if (!signal.aborted) await wait(SUCCESS_YIELD_MS, signal);
-    } catch {
+    } catch (error) {
       if (signal.aborted) break;
+      if (error instanceof ControllerRequestError && !error.retryable) throw error;
       options.onEvent?.({ code: "relay_iteration_failed" });
       try {
-        await wait(1_000, signal);
+        await wait(
+          error instanceof ControllerRequestError && error.retryAfterMs !== undefined
+            ? error.retryAfterMs
+            : 1_000,
+          signal,
+        );
       } catch {
         if (!signal.aborted) throw new Error("Daemon retry delay failed");
       }

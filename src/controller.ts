@@ -38,6 +38,33 @@ function discardBody(response: Response): void {
   }
 }
 
+function retryAfterMs(response: Response): number | undefined {
+  const value = response.headers.get("retry-after")?.trim();
+  if (value === undefined || value === "") return undefined;
+  if (/^\d+$/.test(value)) {
+    const milliseconds = Number(value) * 1_000;
+    return Number.isSafeInteger(milliseconds) && milliseconds > 0 ? milliseconds : undefined;
+  }
+  const date = Date.parse(value);
+  if (!Number.isFinite(date)) return undefined;
+  const milliseconds = Math.ceil(date - Date.now());
+  return Number.isSafeInteger(milliseconds) && milliseconds > 0 ? milliseconds : undefined;
+}
+
+function responseError(response: Response): ControllerRequestError {
+  const retryAfter = retryAfterMs(response);
+  if (response.status === 401 || response.status === 403) {
+    return new ControllerRequestError("authentication_failed", false);
+  }
+  if (response.status === 429) {
+    return new ControllerRequestError("rate_limited", true, retryAfter);
+  }
+  if ([408, 425, 500, 502, 503, 504].includes(response.status)) {
+    return new ControllerRequestError("unavailable", true, retryAfter);
+  }
+  return new ControllerRequestError("request_rejected", false);
+}
+
 function safeRequestError(operation: string, signal: AbortSignal): Error {
   if (signal.aborted) {
     const error = new Error(`${operation} was aborted`);
@@ -224,7 +251,7 @@ export class HttpControllerClient implements ControllerClient {
     );
     if (!response.ok) {
       discardBody(response);
-      throw new Error(`Controller poll failed with HTTP status ${response.status}`);
+      throw responseError(response);
     }
 
     let input: unknown;
@@ -236,7 +263,7 @@ export class HttpControllerClient implements ControllerClient {
     try {
       return parsePollResponse(input);
     } catch {
-      throw new Error("Controller poll response failed protocol validation");
+      throw new ControllerRequestError("request_rejected", false);
     }
   }
 
@@ -271,7 +298,7 @@ export class HttpControllerClient implements ControllerClient {
     );
     discardBody(response);
     if (!response.ok) {
-      throw new Error(`Controller acknowledgement failed with HTTP status ${response.status}`);
+      throw responseError(response);
     }
   }
 
@@ -309,7 +336,7 @@ export class HttpControllerClient implements ControllerClient {
     );
     discardBody(response);
     if (!response.ok) {
-      throw new Error(`Controller wake report failed with HTTP status ${response.status}`);
+      throw responseError(response);
     }
   }
 }
