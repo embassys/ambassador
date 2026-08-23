@@ -93,6 +93,8 @@ export class Relay {
     attemptedOutboxIds: Set<string>,
   ): Promise<{ error: unknown | null; reportFailed: boolean }> {
     const initial = await this.flushOutbox(signal, attemptedOutboxIds);
+    const dueAtMs = this.now();
+    this.journal.expireDue(dueAtMs);
     if (
       initial.error !== null &&
       (signal.aborted || initial.error instanceof ControllerRequestError)
@@ -100,8 +102,6 @@ export class Relay {
       return initial;
     }
 
-    const dueAtMs = this.now();
-    this.journal.expireDue(dueAtMs);
     const dueDeliveries = this.journal.listDue(dueAtMs, this.config.controller.queue_capacity);
 
     for (const dueDelivery of initial.reportFailed ? [] : dueDeliveries) {

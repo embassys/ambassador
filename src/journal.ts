@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, openSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fstatSync, lstatSync, openSync } from "node:fs";
 
 import Database from "better-sqlite3";
 
@@ -359,11 +359,46 @@ function validateWakeResult(result: RecordedWakeResult): void {
   }
 }
 
+function invalidJournalArtifact(): Error {
+  return new Error("Journal path must be a regular file");
+}
+
+function errorCode(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" && "code" in error
+    ? String(error.code)
+    : undefined;
+}
+
+function prepareJournalArtifact(path: string): void {
+  let descriptor: number | undefined;
+  try {
+    try {
+      descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
+    } catch (error) {
+      if (errorCode(error) !== "EEXIST") throw error;
+      if (!lstatSync(path).isFile()) throw invalidJournalArtifact();
+      descriptor = openSync(path, constants.O_RDWR | constants.O_NOFOLLOW);
+    }
+
+    const descriptorStats = fstatSync(descriptor);
+    const pathStats = lstatSync(path);
+    if (
+      !descriptorStats.isFile() ||
+      !pathStats.isFile() ||
+      descriptorStats.dev !== pathStats.dev ||
+      descriptorStats.ino !== pathStats.ino
+    ) {
+      throw invalidJournalArtifact();
+    }
+    if (process.platform !== "win32") fchmodSync(descriptor, 0o600);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 export class Journal {
   constructor(path: string, idGenerator: () => string = crypto.randomUUID) {
-    const descriptor = openSync(path, "a", 0o600);
-    closeSync(descriptor);
-    if (process.platform !== "win32") chmodSync(path, 0o600);
+    prepareJournalArtifact(path);
     const database = new Database(path, { timeout: BUSY_TIMEOUT_MS });
 
     try {
@@ -548,8 +583,18 @@ export class Journal {
     return row.poll_cursor;
   }
 
-  getControllerClockOffsetMs(): number {
-    return controllerClockOffset(resourcesFor(this).database);
+  getControllerClockOffsetMs(): number | undefined {
+    const row = resourcesFor(this)
+      .database.prepare<[], { poll_cursor: string | null; controller_clock_offset_ms: bigint }>(`
+        SELECT poll_cursor, controller_clock_offset_ms
+        FROM sidecar_state
+        WHERE singleton = 1
+      `)
+      .get();
+    if (row === undefined) throw new Error("journal state row is missing");
+    return row.poll_cursor === null
+      ? undefined
+      : safeInteger(row.controller_clock_offset_ms, "controller_clock_offset_ms");
   }
 
   getDelivery(deliveryId: string): DeliveryRecord | undefined {
