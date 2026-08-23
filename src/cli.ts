@@ -21,6 +21,7 @@ export interface CliContext {
   io: CliIo;
   env: NodeJS.ProcessEnv;
   cwd: string;
+  signal?: AbortSignal;
 }
 
 type OptionDefinition = { type: "boolean" | "string" };

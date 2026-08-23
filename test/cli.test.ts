@@ -7,6 +7,7 @@ import test, { type TestContext } from "node:test";
 
 import { runCli } from "../src/cli.js";
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
+import { defaultPaths } from "../src/paths.js";
 
 interface Invocation {
   exitCode: number;
@@ -17,6 +18,7 @@ interface Invocation {
 interface InvokeOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
 }
 
 function memoryWriter(): {
@@ -42,6 +44,7 @@ async function invoke(args: string[], options: InvokeOptions): Promise<Invocatio
   const exitCode = await runCli(args, {
     cwd: options.cwd,
     env: options.env ?? {},
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     io: { stdout: stdout.writer, stderr: stderr.writer },
   });
 
@@ -123,7 +126,7 @@ function assertJsonError(result: Invocation, exitCode: number): Record<string, u
 
 async function listen(
   t: TestContext,
-  response: { status: number; body?: string },
+  response: { status: number; body?: string; onRequest?: () => void },
 ): Promise<{ baseUrl: string; requests: string[] }> {
   const requests: string[] = [];
   const server = createServer((request, serverResponse) => {
@@ -131,6 +134,7 @@ async function listen(
     serverResponse.statusCode = response.status;
     serverResponse.setHeader("content-type", "text/plain");
     serverResponse.end(response.body ?? "");
+    response.onRequest?.();
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -321,6 +325,51 @@ test("version supports human and JSON output", async (t) => {
 
   const json = await invoke(["version", "--json"], { cwd: directory });
   assert.deepEqual(assertJsonSuccess(json), { version });
+});
+
+test("run starts the assembled sidecar and releases its process lock on abort", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const stop = new AbortController();
+  const controller = await listen(t, {
+    status: 200,
+    body: JSON.stringify({
+      protocol_version: 1,
+      cursor: "cursor_empty",
+      server_time: new Date().toISOString(),
+      notifications: [],
+    }),
+    onRequest: () => setImmediate(() => stop.abort()),
+  });
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, {
+    ...configWithAgents(),
+    controller: {
+      ...configWithAgents().controller,
+      base_url: controller.baseUrl,
+      poll_wait_seconds: 1,
+    },
+  });
+  const env = {
+    HOME: directory,
+    USERPROFILE: directory,
+    APPDATA: join(directory, "AppData", "Roaming"),
+    LOCALAPPDATA: join(directory, "AppData", "Local"),
+    XDG_CONFIG_HOME: join(directory, ".config"),
+    XDG_STATE_HOME: join(directory, ".state"),
+    A2A_CONTROLLER_TOKEN: "controller-token",
+  };
+
+  const result = await invoke(["run", "--config", configPath, "--json"], {
+    cwd: directory,
+    env,
+    signal: stop.signal,
+  });
+
+  assert.deepEqual(assertJsonSuccess(result), { stopped: true });
+  assert.equal(controller.requests.length, 1);
+  const paths = defaultPaths(process.platform, env, directory);
+  await access(paths.journalPath);
+  await assert.rejects(access(paths.lockPath), { code: "ENOENT" });
 });
 
 test("an unknown command exits 2 with a JSON error envelope", async (t) => {
