@@ -93,12 +93,11 @@ export class Relay {
     attemptedOutboxIds: Set<string>,
   ): Promise<{ error: unknown | null; reportFailed: boolean }> {
     const initial = await this.flushOutbox(signal, attemptedOutboxIds);
+    if (signal.aborted) return initial;
+
     const dueAtMs = this.now();
     this.journal.expireDue(dueAtMs);
-    if (
-      initial.error !== null &&
-      (signal.aborted || initial.error instanceof ControllerRequestError)
-    ) {
+    if (initial.error instanceof ControllerRequestError) {
       return initial;
     }
 
@@ -242,7 +241,14 @@ export class Relay {
     signal: AbortSignal,
     attemptedOutboxIds: Set<string>,
   ): Promise<{ error: unknown | null; reportFailed: boolean }> {
+    if (signal.aborted) {
+      return { error: signal.reason ?? new Error("Relay was aborted"), reportFailed: false };
+    }
+
     for (const record of this.journal.listOutbox(OUTBOX_BATCH_SIZE)) {
+      if (signal.aborted) {
+        return { error: signal.reason ?? new Error("Relay was aborted"), reportFailed: false };
+      }
       if (attemptedOutboxIds.has(record.id)) continue;
       attemptedOutboxIds.add(record.id);
 
