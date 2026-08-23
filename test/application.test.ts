@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -286,4 +296,75 @@ test("rejects a journal symlink without changing or opening its target", {
   assert.equal(rejected, true);
   assert.equal((await stat(targetPath)).mode & 0o777, 0o644);
   assert.equal((await stat(targetPath)).size, 0);
+});
+
+test("rejects a hard-linked journal without changing or opening its target", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-application-hardlink-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const stateDirectory = join(root, "state");
+  const targetPath = join(root, "target.sqlite");
+  const journalPath = join(stateDirectory, "journal.sqlite");
+  await mkdir(stateDirectory);
+  await writeFile(targetPath, "", { mode: 0o644 });
+  await link(targetPath, journalPath);
+  const config: SidecarConfig = {
+    version: 1,
+    controller: {
+      base_url: "http://127.0.0.1:1",
+      token: { source: "env", name: "CONTROLLER_TOKEN" },
+      poll_wait_seconds: 1,
+      max_notifications: 1,
+      queue_capacity: 1,
+    },
+    agents: [],
+  };
+
+  await assert.rejects(
+    SidecarApplication.open({
+      config,
+      journalPath,
+      lockPath: join(root, "lock", "daemon.lock"),
+      env: { CONTROLLER_TOKEN },
+    }),
+  );
+
+  assert.equal((await stat(targetPath)).size, 0);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(targetPath)).mode & 0o777, 0o644);
+  }
+});
+
+test("rejects a symlinked state directory without changing its target", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-application-state-symlink-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const targetDirectory = join(root, "target-state");
+  const stateDirectory = join(root, "state");
+  await mkdir(targetDirectory, { mode: 0o777 });
+  await chmod(targetDirectory, 0o777);
+  await symlink(targetDirectory, stateDirectory);
+  const config: SidecarConfig = {
+    version: 1,
+    controller: {
+      base_url: "http://127.0.0.1:1",
+      token: { source: "env", name: "CONTROLLER_TOKEN" },
+      poll_wait_seconds: 1,
+      max_notifications: 1,
+      queue_capacity: 1,
+    },
+    agents: [],
+  };
+
+  await assert.rejects(
+    SidecarApplication.open({
+      config,
+      journalPath: join(stateDirectory, "journal.sqlite"),
+      lockPath: join(root, "lock", "daemon.lock"),
+      env: { CONTROLLER_TOKEN },
+    }),
+  );
+
+  assert.equal((await stat(targetDirectory)).mode & 0o777, 0o777);
+  await assert.rejects(stat(join(targetDirectory, "journal.sqlite")), { code: "ENOENT" });
 });

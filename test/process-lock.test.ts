@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
-import { access, chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, link, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -153,6 +153,20 @@ test("rejects an invalid lock artifact without replacing it", async (t) => {
 
   await assert.rejects(ProcessLock.acquire(path), { code: "lock_invalid" });
   assert.equal(await readFile(path, "utf8"), "not a sqlite database\n");
+});
+
+test("rejects a hard-linked lock artifact without changing its target", async (t) => {
+  const path = await lockPath(t);
+  const targetPath = join(dirname(path), "target.sqlite");
+  await writeFile(targetPath, "", { mode: 0o644 });
+  await link(targetPath, path);
+
+  await assert.rejects(ProcessLock.acquire(path), { code: "lock_invalid" });
+
+  assert.equal((await stat(targetPath)).size, 0);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(targetPath)).mode & 0o777, 0o644);
+  }
 });
 
 test("enforces owner-only artifact and directory permissions on POSIX", {
