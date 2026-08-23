@@ -525,9 +525,17 @@ describe("Relay", () => {
       deliveryId: "delivery_also_old",
       persistedAt: new Date(NOW_MS - 500).toISOString(),
     };
+    const expiredDeliveryId = "delivery_expired";
     const journal = new MemoryJournal(
       trace,
-      [delivery()],
+      [
+        delivery(),
+        delivery({
+          notificationId: "notification_expired",
+          deliveryId: expiredDeliveryId,
+          expiresAtMs: NOW_MS,
+        }),
+      ],
       [pendingAcknowledgement, laterAcknowledgement],
     );
     const controller = new RecordingController(trace, [emptyPoll()]);
@@ -544,6 +552,8 @@ describe("Relay", () => {
     assert.deepEqual(adapter.inputs, []);
     assert.deepEqual(controller.reports, []);
     assert.equal(controller.cursors.length, 0);
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "pending");
+    assert.equal(journal.getDelivery(expiredDeliveryId)?.state, "expired");
   });
 
   test("does not start another wake while report delivery is failing", async () => {

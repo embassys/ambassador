@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -242,4 +242,48 @@ test("repairs state-directory and SQLite permissions on POSIX", {
   } finally {
     await application.close();
   }
+});
+
+test("rejects a journal symlink without changing or opening its target", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-application-symlink-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const stateDirectory = join(root, "state");
+  const targetPath = join(root, "target.sqlite");
+  const journalPath = join(stateDirectory, "journal.sqlite");
+  await mkdir(stateDirectory);
+  await writeFile(targetPath, "", { mode: 0o644 });
+  await chmod(targetPath, 0o644);
+  await symlink(targetPath, journalPath);
+  const config: SidecarConfig = {
+    version: 1,
+    controller: {
+      base_url: "http://127.0.0.1:1",
+      token: { source: "env", name: "CONTROLLER_TOKEN" },
+      poll_wait_seconds: 1,
+      max_notifications: 1,
+      queue_capacity: 1,
+    },
+    agents: [],
+  };
+
+  let application: SidecarApplication | undefined;
+  let rejected = false;
+  try {
+    application = await SidecarApplication.open({
+      config,
+      journalPath,
+      lockPath: join(root, "lock", "daemon.lock"),
+      env: { CONTROLLER_TOKEN },
+    });
+  } catch {
+    rejected = true;
+  } finally {
+    await application?.close();
+  }
+
+  assert.equal(rejected, true);
+  assert.equal((await stat(targetPath)).mode & 0o777, 0o644);
+  assert.equal((await stat(targetPath)).size, 0);
 });

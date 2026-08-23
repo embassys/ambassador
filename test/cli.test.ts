@@ -588,6 +588,35 @@ test("doctor validates credentials and health without exposing their values", as
   assert.equal(`${result.stdout}${result.stderr}`.includes(runtimeSecret), false);
 });
 
+test("doctor omits clock skew before the first controller sample", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, configWithAgents());
+  const env = {
+    HOME: directory,
+    USERPROFILE: directory,
+    APPDATA: join(directory, "AppData", "Roaming"),
+    LOCALAPPDATA: join(directory, "AppData", "Local"),
+    XDG_CONFIG_HOME: join(directory, ".config"),
+    XDG_STATE_HOME: join(directory, ".state"),
+    A2A_CONTROLLER_TOKEN: "doctor-controller-secret",
+  };
+  const paths = defaultPaths(process.platform, env, directory);
+  await mkdir(dirname(paths.journalPath), { recursive: true });
+  new Journal(paths.journalPath).close();
+
+  const result = await invoke(["doctor", "--config", configPath, "--json"], {
+    cwd: directory,
+    env,
+  });
+
+  assert.deepEqual(assertJsonSuccess(result), {
+    config_valid: true,
+    controller_credential: true,
+    agents: [],
+  });
+});
+
 test("an unknown command exits 2 with a JSON error envelope", async (t) => {
   const directory = await temporaryDirectory(t);
   const result = await invoke(["unknown-command", "--json"], { cwd: directory });
