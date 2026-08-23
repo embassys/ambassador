@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import { runCli } from "../src/cli.js";
+import { type CliServiceManager, runCli } from "../src/cli.js";
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
 import { defaultPaths } from "../src/paths.js";
 
@@ -19,6 +19,7 @@ interface InvokeOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
+  serviceManager?: CliServiceManager;
 }
 
 function memoryWriter(): {
@@ -45,6 +46,7 @@ async function invoke(args: string[], options: InvokeOptions): Promise<Invocatio
     cwd: options.cwd,
     env: options.env ?? {},
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.serviceManager === undefined ? {} : { serviceManager: options.serviceManager }),
     io: { stdout: stdout.writer, stderr: stderr.writer },
   });
 
@@ -477,6 +479,38 @@ test("run starts the assembled sidecar and releases its process lock on abort", 
   const paths = defaultPaths(process.platform, env, directory);
   await access(paths.journalPath);
   await assert.rejects(access(paths.lockPath), { code: "ENOENT" });
+});
+
+test("service commands call the selected native lifecycle operation", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configPath = join(directory, "config.json");
+  await writeConfig(configPath, configWithAgents());
+  const calls: string[] = [];
+  const serviceManager: CliServiceManager = {
+    install: async () => void calls.push("install"),
+    start: async () => void calls.push("start"),
+    stop: async () => void calls.push("stop"),
+    restart: async () => void calls.push("restart"),
+    status: async () => {
+      calls.push("status");
+      return { installed: true, running: true };
+    },
+    uninstall: async () => void calls.push("uninstall"),
+  };
+
+  for (const action of ["install", "start", "stop", "restart", "uninstall"] as const) {
+    const result = await invoke(["service", action, "--config", configPath, "--json"], {
+      cwd: directory,
+      serviceManager,
+    });
+    assert.deepEqual(assertJsonSuccess(result), { action });
+  }
+  const status = await invoke(["service", "status", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+  assert.deepEqual(assertJsonSuccess(status), { installed: true, running: true });
+  assert.deepEqual(calls, ["install", "start", "stop", "restart", "uninstall", "status"]);
 });
 
 test("an unknown command exits 2 with a JSON error envelope", async (t) => {

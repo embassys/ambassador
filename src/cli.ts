@@ -24,6 +24,16 @@ export interface CliContext {
   env: NodeJS.ProcessEnv;
   cwd: string;
   signal?: AbortSignal;
+  serviceManager?: CliServiceManager;
+}
+
+export interface CliServiceManager {
+  install(): Promise<void>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  restart(): Promise<void>;
+  status(): Promise<{ installed: boolean; running: boolean }>;
+  uninstall(): Promise<void>;
 }
 
 type OptionDefinition = { type: "boolean" | "string" };
