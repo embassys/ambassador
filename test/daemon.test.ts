@@ -80,3 +80,29 @@ test("does no work when already aborted", async () => {
 
   assert.equal(calls, 0);
 });
+
+test("yields after a successful iteration so a full retry queue cannot spin", async () => {
+  const controller = new AbortController();
+  const delays: number[] = [];
+  let iterations = 0;
+
+  await runDaemon(
+    {
+      journal: { recoverInFlight: () => 0 },
+      relay: {
+        async runOnce() {
+          iterations += 1;
+          if (iterations === 1_000) controller.abort();
+        },
+      },
+      sleep: async (milliseconds) => {
+        delays.push(milliseconds);
+        controller.abort();
+      },
+    },
+    controller.signal,
+  );
+
+  assert.equal(iterations, 1);
+  assert.deepEqual(delays, [100]);
+});

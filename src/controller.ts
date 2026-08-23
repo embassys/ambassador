@@ -106,9 +106,18 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 }
 
 export interface ControllerClient {
-  poll(cursor: string | null, signal: AbortSignal): Promise<PollResponse>;
+  poll(
+    cursor: string | null,
+    signal: AbortSignal,
+    options?: PollRequestOptions,
+  ): Promise<PollResponse>;
   acknowledge(message: PersistenceAcknowledgement, signal: AbortSignal): Promise<void>;
   report(message: WakeReport, signal: AbortSignal): Promise<void>;
+}
+
+export interface PollRequestOptions {
+  waitSeconds?: number;
+  maxNotifications?: number;
 }
 
 export interface HttpControllerOptions {

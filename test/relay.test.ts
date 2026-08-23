@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 
 import type { HealthResult, WakeAdapter, WakeInput } from "../src/adapters/types.js";
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
-import type { ControllerClient } from "../src/controller.js";
+import type { ControllerClient, PollRequestOptions } from "../src/controller.js";
 import type {
   ClaimResult,
   DeliveryRecord,
@@ -256,12 +256,27 @@ class MemoryJournal {
         record.state === "pending" || record.state === "waking" || record.state === "retry_wait",
     ).length;
   }
+
+  hasPendingAcknowledgement(deliveryId: string): boolean {
+    return [...this.outbox.values()].some(
+      (record) => record.kind === "ack" && record.deliveryId === deliveryId,
+    );
+  }
+
+  nextActionAtMs(): number | null {
+    const active = [...this.deliveries.values()].filter(
+      (record) => record.state === "pending" || record.state === "retry_wait",
+    );
+    if (active.length === 0) return null;
+    return Math.min(...active.flatMap((record) => [record.nextAttemptAtMs, record.expiresAtMs]));
+  }
 }
 
 class RecordingController implements ControllerClient {
   readonly acknowledgements: PersistenceAcknowledgement[] = [];
   readonly reports: WakeReport[] = [];
   readonly cursors: Array<string | null> = [];
+  readonly pollOptions: Array<PollRequestOptions | undefined> = [];
   failReports = 0;
 
   constructor(
@@ -269,9 +284,14 @@ class RecordingController implements ControllerClient {
     private readonly polls: PollResponse[] = [],
   ) {}
 
-  async poll(cursor: string | null, _signal: AbortSignal): Promise<PollResponse> {
+  async poll(
+    cursor: string | null,
+    _signal: AbortSignal,
+    options?: PollRequestOptions,
+  ): Promise<PollResponse> {
     this.trace.push("controller.poll");
     this.cursors.push(cursor);
+    this.pollOptions.push(options);
     return this.polls.shift() ?? emptyPoll(`cursor_empty_${this.cursors.length}`);
   }
 
@@ -382,6 +402,93 @@ describe("Relay", () => {
     assert.deepEqual(controller.acknowledgements, []);
     assert.deepEqual(adapter.inputs, []);
     assert.equal(journal.getCursor(), null);
+  });
+
+  test("drains existing due work before an over-capacity poll is rejected", async () => {
+    const trace: string[] = [];
+    const journal = new MemoryJournal(trace, [delivery()]);
+    const baseNotification = notificationPoll().notifications[0];
+    assert.ok(baseNotification);
+    const overCapacityPoll: PollResponse = {
+      ...notificationPoll(),
+      notifications: [
+        { ...baseNotification, notification_id: "notification_2", delivery_id: "delivery_2" },
+        { ...baseNotification, notification_id: "notification_3", delivery_id: "delivery_3" },
+      ],
+    };
+    const controller = new RecordingController(trace, [overCapacityPoll]);
+    const adapter = new ScriptedAdapter(trace, [
+      { protocol_version: 1, status: "retryable_error", code: "runtime_unavailable" },
+    ]);
+    const relay = createRelay({
+      journal,
+      controller,
+      adapter,
+      config: {
+        ...CONFIG,
+        controller: { ...CONFIG.controller, queue_capacity: 2 },
+      },
+    });
+
+    await relay.runOnce(AbortSignal.timeout(1_000)).catch(() => undefined);
+
+    assert.deepEqual(adapter.inputs, [{ deliveryId: DELIVERY_ID }]);
+    assert.equal(controller.reports[0]?.status, "retrying");
+    assert.equal(journal.getCursor(), null);
+  });
+
+  test("shortens long polling so a scheduled retry is not delayed", async () => {
+    const trace: string[] = [];
+    const journal = new MemoryJournal(trace, [
+      delivery({ state: "retry_wait", nextAttemptAtMs: NOW_MS + 5_500 }),
+    ]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    const adapter = new ScriptedAdapter(trace, []);
+    const relay = createRelay({ journal, controller, adapter });
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.deepEqual(controller.pollOptions, [{ waitSeconds: 5, maxNotifications: 999 }]);
+  });
+
+  test("does not start another wake while report delivery is failing", async () => {
+    const trace: string[] = [];
+    const acceptedReport: OutboxRecord = {
+      id: "report_blocking_1",
+      kind: "report",
+      notificationId: "notification_old",
+      deliveryId: "delivery_old",
+      sequence: 1,
+      status: "accepted",
+      observedAt: new Date(NOW_MS - 1_000).toISOString(),
+    };
+    const journal = new MemoryJournal(trace, [delivery()], [acceptedReport]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    controller.failReports = 1;
+    const adapter = new ScriptedAdapter(trace, [{ protocol_version: 1, status: "accepted" }]);
+    const relay = createRelay({ journal, controller, adapter });
+
+    await relay.runOnce(AbortSignal.timeout(1_000)).catch(() => undefined);
+
+    assert.deepEqual(adapter.inputs, []);
+    assert.equal(controller.cursors.length, 0);
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "pending");
+  });
+
+  test("recovers a waking row at the start of the next in-process iteration", async () => {
+    const trace: string[] = [];
+    const journal = new MemoryJournal(trace, [delivery({ nextAttemptAtMs: NOW_MS + 60_000 })]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    const adapter = new ScriptedAdapter(trace, [{ protocol_version: 1, status: "accepted" }]);
+    const relay = createRelay({ journal, controller, adapter });
+    const record = journal.getDelivery(DELIVERY_ID);
+    assert.ok(record);
+    record.state = "waking";
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.deepEqual(adapter.inputs, [{ deliveryId: DELIVERY_ID }]);
+    assert.equal(record.state, "accepted");
   });
 
   test("retries the same delivery with injected deterministic jitter", async () => {
