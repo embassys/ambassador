@@ -17,5 +17,6 @@ On August 23, 2026, the user authorized provisional decisions so implementation 
 | `0011-runtime-cli-flags.md` | Generic, Hermes, and OpenClaw agent-add flags | Public CLI release |
 | `0012-http-deadlines.md` | Bounded controller, wake, and health request deadlines | Public beta operating defaults |
 | `0013-windows-restart-interval.md` | One-minute Task Scheduler crash restart, superseding ADR 0010's Windows delay | Enabling Windows service installation |
+| `0014-lock-handoff-timeout.md` | One-second SQLite singleton-lock handoff window | Public beta operating defaults |
 
 More rows will be added as implementation choices are made.
