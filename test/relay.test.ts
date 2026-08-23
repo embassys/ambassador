@@ -3,7 +3,11 @@ import { describe, test } from "node:test";
 
 import type { HealthResult, WakeAdapter, WakeInput } from "../src/adapters/types.js";
 import type { AgentConfig, SidecarConfig } from "../src/config.js";
-import type { ControllerClient, PollRequestOptions } from "../src/controller.js";
+import {
+  type ControllerClient,
+  ControllerRequestError,
+  type PollRequestOptions,
+} from "../src/controller.js";
 import type {
   ClaimResult,
   DeliveryRecord,
@@ -95,6 +99,7 @@ class MemoryJournal {
   readonly recordedResults: Array<{ deliveryId: string; result: RecordedWakeResult }> = [];
   readonly confirmed: string[] = [];
   failIngest = false;
+  controllerObservedAtMs: number | undefined;
   private nextReport = 1;
 
   constructor(
@@ -108,8 +113,14 @@ class MemoryJournal {
 
   close(): void {}
 
-  ingestPoll(response: PollResponse, capacity: number, persistedAtMs: number): IngestResult {
+  ingestPoll(
+    response: PollResponse,
+    capacity: number,
+    persistedAtMs: number,
+    controllerObservedAtMs?: number,
+  ): IngestResult {
     this.trace.push("journal.ingest");
+    this.controllerObservedAtMs = controllerObservedAtMs;
     if (this.failIngest) throw new Error("simulated journal failure");
 
     const unseen = response.notifications.filter(
@@ -286,11 +297,13 @@ class RecordingController implements ControllerClient {
   readonly reports: WakeReport[] = [];
   readonly cursors: Array<string | null> = [];
   readonly pollOptions: Array<PollRequestOptions | undefined> = [];
+  acknowledgementError: unknown;
   failReports = 0;
 
   constructor(
     private readonly trace: string[],
     private readonly polls: PollResponse[] = [],
+    private readonly onPoll?: () => void,
   ) {}
 
   async poll(
@@ -301,12 +314,14 @@ class RecordingController implements ControllerClient {
     this.trace.push("controller.poll");
     this.cursors.push(cursor);
     this.pollOptions.push(options);
+    this.onPoll?.();
     return this.polls.shift() ?? emptyPoll(`cursor_empty_${this.cursors.length}`);
   }
 
   async acknowledge(message: PersistenceAcknowledgement, _signal: AbortSignal): Promise<void> {
     this.trace.push("controller.ack");
     this.acknowledgements.push(message);
+    if (this.acknowledgementError !== undefined) throw this.acknowledgementError;
   }
 
   async report(message: WakeReport, _signal: AbortSignal): Promise<void> {
@@ -462,6 +477,58 @@ describe("Relay", () => {
     assert.deepEqual(controller.pollOptions, [{ waitSeconds: 5, maxNotifications: 50 }]);
   });
 
+  test("uses response receipt rather than request start for long-poll clock offset", async () => {
+    const trace: string[] = [];
+    const pollStartedAt = NOW_MS;
+    const responseReceivedAt = pollStartedAt + 30_000;
+    let nowMs = pollStartedAt;
+    const journal = new MemoryJournal(trace);
+    const controller = new RecordingController(
+      trace,
+      [
+        {
+          ...emptyPoll(),
+          server_time: new Date(responseReceivedAt).toISOString(),
+        },
+      ],
+      () => {
+        nowMs = responseReceivedAt;
+      },
+    );
+    const adapter = new ScriptedAdapter(trace, []);
+    const relay = createRelay({ journal, controller, adapter, now: () => nowMs });
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.equal(journal.controllerObservedAtMs, responseReceivedAt);
+  });
+
+  test("stops the iteration immediately when the controller requests backoff", async () => {
+    const trace: string[] = [];
+    const pendingAcknowledgement: OutboxRecord = {
+      id: "ack_rate_limited",
+      kind: "ack",
+      notificationId: "notification_old",
+      deliveryId: "delivery_old",
+      persistedAt: new Date(NOW_MS - 1_000).toISOString(),
+    };
+    const journal = new MemoryJournal(trace, [delivery()], [pendingAcknowledgement]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    controller.acknowledgementError = new ControllerRequestError("rate_limited", true, 60_000);
+    const adapter = new ScriptedAdapter(trace, [{ protocol_version: 1, status: "accepted" }]);
+    const relay = createRelay({ journal, controller, adapter });
+
+    await assert.rejects(
+      relay.runOnce(AbortSignal.timeout(1_000)),
+      (error: unknown) => error instanceof ControllerRequestError && error.retryAfterMs === 60_000,
+    );
+
+    assert.equal(controller.acknowledgements.length, 1);
+    assert.deepEqual(adapter.inputs, []);
+    assert.deepEqual(controller.reports, []);
+    assert.equal(controller.cursors.length, 0);
+  });
+
   test("does not start another wake while report delivery is failing", async () => {
     const trace: string[] = [];
     const acceptedReport: OutboxRecord = {
@@ -600,6 +667,36 @@ describe("Relay", () => {
     assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "expired");
     assert.equal(controller.reports.at(-1)?.status, "expired");
     assert.equal(controller.reports.at(-1)?.reason, undefined);
+  });
+
+  test("preserves uncertainty from an earlier attempt when a later retry reaches expiry", async () => {
+    const trace: string[] = [];
+    let nowMs = NOW_MS;
+    const expiresAtMs = NOW_MS + 100;
+    const journal = new MemoryJournal(trace, [
+      delivery({
+        state: "retry_wait",
+        attemptCount: 1,
+        mayHaveReachedRuntime: true,
+        expiresAtMs,
+      }),
+    ]);
+    const controller = new RecordingController(trace, [emptyPoll()]);
+    const adapter = new ScriptedAdapter(
+      trace,
+      [{ protocol_version: 1, status: "retryable_error", code: "runtime_unavailable" }],
+      () => {
+        nowMs = expiresAtMs;
+      },
+    );
+    const relay = createRelay({ journal, controller, adapter, now: () => nowMs });
+
+    await relay.runOnce(AbortSignal.timeout(1_000));
+
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.state, "uncertain");
+    assert.equal(journal.getDelivery(DELIVERY_ID)?.mayHaveReachedRuntime, true);
+    assert.equal(controller.reports.at(-1)?.status, "uncertain");
+    assert.equal(controller.reports.at(-1)?.reason, "retry_window_exhausted");
   });
 
   test("records a permanent binding_not_found failure without calling an adapter", async () => {

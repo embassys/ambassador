@@ -190,7 +190,7 @@ test("uses controller clock offset for expiry and controller-facing timestamps",
   assert.equal(journal.expireDue(localNow + 60_000), 1);
 });
 
-test("uses the poll start time so response latency cannot extend controller expiry", (t) => {
+test("uses response receipt time so body latency cannot extend controller expiry", (t) => {
   const journal = temporaryJournal(t).open();
   const pollStartedAt = Date.parse("2026-08-23T12:00:00Z");
   const persistedAt = pollStartedAt + 10_000;
