@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { promisify } from "node:util";
+import { type TestContext, test } from "node:test";
+
+const executeFile = promisify(execFile);
 
 test("package metadata exposes the approved public gateway", async () => {
   const packageJson = JSON.parse(
@@ -20,3 +25,19 @@ test("package metadata exposes the approved public gateway", async () => {
     url: "git+https://github.com/nikrooz/a2a.git",
   });
 });
+
+test(
+  "the packaged CLI runs through an npm-style executable link",
+  { skip: process.platform === "win32" },
+  async (t: TestContext) => {
+    const directory = await mkdtemp(join(tmpdir(), "a2a-package-test-"));
+    t.after(() => rm(directory, { force: true, recursive: true }));
+    const executable = join(directory, "a2a-gateway");
+    await symlink(join(process.cwd(), ".test-dist", "src", "cli.js"), executable);
+
+    const result = await executeFile(process.execPath, [executable, "version"]);
+
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, "a2a-gateway 0.1.0\n");
+  },
+);
