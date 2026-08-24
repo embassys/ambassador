@@ -15,7 +15,7 @@
   },
   "type": "module",
   "bin": {
-    "a2a-gateway": "./dist/cli.js"
+    "a2a-gateway": "dist/cli.js"
   },
   "engines": {
     "node": ">=24.19.0 <25"
