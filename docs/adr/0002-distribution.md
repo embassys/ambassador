@@ -1,6 +1,6 @@
 # 0002 Distribution
 
-Status: accepted under delegated approval, user review pending
+Status: superseded by ADR 0015
 
 Date: 2026-08-23
 
