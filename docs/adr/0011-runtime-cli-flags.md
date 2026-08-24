@@ -6,21 +6,21 @@ Date: 2026-08-23
 
 ## Problem
 
-`a2a agent add` needs noninteractive flags for all three v1 adapters. Native runtimes use different credential names and OpenClaw also needs an agent ID.
+`a2a-gateway agent add` needs noninteractive flags for all three v1 adapters. Native runtimes use different credential names and OpenClaw also needs an agent ID.
 
 ## Decision
 
 Use these forms:
 
 ```text
-a2a agent add <binding-id> --adapter generic --url <url> --secret-env <name>
-a2a agent add <binding-id> --adapter hermes --url <url> --secret-env <name>
-a2a agent add <binding-id> --adapter openclaw --url <url> --agent-id <id> --token-env <name>
+a2a-gateway agent add <binding-id> --adapter generic --url <url> --secret-env <name>
+a2a-gateway agent add <binding-id> --adapter hermes --url <url> --secret-env <name>
+a2a-gateway agent add <binding-id> --adapter openclaw --url <url> --agent-id <id> --token-env <name>
 ```
 
 Each form accepts `--health-url`. The command stores only the environment-variable name. Literal `--secret` and `--token` values remain forbidden.
 
-`a2a agent test <binding-id>` constructs the selected adapter and runs its unauthenticated health probe. It resolves the credential first so the test also catches a missing service environment variable, but it never sends that credential to a health endpoint.
+`a2a-gateway agent test <binding-id>` constructs the selected adapter and runs its unauthenticated health probe. It resolves the credential first so the test also catches a missing service environment variable, but it never sends that credential to a health endpoint.
 
 ## Costs
 

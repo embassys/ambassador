@@ -24,7 +24,7 @@ Use staged distribution:
 3. Add Homebrew, WinGet or Scoop, and Linux package manifests that install the same signed files.
 4. Keep containers for acceptance tests and server-style deployments, not as the primary desktop install.
 
-The CLI installs its own per-user service through `a2a service install`. Package managers install files but do not silently start the daemon.
+`a2a-gateway start` registers its per-user service on first use, then starts the daemon. Package managers install files but do not silently start it.
 
 Do not add a self-updater in v1. Package managers or explicit installer runs own upgrades.
 
