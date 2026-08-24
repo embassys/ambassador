@@ -512,7 +512,6 @@ test("top-level lifecycle commands hide native service registration", async (t) 
       calls.push("status");
       return { installed, running };
     },
-    uninstall: async () => void calls.push("uninstall"),
   };
 
   const start = await invoke(["start", "--config", configPath, "--json"], {
@@ -528,7 +527,7 @@ test("top-level lifecycle commands hide native service registration", async (t) 
     serviceManager,
   });
   assert.deepEqual(assertJsonSuccess(reload), { action: "start" });
-  assert.deepEqual(calls, ["status", "restart"]);
+  assert.deepEqual(calls, ["status", "stop", "install", "start"]);
 
   calls.length = 0;
   const stop = await invoke(["stop", "--config", configPath, "--json"], {
@@ -552,7 +551,7 @@ test("top-level lifecycle commands hide native service registration", async (t) 
     serviceManager,
   });
   assert.deepEqual(assertJsonSuccess(restart), { action: "restart" });
-  assert.deepEqual(calls, ["status", "start"]);
+  assert.deepEqual(calls, ["status", "install", "start"]);
 });
 
 test("the service command namespace is not public", async (t) => {
@@ -573,7 +572,6 @@ test("status reports service and configured binding counts", async (t) => {
     stop: async () => undefined,
     restart: async () => undefined,
     status: async () => ({ installed: true, running: false }),
-    uninstall: async () => undefined,
   };
 
   const result = await invoke(["status", "--config", configPath, "--json"], {
