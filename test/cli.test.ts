@@ -428,7 +428,7 @@ test("version supports human and JSON output", async (t) => {
   );
   const version = record(packageJson).version;
   assert.ok(typeof version === "string");
-  assert.deepEqual(record(packageJson).bin, { "a2a-gateway": "./dist/cli.js" });
+  assert.deepEqual(record(packageJson).bin, { "a2a-gateway": "dist/cli.js" });
 
   const human = await invoke(["version"], { cwd: directory });
   assert.equal(human.exitCode, 0);
