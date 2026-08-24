@@ -428,12 +428,12 @@ test("version supports human and JSON output", async (t) => {
   );
   const version = record(packageJson).version;
   assert.ok(typeof version === "string");
+  assert.deepEqual(record(packageJson).bin, { "a2a-gateway": "./dist/cli.js" });
 
   const human = await invoke(["version"], { cwd: directory });
   assert.equal(human.exitCode, 0);
   assert.equal(human.stderr, "");
-  assert.match(human.stdout, new RegExp(`\\b${version.replaceAll(".", "\\.")}\\b`));
-  assert.ok(!human.stdout.trimStart().startsWith("{"));
+  assert.equal(human.stdout, `a2a-gateway ${version}\n`);
 
   const json = await invoke(["version", "--json"], { cwd: directory });
   assert.deepEqual(assertJsonSuccess(json), { version });
@@ -484,36 +484,83 @@ test("run starts the assembled sidecar and releases its process lock on abort", 
   await access(paths.lockPath);
 });
 
-test("service commands call the selected native lifecycle operation", async (t) => {
+test("top-level lifecycle commands hide native service registration", async (t) => {
   const directory = await temporaryDirectory(t);
   const configPath = join(directory, "config.json");
   await writeConfig(configPath, configWithAgents());
   const calls: string[] = [];
+  let installed = false;
+  let running = false;
   const serviceManager: CliServiceManager = {
-    install: async () => void calls.push("install"),
-    start: async () => void calls.push("start"),
-    stop: async () => void calls.push("stop"),
-    restart: async () => void calls.push("restart"),
+    install: async () => {
+      calls.push("install");
+      installed = true;
+    },
+    start: async () => {
+      calls.push("start");
+      running = true;
+    },
+    stop: async () => {
+      calls.push("stop");
+      running = false;
+    },
+    restart: async () => {
+      calls.push("restart");
+      running = true;
+    },
     status: async () => {
       calls.push("status");
-      return { installed: true, running: true };
+      return { installed, running };
     },
     uninstall: async () => void calls.push("uninstall"),
   };
 
-  for (const action of ["install", "start", "stop", "restart", "uninstall"] as const) {
-    const result = await invoke(["service", action, "--config", configPath, "--json"], {
-      cwd: directory,
-      serviceManager,
-    });
-    assert.deepEqual(assertJsonSuccess(result), { action });
-  }
-  const status = await invoke(["service", "status", "--config", configPath, "--json"], {
+  const start = await invoke(["start", "--config", configPath, "--json"], {
     cwd: directory,
     serviceManager,
   });
-  assert.deepEqual(assertJsonSuccess(status), { installed: true, running: true });
-  assert.deepEqual(calls, ["install", "start", "stop", "restart", "uninstall", "status"]);
+  assert.deepEqual(assertJsonSuccess(start), { action: "start" });
+  assert.deepEqual(calls, ["status", "install", "start"]);
+
+  calls.length = 0;
+  const reload = await invoke(["start", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+  assert.deepEqual(assertJsonSuccess(reload), { action: "start" });
+  assert.deepEqual(calls, ["status", "restart"]);
+
+  calls.length = 0;
+  const stop = await invoke(["stop", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+  assert.deepEqual(assertJsonSuccess(stop), { action: "stop" });
+  assert.deepEqual(calls, ["status", "stop"]);
+
+  calls.length = 0;
+  const stoppedAgain = await invoke(["stop", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+  assert.deepEqual(assertJsonSuccess(stoppedAgain), { action: "stop" });
+  assert.deepEqual(calls, ["status"]);
+
+  calls.length = 0;
+  const restart = await invoke(["restart", "--config", configPath, "--json"], {
+    cwd: directory,
+    serviceManager,
+  });
+  assert.deepEqual(assertJsonSuccess(restart), { action: "restart" });
+  assert.deepEqual(calls, ["status", "start"]);
+});
+
+test("the service command namespace is not public", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const result = await invoke(["service", "start", "--json"], { cwd: directory });
+
+  const error = assertJsonError(result, 2);
+  assert.equal(error.code, "invalid_arguments");
 });
 
 test("status reports service and configured binding counts", async (t) => {
