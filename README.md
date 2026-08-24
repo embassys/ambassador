@@ -15,6 +15,7 @@ Install and verify:
 npm ci
 npm run check
 npm run build
+npm link
 ```
 
 The local machine may use another Node release for development, but CI and release qualification target Node 24.19.
@@ -26,7 +27,7 @@ The CLI stores references to environment variables, never literal credentials.
 ```sh
 export A2A_CONTROLLER_TOKEN='controller-issued-token'
 
-node dist/cli.js setup \
+a2a-gateway setup \
   --controller-url https://controller.example \
   --controller-token-env A2A_CONTROLLER_TOKEN
 ```
@@ -36,7 +37,7 @@ Add a generic webhook binding:
 ```sh
 export A2A_RUNTIME_SECRET='binding-secret'
 
-node dist/cli.js agent add binding_local \
+a2a-gateway agent add binding_local \
   --adapter generic \
   --url http://127.0.0.1:8644/webhooks/a2a \
   --health-url http://127.0.0.1:8644/health \
@@ -46,7 +47,7 @@ node dist/cli.js agent add binding_local \
 Hermes uses the same `--secret-env` form. OpenClaw uses `--agent-id` and `--token-env`:
 
 ```sh
-node dist/cli.js agent add binding_openclaw \
+a2a-gateway agent add binding_openclaw \
   --adapter openclaw \
   --url http://127.0.0.1:18789/hooks/agent \
   --agent-id agent_local \
@@ -56,20 +57,21 @@ node dist/cli.js agent add binding_openclaw \
 Run diagnostics and start the daemon in the foreground:
 
 ```sh
-node dist/cli.js doctor
-node dist/cli.js run
+a2a-gateway doctor
+a2a-gateway run
 ```
 
 Every command accepts `--config <path>`. Read-only and fully noninteractive commands accept `--json`.
 
-## User service
+## Background gateway
 
-The CLI uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows.
+One gateway handles every configured agent. `start` uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows. It registers the native user service automatically on first use.
 
 ```sh
-node dist/cli.js service install
-node dist/cli.js service start
-node dist/cli.js service status --json
+a2a-gateway start
+a2a-gateway status --json
+a2a-gateway restart
+a2a-gateway stop
 ```
 
 Service definitions contain the executable, CLI path, and config path. They do not contain credentials. Environment-referenced credentials must exist in the service manager's environment.

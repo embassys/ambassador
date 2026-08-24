@@ -35,7 +35,6 @@ export interface CliServiceManager {
   stop(): Promise<void>;
   restart(): Promise<void>;
   status(): Promise<{ installed: boolean; running: boolean }>;
-  uninstall(): Promise<void>;
 }
 
 type OptionDefinition = { type: "boolean" | "string" };
@@ -479,35 +478,28 @@ function nativeServiceManager(context: CliContext, path: string): CliServiceMana
   });
 }
 
-async function service(
-  action: "install" | "start" | "stop" | "restart" | "status" | "uninstall",
+async function lifecycle(
+  action: "start" | "stop" | "restart",
   args: string[],
   context: CliContext,
 ): Promise<CommandResult> {
   const parsed = parseCommand(args, commonOptions, 0);
   const path = configPath(parsed.values, context);
-  if (action === "install" || action === "start" || action === "restart") {
-    await loadConfig(path);
-  }
+  if (action !== "stop") await loadConfig(path);
   const manager = nativeServiceManager(context, path);
+  const serviceStatus = await manager.status();
 
-  if (action === "status") {
-    const status = await manager.status();
-    return {
-      data: status,
-      human: status.running
-        ? "Sidecar service is running\n"
-        : status.installed
-          ? "Sidecar service is stopped\n"
-          : "Sidecar service is not installed\n",
-      json: jsonRequested(parsed.values),
-    };
+  if (action === "stop") {
+    if (serviceStatus.running) await manager.stop();
+  } else {
+    if (serviceStatus.running) await manager.stop();
+    await manager.install();
+    await manager.start();
   }
 
-  await manager[action]();
   return {
     data: { action },
-    human: `Service ${action} completed\n`,
+    human: `Gateway ${action} completed\n`,
     json: jsonRequested(parsed.values),
   };
 }
@@ -585,7 +577,7 @@ function version(args: string[]): CommandResult {
   const parsed = parseCommand(args, commonOptions, 0);
   return {
     data: { version: packageJson.version },
-    human: `a2a ${packageJson.version}\n`,
+    human: `a2a-gateway ${packageJson.version}\n`,
     json: jsonRequested(parsed.values),
   };
 }
@@ -617,24 +609,14 @@ async function dispatch(args: string[], context: CliContext): Promise<CommandRes
   if (command === "run") {
     return run(args.slice(1), context);
   }
+  if (command === "start" || command === "stop" || command === "restart") {
+    return lifecycle(command, args.slice(1), context);
+  }
   if (command === "status") {
     return status(args.slice(1), context);
   }
   if (command === "doctor") {
     return doctor(args.slice(1), context);
-  }
-  if (command === "service") {
-    const action = args[1];
-    if (
-      action === "install" ||
-      action === "start" ||
-      action === "stop" ||
-      action === "restart" ||
-      action === "status" ||
-      action === "uninstall"
-    ) {
-      return service(action, args.slice(2), context);
-    }
   }
   throw invalidArguments;
 }
