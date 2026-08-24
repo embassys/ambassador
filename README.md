@@ -2,14 +2,27 @@
 
 The A2A sidecar is a per-user daemon that wakes local agent runtimes after a central controller authorizes work. It receives opaque IDs and timing metadata. Task text, results, permissions, grants, and MCP payloads do not cross this process.
 
-This repository contains a working development implementation. It is not ready for public distribution. See `docs/implementation-status.md` for the remaining release work.
+This repository contains a working development preview. It is not ready for public beta. See `docs/implementation-status.md` for the remaining release work.
 
 ## Requirements
 
 - Node.js 24.19.x
 - npm 11
 
-Install and verify:
+Install globally for background operation:
+
+```sh
+npm install --global @a2adev/gateway
+a2a-gateway version
+```
+
+Run a temporary command without installing:
+
+```sh
+npx @a2adev/gateway version
+```
+
+Install and verify a development checkout:
 
 ```sh
 npm ci

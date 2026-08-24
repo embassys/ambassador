@@ -1,7 +1,18 @@
 {
-  "name": "a2a-sidecar",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@a2adev/gateway",
+  "version": "0.1.0",
+  "description": "Content-blind gateway for waking local AI agent runtimes",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikrooz/a2a.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "a2a-gateway": "./dist/cli.js"
@@ -16,6 +27,7 @@
     "clean": "node scripts/clean.mjs",
     "format": "biome check --write .",
     "lint": "biome check .",
+    "prepack": "npm run build",
     "test": "npm run test:build && node scripts/run-tests.mjs",
     "test:build": "node scripts/clean.mjs .test-dist && tsc -p tsconfig.test.json",
     "test:coverage": "npm run test:build && node scripts/run-tests.mjs --coverage",

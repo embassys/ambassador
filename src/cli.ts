@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -660,7 +661,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
 }
 
 const entrypoint = process.argv[1];
-if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
+if (entrypoint !== undefined && import.meta.url === pathToFileURL(realpathSync(entrypoint)).href) {
   const exitCode = await runCli(process.argv.slice(2), {
     io: { stdout: process.stdout, stderr: process.stderr },
     env: process.env,
