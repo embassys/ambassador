@@ -214,6 +214,7 @@ test("refuses a second application before opening the shared journal", async (t)
       now: () => NOW_MS,
     }),
   );
+  await first.close();
 });
 
 test("repairs state-directory and SQLite permissions on POSIX", {

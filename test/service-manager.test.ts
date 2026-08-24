@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { type TestContext, test } from "node:test";
 
 import {
@@ -58,7 +58,7 @@ test("installs and controls a launchd user agent without embedding an environmen
   });
 
   await manager.install();
-  const definitionPath = join(home, "Library", "LaunchAgents", "com.a2a.sidecar.plist");
+  const definitionPath = posix.join(home, "Library", "LaunchAgents", "com.a2a.sidecar.plist");
   const definition = await readFile(definitionPath, "utf8");
   assert.doesNotMatch(definition, /EnvironmentVariables/);
   await manager.start();
