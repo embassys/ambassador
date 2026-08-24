@@ -1,0 +1,46 @@
+{
+  "name": "@a2adev/gateway",
+  "version": "0.1.0",
+  "description": "Content-blind gateway for waking local AI agent runtimes",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nikrooz/a2a.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "a2a-gateway": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "packageManager": "npm@11.19.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "clean": "node scripts/clean.mjs",
+    "format": "biome check --write .",
+    "lint": "biome check .",
+    "prepack": "npm run build",
+    "test": "npm run test:build && node scripts/run-tests.mjs",
+    "test:build": "node scripts/clean.mjs .test-dist && tsc -p tsconfig.test.json",
+    "test:coverage": "npm run test:build && node scripts/run-tests.mjs --coverage",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.10",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  }
+}
