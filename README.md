@@ -81,13 +81,7 @@ SQLite remains ID-only. Registration data, verification codes, central JWT plain
 
 ## Current implementation
 
-Version `0.1.0` still has setup, binding, adapter, JSON configuration, and user-service code. It has no local MCP listener, registration proxy, JWT interception, or ID-only compatibility with the available central API. See `docs/implementation-status.md` for the replacement plan.
-
-The current package can still report its version:
-
-```sh
-npx @a2adev/gateway version
-```
+The source tree implements the single-webhook gateway. The published `0.1.0` package is still the older relay-only build and must not be presented as this integration. A production release remains blocked on stable central API and MCP URLs, the ID-only notification view, structured verification results, and central JWT reissue.
 
 ## Development
 
@@ -104,7 +98,7 @@ npm run test:coverage
 npm audit --omit=dev --audit-level=high
 ```
 
-The current suite uses Node's test runner, temporary SQLite files, and loopback HTTP fixtures. The replacement plan adds a Dockerized Python/FastMCP central fixture with in-memory verification. Docker E2E runs on Ubuntu CI; the local Docker daemon must be running for local E2E.
+The suite uses Node's test runner, temporary SQLite files, loopback HTTP fixtures, and a Dockerized Python/FastMCP central fixture with in-memory verification. Docker E2E runs on Ubuntu CI; the local Docker daemon must be running for local container tests.
 
 ## Design records
 
