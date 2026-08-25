@@ -46,6 +46,7 @@ Debian packages retain their copyright and license notices under `/usr/share/doc
 | jaraco.classes | 3.4.0 | MIT |
 | jaraco.context | 6.1.2 | MIT |
 | jaraco.functools | 4.6.0 | MIT |
+| jeepney | 0.9.0 | MIT |
 | joserfc | 1.7.4 | BSD-3-Clause |
 | jsonref | 1.1.0 | MIT |
 | jsonschema | 4.26.0 | MIT |
@@ -76,6 +77,7 @@ Debian packages retain their copyright and license notices under `/usr/share/doc
 | rich | 15.0.0 | MIT |
 | rich-rst | 2.1.0 | MIT |
 | rpds-py | 2026.6.3 | MIT |
+| SecretStorage | 3.5.0 | BSD-3-Clause |
 | sse-starlette | 3.4.8 | BSD-3-Clause |
 | Starlette | 1.6.0 | BSD-3-Clause |
 | tomli | 2.4.1 | MIT |
