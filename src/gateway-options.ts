@@ -13,6 +13,11 @@ export interface GatewayStartOptions {
   webhookTokenEnv: string;
 }
 
+export interface DevelopmentCentralUrls {
+  centralApiUrl: string;
+  centralMcpUrl: string;
+}
+
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const GENERATED_HOOK_TOKEN = /^[0-9a-f]{48}$/u;
 const LOOPBACK_AUTHORITY = /^https?:\/\/127\.0\.0\.1:([0-9]{1,5})(?:[/?]|$)/u;
@@ -48,6 +53,32 @@ function parseWebhookUrl(value: string): string {
     throw new GatewayOptionsError(2);
   }
 
+  return value;
+}
+
+function parseDevelopmentCentralUrl(value: string | undefined): string {
+  if (value === undefined || value.length === 0 || /\s/u.test(value)) {
+    throw new Error("Invalid development central endpoints");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Invalid development central endpoints");
+  }
+  const loopback =
+    parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "[::1]" ||
+    parsed.hostname === "localhost";
+  if (
+    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw new Error("Invalid development central endpoints");
+  }
   return value;
 }
 
@@ -96,4 +127,19 @@ export function resolveWebhookToken(environment: NodeJS.ProcessEnv, variableName
     throw new GatewayOptionsError(4);
   }
   return value;
+}
+
+export function resolveDevelopmentCentralUrls(
+  environment: NodeJS.ProcessEnv,
+): DevelopmentCentralUrls | undefined {
+  const centralApiUrl = environment.A2A_DEV_CENTRAL_API_URL;
+  const centralMcpUrl = environment.A2A_DEV_CENTRAL_MCP_URL;
+  if (centralApiUrl === undefined && centralMcpUrl === undefined) return undefined;
+  if (centralApiUrl === undefined || centralMcpUrl === undefined) {
+    throw new Error("Invalid development central endpoints");
+  }
+  return {
+    centralApiUrl: parseDevelopmentCentralUrl(centralApiUrl),
+    centralMcpUrl: parseDevelopmentCentralUrl(centralMcpUrl),
+  };
 }

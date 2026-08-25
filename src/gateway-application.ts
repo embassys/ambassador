@@ -70,6 +70,13 @@ function safeFailure(): Error {
   return new Error("Gateway operation failed");
 }
 
+function credentialScope(options: GatewayApplicationOptions): string {
+  return JSON.stringify({
+    centralApiUrl: options.centralApiUrl === undefined ? null : new URL(options.centralApiUrl).href,
+    centralMcpUrl: options.centralMcpUrl === undefined ? null : new URL(options.centralMcpUrl).href,
+  });
+}
+
 function contentAcknowledgement(
   result: Record<string, unknown>,
   arguments_: Record<string, unknown>,
@@ -94,7 +101,11 @@ export async function openGatewayApplication(
   const journal = new NotificationJournal(options.journalPath);
   const credentialStore =
     options.credentialStore ??
-    new EncryptedFileCredentialStore(options.credentialPath, options.webhookToken);
+    new EncryptedFileCredentialStore(
+      options.credentialPath,
+      options.webhookToken,
+      credentialScope(options),
+    );
   const central =
     options.centralMcpUrl === undefined
       ? undefined

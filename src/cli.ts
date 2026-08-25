@@ -12,6 +12,7 @@ import {
   GatewayOptionsError,
   type GatewayStartOptions,
   parseGatewayStartOptions,
+  resolveDevelopmentCentralUrls,
   resolveWebhookToken,
 } from "./gateway-options.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
@@ -93,13 +94,15 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
   try {
     lock = await ProcessLock.acquire(paths.lockPath);
     const webhookToken = resolveWebhookToken(context.env, parsed.webhookTokenEnv);
+    const developmentCentralUrls =
+      context.testOverrides === undefined ? resolveDevelopmentCentralUrls(context.env) : undefined;
     application = await openGatewayApplication({
       webhookUrl: parsed.webhookUrl,
       webhookToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
       ...(context.testOverrides === undefined
-        ? {}
+        ? developmentCentralUrls
         : {
             centralApiUrl: context.testOverrides.centralApiUrl,
             centralMcpUrl: context.testOverrides.centralMcpUrl,

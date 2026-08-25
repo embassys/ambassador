@@ -18,7 +18,12 @@ function appendBounded(current: string, chunk: Buffer): string {
   return combined.length > 65_536 ? combined.slice(-65_536) : combined;
 }
 
-function isolatedEnvironment(directory: string, token: string | undefined): NodeJS.ProcessEnv {
+function isolatedEnvironment(
+  directory: string,
+  token: string | undefined,
+  centralApiUrl?: string,
+  centralMcpUrl?: string,
+): NodeJS.ProcessEnv {
   return {
     HOME: directory,
     USERPROFILE: directory,
@@ -29,6 +34,8 @@ function isolatedEnvironment(directory: string, token: string | undefined): Node
     ...(process.env.SystemRoot === undefined ? {} : { SystemRoot: process.env.SystemRoot }),
     ...(process.env.ComSpec === undefined ? {} : { ComSpec: process.env.ComSpec }),
     ...(token === undefined ? {} : { A2A_WEBHOOK_TOKEN: token }),
+    ...(centralApiUrl === undefined ? {} : { A2A_DEV_CENTRAL_API_URL: centralApiUrl }),
+    ...(centralMcpUrl === undefined ? {} : { A2A_DEV_CENTRAL_MCP_URL: centralMcpUrl }),
   };
 }
 
@@ -43,11 +50,17 @@ async function waitForExit(
 
 export async function startGatewayProcess(
   t: TestContext,
-  options: { webhookUrl: string; webhookToken: string },
+  options: {
+    webhookUrl: string;
+    webhookToken: string;
+    centralApiUrl?: string;
+    centralMcpUrl?: string;
+    executable?: string;
+  },
 ): Promise<GatewayProcess> {
   const directory = await mkdtemp(join(tmpdir(), "a2a-gateway-process-test-"));
   t.after(() => rm(directory, { force: true, recursive: true }));
-  const executable = join(process.cwd(), ".test-dist", "src", "cli.js");
+  const executable = options.executable ?? join(process.cwd(), ".test-dist", "src", "cli.js");
   const child = spawn(
     process.execPath,
     [
@@ -58,7 +71,12 @@ export async function startGatewayProcess(
     ],
     {
       cwd: directory,
-      env: isolatedEnvironment(directory, options.webhookToken),
+      env: isolatedEnvironment(
+        directory,
+        options.webhookToken,
+        options.centralApiUrl,
+        options.centralMcpUrl,
+      ),
       stdio: ["ignore", "pipe", "pipe"],
     },
   );

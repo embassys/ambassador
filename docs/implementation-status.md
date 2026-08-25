@@ -27,7 +27,9 @@ PR `#5` implements the approved replacement on the reviewed test branch:
 - restart recovery and fixed safe errors; and
 - deletion of setup, bindings, runtime adapters, JSON configuration, and native service management.
 
-The local replacement suite has 77 passing tests and one container-gated FastMCP test. Linux and macOS run the local suite in CI. The Linux Docker job tests the independent fixture, then runs the Node gateway through enrollment, notification delivery, content retrieval, and acknowledgement against the pinned FastMCP server. Windows CI is disabled for this implementation PR after its strict credential DACL checks failed on the GitHub runner; Windows support and release qualification remain incomplete. The published `@a2adev/gateway@0.1.0` package remains the older implementation until a later release passes the release gates.
+The local replacement suite covers the complete loopback flow and one container-gated FastMCP flow. Linux and macOS run the local suite in CI. The Linux Docker job tests the independent fixture, then runs the Node gateway through enrollment, notification delivery, content retrieval, and acknowledgement against the pinned FastMCP server. A separate Linux and macOS job packs the npm artifact, installs it into an empty prefix, and repeats that flow through the installed binary. Its Linux run also verifies pre- and post-enrollment tool discovery through OpenClaw `2026.7.1-2` and confirms that OpenClaw accepts the gateway's real wake request. Windows CI is disabled after its strict credential DACL checks failed on the GitHub runner; Windows support and release qualification remain incomplete.
+
+Version `0.2.0` adds paired `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` overrides so a developer can run the full flow before production endpoint constants exist. The release includes beginner setup guides for OpenClaw and Hermes Agent. Hermes uses its explicitly development-only, loopback-restricted unauthenticated webhook route because its generic webhook does not accept the gateway's bearer header.
 
 ## Production decisions
 
@@ -55,13 +57,12 @@ PR `#4` recorded the reviewed red suite and failure inventory before production 
 
 Docker runs in GitHub's Ubuntu runners. The Docker CLI is installed locally, but the local daemon is not running.
 
-## Release blockers
+## Production release blockers
 
-- Pass the replacement matrix and Docker fixture after the implementation stack is combined.
 - Obtain stable production central API and MCP URLs.
 - Obtain a non-consuming production ID notification view.
 - Obtain separate idempotent notification and content acknowledgements.
 - Obtain structured central verification results.
 - Obtain central JWT reissue and revocation behavior.
-- Qualify packed installation on clean Linux, macOS, and Windows environments.
-- Publish a new version through GitHub OIDC after the implementation is ready.
+- Qualify packed installation and credential permissions on Windows.
+- Verify trusted npm publishing after the `0.2.0` release PR merges to `main`.

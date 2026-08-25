@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-08-24
 
+Updated: 2026-08-25 for the `0.2.0` development release qualification
+
 ## Problem
 
 The initial distribution plan required standalone files before public beta. Current users already have Node.js, so that work would delay a usable release without removing a real installation barrier.
@@ -19,7 +21,9 @@ npm install --global @a2adev/gateway
 a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 ```
 
-Publish from the `main` branch only after Linux, macOS, and Windows checks pass. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
+Publish production releases from the `main` branch only after Linux, macOS, and Windows checks pass. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
+
+The user approved `0.2.0` as a development-only exception on npm's `latest` tag after Linux and macOS qualification. Windows packaging and credential permissions remain unqualified, so `0.2.0` documentation excludes Windows and does not present this version as a production release.
 
 Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
 
@@ -37,4 +41,4 @@ The current private GitHub repository can use trusted publishing, but npm cannot
 
 ## Approval
 
-The user reviewed and approved npm-first distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24.
+The user reviewed and approved npm-first distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows remains unqualified.

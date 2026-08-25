@@ -31,17 +31,14 @@ const ENVELOPE_KEYS = [
   "tag",
   "version",
 ] as const;
-const AAD = Buffer.from(
-  JSON.stringify({
-    version: FILE_VERSION,
-    kdf: "scrypt",
-    n: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    cipher: "aes-256-gcm",
-  }),
-  "ascii",
-);
+const AAD_METADATA = {
+  version: FILE_VERSION,
+  kdf: "scrypt",
+  n: SCRYPT_N,
+  r: SCRYPT_R,
+  p: SCRYPT_P,
+  cipher: "aes-256-gcm",
+} as const;
 const savingPaths = new Set<string>();
 
 interface CredentialEnvelope {
@@ -287,17 +284,27 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   private readonly path: string;
   private readonly directoryPath: string;
   private readonly hookToken: Buffer;
+  private readonly additionalData: Buffer;
   private readonly platform: NodeJS.Platform;
   private readonly windowsAccessControl?: WindowsCredentialAccessControl;
   private saved = false;
 
-  constructor(path: string, hookToken: string, options: EncryptedFileCredentialStoreOptions = {}) {
+  constructor(
+    path: string,
+    hookToken: string,
+    credentialScope: string,
+    options: EncryptedFileCredentialStoreOptions = {},
+  ) {
     if (!HOOK_TOKEN_PATTERN.test(hookToken)) {
       throw new Error("The webhook token format is invalid");
+    }
+    if (typeof credentialScope !== "string" || credentialScope.length === 0) {
+      throw new Error("The credential scope is invalid");
     }
     this.path = resolve(path);
     this.directoryPath = dirname(this.path);
     this.hookToken = Buffer.from(hookToken, "hex");
+    this.additionalData = Buffer.from(JSON.stringify({ ...AAD_METADATA, credentialScope }), "utf8");
     this.platform = options.platform ?? process.platform;
     if (this.platform === "win32") {
       this.windowsAccessControl =
@@ -336,7 +343,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
           const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
             authTagLength: TAG_BYTES,
           });
-          decipher.setAAD(AAD);
+          decipher.setAAD(this.additionalData);
           decipher.setAuthTag(envelope.tag);
           plaintext = Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
           const jwt = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
@@ -381,7 +388,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       try {
         key = await deriveKey(this.hookToken, salt);
         const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
-        cipher.setAAD(AAD);
+        cipher.setAAD(this.additionalData);
         ciphertext = Buffer.concat([cipher.update(jwt, "utf8"), cipher.final()]);
         tag = cipher.getAuthTag();
       } finally {
