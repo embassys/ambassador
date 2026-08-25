@@ -10,7 +10,7 @@ The gateway must act as both a Streamable HTTP MCP server and an MCP client. The
 
 ## Options
 
-- Use the official TypeScript SDK packages at version `2.0.0`: `@modelcontextprotocol/server`, `@modelcontextprotocol/client`, and the Node transport package. They are MIT licensed, require Node 20 or newer, and are maintained in the official Model Context Protocol repository. The Node transport also requires Hono.
+- Use the official TypeScript SDK packages `@modelcontextprotocol/server`, `@modelcontextprotocol/client`, and `@modelcontextprotocol/node` at version `2.0.0`. They are MIT licensed, require Node 20 or newer, and are maintained in the official Model Context Protocol repository. The server and client use `@modelcontextprotocol/core` and Zod; the Node transport requires `@hono/node-server`.
 - Use the combined `@modelcontextprotocol/sdk` package at version `1.30.0`. It is MIT licensed and widely used, but brings 17 direct runtime dependencies and represents the older package layout.
 - Implement the required Streamable HTTP subset with Node core. This avoids dependencies but makes this project responsible for protocol negotiation, SSE, sessions, cancellation, and future compatibility.
 
