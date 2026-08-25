@@ -10,28 +10,26 @@ interface TestOverrides {
   centralApiUrl: string;
   centralMcpUrl: string;
   stateRoot: string;
+  credentialStore?: {
+    load: () => Promise<string | undefined>;
+    save: (token: string) => Promise<void>;
+  };
 }
 
 interface RunningGateway {
   endpoint: string;
+  artifactRoot: string;
   stateRoot: string;
   stdout: () => string;
   stderr: () => string;
   stop: () => Promise<number>;
 }
 
-function waitForReady(
-  ready: Promise<string>,
-  completion: Promise<number>,
-  output: () => { stdout: string; stderr: string },
-): Promise<string> {
+function waitForReady(ready: Promise<string>, completion: Promise<number>): Promise<string> {
   return Promise.race([
     ready,
     completion.then((exitCode) => {
-      const current = output();
-      throw new Error(
-        `gateway exited before startup (code ${exitCode})\nstdout: ${current.stdout}\nstderr: ${current.stderr}`,
-      );
+      throw new Error(`gateway exited before startup with code ${exitCode}`);
     }),
     delay(5_000, undefined, { ref: false }).then(() => {
       throw new Error("timed out waiting for gateway startup");
@@ -46,10 +44,15 @@ export async function startGateway(
     webhookToken: string;
     centralApiUrl: string;
     centralMcpUrl: string;
+    artifactRoot?: string;
+    credentialStore?: TestOverrides["credentialStore"];
   },
 ): Promise<RunningGateway> {
-  const directory = await mkdtemp(join(tmpdir(), "a2a-single-gateway-test-"));
-  t.after(() => rm(directory, { force: true, recursive: true }));
+  const directory =
+    options.artifactRoot ?? (await mkdtemp(join(tmpdir(), "a2a-single-gateway-test-")));
+  if (options.artifactRoot === undefined) {
+    t.after(() => rm(directory, { force: true, recursive: true }));
+  }
   const controller = new AbortController();
   const stateRoot = join(directory, "state", "a2a-gateway");
   let stdout = "";
@@ -90,6 +93,9 @@ export async function startGateway(
       centralApiUrl: options.centralApiUrl,
       centralMcpUrl: options.centralMcpUrl,
       stateRoot,
+      ...(options.credentialStore === undefined
+        ? {}
+        : { credentialStore: options.credentialStore }),
     },
   };
 
@@ -97,18 +103,18 @@ export async function startGateway(
     ["start", `--webhook-url=${options.webhookUrl}`, "--webhook-token-env=A2A_WEBHOOK_TOKEN"],
     context,
   );
-  const endpoint = await waitForReady(ready, completion, () => ({ stdout, stderr }));
   let stopped: Promise<number> | undefined;
-
   const stop = async (): Promise<number> => {
     controller.abort();
     stopped ??= completion;
     return await stopped;
   };
   t.after(stop);
+  const endpoint = await waitForReady(ready, completion);
 
   return {
     endpoint,
+    artifactRoot: directory,
     stateRoot,
     stdout: () => stdout,
     stderr: () => stderr,

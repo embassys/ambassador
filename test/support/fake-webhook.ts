@@ -1,34 +1,78 @@
-import assert from "node:assert/strict";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 
 export interface WebhookWake {
+  method: string;
+  path: string;
+  contentType: string | undefined;
   headers: IncomingHttpHeaders;
   body: Record<string, unknown>;
 }
 
+interface WakeWaiter {
+  resolve: (wake: WebhookWake) => void;
+  timer: NodeJS.Timeout;
+}
+
 export async function startFakeWebhook(
   t: TestContext,
+  options: { statuses?: number[] } = {},
 ): Promise<{ url: string; waitForWake: () => Promise<WebhookWake> }> {
   const wakes: WebhookWake[] = [];
-  const waiters: Array<(wake: WebhookWake) => void> = [];
+  const waiters: WakeWaiter[] = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let byteLength = 0;
+    request.on("data", (chunk: Buffer) => {
+      byteLength += chunk.byteLength;
+      if (byteLength <= 1_048_576) {
+        chunks.push(chunk);
+      }
+    });
     request.on("end", () => {
-      const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-      assert.ok(parsed !== null && typeof parsed === "object" && !Array.isArray(parsed));
-      const wake = { headers: request.headers, body: parsed as Record<string, unknown> };
+      if (
+        byteLength > 1_048_576 ||
+        request.method !== "POST" ||
+        request.url !== "/hooks/agent" ||
+        request.headers["content-type"] !== "application/json"
+      ) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end('{"ok":false}');
+        return;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+      } catch {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end('{"ok":false}');
+        return;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end('{"ok":false}');
+        return;
+      }
+
+      const wake = {
+        method: request.method,
+        path: request.url,
+        contentType: request.headers["content-type"],
+        headers: request.headers,
+        body: parsed as Record<string, unknown>,
+      };
       const waiter = waiters.shift();
       if (waiter === undefined) {
         wakes.push(wake);
       } else {
-        waiter(wake);
+        clearTimeout(waiter.timer);
+        waiter.resolve(wake);
       }
-      response.writeHead(200, { "content-type": "application/json" });
-      response.end('{"ok":true}');
+      const responseStatus = options.statuses?.shift() ?? 200;
+      response.writeHead(responseStatus, { "content-type": "application/json" });
+      response.end(responseStatus >= 200 && responseStatus < 300 ? '{"ok":true}' : '{"ok":false}');
     });
   });
 
@@ -49,12 +93,20 @@ export async function startFakeWebhook(
       if (wake !== undefined) {
         return wake;
       }
-      return await Promise.race([
-        new Promise<WebhookWake>((resolve) => waiters.push(resolve)),
-        delay(5_000, undefined, { ref: false }).then(() => {
-          throw new Error("timed out waiting for webhook wake");
-        }),
-      ]);
+      return await new Promise<WebhookWake>((resolve, reject) => {
+        const waiter: WakeWaiter = {
+          resolve,
+          timer: setTimeout(() => {
+            const index = waiters.indexOf(waiter);
+            if (index >= 0) {
+              waiters.splice(index, 1);
+            }
+            reject(new Error("timed out waiting for webhook wake"));
+          }, 5_000),
+        };
+        waiter.timer.unref();
+        waiters.push(waiter);
+      });
     },
   };
 }
