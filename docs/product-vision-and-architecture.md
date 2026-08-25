@@ -51,7 +51,7 @@ Configured local webhook
 ### Startup
 
 1. Acquire the singleton lock before resolving tokens, opening credentials, binding MCP, polling, or sending a webhook.
-2. Resolve the webhook token from the named environment variable.
+2. Resolve and validate the OpenClaw-generated 48-character hexadecimal webhook token from the named environment variable.
 3. Bind the authenticated MCP endpoint to `127.0.0.1:8787`.
 4. Load an existing central JWT from the approved credential store, if present.
 5. Start ID-only notification polling only when a central JWT is available.
@@ -95,8 +95,6 @@ The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state,
 
 ## Open decisions
 
-- Approve the production MCP SDK in ADR `0018-mcp-sdk.md`.
-- Approve central JWT persistence in ADR `0019-central-credential-storage.md`.
 - Obtain stable production central API and MCP URLs for package constants.
 - Add central support for an ID-only, non-consuming notification view and structured verification results.
 - Define central JWT revocation, reissue, and intentional local reset.

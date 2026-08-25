@@ -42,12 +42,12 @@ This code is useful as a tested source of lock, SQLite, HTTP, and retry behavior
 - Fixed OpenClaw-compatible webhook body without configured `agentId`.
 - Dockerized in-memory central service and full E2E test.
 
-## Decisions before production code
+## Production decisions
 
-- ADR `0018-mcp-sdk.md` recommends the official split MCP TypeScript SDK version 2 packages.
-- ADR `0019-central-credential-storage.md` recommends an AES-256-GCM credential file keyed from the webhook token.
+- ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
+- ADR `0019-central-credential-storage.md` approves an AES-256-GCM credential file keyed from an OpenClaw-generated 192-bit webhook token.
 
-Neither decision installs a dependency or authorizes credential implementation yet. The red tests and Docker fixture come first.
+The user approved the red failures and authorized production implementation on 2026-08-25. OS credential-vault storage and DPoP remain stronger future improvements; DPoP also requires central support.
 
 ## External central changes
 
@@ -72,8 +72,6 @@ Docker is available in GitHub's Ubuntu runners. The Docker CLI is installed loca
 
 ## Release blockers
 
-- Review the red test suite.
-- Approve ADRs 0018 and 0019.
 - Implement and pass the replacement tests.
 - Run the E2E container in CI.
 - Obtain stable production central API and MCP URLs.

@@ -10,7 +10,7 @@ Requirements:
 
 - Node.js 24.19.x
 - npm 11
-- A local webhook URL and its bearer token
+- A local webhook URL and its OpenClaw-generated 48-character lowercase hexadecimal bearer token
 
 Install the package:
 
@@ -21,14 +21,14 @@ npm install --global @a2adev/gateway
 Start one foreground gateway:
 
 ```sh
-export OPENCLAW_HOOK_TOKEN='your-existing-hook-token'
+export OPENCLAW_HOOK_TOKEN='<OpenClaw-generated-48-hex-hook-token>'
 
 a2a-gateway start \
   --webhook-url=http://127.0.0.1:18789/hooks/agent \
   --webhook-token-env=OPENCLAW_HOOK_TOKEN
 ```
 
-Only the `--name=value` form is accepted. The gateway does not accept a central JWT, configured local-runtime agent ID, binding ID, configuration path, or literal token option.
+Only the `--name=value` form is accepted. The resolved webhook token must match `[0-9a-f]{48}`. The gateway does not accept a central JWT, configured local-runtime agent ID, binding ID, configuration path, or literal token option.
 
 Successful startup prints:
 

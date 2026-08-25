@@ -12,7 +12,7 @@ a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 
 Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
-`--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must be non-empty and contain no CR or LF.
+`--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must match OpenClaw's generated 192-bit hook-token format, `[0-9a-f]{48}`.
 
 Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Errors never echo an option value, environment value, URL, header, or remote body.
 
@@ -201,7 +201,7 @@ Production limits must be positive constants, tested at and above their boundari
 
 Never write task text, prompts, attachments, responses, results, permission details, grants, tool arguments, email addresses, verification codes, webhook tokens, plaintext central JWTs, or MCP request and response bodies to configuration, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles. The upstream MCP request may contain the injected JWT transiently in memory; no retry spool or body capture is allowed.
 
-The approved credential store is the sole durable exception for the central JWT. If ADR 0019 approves encrypted-file storage, only authenticated ciphertext and its cryptographic metadata may be written.
+The approved credential store is the sole durable exception for the central JWT. Only authenticated ciphertext and the cryptographic metadata defined by ADR 0019 may be written.
 
 ## Acceptance cases
 
