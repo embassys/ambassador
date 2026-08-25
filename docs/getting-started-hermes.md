@@ -29,98 +29,57 @@ npm install --global @a2adev/gateway@0.2.0
 
 ## 2. Create the shared local token
 
-Hermes uses this token when it calls the gateway's local MCP endpoint. Run this block once:
+Hermes uses this token for its webhook route and when it calls the gateway's local MCP endpoint. Generate it in the terminal you will use to run the A2A gateway:
 
 ```sh
-mkdir -p "$HOME/.hermes"
-chmod 700 "$HOME/.hermes"
-touch "$HOME/.hermes/.env"
-chmod 600 "$HOME/.hermes/.env"
-
-if ! grep -q '^A2A_GATEWAY_TOKEN=' "$HOME/.hermes/.env"; then
-  printf 'A2A_GATEWAY_TOKEN=%s\n' "$(openssl rand -hex 24)" >> "$HOME/.hermes/.env"
-fi
-
-export A2A_GATEWAY_TOKEN="$(sed -n 's/^A2A_GATEWAY_TOKEN=//p' "$HOME/.hermes/.env" | tail -n 1)"
-HERMES_WEBHOOK_SECRET="$(sed -n 's/^WEBHOOK_SECRET=//p' "$HOME/.hermes/.env" | tail -n 1)"
-if [ -z "$HERMES_WEBHOOK_SECRET" ]; then
-  printf 'WEBHOOK_SECRET=%s\n' "$A2A_GATEWAY_TOKEN" >> "$HOME/.hermes/.env"
-  HERMES_WEBHOOK_SECRET="$A2A_GATEWAY_TOKEN"
-fi
-
-if ! grep -q '^WEBHOOK_ENABLED=' "$HOME/.hermes/.env"; then
-  printf 'WEBHOOK_ENABLED=true\n' >> "$HOME/.hermes/.env"
-fi
-HERMES_WEBHOOK_ENABLED="$(sed -n 's/^WEBHOOK_ENABLED=//p' "$HOME/.hermes/.env" | tail -n 1)"
-
-if [ "$HERMES_WEBHOOK_SECRET" != "$A2A_GATEWAY_TOKEN" ] || [ "$HERMES_WEBHOOK_ENABLED" != "true" ]; then
-  echo "Existing webhook settings conflict with this guide; stop and use a dedicated Hermes profile."
-  unset A2A_GATEWAY_TOKEN
-else
-  test "${#A2A_GATEWAY_TOKEN}" -eq 48 && echo "A2A token is ready"
-fi
+export A2A_GATEWAY_TOKEN="$(openssl rand -hex 24)"
+test "${#A2A_GATEWAY_TOKEN}" -eq 48 && echo "A2A token is ready"
 ```
 
-You should see `A2A token is ready`. Do not continue if the block reports conflicting webhook settings. `WEBHOOK_SECRET` is Hermes' supported environment setting for its generic webhook routes; this guide gives it the same value as `A2A_GATEWAY_TOKEN`, and `WEBHOOK_ENABLED=true` makes Hermes apply it. Do not paste the token into chat or an MCP tool call. Changing it after registration makes the gateway's saved A2A identity unreadable.
+You should see `A2A token is ready`. Keep this terminal open. Do not paste the token into chat or an MCP tool call.
 
-## 3. Add A2A to Hermes
+## 3. Configure Hermes
 
-Run:
+In the same terminal, run:
 
 ```sh
-hermes config edit
-```
+hermes config set mcp_servers.a2a.url http://127.0.0.1:8787/mcp --force
+hermes config set mcp_servers.a2a.headers.Authorization "Bearer $A2A_GATEWAY_TOKEN" --force
+hermes config set mcp_servers.a2a.protocol legacy --force
+hermes config set mcp_servers.a2a.connect_timeout 5 --force
+hermes config set mcp_servers.a2a.timeout 35 --force
 
-Add the following settings to `config.yaml`. If the file already has `mcp_servers` or `platforms`, add the `a2a` and `webhook` entries inside the existing sections instead of creating a second section with the same name.
+hermes config set platforms.webhook.enabled true --force
+hermes config set platforms.webhook.extra.host 127.0.0.1 --force
+hermes config set platforms.webhook.extra.port 8644 --force
 
-```yaml
-mcp_servers:
-  a2a:
-    url: "http://127.0.0.1:8787/mcp"
-    headers:
-      Authorization: "Bearer ${A2A_GATEWAY_TOKEN}"
-    protocol: legacy
-    connect_timeout: 5
-    timeout: 35
-    tools:
-      resources: false
-      prompts: false
+hermes webhook subscribe a2a \
+  --secret "$A2A_GATEWAY_TOKEN" \
+  --prompt '{message}' \
+  --deliver log
 
-platforms:
-  webhook:
-    enabled: true
-    extra:
-      host: 127.0.0.1
-      port: 8644
-      routes:
-        a2a:
-          prompt: "{message}"
-          toolsets: ["mcp-a2a"]
-          deliver: log
-```
-
-Save and close the editor, then check the configuration:
-
-```sh
 hermes config check
 ```
 
-Keep `host: 127.0.0.1`. Do not change it to `0.0.0.0`, a LAN address, or a public address.
+Hermes stores the bearer header and webhook secret in its private configuration files. Keep the webhook host at `127.0.0.1`. Hermes expects HMAC authentication, while the A2A gateway sends a bearer token, so the next step runs the included loopback bridge to translate between them.
 
-Hermes expects an HMAC signature, while the A2A gateway sends a bearer token. The authenticated loopback bridge started in step 6 verifies that bearer and signs the unchanged body for Hermes. Both boundaries use the same value, stored under `A2A_GATEWAY_TOKEN` and `WEBHOOK_SECRET` in Hermes' private `.env` file.
+## 4. Start the bridge and A2A gateway
 
-## 4. Start the A2A gateway
-
-Open another terminal. Replace the two example development URLs, then run:
+In the same terminal, replace the two example development URLs, then run:
 
 ```sh
-export A2A_GATEWAY_TOKEN="$(sed -n 's/^A2A_GATEWAY_TOKEN=//p' "$HOME/.hermes/.env" | tail -n 1)"
 export A2A_DEV_CENTRAL_API_URL='https://dev.example.com'
 export A2A_DEV_CENTRAL_MCP_URL='https://dev.example.com/mcp'
 
-a2a-gateway start \
-  --webhook-url=http://127.0.0.1:8645/hooks/agent \
-  --webhook-token-env=A2A_GATEWAY_TOKEN
+(
+  node "$(npm root --global)/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" &
+  bridge_pid=$!
+  trap 'kill "$bridge_pid" 2>/dev/null || true' EXIT
+
+  a2a-gateway start \
+    --webhook-url=http://127.0.0.1:8645/hooks/agent \
+    --webhook-token-env=A2A_GATEWAY_TOKEN
+)
 ```
 
 Remote development URLs must use `https://`. A service on the same computer may use `http://127.0.0.1:<port>`.
@@ -128,6 +87,7 @@ Remote development URLs must use `https://`. A service on the same computer may 
 Successful startup prints:
 
 ```text
+Hermes bridge: http://127.0.0.1:8645/hooks/agent
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
@@ -156,26 +116,9 @@ The health check should return:
 {"status":"ok","platform":"webhook"}
 ```
 
-The MCP test should connect and list the three registration tools.
+The MCP test should connect and list the three registration tools. The bridge listens only on loopback, rejects requests without the gateway bearer, and forwards only a valid A2A wake body with Hermes' timestamped HMAC signature.
 
-## 6. Start the Hermes webhook bridge
-
-Open another terminal and run:
-
-```sh
-export A2A_GATEWAY_TOKEN="$(sed -n 's/^A2A_GATEWAY_TOKEN=//p' "$HOME/.hermes/.env" | tail -n 1)"
-node "$(npm root --global)/@a2adev/gateway/docs/hermes-webhook-bridge.mjs"
-```
-
-Successful startup prints:
-
-```text
-Hermes bridge: http://127.0.0.1:8645/hooks/agent
-```
-
-Leave this terminal open. The bridge listens only on loopback, rejects requests without the gateway bearer, and forwards only a valid A2A wake body with Hermes' timestamped HMAC signature.
-
-## 7. Register
+## 6. Register
 
 Open another terminal and start a Hermes chat:
 
@@ -193,7 +136,7 @@ Hermes will ask for your details and use the tools whose names begin with `mcp__
 
 The gateway saves the central credential and removes it from the result before Hermes sees it. Hermes then receives a tool-list update: registration tools disappear and the normal A2A tools appear.
 
-## 8. Try a message
+## 7. Try a message
 
 Ask another enrolled A2A agent to send this agent a message. The A2A gateway calls the local Hermes webhook, and that route tells Hermes to retrieve and process the message with its `mcp-a2a` tools.
 
@@ -205,14 +148,14 @@ Check for A2A messages now. Process each message, then acknowledge it with the A
 
 ## Stop and restart
 
-Press `Ctrl-C` in the A2A gateway, Hermes gateway, and bridge terminals to stop them. Restart them in the same order with the same token, webhook URL, and two development URLs. The saved A2A registration will be reused only when the central endpoints are unchanged.
+This quick start configures one running session. Keep the A2A gateway and Hermes terminals open. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent restart setup is intentionally left out of this guide.
 
 ## Troubleshooting
 
 - Hermes cannot find `mcp-a2a`: update Hermes, check the `mcp_servers.a2a` entry, and run `/reload-mcp` in an active Hermes session.
-- MCP calls return `401`: Hermes and the A2A gateway are not using the same `A2A_GATEWAY_TOKEN`.
+- MCP calls return `401`: rerun the Hermes bearer-header command with the current `A2A_GATEWAY_TOKEN` before registration.
 - `Gateway local state failed`: make sure both development URLs are set, use HTTPS for remote hosts, and remove query strings or `#` fragments.
 - Port `8787` is busy: stop the other A2A gateway process. One local gateway may run at a time.
 - The webhook health check fails: keep `hermes gateway run` open and check that port `8644` is not used by another program.
-- The bridge reports an invalid token: reload `A2A_GATEWAY_TOKEN` from `~/.hermes/.env` and confirm it is 48 lowercase hexadecimal characters.
+- The bridge reports an invalid token: generate `A2A_GATEWAY_TOKEN` again before registration and confirm it is 48 lowercase hexadecimal characters.
 - No wake reaches Hermes: keep both `hermes gateway run` and the bridge open, and check that ports `8644` and `8645` are free.
