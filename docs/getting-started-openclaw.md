@@ -38,54 +38,38 @@ The command should print a path.
 
 ## 2. Create the shared local token
 
-OpenClaw uses this token to accept wake requests from the gateway and to call the gateway's MCP tools. Run this block once:
+OpenClaw uses this token to accept wake requests from the gateway and to call the gateway's MCP tools. Generate it in the terminal you will use to run the A2A gateway:
 
 ```sh
-mkdir -p "$HOME/.openclaw"
-chmod 700 "$HOME/.openclaw"
-touch "$HOME/.openclaw/.env"
-chmod 600 "$HOME/.openclaw/.env"
-
-if ! grep -q '^A2A_HOOK_TOKEN=' "$HOME/.openclaw/.env"; then
-  printf 'A2A_HOOK_TOKEN=%s\n' "$(openssl rand -hex 24)" >> "$HOME/.openclaw/.env"
-fi
-
-export A2A_HOOK_TOKEN="$(sed -n 's/^A2A_HOOK_TOKEN=//p' "$HOME/.openclaw/.env" | tail -n 1)"
+export A2A_HOOK_TOKEN="$(openssl rand -hex 24)"
 test "${#A2A_HOOK_TOKEN}" -eq 48 && echo "A2A token is ready"
 ```
 
-You should see `A2A token is ready`. Do not paste the token into chat or an MCP tool call. Keep `~/.openclaw/.env` private.
+You should see `A2A token is ready`. Keep this terminal open. Do not paste the token into chat or an MCP tool call.
 
-Changing this token after registration makes the gateway's saved A2A identity unreadable. Reuse the same token when you restart.
-
-## 3. Turn on the OpenClaw webhook
+## 3. Configure OpenClaw
 
 In the same terminal, run:
 
 ```sh
 openclaw config set hooks.enabled true --strict-json
 openclaw config set hooks.path /hooks
-openclaw config set hooks.token '${A2A_HOOK_TOKEN}'
+openclaw config set hooks.token "$A2A_HOOK_TOKEN"
 openclaw config set gateway.mode local
+
+openclaw mcp set a2a \
+  "{\"url\":\"http://127.0.0.1:8787/mcp\",\"transport\":\"streamable-http\",\"headers\":{\"Authorization\":\"Bearer $A2A_HOOK_TOKEN\"},\"connectionTimeoutMs\":5000,\"requestTimeoutMs\":35000}"
+
 openclaw config validate
 ```
 
-The single quotes in the third command matter. They tell OpenClaw to read the token from `~/.openclaw/.env` when it starts.
-
-Start or restart OpenClaw after changing the webhook settings:
-
-```sh
-openclaw gateway run
-```
-
-Leave this terminal open. The default webhook address is `http://127.0.0.1:18789/hooks/agent`. If your OpenClaw gateway uses a different port, replace `18789` in the later commands.
+OpenClaw stores the webhook token and MCP header in its private configuration. Use a dedicated token; do not reuse OpenClaw's `gateway.auth` token.
 
 ## 4. Start the A2A gateway
 
-Open a second terminal. Replace the two example development URLs, then run:
+In the same terminal, replace the two example development URLs, then run:
 
 ```sh
-export A2A_HOOK_TOKEN="$(sed -n 's/^A2A_HOOK_TOKEN=//p' "$HOME/.openclaw/.env" | tail -n 1)"
 export A2A_DEV_CENTRAL_API_URL='https://dev.example.com'
 export A2A_DEV_CENTRAL_MCP_URL='https://dev.example.com/mcp'
 
@@ -100,16 +84,25 @@ Successful startup prints:
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
-Leave this terminal open too. The gateway is meant to stay in the foreground.
+Leave this terminal open. The gateway is meant to stay in the foreground.
 
-## 5. Add the MCP connection to OpenClaw
+## 5. Start or reload OpenClaw
 
-Open a third terminal and run:
+If the OpenClaw gateway is not already running, open another terminal and run:
 
 ```sh
-openclaw mcp set a2a \
-  '{"url":"http://127.0.0.1:8787/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${A2A_HOOK_TOKEN}"},"connectionTimeoutMs":5000,"requestTimeoutMs":35000}'
+openclaw gateway run
+```
 
+If OpenClaw was already running, reload its MCP connections:
+
+```sh
+openclaw mcp reload
+```
+
+Check the connection from another terminal:
+
+```sh
 openclaw mcp probe a2a --json
 ```
 
@@ -150,13 +143,13 @@ Check for A2A messages now. Process each message, then acknowledge it with the A
 
 ## Stop and restart
 
-Press `Ctrl-C` in the A2A gateway terminal to stop it. Start it again with the same token, webhook URL, and two development URLs. The saved A2A registration will be reused only when the central endpoints are unchanged.
+This quick start configures one running session. Keep the A2A gateway terminal open. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent restart setup is intentionally left out of this guide.
 
 ## Troubleshooting
 
-- `Invalid webhook token`: reload `A2A_HOOK_TOKEN` from `~/.openclaw/.env` and check that the final command prints `A2A token is ready`.
+- `Invalid webhook token`: generate `A2A_HOOK_TOKEN` again before registration and check that the command prints `A2A token is ready`.
 - `Gateway local state failed`: make sure both development URLs are set, use HTTPS for remote hosts, and remove query strings or `#` fragments.
 - MCP probe returns `401`: OpenClaw and the A2A gateway are not using the same `A2A_HOOK_TOKEN`.
-- Webhook returns `401`: restart OpenClaw after setting `hooks.token`, and keep the token in `~/.openclaw/.env` unchanged.
+- Webhook returns `401`: rerun the OpenClaw `hooks.token` command with the current `A2A_HOOK_TOKEN` before registration.
 - Port `8787` is busy: stop the other A2A gateway process. One local gateway may run at a time.
 - Registration works but no wake arrives: confirm the OpenClaw gateway is still running on port `18789` and that the A2A gateway terminal has not exited.
