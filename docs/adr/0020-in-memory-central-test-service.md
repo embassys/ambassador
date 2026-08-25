@@ -1,6 +1,6 @@
 # 0020 In-memory central test service
 
-Status: accepted under delegated approval, user review pending
+Status: accepted
 
 Date: 2026-08-25
 
@@ -35,10 +35,10 @@ MCP  ack_message(message_id)
 
 ## Scope
 
-The fixture proves registration, in-memory verification, JWT capture, removal from local schemas and results, transient upstream token injection, ID-only polling, separate acknowledgements, webhook wake, restart, and redaction. It is not a production central server and does not test real email delivery or PostgreSQL behavior.
+The fixture proves registration, in-memory verification, JWT capture, removal from local schemas and results, transient upstream token injection, ID-only polling, separate acknowledgements, repeatable content retrieval until `ack_message`, webhook wake, restart, and redaction. It is not a production central server and does not test real email delivery or PostgreSQL behavior.
 
 Test-control endpoints require a fixture-only header. They allow reset, verification-code lookup by JSON body, message injection, and ID/status inspection. They never return JWTs or message content. The container uses one non-root worker, no volumes, no access log, and no published CI port.
 
 ## Approval
 
-The user requested a Dockerized central MCP and polling fixture with in-memory email verification on 2026-08-25 and delegated implementation details to the project.
+The user requested a Dockerized central MCP and polling fixture with in-memory email verification on 2026-08-25 and explicitly approved the pinned Python, FastAPI, FastMCP, Pydantic, and Uvicorn stack on 2026-08-25.

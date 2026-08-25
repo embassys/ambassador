@@ -16,13 +16,15 @@ Successful email verification returns the only central agent JWT. The gateway mu
 
 ## Recommendation
 
-Use a dedicated encrypted credential file for the first implementation. Derive the encryption key with `scrypt`, use a fresh random salt and IV, write atomically with owner-only permissions, and authenticate fixed version metadata as additional data. Never place the ciphertext in the relay journal or support bundles.
+Use a dedicated encrypted credential file for the first implementation only if the supplied webhook token has enough entropy to resist offline guessing. Derive the encryption key with `scrypt`, use a fresh random salt and IV, write atomically with owner-only permissions, and authenticate fixed version metadata as additional data. Never place the ciphertext in the relay journal or support bundles.
 
 Store the file under the platform's private `a2a-gateway` state directory. The file contains no webhook URL, email, username, message ID, or MCP data.
 
 Changing the webhook token makes the stored JWT unreadable. Until the central service supports token reissue, startup must report that condition without deleting or replacing the credential.
 
 This encryption protects against accidental plaintext disclosure and access to the state file alone. It does not protect against a same-user attacker who can read both the webhook token and ciphertext. An OS credential vault would provide stronger separation later.
+
+Approval must set a measurable minimum token entropy or replace token-derived encryption with an OS credential vault. It must also define POSIX and Windows access controls and require file and parent-directory synchronization before verification success is returned. Atomic rename alone does not guarantee crash durability.
 
 The central service marks an email verified before the gateway can confirm local persistence. If persistence fails and the process exits, the current one-time token is unrecoverable. Public use therefore requires a central reissue flow; tests still cover local persistence failure so the gateway never reports a token it did not save.
 

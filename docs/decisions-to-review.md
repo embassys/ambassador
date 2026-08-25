@@ -10,7 +10,6 @@ The user approved the single-webhook startup and enrollment architecture on Augu
 | `0007-sqlite.md` | better-sqlite3 with no ORM for the ID-only journal | Changing durable relay storage |
 | `0012-http-deadlines.md` | Bounded HTTP operations and redirect rejection | Public beta operating defaults |
 | `0014-lock-handoff-timeout.md` | One-second SQLite singleton-lock handoff | Public beta operating defaults |
-| `0020-in-memory-central-test-service.md` | Python/FastMCP Docker fixture with in-memory verification and state | Merging the E2E fixture |
 
 ## Approval required
 
@@ -23,3 +22,4 @@ The user approved the single-webhook startup and enrollment architecture on Augu
 
 - ADR 0015 fixes npm distribution as `@a2adev/gateway` with the `a2a-gateway` binary.
 - ADR 0017 fixes the two-option foreground CLI, one webhook and identity, shared local bearer, MCP enrollment, and removal of bindings and runtime discovery.
+- ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.

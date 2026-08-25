@@ -6,7 +6,7 @@ Read this before working on the project.
 
 The gateway is one foreground process between a local agent runtime and the central A2A service. It runs an authenticated loopback MCP server, enrolls one central agent identity, polls that identity's notification stream, and wakes one configured webhook target.
 
-The gateway does not discover OpenClaw, inspect agents, choose a runtime adapter, or manage bindings. The user supplies a webhook URL and an environment-variable reference for its bearer token:
+The gateway does not discover OpenClaw, inspect agents, choose a runtime adapter, or manage bindings. The user supplies a literal-loopback webhook URL and an environment-variable reference for its bearer token:
 
 ```text
 a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
@@ -76,7 +76,7 @@ If persistence fails, verification does not report local success. A second verif
 4. Notification acknowledgement stops ID redelivery but leaves the content available through MCP.
 5. The gateway wakes the webhook with a fixed instruction and an idempotency header.
 6. The agent calls the gateway's MCP `poll_messages` tool to retrieve content from the central MCP server.
-7. The agent processes the message and calls the separate `ack_message` content acknowledgement through the gateway.
+7. The agent processes the message and calls the separate `ack_message` content acknowledgement through the gateway. Content remains retrievable and the same wake ID remains eligible for redrive until this succeeds.
 
 ## Ownership
 

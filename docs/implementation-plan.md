@@ -5,7 +5,7 @@
 - Read the product document, protocol, this plan, review list, and relevant accepted ADRs before work.
 - Write tests, fixtures, and CI before production behavior.
 - Keep the first code PR red until the user reviews its failures.
-- Do not install a production framework or library before its ADR is approved.
+- Do not select or install any framework, library, runtime, package manager, database driver, or build tool before its ADR is explicitly approved.
 - Keep MCP bodies out of the relay, journal, logs, diagnostics, temporary files, crash artifacts, and support bundles.
 - Do not preserve the obsolete setup, binding, adapter, configuration, or service interfaces as compatibility code.
 
@@ -40,8 +40,8 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 | T4 | Enrollment | Test bootstrap-only catalog, registration forwarding, verification JWT interception, token-free result, tool-list change, persistence failure, restart recovery, and identity replacement rejection | T3 | Fails because enrollment does not exist |
 | T5 | Proxy | Test local schemas without `token`, exact transient upstream `token` injection, caller selector rejection, no automatic side-effect retry, and authentication failure behavior | T4 | Fails because proxying does not exist |
 | T6 | Relay | Test dormant polling before enrollment, ID-only poll validation, commit-before-`ack_notification`, bearer webhook, no `agentId`, retries, separate content acknowledgement, and restart | T1, T4 | Fails on legacy controller and binding relay |
-| T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | ADR 0020 | Fixture contract passes independently |
-| T8 | End to end | Start gateway, register, verify, scan out JWT, poll an ID, wake fake webhook, retrieve content through MCP, and acknowledge | T2-T7 | Fails on missing gateway behavior |
+| T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | Approved ADR 0020 | Fixture contract passes independently |
+| T8 | End to end | Start gateway, register, verify, prove JWT absence, poll an ID, wake fake webhook, retrieve content through MCP, and acknowledge | T2-T7 | Fails on missing gateway behavior |
 | C1 | CI | Run unit tests on Linux, macOS, and Windows; build and run Docker E2E on Ubuntu | T1-T8 | Red feature PR with classified failures |
 | V1 | Review | Confirm every failure is missing product behavior rather than a fixture defect | C1 | Written failure inventory |
 | G1 | User | Review the red suite, fixture contract, proposed MCP SDK, and credential storage | V1 | Approval to implement production behavior |
@@ -61,11 +61,11 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 - Require structured verification data with exactly one `token` field.
 - Persist before returning token-free success or enabling polls.
 - Reject concurrent replacement, malformed results, oversized results, and token-bearing registration results.
-- After restart, decrypt and load the stored JWT without exposing it locally.
+- After restart, load the JWT through the abstract credential store without exposing it locally.
 
 ### Required data scan
 
-Tests scan stdout, stderr, errors, SQLite, WAL, SHM, state files other than approved encrypted credential ciphertext, logs, diagnostics, and support artifacts for:
+Tests scan stdout, stderr, errors, every credential-store artifact, SQLite, WAL, SHM, temporary files, crash artifacts, logs, diagnostics, and support artifacts for known plaintext values:
 
 - webhook token;
 - central JWT;
@@ -79,7 +79,7 @@ Tests scan stdout, stderr, errors, SQLite, WAL, SHM, state files other than appr
 | --- | --- | --- | --- | --- |
 | I1 | CLI | Replace command dispatch with the strict two-option foreground `start` | G1 | T2 passes |
 | I2 | MCP | Add the approved SDK, authenticated loopback server, central MCP client, limits, and safe errors | G1, approved ADR 0018 | T3 and T5 transport cases pass |
-| I3 | Credentials | Implement the approved atomic central JWT store and restart loading | G1, approved ADR 0019 | T4 persistence cases pass |
+| I3 | Credentials | Implement the approved atomic central JWT store and restart loading | G1, approved ADR 0019 | Abstract credential-store cases pass |
 | I4 | Enrollment | Add bootstrap catalog, structured verification interception, sanitization, and identity state | I2, I3 | T4 passes |
 | I5 | Relay | Replace binding protocol with one ID stream and one bearer webhook target | I1, I3 | T6 passes |
 | I6 | Assembly | Start MCP immediately, gate polling on identity, coordinate shutdown, and stream startup output | I1-I5 | T8 passes |

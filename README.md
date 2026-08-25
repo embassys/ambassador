@@ -1,6 +1,6 @@
 # A2A gateway
 
-The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one local webhook. It does not discover runtimes or manage agent bindings.
+The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
 The published `0.1.0` package contains the older relay-only implementation. The command below documents the approved replacement and does not work in `0.1.0` yet.
 
@@ -28,7 +28,7 @@ a2a-gateway start \
   --webhook-token-env=OPENCLAW_HOOK_TOKEN
 ```
 
-Only the `--name=value` form is accepted. The gateway does not accept a central JWT, agent ID, binding ID, configuration path, or literal token option.
+Only the `--name=value` form is accepted. The gateway does not accept a central JWT, configured local-runtime agent ID, binding ID, configuration path, or literal token option.
 
 Successful startup prints:
 
@@ -75,7 +75,7 @@ The gateway then starts notification polling. Later local MCP calls have no `tok
 
 ## Delivery
 
-The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed webhook wake with the same ID as its idempotency key. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`.
+The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed OpenClaw-compatible webhook wake with the same ID as its idempotency key. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`. Until that acknowledgement succeeds, content remains retrievable and the gateway periodically re-drives the same wake ID.
 
 SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
