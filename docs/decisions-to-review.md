@@ -11,15 +11,10 @@ The user approved the single-webhook startup and enrollment architecture on Augu
 | `0012-http-deadlines.md` | Bounded HTTP operations and redirect rejection | Public beta operating defaults |
 | `0014-lock-handoff-timeout.md` | One-second SQLite singleton-lock handoff | Public beta operating defaults |
 
-## Approval required
-
-| ADR | Recommendation | Needed before |
-| --- | --- | --- |
-| `0018-mcp-sdk.md` | Official split MCP TypeScript SDK version 2 packages | Installing production MCP dependencies |
-| `0019-central-credential-storage.md` | AES-256-GCM credential file keyed from the webhook token | Implementing durable central JWT storage |
-
 ## Resolved
 
 - ADR 0015 fixes npm distribution as `@a2adev/gateway` with the `a2a-gateway` binary.
 - ADR 0017 fixes the two-option foreground CLI, one webhook and identity, shared local bearer, MCP enrollment, and removal of bindings and runtime discovery.
+- ADR 0018 fixes the official split MCP TypeScript SDK packages at version 2.0.0.
+- ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.
 - ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.

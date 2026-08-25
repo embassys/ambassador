@@ -25,7 +25,7 @@ One foreground process owns one webhook, one authenticated loopback MCP endpoint
 | --- | --- | --- |
 | D1 | Replace multi-binding architecture and protocol | ADR 0017 and revised product/protocol docs |
 | D2 | Remove obsolete ADRs and active-review entries | Only current decisions remain |
-| D3 | Record MCP dependency and credential-storage choices | ADRs 0018 and 0019 await explicit approval |
+| D3 | Record MCP dependency and credential-storage choices | ADRs 0018 and 0019 accepted |
 | D4 | Record the independent in-memory central fixture | ADR 0020 |
 
 ## Red test PR
@@ -51,6 +51,7 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 - Accept only `start --webhook-url=<url> --webhook-token-env=<name>`.
 - Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
 - Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
+- Require the resolved webhook token to match OpenClaw's generated `[0-9a-f]{48}` format.
 - Acquire the singleton lock before resolving the token or touching credentials.
 - Print the endpoint only after successful bind and keep running until cancellation.
 - Never print either token or a credential-bearing MCP URL.
