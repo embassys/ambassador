@@ -404,7 +404,61 @@ test("a failed webhook attempt retries the same opaque ID", async (t) => {
   assert.equal(await gateway.stop(), 0);
 });
 
-test("the packaged CLI stays foreground, owns one instance, and stops on SIGTERM", async (t) => {
+test("the CLI completes the flow through development central URLs", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  const gateway = await startGatewayProcess(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    ...(process.env.A2A_PACKED_GATEWAY_CLI === undefined
+      ? {}
+      : { executable: process.env.A2A_PACKED_GATEWAY_CLI }),
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+
+  await client.callTool("register_agent", {
+    username: "fixture-agent",
+    email: EMAIL,
+    display_name: "Fixture Agent",
+  });
+  const listChanged = client.waitForNotification("notifications/tools/list_changed");
+  const verification = await client.callTool("verify_email", { email: EMAIL, code: CODE });
+  assert.equal(verification.verified, true);
+  assert.equal(Object.hasOwn(verification, "token"), false);
+  await listChanged;
+
+  central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
+  const wake = await webhook.waitForWake();
+  assert.equal(wake.headers["idempotency-key"], MESSAGE_ID);
+  await waitFor(() => central.messageState(MESSAGE_ID).notificationAcknowledged);
+  const polled = await client.callTool("poll_messages", { timeout: 0 });
+  assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, MESSAGE_ID);
+  await client.callTool("ack_message", { message_id: MESSAGE_ID });
+  assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, true);
+
+  const stopped = await gateway.stop();
+  assert.equal(stopped.code, 0);
+  const forbiddenArtifacts = [
+    central.jwt,
+    central.apiUrl,
+    central.mcpUrl,
+    EMAIL,
+    CODE,
+    MESSAGE_CONTENT,
+  ];
+  await scanFiles(gateway.artifactRoot, forbiddenArtifacts);
+  for (const marker of forbiddenArtifacts) {
+    assert.ok(!gateway.stdout().includes(marker));
+    assert.ok(!gateway.stderr().includes(marker));
+  }
+});
+
+test("the built CLI stays foreground, owns one instance, and stops on SIGTERM", async (t) => {
   const webhook = await startFakeWebhook(t);
   const token = "fedcba9876543210fedcba9876543210fedcba9876543210";
   const gateway = await startGatewayProcess(t, { webhookUrl: webhook.url, webhookToken: token });
