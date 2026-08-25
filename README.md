@@ -27,6 +27,8 @@ export A2A_DEV_CENTRAL_API_URL='https://dev.example.com'
 export A2A_DEV_CENTRAL_MCP_URL='https://dev.example.com/mcp'
 ```
 
+The encrypted central credential is bound to this canonical endpoint pair. Reuse the same two URLs after enrollment; changing either URL fails closed before the credential can be sent.
+
 Start one foreground gateway:
 
 ```sh

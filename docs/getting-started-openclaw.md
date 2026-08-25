@@ -66,6 +66,7 @@ In the same terminal, run:
 openclaw config set hooks.enabled true --strict-json
 openclaw config set hooks.path /hooks
 openclaw config set hooks.token '${A2A_HOOK_TOKEN}'
+openclaw config set gateway.mode local
 openclaw config validate
 ```
 
@@ -130,7 +131,7 @@ Register this agent with A2A. Ask me for the username, display name, and email a
 
 OpenClaw will ask for your details and call `register_agent`. When the code arrives by email, paste only the code into the chat. The gateway saves the central credential and removes it from the result before OpenClaw sees it.
 
-After verification, OpenClaw receives a tool-list update. The registration tools disappear and the normal A2A tools appear.
+After verification, the gateway emits a tool-list update. The registration tools disappear and the normal A2A tools appear. If the current chat does not refresh its tools, start a new chat.
 
 ## 7. Try a message
 
@@ -149,7 +150,7 @@ Check for A2A messages now. Process each message, then acknowledge it with the A
 
 ## Stop and restart
 
-Press `Ctrl-C` in the A2A gateway terminal to stop it. Start it again with the same token, webhook URL, and two development URLs. The saved A2A registration will be reused.
+Press `Ctrl-C` in the A2A gateway terminal to stop it. Start it again with the same token, webhook URL, and two development URLs. The saved A2A registration will be reused only when the central endpoints are unchanged.
 
 ## Troubleshooting
 

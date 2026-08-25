@@ -15,6 +15,7 @@ test("package metadata exposes the approved public gateway", async () => {
   assert.deepEqual(packageJson.bin, { "a2a-gateway": "dist/cli.js" });
   assert.deepEqual(packageJson.files, [
     "dist",
+    "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
   ]);
