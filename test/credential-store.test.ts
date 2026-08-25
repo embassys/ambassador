@@ -19,6 +19,7 @@ import { type TestContext, test } from "node:test";
 
 import {
   EncryptedFileCredentialStore,
+  type EncryptedFileCredentialStoreOptions,
   type WindowsCredentialAccessControl,
 } from "../src/credential-store.js";
 
@@ -26,7 +27,17 @@ const HOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_HOOK_TOKEN = "abcdef0123456789abcdef0123456789abcdef0123456789";
 const CENTRAL_JWT = "header.payload.central-signature-value";
 const OTHER_CENTRAL_JWT = "other-header.other-payload.other-signature";
-const SECRET_MARKERS = [HOOK_TOKEN, OTHER_HOOK_TOKEN, CENTRAL_JWT, OTHER_CENTRAL_JWT];
+const CREDENTIAL_SCOPE = "central:https://api.example.test|https://mcp.example.test/mcp";
+const OTHER_CREDENTIAL_SCOPE =
+  "central:https://other-api.example.test|https://other-mcp.example.test/mcp";
+const SECRET_MARKERS = [
+  HOOK_TOKEN,
+  OTHER_HOOK_TOKEN,
+  CENTRAL_JWT,
+  OTHER_CENTRAL_JWT,
+  CREDENTIAL_SCOPE,
+  OTHER_CREDENTIAL_SCOPE,
+];
 
 interface StoreFixture {
   root: string;
@@ -62,18 +73,27 @@ async function assertNoSecretFiles(root: string): Promise<void> {
   }
 }
 
+function credentialStore(
+  path: string,
+  token = HOOK_TOKEN,
+  scope = CREDENTIAL_SCOPE,
+  options: EncryptedFileCredentialStoreOptions = {},
+): EncryptedFileCredentialStore {
+  return new EncryptedFileCredentialStore(path, token, scope, options);
+}
+
 test("round trips one central credential across store instances", async (t) => {
   const item = await fixture(t);
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const store = credentialStore(item.path);
   await store.save(CENTRAL_JWT);
 
-  const restarted = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const restarted = credentialStore(item.path);
   assert.ok((await restarted.load()) === CENTRAL_JWT);
 });
 
 test("writes only the strict cryptographic envelope and no plaintext", async (t) => {
   const item = await fixture(t);
-  await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).save(CENTRAL_JWT);
+  await credentialStore(item.path).save(CENTRAL_JWT);
 
   await assertNoSecretFiles(item.root);
   const envelope = JSON.parse(await readFile(item.path, "utf8")) as Record<string, unknown>;
@@ -103,28 +123,38 @@ test("writes only the strict cryptographic envelope and no plaintext", async (t)
 
 test("a different valid webhook token cannot decrypt the credential", async (t) => {
   const item = await fixture(t);
-  await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).save(CENTRAL_JWT);
+  await credentialStore(item.path).save(CENTRAL_JWT);
 
-  const wrongStore = new EncryptedFileCredentialStore(item.path, OTHER_HOOK_TOKEN);
+  const wrongStore = credentialStore(item.path, OTHER_HOOK_TOKEN);
   await expectSafeRejection(() => wrongStore.load());
-  assert.ok((await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).load()) === CENTRAL_JWT);
+  assert.ok((await credentialStore(item.path).load()) === CENTRAL_JWT);
+});
+
+test("a different central endpoint scope cannot decrypt the credential", async (t) => {
+  const item = await fixture(t);
+  await credentialStore(item.path).save(CENTRAL_JWT);
+
+  await expectSafeRejection(() =>
+    credentialStore(item.path, HOOK_TOKEN, OTHER_CREDENTIAL_SCOPE).load(),
+  );
+  assert.equal(await credentialStore(item.path).load(), CENTRAL_JWT);
 });
 
 test("rejects authenticated-ciphertext tampering", async (t) => {
   const item = await fixture(t);
-  await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).save(CENTRAL_JWT);
+  await credentialStore(item.path).save(CENTRAL_JWT);
   const envelope = JSON.parse(await readFile(item.path, "utf8")) as Record<string, unknown>;
   const tag = Buffer.from(String(envelope.tag), "base64");
   tag[0] = (tag[0] as number) ^ 1;
   envelope.tag = tag.toString("base64");
   await writeFile(item.path, JSON.stringify(envelope));
 
-  await expectSafeRejection(() => new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).load());
+  await expectSafeRejection(() => credentialStore(item.path).load());
 });
 
 test("rejects malformed, incomplete, and unknown credential fields", async (t) => {
   const item = await fixture(t);
-  await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).save(CENTRAL_JWT);
+  await credentialStore(item.path).save(CENTRAL_JWT);
   const original = JSON.parse(await readFile(item.path, "utf8")) as Record<string, unknown>;
   const cases: Array<[string, string]> = [
     ["malformed JSON", "{"],
@@ -139,32 +169,28 @@ test("rejects malformed, incomplete, and unknown credential fields", async (t) =
   for (const [name, contents] of cases) {
     await t.test(name, async () => {
       await writeFile(item.path, contents);
-      await expectSafeRejection(() =>
-        new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).load(),
-      );
+      await expectSafeRejection(() => credentialStore(item.path).load());
     });
   }
 });
 
 test("never overwrites the first stored identity", async (t) => {
   const item = await fixture(t);
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const store = credentialStore(item.path);
   await store.save(CENTRAL_JWT);
   const before = await readFile(item.path);
 
   await expectSafeRejection(() => store.save(OTHER_CENTRAL_JWT));
-  await expectSafeRejection(() =>
-    new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).save(OTHER_CENTRAL_JWT),
-  );
+  await expectSafeRejection(() => credentialStore(item.path).save(OTHER_CENTRAL_JWT));
   const after = await readFile(item.path);
   assert.ok(before.equals(after));
-  assert.ok((await new EncryptedFileCredentialStore(item.path, HOOK_TOKEN).load()) === CENTRAL_JWT);
+  assert.ok((await credentialStore(item.path).load()) === CENTRAL_JWT);
 });
 
 test("serializes concurrent saves for the same identity path", async (t) => {
   const item = await fixture(t);
-  const first = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
-  const second = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const first = credentialStore(item.path);
+  const second = credentialStore(item.path);
 
   const firstSave = first.save(CENTRAL_JWT);
   await expectSafeRejection(() => second.save(OTHER_CENTRAL_JWT));
@@ -178,7 +204,7 @@ test("enforces owner-only POSIX directory and file modes on save and load", {
   const item = await fixture(t);
   await mkdir(item.directory, { mode: 0o777 });
   await chmod(item.directory, 0o777);
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const store = credentialStore(item.path);
   await store.save(CENTRAL_JWT);
 
   assert.equal((await stat(item.directory)).mode & 0o7777, 0o700);
@@ -200,7 +226,7 @@ test("rejects POSIX credential and directory symlinks without touching their tar
     const target = join(item.root, "target");
     await writeFile(target, "target-data", { mode: 0o644 });
     await symlink(target, item.path);
-    const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+    const store = credentialStore(item.path);
 
     await expectSafeRejection(() => store.load());
     await expectSafeRejection(() => store.save(CENTRAL_JWT));
@@ -213,7 +239,7 @@ test("rejects POSIX credential and directory symlinks without touching their tar
     const targetDirectory = join(item.root, "target-state");
     await mkdir(targetDirectory, { mode: 0o700 });
     await symlink(targetDirectory, item.directory);
-    const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+    const store = credentialStore(item.path);
 
     await expectSafeRejection(() => store.load());
     await expectSafeRejection(() => store.save(CENTRAL_JWT));
@@ -229,7 +255,7 @@ test("rejects a POSIX hard-linked credential without changing its target", {
   const target = join(item.root, "target");
   await writeFile(target, "target-data", { mode: 0o644 });
   await link(target, item.path);
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const store = credentialStore(item.path);
 
   await expectSafeRejection(() => store.load());
   await expectSafeRejection(() => store.save(CENTRAL_JWT));
@@ -241,7 +267,7 @@ test("rejects a POSIX hard-linked credential without changing its target", {
 test("reports persistence failure without writing plaintext or a final file", async (t) => {
   const item = await fixture(t, "a2a-credential-failure-test-");
   await writeFile(item.directory, "directory-blocker");
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN);
+  const store = credentialStore(item.path);
 
   await expectSafeRejection(() => store.save(CENTRAL_JWT));
   await expectSafeRejection(() => access(item.path));
@@ -257,7 +283,7 @@ test("fails closed when injected Windows DACL enforcement fails", async (t) => {
       throw new Error("injected access-control failure");
     },
   };
-  const store = new EncryptedFileCredentialStore(item.path, HOOK_TOKEN, {
+  const store = credentialStore(item.path, HOOK_TOKEN, CREDENTIAL_SCOPE, {
     platform: "win32",
     windowsAccessControl: accessControl,
   });
@@ -280,7 +306,7 @@ test("rejects invalid webhook-token formats before touching state", async (t) =>
   ];
 
   for (const token of invalidTokens) {
-    assert.throws(() => new EncryptedFileCredentialStore(item.path, token));
+    assert.throws(() => credentialStore(item.path, token));
   }
   await expectSafeRejection(() => access(item.directory));
 });

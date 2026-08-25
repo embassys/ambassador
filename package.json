@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md"
   ],

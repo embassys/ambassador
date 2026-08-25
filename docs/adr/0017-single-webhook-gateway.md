@@ -69,4 +69,4 @@ The replacement uses new `a2a-gateway` state paths and ignores legacy `a2a-sidec
 
 ## Approval
 
-The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history.
+The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history.

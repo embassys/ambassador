@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-08-25
 
+Updated: 2026-08-25 to bind credentials to their central endpoints
+
 ## Problem
 
 Successful email verification returns the only central agent JWT. The gateway must survive a restart without returning that JWT to the agent or writing plaintext credentials to configuration or SQLite.
@@ -18,7 +20,7 @@ Successful email verification returns the only central agent JWT. The gateway mu
 
 Use a dedicated encrypted credential file for the first implementation. The resolved webhook token must match OpenClaw's generated token format, exactly 48 lowercase hexadecimal characters encoding 192 random bits. Reject any other token before opening the credential file or binding MCP.
 
-Decode the validated hook token to 24 bytes, then derive a 32-byte key with `scrypt` using a fresh 16-byte salt and parameters `N=131072`, `r=8`, and `p=1`. Encrypt with AES-256-GCM using a fresh 12-byte IV, a 16-byte tag, and fixed version metadata as additional authenticated data. The versioned file stores only the KDF parameters, salt, IV, tag, and ciphertext. Never place it in the relay journal or support bundles.
+Decode the validated hook token to 24 bytes, then derive a 32-byte key with `scrypt` using a fresh 16-byte salt and parameters `N=131072`, `r=8`, and `p=1`. Encrypt with AES-256-GCM using a fresh 12-byte IV and a 16-byte tag. The additional authenticated data contains the fixed version metadata and the canonical central API/MCP endpoint pair. The endpoint pair is not stored in the credential file, but changing it makes the existing credential fail authentication before any JWT can be sent upstream. The versioned file stores only the KDF parameters, salt, IV, tag, and ciphertext. Never place it in the relay journal or support bundles.
 
 Store the file under the platform's private `a2a-gateway` state directory. The file contains no webhook URL, email, username, message ID, or MCP data.
 

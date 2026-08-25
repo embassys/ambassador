@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer, type IncomingHttpHeaders } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -55,6 +57,7 @@ async function startOpenClaw(
           path: "/hooks",
           token: `\${A2A_HOOK_TOKEN}`,
         },
+        gateway: { mode: "local" },
         mcp: {
           servers: {
             a2a: {
@@ -83,7 +86,7 @@ async function startOpenClaw(
   };
   const child = spawn(
     process.execPath,
-    [executable, "gateway", "run", "--allow-unconfigured", "--auth", "none", "--port", "18789"],
+    [executable, "gateway", "run", "--auth", "none", "--port", "18789"],
     { env, stdio: ["ignore", "pipe", "pipe"] },
   );
   let stdout = "";
@@ -160,6 +163,73 @@ async function probeOpenClaw(executable: string, env: NodeJS.ProcessEnv): Promis
   return result.tools.map(String).sort();
 }
 
+async function observeOpenClawWebhook(t: TestContext): Promise<{
+  url: string;
+  waitForWake: () => Promise<{
+    headers: IncomingHttpHeaders;
+    body: Record<string, unknown>;
+    openclawStatus: number;
+  }>;
+}> {
+  let resolveWake:
+    | ((wake: {
+        headers: IncomingHttpHeaders;
+        body: Record<string, unknown>;
+        openclawStatus: number;
+      }) => void)
+    | undefined;
+  const wake = new Promise<{
+    headers: IncomingHttpHeaders;
+    body: Record<string, unknown>;
+    openclawStatus: number;
+  }>((resolve) => {
+    resolveWake = resolve;
+  });
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    try {
+      const upstream = await fetch("http://127.0.0.1:18789/hooks/agent", {
+        method: "POST",
+        headers: {
+          Authorization: String(request.headers.authorization),
+          "Content-Type": String(request.headers["content-type"]),
+          "Idempotency-Key": String(request.headers["idempotency-key"]),
+        },
+        body: bytes,
+      });
+      await upstream.body?.cancel();
+      const body = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+      resolveWake?.({ headers: request.headers, body, openclawStatus: upstream.status });
+      response.writeHead(upstream.status, { "content-type": "application/json" });
+      response.end('{"ok":true}');
+    } catch {
+      response.writeHead(502, { "content-type": "application/json" });
+      response.end('{"ok":false}');
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/hooks/agent`,
+    waitForWake: async () =>
+      await Promise.race([
+        wake,
+        delay(10_000, undefined, { ref: false }).then(() =>
+          assert.fail("OpenClaw did not receive the gateway wake"),
+        ),
+      ]),
+  };
+}
+
 test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
   skip: OPENCLAW_CLI === undefined || GATEWAY_CLI === undefined,
   timeout: 60_000,
@@ -167,21 +237,11 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
   assert.ok(OPENCLAW_CLI !== undefined);
   assert.ok(GATEWAY_CLI !== undefined);
   const openclaw = await startOpenClaw(t, OPENCLAW_CLI);
-  const webhookResponse = await fetch("http://127.0.0.1:18789/hooks/agent", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${WEBHOOK_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      message: "You have new A2A work. Use the A2A tools to poll, process, and acknowledge it.",
-    }),
-  });
-  assert.equal(webhookResponse.status, 200);
+  const webhook = await observeOpenClawWebhook(t);
 
   const central = await startFakeCentral(t);
   const gateway = await startGatewayProcess(t, {
-    webhookUrl: "http://127.0.0.1:18789/hooks/agent",
+    webhookUrl: webhook.url,
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
@@ -212,6 +272,16 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
   ]);
 
   central.injectMessage("openclaw_message_01", "OpenClaw interoperability content");
+  const wake = await webhook.waitForWake();
+  assert.equal(wake.openclawStatus, 200);
+  assert.equal(wake.headers["idempotency-key"], "openclaw_message_01");
+  assert.deepEqual(wake.body, {
+    message:
+      "A2A message openclaw_message_01 is ready. Use the A2A MCP tools to retrieve and process it.",
+    name: "A2A Gateway",
+    deliver: false,
+    wakeMode: "now",
+  });
   await waitFor(() => central.messageState("openclaw_message_01").notificationAcknowledged);
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, "openclaw_message_01");

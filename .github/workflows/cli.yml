@@ -141,10 +141,17 @@ jobs:
           install_root="$RUNNER_TEMP/a2a-install"
           npm install --prefix "$install_root" "$RUNNER_TEMP/$tarball"
           test -x "$install_root/node_modules/.bin/a2a-gateway"
-          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-            node --test \
-              --test-name-pattern="the CLI completes the flow through development central URLs" \
-              .test-dist/test/single-webhook-e2e.test.js
+          test_output=$(
+            A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+              node --test \
+                --test-reporter=tap \
+                --test-name-pattern="the CLI completes the flow through development central URLs" \
+                .test-dist/test/single-webhook-e2e.test.js
+          )
+          printf '%s\n' "$test_output"
+          grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
+          A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
+            node --test .test-dist/test/hermes-webhook-bridge.test.js
       - name: Verify OpenClaw interoperability
         if: matrix.openclaw
         shell: bash
@@ -177,8 +184,6 @@ jobs:
       - name: Use qualified npm
         run: npm install --global npm@11.19.0
       - run: npm ci
-      - name: Verify package contents
-        run: npm pack --dry-run
       - name: Check published version
         id: version
         shell: bash
@@ -190,6 +195,30 @@ jobs:
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Pack and test publication artifact
+        if: steps.version.outputs.publish == 'true'
+        id: artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:build
+          npm pack --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/a2a-publish-pack.json"
+          tarball=$(node -e 'const [pack] = require(process.argv[1]); process.stdout.write(pack.filename)' "$RUNNER_TEMP/a2a-publish-pack.json")
+          install_root="$RUNNER_TEMP/a2a-publish-install"
+          npm install --prefix "$install_root" "$RUNNER_TEMP/$tarball"
+          test -x "$install_root/node_modules/.bin/a2a-gateway"
+          test_output=$(
+            A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+              node --test \
+                --test-reporter=tap \
+                --test-name-pattern="the CLI completes the flow through development central URLs" \
+                .test-dist/test/single-webhook-e2e.test.js
+          )
+          printf '%s\n' "$test_output"
+          grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
+          A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
+            node --test .test-dist/test/hermes-webhook-bridge.test.js
+          echo "tarball=$RUNNER_TEMP/$tarball" >> "$GITHUB_OUTPUT"
       - name: Publish package
         if: steps.version.outputs.publish == 'true'
-        run: npm publish
+        run: npm publish "${{ steps.artifact.outputs.tarball }}"
