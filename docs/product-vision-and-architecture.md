@@ -2,102 +2,102 @@
 
 Read this before working on the project.
 
-## What we are building
+## Product
 
-The gateway is one per-user daemon with two responsibilities. Its notification relay durably receives opaque IDs and wakes local AI agents. Its local MCP proxy authenticates independently running agents, holds their central JWT references, and injects those JWTs into central MCP calls.
+The gateway is one foreground process between a local agent runtime and the central A2A service. It runs an authenticated loopback MCP server, enrolls one central agent identity, polls that identity's notification stream, and wakes one configured webhook target.
 
-This combined-process design is an intentional short- and medium-term choice. It matches the available central API, which identifies each message stream through an agent JWT. We may split the responsibilities after the controller provides an installation-scoped notification API and restricted gateway credentials.
-
-The user's machine remains closed to inbound internet traffic. The local MCP endpoint listens only on loopback and requires caller authentication.
-
-## Rules we will not bend
-
-- The notification path receives opaque IDs only. It rejects task text, responses, permissions, grants, tool arguments, and MCP payloads.
-- The combined process may handle MCP requests and responses transiently, but it never writes them to configuration, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
-- A local MCP caller is authenticated and mapped to one fixed binding. Request data cannot select another binding or central JWT.
-- Central JWT values come from approved secret references. They never appear in configuration, URLs, MCP tool arguments or results, durable state, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
-- Once the gateway acknowledges a notification, that notification must survive a crash or restart.
-- A wake retry uses the same `delivery_id`, so the runtime can detect a duplicate wake.
-- One gateway can route deliveries and MCP calls for several local agents.
-- Runtime-specific wake code stays behind adapters.
-- The gateway does not run a model or hold model-provider credentials.
-- No gateway interface accepts inbound internet traffic.
-
-## How it fits together
+The gateway does not discover OpenClaw, inspect agents, choose a runtime adapter, or manage bindings. The user supplies a webhook URL and an environment-variable reference for its bearer token:
 
 ```text
-Central controller and MCP API
-  authentication, authorization, delivery queue, MCP tools
-          ^                              |
-          | authenticated MCP calls      | authenticated long poll, IDs only
-          |                              v
-Combined local gateway process
-  local MCP proxy              notification relay
-  JWT injection                durable journal and retries
-          ^                              |
-          | authenticated loopback MCP   | authenticated local wake, delivery ID
-          |                              v
-Local agent runtime <-------------- wake adapter
-  independent process
+a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 ```
 
-## Delivery and tool flow
+The same bearer token authenticates calls from the local MCP client. The gateway prints `http://127.0.0.1:8787/mcp` after it binds successfully. The user configures that address in the local agent runtime.
 
-1. A configured binding associates one central agent identity and JWT reference, an authenticated local caller mapping, and one wake adapter.
-2. The gateway long-polls that binding's central message stream and accepts an opaque message ID only.
-3. The relay validates and records the ID before acknowledging it.
-4. The relay wakes the configured runtime with a fixed instruction and the same delivery ID.
-5. The independent agent calls the gateway's loopback MCP endpoint without supplying its central JWT.
-6. The proxy authenticates the local caller, selects the caller's fixed binding, injects that binding's central JWT, and forwards the tool call.
-7. MCP request and response bodies pass through memory but are not persisted or logged.
-8. The relay reports wake acceptance or failure when the controller supports that operation.
+## Rules
 
-## Data boundary
+- One process owns one webhook target and one central identity.
+- The process runs in the foreground and accepts exactly two required named startup options in `--name=value` form.
+- The MCP listener binds only to `127.0.0.1:8787` and authenticates every request with the webhook bearer token.
+- Before enrollment, the local MCP catalog contains only the central-JWT-exempt registration and verification tools.
+- The gateway captures the central JWT from a successful verification response before returning a token-free result to the agent.
+- Future central MCP calls and notification polls receive the stored JWT from the gateway. Local tool schemas never contain a JWT argument; the proxy adds `token` only to the transient upstream tool call required by the current central MCP contract.
+- The durable notification journal contains opaque IDs and relay state only.
+- MCP arguments and results, task content, permission data, registration email, verification codes, and plaintext JWTs never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+- The gateway does not run a model or hold model-provider credentials.
+- No listener binds beyond loopback.
 
-The durable relay may store notification, delivery, and binding IDs. It may also store retry state, timestamps, local session mappings, and pending acknowledgements or wake reports.
+## Flow
 
-The combined process may transiently process MCP tool arguments and responses. It must not store prompts, attachments, agent responses, results, permission details, grants, central JWT values, or MCP request and response bodies in files, SQLite, diagnostics, metrics, logs, temporary spools, crash artifacts, or support bundles.
+```text
+Local agent runtime
+  |  authenticated MCP using webhook token
+  v
+Gateway MCP server on 127.0.0.1:8787
+  |  registration before enrollment
+  |  stored central JWT after verification
+  v
+Central MCP server
 
-Notification parsing and MCP proxying remain separate code paths. Content accepted by the MCP proxy must never enter the relay state machine or durable outbox.
+Central ID notification API
+  |  authenticated poll after enrollment
+  v
+Gateway ID-only relay
+  |  bearer webhook wake
+  v
+Configured local webhook
+```
 
-## Who owns what
+### Startup
+
+1. Acquire the singleton lock before resolving tokens, opening credentials, binding MCP, polling, or sending a webhook.
+2. Resolve the webhook token from the named environment variable.
+3. Bind the authenticated MCP endpoint to `127.0.0.1:8787`.
+4. Load an existing central JWT from the approved credential store, if present.
+5. Start ID-only notification polling only when a central JWT is available.
+6. Print the MCP endpoint and wait until interrupted.
+
+### Enrollment
+
+1. The user tells the local agent to register with A2A.
+2. The agent gathers username, display name, and email through normal conversation.
+3. The agent calls local `register_agent`; the gateway forwards it centrally without a central JWT.
+4. The user gives the emailed code to the agent.
+5. The agent calls local `verify_email`; the gateway forwards it centrally.
+6. The gateway validates the upstream result, extracts and persists the central JWT, removes it from the local result, and enables authenticated tools and polling.
+
+If persistence fails, verification does not report local success. A second verification cannot replace an enrolled identity silently.
+
+### Delivery
+
+1. The gateway polls the central ID view with the stored JWT.
+2. The central service returns opaque message IDs without consuming the content-bearing MCP message.
+3. The gateway stores each new ID and then sends the separate idempotent `ack_notification` persistence acknowledgement.
+4. Notification acknowledgement stops ID redelivery but leaves the content available through MCP.
+5. The gateway wakes the webhook with a fixed instruction and an idempotency header.
+6. The agent calls the gateway's MCP `poll_messages` tool to retrieve content from the central MCP server.
+7. The agent processes the message and calls the separate `ack_message` content acknowledgement through the gateway.
+
+## Ownership
 
 | Component | Responsibility |
 | --- | --- |
-| Central controller and MCP API | Agent authentication, authorization, message assignment, task state, grants, and MCP tools |
-| Gateway notification relay | ID receipt, durable acknowledgement, local binding lookup, wake retries, and wake reports |
-| Gateway local MCP proxy | Local caller authentication, fixed binding selection, approved tool exposure, central JWT injection, forwarding limits, and response return |
-| Wake adapter | Runtime authentication, wake request translation, health checks, and idempotency keys |
-| Local runtime | Agent sessions and authenticated calls to the gateway's loopback MCP endpoint |
+| Central service | Registration, email verification, agent JWT issuance, authorization, message content, permissions, and MCP tools |
+| Gateway MCP path | Local bearer authentication, bootstrap tools, JWT capture, token-free local results, transient upstream `token` injection, limits, and cancellation |
+| Gateway relay | ID-only polling, durable IDs, wake retries, and acknowledgement observation |
+| Local runtime | User interaction, MCP tool use, model execution, and webhook handling |
 
-## Short-term release target
+## Current release boundary
 
-- One headless per-user process plus CLI.
-- ID-only durable notification relay.
-- Authenticated loopback MCP proxy in the same process.
-- Per-binding central JWT references, with no JWT tool arguments.
-- macOS, Linux, and Windows service support.
-- Generic authenticated webhook adapter.
-- Hermes and OpenClaw presets after their wake paths and duplicate handling pass tests.
-- Model-free fake controller, fake central MCP service, and fake runtime for local and CI testing.
+The published `0.1.0` package implements the discarded setup, binding, adapter, and controller contract. It does not implement this design. Do not present `0.1.0` as an end-to-end A2A integration.
 
-## Not in the short-term release
+The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation.
 
-- Implementing or hosting the central MCP service.
-- Durable storage of task, result, permission, grant, or MCP payload data.
-- An MCP or notification listener exposed beyond loopback.
-- Public A2A server or Agent Card.
-- ACP and headless CLI adapters.
-- Grok Bot and hosted-agent connectors.
-- Desktop GUI and automatic self-update.
+## Open decisions
 
-## Open constraints
-
-- Select and approve the local MCP transport and caller-authentication contract.
-- Select the proxied tool catalog and define central JWT enrollment, refresh, revocation, and reissue without returning JWTs through local tools.
-- Redesign configuration and CLI setup for per-binding central JWT references and local MCP identities.
-- Confirm global message-ID uniqueness across JWT-scoped poll streams. Otherwise approve one namespacing design for journal keys, acknowledgement mapping, and runtime wake idempotency keys before integration.
-- Add controller redelivery, idempotent persistence acknowledgement, expiry metadata, and wake reporting around the available `poll_messages` API.
-- Add OS credential-vault support before public beta.
-- Prove cross-binding isolation and prove that MCP content never reaches durable state or logs.
-- Prove duplicate wake behavior in each supported runtime.
+- Approve the production MCP SDK in ADR `0018-mcp-sdk.md`.
+- Approve central JWT persistence in ADR `0019-central-credential-storage.md`.
+- Obtain stable production central API and MCP URLs for package constants.
+- Add central support for an ID-only, non-consuming notification view and structured verification results.
+- Define central JWT revocation, reissue, and intentional local reset.
+- Require central token reissue before relying on one-time verification in public use; a crash after remote issuance but before local persistence is otherwise unrecoverable.

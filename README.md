@@ -1,134 +1,115 @@
 # A2A gateway
 
-The A2A gateway is a per-user daemon that wakes local agent runtimes after a central controller authorizes work. The published `0.1.0` development preview implements a locally durable, ID-only relay against its fake v1 controller contract.
+The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one local webhook. It does not discover runtimes or manage agent bindings.
 
-ADR `0016-combined-gateway-mcp-proxy.md` approves the next short- and medium-term design: the same process will also expose an authenticated loopback MCP proxy and inject a central agent JWT for each binding. MCP content may then pass through process memory, but it must never enter configuration, SQLite, diagnostics, metrics, or logs. The proxy is not implemented yet.
+The published `0.1.0` package contains the older relay-only implementation. The command below documents the approved replacement and does not work in `0.1.0` yet.
 
-This repository contains a working development preview. It is not ready for public beta. See `docs/implementation-status.md` for the remaining release work.
+## Target usage
 
-## Requirements
+Requirements:
 
 - Node.js 24.19.x
 - npm 11
+- A local webhook URL and its bearer token
 
-Install globally for background operation:
+Install the package:
 
 ```sh
 npm install --global @a2adev/gateway
-a2a-gateway version
 ```
 
-Run a temporary command without installing:
+Start one foreground gateway:
+
+```sh
+export OPENCLAW_HOOK_TOKEN='your-existing-hook-token'
+
+a2a-gateway start \
+  --webhook-url=http://127.0.0.1:18789/hooks/agent \
+  --webhook-token-env=OPENCLAW_HOOK_TOKEN
+```
+
+Only the `--name=value` form is accepted. The gateway does not accept a central JWT, agent ID, binding ID, configuration path, or literal token option.
+
+Successful startup prints:
+
+```text
+MCP endpoint: http://127.0.0.1:8787/mcp
+```
+
+The process remains in the foreground until interrupted.
+
+## Connect OpenClaw
+
+In another terminal, add the printed endpoint to OpenClaw:
+
+```sh
+openclaw mcp set a2a \
+  '{"url":"http://127.0.0.1:8787/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${OPENCLAW_HOOK_TOKEN}"}}'
+
+openclaw mcp doctor a2a --probe
+```
+
+The same token authenticates calls in both directions. The gateway uses it to call the webhook, and OpenClaw uses it to call the gateway's MCP endpoint. The central JWT never belongs in OpenClaw configuration or an MCP tool argument.
+
+## Register
+
+Tell the local agent:
+
+```text
+Register this agent with A2A.
+```
+
+The agent asks for username, display name, and email, then calls `register_agent`. After the user provides the emailed code, the agent calls `verify_email`.
+
+The central verification response contains a JWT. The gateway captures and persists it before returning a token-free confirmation:
+
+```json
+{
+  "verified": true,
+  "agent_id": "agent_123",
+  "username": "nik-agent"
+}
+```
+
+The gateway then starts notification polling. Later local MCP calls have no `token` argument; the gateway adds the stored JWT only to the transient upstream tool call required by the central server.
+
+## Delivery
+
+The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed webhook wake with the same ID as its idempotency key. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`.
+
+SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+
+## Current implementation
+
+Version `0.1.0` still has setup, binding, adapter, JSON configuration, and user-service code. It has no local MCP listener, registration proxy, JWT interception, or ID-only compatibility with the available central API. See `docs/implementation-status.md` for the replacement plan.
+
+The current package can still report its version:
 
 ```sh
 npx @a2adev/gateway version
 ```
 
-Install and verify a development checkout:
+## Development
 
 ```sh
 npm ci
 npm run check
 npm run build
-npm link
 ```
 
-The local machine may use another Node release for development, but CI and release qualification target Node 24.19.
-
-## Configure
-
-The current CLI stores references to environment variables, never literal credentials. This configuration covers the existing relay; the approved per-binding central JWT and local MCP settings still need a separate CLI and configuration review.
-
-The available central `/api/poll_messages` implementation is not compatible with the relay's crash-safety contract yet: it marks messages delivered while polling and lacks durable redelivery and idempotent acknowledgement. Do not treat the current setup as end-to-end durable against that service.
+Additional checks:
 
 ```sh
-export A2A_CONTROLLER_TOKEN='controller-issued-token'
-
-a2a-gateway setup \
-  --controller-url https://controller.example \
-  --controller-token-env A2A_CONTROLLER_TOKEN
-```
-
-Add a generic webhook binding:
-
-```sh
-export A2A_RUNTIME_SECRET='binding-secret'
-
-a2a-gateway agent add binding_local \
-  --adapter generic \
-  --url http://127.0.0.1:8644/webhooks/a2a \
-  --health-url http://127.0.0.1:8644/health \
-  --secret-env A2A_RUNTIME_SECRET
-```
-
-Hermes uses the same `--secret-env` form. OpenClaw uses `--agent-id` and `--token-env`:
-
-```sh
-a2a-gateway agent add binding_openclaw \
-  --adapter openclaw \
-  --url http://127.0.0.1:18789/hooks/agent \
-  --agent-id agent_local \
-  --token-env A2A_OPENCLAW_TOKEN
-```
-
-Run diagnostics and start the daemon in the foreground:
-
-```sh
-a2a-gateway doctor
-a2a-gateway run
-```
-
-Every command accepts `--config <path>`. Read-only and fully noninteractive commands accept `--json`.
-
-## Planned local MCP proxy
-
-Independently running agents will call an authenticated MCP endpoint bound to loopback. The combined gateway process will map each authenticated local caller to one fixed binding and inject that binding's central JWT. Central JWTs will not be MCP tool arguments.
-
-Every G5 decision listed in `docs/implementation-plan.md`, including ID scope, tool catalog, JWT lifecycle, side-effect semantics, transport, authentication, configuration, CLI, dependencies, and migration, remains unapproved. Registration or verification tools will not return central JWTs through the local proxy. Do not configure an agent against a gateway MCP URL yet.
-
-## Background gateway
-
-One gateway handles every configured agent. `start` uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows. It registers the native user service automatically on first use.
-
-```sh
-a2a-gateway start
-a2a-gateway status --json
-a2a-gateway restart
-a2a-gateway stop
-```
-
-Service definitions contain the executable, CLI path, and config path. They do not contain credentials. Environment-referenced credentials must exist in the service manager's environment.
-
-## Delivery behavior
-
-The gateway relay commits each notification and cursor to SQLite before acknowledgement. A wake retry keeps the same `delivery_id`. Reports stay in a durable outbox until the controller confirms them.
-
-The generic webhook sends this strict body:
-
-```json
-{"protocol_version":1,"delivery_id":"delivery_...","sent_at":"2026-08-23T12:00:02.000Z"}
-```
-
-It signs `<unix-seconds>.<exact-body>` with HMAC-SHA256 and sends the lowercase hexadecimal digest in `X-Webhook-Signature-V2`. The timestamp is in `X-Webhook-Timestamp`.
-
-Hermes and OpenClaw presets are best-effort. Their native duplicate caches do not survive a runtime restart, so neither preset can promise one model turn per delivery. The generic adapter qualifies for the stronger contract only when its receiver durably stores the delivery-to-session mapping.
-
-## Tests
-
-```sh
-npm test
 npm run test:coverage
 npm audit --omit=dev --audit-level=high
 ```
 
-The suite uses Node's test runner, temporary SQLite journals, and local HTTP servers. It does not call a model or an external controller.
-
-The GitHub Actions workflow runs lint, type checks, tests, and the production dependency audit on Linux, macOS, and Windows with Node 24.19.
+The current suite uses Node's test runner, temporary SQLite files, and loopback HTTP fixtures. The replacement plan adds a Dockerized Python/FastMCP central fixture with in-memory verification. Docker E2E runs on Ubuntu CI; the local Docker daemon must be running for local E2E.
 
 ## Design records
 
-- `docs/product-vision-and-architecture.md` defines the product boundary.
-- `docs/protocol-v1.md` defines wire behavior and state transitions.
-- `docs/decisions-to-review.md` lists every provisional choice made under delegated approval.
-- `docs/adr/` contains the corresponding decision records.
-- `docs/adr/0016-combined-gateway-mcp-proxy.md` records the approved interim combined-process architecture.
+- `docs/product-vision-and-architecture.md` defines the target process and data boundary.
+- `docs/protocol-v1.md` defines startup, MCP, enrollment, polling, and webhook behavior.
+- `docs/implementation-plan.md` is the active task list and approval gate.
+- `docs/decisions-to-review.md` lists provisional and proposed choices.
+- `docs/adr/0017-single-webhook-gateway.md` records the approved design.

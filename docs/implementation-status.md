@@ -2,55 +2,80 @@
 
 Status as of August 25, 2026.
 
-## Complete on main
+## Approved target
 
-- Strict controller, wake, and configuration schemas.
-- Secure controller client with fixed v1 paths, bearer authentication, redirect rejection, bounded responses, operation deadlines, and controller retry semantics.
-- SQLite journal with atomic ingestion, durable acknowledgements and reports, queue capacity, atomic claims, crash recovery, conservative clock-offset handling, private single-link SQLite artifacts, and terminal states.
-- Relay polling, wake dispatch, retry timing, expiry, duplicate normalization, bounded outbox replay, report-outage backpressure, and in-process recovery.
-- Generic HMAC webhook adapter.
-- Best-effort Hermes and OpenClaw adapters for the pinned researched contracts.
-- Foreground daemon assembly with atomic crash-releasing one-instance locking and signal-based shutdown.
-- CLI setup, agent management, health tests, status, diagnostics, foreground run, JSON output, and stable exit codes.
-- Per-user service definitions and lifecycle commands for `launchd`, `systemd --user`, and Windows Task Scheduler, including native restart-after-failure policies.
-- Linux, macOS, and Windows CI checks passing on GitHub Actions.
-- 142 automated tests using local HTTP servers, real temporary SQLite files, and concurrent subprocess lock contention.
-- Exact Node 24.19.0 and npm 11.19.0 checks, build, coverage, native SQLite loading, and production dependency audit pass locally.
-- Public `@a2adev/gateway@0.1.0` npm package with the `a2a-gateway` executable, MIT license, and Node 24 engine requirement.
-- Packed-install and executable-link smoke tests, plus a public-registry `npx @a2adev/gateway version` check.
-- Main-branch npm publishing workflow with GitHub OIDC permissions and an already-published-version check.
+- One foreground process starts with `--webhook-url=<url>` and `--webhook-token-env=<name>`.
+- The CLI accepts only named `--name=value` options and has no setup, binding, runtime-discovery, configuration, or service-management flow.
+- The process binds an authenticated Streamable HTTP MCP endpoint at `http://127.0.0.1:8787/mcp` and prints that address after successful startup.
+- The webhook token authenticates both the outbound webhook and every local MCP request.
+- Before enrollment, the MCP server exposes only registration, verification, and resend tools.
+- A successful verification response supplies the central JWT. The gateway persists it, strips it from the local result, starts polling, and adds it only to future transient upstream MCP arguments and central poll authorization.
+- One process owns one webhook and one central identity. There are no bindings or agent IDs.
+- The relay and SQLite remain ID-only. MCP content and plaintext credentials never enter durable relay state or observability outputs.
 
-## Approved design, not implemented
+ADR `0017-single-webhook-gateway.md` records this design. Obsolete ADRs were deleted at the user's direction.
 
-- ADR `0016-combined-gateway-mcp-proxy.md` approves one process for ID-only notification relay, runtime wake delivery, and authenticated local MCP proxying in the short and medium term.
-- The target process will hold one central agent JWT reference per binding and inject it into upstream MCP calls. Agents will not pass central JWTs as tool arguments.
-- The provisional central mapping uses one JWT-authenticated `/api/poll_messages` stream per binding and assumes each returned message contains only an opaque `id`.
-- The current `0.1.0` package has no MCP listener, MCP tools, per-binding central JWT configuration, or local caller authentication.
-- Every G5 decision in `docs/implementation-plan.md`, including ID scope, poll isolation, tool catalog, JWT lifecycle, side-effect semantics, transport, authentication, configuration, CLI, dependencies, and migration behavior, requires another user review before tests or implementation.
+## Current `0.1.0` implementation
 
-## Partially complete
+- Strict legacy controller, wake, and configuration schemas.
+- Secure client for superseded `/v1/sidecar/...` controller paths.
+- SQLite journal with atomic ingestion, acknowledgements, reports, retries, crash recovery, and singleton locking.
+- Generic HMAC, Hermes, and OpenClaw wake adapters.
+- Setup, agent management, diagnostics, foreground `run`, and native per-user services.
+- Linux, macOS, and Windows CI.
+- 142 automated tests.
+- Public `@a2adev/gateway@0.1.0` package with the `a2a-gateway` executable.
 
-- Runtime qualification has request and response contract tests, but not pinned real-runtime container runs.
-- Service lifecycle has command and file tests on all platforms, but native login-start tests have not run in CI yet.
-- The application integration test uses a real controller HTTP boundary and generic runtime HTTP boundary, but both are in-process fixtures rather than reusable containers.
-- The current controller client still uses ADR 0003's superseded `/v1/sidecar/...` development paths. It does not implement ADR 0016's per-binding polling compatibility mapping.
-- The inspected central `poll_messages` implementation marks messages delivered during polling and lacks redelivery, idempotent acknowledgement, expiry metadata, and wake reporting, so it does not satisfy the durable relay contract yet.
-- npm trusted publishing is configured for `nikrooz/a2a` and `.github/workflows/cli.yml`, but has not published a version yet. Version `0.1.0` was already present when the first main-branch publish job ran, so that job skipped `npm publish`.
-- The GitHub repository is private. npm trusted publishing works for private repositories, but npm provenance requires public source.
-- The public package has been installed and run on macOS, but not from clean Linux and Windows user environments.
+This code is useful as a tested source of lock, SQLite, HTTP, and retry behavior, but its public interface and central contract are no longer the target. It will be replaced rather than kept for compatibility.
 
-## Required before public beta
+## Not implemented
 
-- Approve and implement loopback MCP transport, local caller authentication, fixed caller-to-binding mapping, payload limits, and cancellation behavior.
-- Approve the per-binding central JWT reference shape, then add OS credential-vault support. The current relay's environment references are development-only and do not pre-approve the combined-process configuration.
-- Define central agent JWT enrollment, issuance, refresh, revocation, and reissue without returning JWTs through local MCP tools, plus migration to a future restricted gateway credential.
-- Add durable controller redelivery, idempotent persistence acknowledgement, expiry metadata, and wake reporting around the available polling API.
-- Prove cross-binding JWT isolation and prove that MCP tool arguments and responses never enter configuration, SQLite, diagnostics, metrics, or logs.
-- Qualify pinned OpenClaw and Hermes images with a fake model, including a runtime restart between duplicate wake attempts. Keep both presets labeled best-effort unless their duplicate state becomes durable.
-- Run native `launchd`, `systemd --user`, and Task Scheduler tests on clean machines.
-- Add migration, abrupt-process-exit, disk-full, and long-running soak tests.
-- Qualify global npm installation and native `better-sqlite3` loading on each supported operating system without elevation.
-- Complete one new-version publish through GitHub OIDC. Produce an SBOM, and decide whether public npm provenance requires making the source repository public before beta.
-- Define bounded journal retention after every adapter has an explicit duplicate window.
+- Strict two-option foreground `start`.
+- Local MCP listener and MCP client.
+- Shared webhook-token local authentication.
+- Bootstrap-only tool catalog.
+- Registration and verification forwarding.
+- Structured JWT extraction, persistence, and token-free verification result.
+- Post-verification JWT injection.
+- Polling gated on enrollment.
+- Single-stream ID-only central notification client.
+- Agent-agnostic webhook body without `agentId`.
+- Dockerized in-memory central service and full E2E test.
 
-The published `0.1.0` package is a relay-only development preview. It does not contain the approved combined MCP proxy and is not a public-beta approval.
+## Decisions before production code
+
+- ADR `0018-mcp-sdk.md` recommends the official split MCP TypeScript SDK version 2 packages.
+- ADR `0019-central-credential-storage.md` recommends an AES-256-GCM credential file keyed from the webhook token.
+
+Neither decision installs a dependency or authorizes credential implementation yet. The red tests and Docker fixture come first.
+
+## External central changes
+
+- Add a non-consuming ID view such as `GET /api/poll_messages?timeout=30&view=ids`.
+- Add idempotent `POST /api/ack_notification` for gateway persistence without consuming message content.
+- Keep full message content available through the MCP `poll_messages` tool after the gateway observes its ID.
+- Keep MCP `ack_message` as a separate idempotent content-processing acknowledgement.
+- Return structured verification data so the gateway can extract exactly one JWT safely.
+- Define JWT expiry, revocation, reissue, and deliberate local identity reset.
+
+Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
+
+The inspected central implementation currently returns message content and marks it delivered during REST polling. Its MCP wrapper calls the same endpoint and returns Python string representations. The target flow cannot be end-to-end safe against that behavior without central changes.
+
+## Test work
+
+The next code PR contains only tests, fixtures, CI, and minimal empty interfaces needed for useful failures. It remains red until user review.
+
+The Docker fixture will independently implement the central contract with in-memory agents, verification codes, tokens, messages, and acknowledgements. The private central repository has no license file, so its source will not be copied.
+
+Docker is available in GitHub's Ubuntu runners. The Docker CLI is installed locally, but the local daemon is not running.
+
+## Release blockers
+
+- Review the red test suite.
+- Approve ADRs 0018 and 0019.
+- Implement and pass the replacement tests.
+- Run the E2E container in CI.
+- Obtain stable production central API and MCP URLs.
+- Qualify packed installation on clean Linux, macOS, and Windows environments.
+- Publish a new version through GitHub OIDC after the implementation is ready.
