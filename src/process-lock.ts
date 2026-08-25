@@ -4,7 +4,7 @@ import { basename, dirname, resolve } from "node:path";
 
 import Database from "better-sqlite3";
 
-import { SidecarError } from "./errors.js";
+import { GatewayError } from "./errors.js";
 import { preparePrivateSqliteArtifact } from "./sqlite-artifact.js";
 
 const LOCK_HANDOFF_TIMEOUT_MS = 1_000;
@@ -18,12 +18,12 @@ function errorCode(error: unknown): string | undefined {
   return undefined;
 }
 
-function invalidLockArtifact(): SidecarError {
-  return new SidecarError("lock_invalid", "The daemon lock artifact is invalid", 7);
+function invalidLockArtifact(): GatewayError {
+  return new GatewayError("lock_invalid", "The gateway lock artifact is invalid", 7);
 }
 
-function daemonRunning(): SidecarError {
-  return new SidecarError("daemon_running", "The sidecar daemon is already running", 7);
+function daemonRunning(): GatewayError {
+  return new GatewayError("daemon_running", "The gateway is already running", 7);
 }
 
 function pathKey(path: string): string {
