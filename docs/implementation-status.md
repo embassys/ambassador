@@ -15,32 +15,19 @@ Status as of August 25, 2026.
 
 ADR `0017-single-webhook-gateway.md` records this design. Obsolete ADRs were deleted at the user's direction.
 
-## Current `0.1.0` implementation
+## Replacement source
 
-- Strict legacy controller, wake, and configuration schemas.
-- Secure client for superseded `/v1/sidecar/...` controller paths.
-- SQLite journal with atomic ingestion, acknowledgements, reports, retries, crash recovery, and singleton locking.
-- Generic HMAC, Hermes, and OpenClaw wake adapters.
-- Setup, agent management, diagnostics, foreground `run`, and native per-user services.
-- Linux, macOS, and Windows CI.
-- 142 automated tests.
-- Public `@a2adev/gateway@0.1.0` package with the `a2a-gateway` executable.
+PR `#5` implements the approved replacement on the reviewed test branch:
 
-This code is useful as a tested source of lock, SQLite, HTTP, and retry behavior, but its public interface and central contract are no longer the target. It will be replaced rather than kept for compatibility.
+- strict two-option foreground `start` and lock-first startup;
+- authenticated, bounded Streamable HTTP MCP on `127.0.0.1:8787`;
+- bootstrap enrollment, encrypted JWT persistence, token-free verification, and authenticated tool proxying;
+- ID-only SQLite notification state with independent persistence acknowledgement and webhook work;
+- accepted-wake redrive until confirmed MCP `ack_message`;
+- restart recovery and fixed safe errors; and
+- deletion of setup, bindings, runtime adapters, JSON configuration, and native service management.
 
-## Not implemented
-
-- Strict two-option foreground `start`.
-- Local MCP listener and MCP client.
-- Shared webhook-token local authentication.
-- Bootstrap-only tool catalog.
-- Registration and verification forwarding.
-- Structured JWT extraction, persistence, and token-free verification result.
-- Post-verification JWT injection.
-- Polling gated on enrollment.
-- Single-stream ID-only central notification client.
-- Fixed OpenClaw-compatible webhook body without configured `agentId`.
-- Dockerized in-memory central service and full E2E test.
+The local replacement suite has 76 passing tests. The independent Dockerized FastMCP fixture exercises eight transport and contract cases in CI. The published `@a2adev/gateway@0.1.0` package remains the older implementation until a later release passes the release gates.
 
 ## Production decisions
 
@@ -64,16 +51,13 @@ The inspected central implementation currently returns message content and marks
 
 ## Test work
 
-The next code PR contains only tests, fixtures, CI, and minimal empty interfaces needed for useful failures. It remains red until user review.
+PR `#4` recorded the reviewed red suite and failure inventory before production implementation. PR `#5` turns all eight expected failures green without changing their assertions. The Docker fixture independently implements the central contract with in-memory state; it copies no source from the unlicensed private central repository.
 
-The Docker fixture will independently implement the central contract with in-memory agents, verification codes, tokens, messages, and acknowledgements. The private central repository has no license file, so its source will not be copied.
-
-Docker is available in GitHub's Ubuntu runners. The Docker CLI is installed locally, but the local daemon is not running.
+Docker runs in GitHub's Ubuntu runners. The Docker CLI is installed locally, but the local daemon is not running.
 
 ## Release blockers
 
-- Implement and pass the replacement tests.
-- Run the E2E container in CI.
+- Pass the replacement matrix and Docker fixture after the implementation stack is combined.
 - Obtain stable production central API and MCP URLs.
 - Obtain a non-consuming production ID notification view.
 - Obtain separate idempotent notification and content acknowledgements.
