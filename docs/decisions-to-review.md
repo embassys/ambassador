@@ -1,21 +1,20 @@
 # Decisions to review
 
-On August 23, 2026, the user authorized provisional decisions so implementation could continue without waiting at every approval gate. Each decision below is recorded in an ADR and can be changed after review.
+The user approved the single-webhook startup and enrollment architecture on August 25, 2026. ADRs 0001 through 0003 and every later record made irrelevant by that design were removed at the user's direction.
 
-ADR `0016-combined-gateway-mcp-proxy.md` is already user-reviewed and accepted. It supersedes provisional ADR `0003-controller-http-transport.md`, ADR 0005's single controller-token shape, and ADR 0009's installation-token assumption. ADR 0003 no longer appears below; the unaffected parts of ADRs 0005 and 0009 remain for review.
+## Active provisional decisions
 
 | ADR | Decision | Review before |
 | --- | --- | --- |
-| `0004-journal-shape.md` | Typed delivery and outbox columns with no generic payload storage | Changing persistence or retention |
-| `0005-configuration.md` | Strict JSON config with secret references and platform-standard paths | Adding per-binding central JWT and local MCP settings |
-| `0006-toolchain.md` | Node 24, npm, TypeScript, node:test, Biome, Zod, and Node core APIs | Changing project tooling or runtime libraries |
-| `0007-sqlite.md` | better-sqlite3 with no ORM | Packaging or changing durable storage |
-| `0008-runtime-presets.md` | OpenClaw and Hermes native webhooks marked best-effort because dedupe is not durable | Claiming production support for either preset |
-| `0009-operating-defaults.md` | HMAC encoding, retry schedule, poll limits, environment credentials, and conservative retention | Implementing combined-process credential handling |
-| `0010-user-services.md` | Per-user launchd, systemd, and Task Scheduler lifecycle | Enabling service installation |
-| `0011-runtime-cli-flags.md` | Generic, Hermes, and OpenClaw agent-add flags | Adding local MCP proxy flags to the public CLI |
-| `0012-http-deadlines.md` | Bounded controller, wake, and health request deadlines | Public beta operating defaults |
-| `0013-windows-restart-interval.md` | One-minute Task Scheduler crash restart, superseding ADR 0010's Windows delay | Enabling Windows service installation |
-| `0014-lock-handoff-timeout.md` | One-second SQLite singleton-lock handoff window | Public beta operating defaults |
+| `0006-toolchain.md` | Node 24, npm, TypeScript, node:test, Biome, Zod, Node HTTP, and GitHub Actions | Changing the existing toolchain |
+| `0007-sqlite.md` | better-sqlite3 with no ORM for the ID-only journal | Changing durable relay storage |
+| `0012-http-deadlines.md` | Bounded HTTP operations and redirect rejection | Public beta operating defaults |
+| `0014-lock-handoff-timeout.md` | One-second SQLite singleton-lock handoff | Public beta operating defaults |
 
-More rows will be added as implementation choices are made.
+## Resolved
+
+- ADR 0015 fixes npm distribution as `@a2adev/gateway` with the `a2a-gateway` binary.
+- ADR 0017 fixes the two-option foreground CLI, one webhook and identity, shared local bearer, MCP enrollment, and removal of bindings and runtime discovery.
+- ADR 0018 fixes the official split MCP TypeScript SDK packages at version 2.0.0.
+- ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.
+- ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.

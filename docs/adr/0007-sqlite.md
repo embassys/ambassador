@@ -20,7 +20,9 @@ Use `better-sqlite3` 13.0.3 with `@types/better-sqlite3` 9.6.0 and no ORM.
 
 Open one connection and keep transactions short. Enable WAL, `synchronous=FULL`, foreign keys, a busy timeout, and defensive schema constraints. Use prepared statements for every value.
 
-Database work stays synchronous and serialized. The sidecar workload is small, so this is simpler than moving each short transaction to a worker.
+SQLite stores notification IDs and relay state only. It never stores the webhook token, central JWT, registration data, MCP arguments, MCP results, message content, or permission data.
+
+Database work stays synchronous and serialized. The gateway workload is small, so this is simpler than moving each short transaction to a worker.
 
 ## Risks
 

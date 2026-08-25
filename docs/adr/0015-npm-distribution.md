@@ -4,8 +4,6 @@ Status: accepted
 
 Date: 2026-08-24
 
-Supersedes ADR `0002-distribution.md`.
-
 ## Problem
 
 The initial distribution plan required standalone files before public beta. Current users already have Node.js, so that work would delay a usable release without removing a real installation barrier.
@@ -14,12 +12,11 @@ The initial distribution plan required standalone files before public beta. Curr
 
 Publish the public package as `@a2adev/gateway` with the `a2a-gateway` binary. Version 1 requires Node.js 24.
 
-Users may try temporary commands with `npx @a2adev/gateway`. Background operation uses a global installation so the native service definition points to a stable executable:
+Users may try temporary commands with `npx @a2adev/gateway`. Normal operation uses a global installation so the foreground command resolves to a stable executable:
 
 ```text
 npm install --global @a2adev/gateway
-a2a-gateway setup
-a2a-gateway start
+a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 ```
 
 Publish from the `main` branch only after Linux, macOS, and Windows checks pass. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.

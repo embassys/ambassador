@@ -15,4 +15,4 @@ Use a name such as `0001-typescript-runtime.md`. Include:
 - Effects on packaging and supported platforms.
 - User approval and date.
 
-Read the accepted decisions that affect your task before writing code. If a choice changes later, add a record that supersedes the old one. Do not rewrite the old decision.
+Read the accepted decisions that affect your task before writing code. If a choice changes later, normally add a record that supersedes the old one. Obsolete records may be deleted only when the user explicitly asks to remove them; Git history remains the archive.

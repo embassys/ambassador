@@ -1,116 +1,123 @@
 # Implementation plan
 
-## Read before working
-
-Read `docs/product-vision-and-architecture.md`, `docs/protocol-v1.md`, this plan, and any accepted decisions in `docs/adr/` that affect your task. If your task conflicts with them, stop and ask. Do not quietly change the scope.
-
 ## Rules
 
-- Write the tests and CI setup before production code.
-- The first code PR contains tests, fixtures, and CI. It should fail because the product behavior does not exist yet. Keep it off the default branch until implementation makes it pass.
-- Do not start production code until the user reviews those failures.
-- Do not select or install a runtime, package manager, framework, library, database driver, or build tool without user approval.
-- Do not write CLI tests, entrypoints, help text, or command code until the user approves the CLI design.
-- Do not add publishing or installation tooling until the user approves the distribution plan.
-- A dependency proposal must explain why we need it, the alternatives, the recommendation, its license and maintenance status, and its effect on packaging.
-- Agents own separate directories or files where possible. Tasks that share files run sequentially.
-- The authenticated local MCP proxy from ADR 0016 is in scope. Implementing the central MCP service, persisting task or MCP content, ACP, Grok Bot, hosted-agent connectors, and a GUI remain out of scope.
+- Read the product document, protocol, this plan, review list, and relevant accepted ADRs before work.
+- Write tests, fixtures, and CI before production behavior.
+- Keep the first code PR red until the user reviews its failures.
+- Do not select or install any framework, library, runtime, package manager, database driver, or build tool before its ADR is explicitly approved.
+- Keep MCP bodies out of the relay, journal, logs, diagnostics, temporary files, crash artifacts, and support bundles.
+- Do not preserve the obsolete setup, binding, adapter, configuration, or service interfaces as compatibility code.
 
-## Before code
+## Approved target
 
-| ID | Agent | Task | Depends On | Result |
+ADR `0017-single-webhook-gateway.md` approves:
+
+```text
+a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
+```
+
+One foreground process owns one webhook, one authenticated loopback MCP endpoint, one durable ID stream, and one enrolled central identity. The webhook token authenticates both webhook delivery and local MCP. Verification produces the central JWT; startup does not accept one.
+
+## Documentation
+
+| ID | Task | Result |
+| --- | --- | --- |
+| D1 | Replace multi-binding architecture and protocol | ADR 0017 and revised product/protocol docs |
+| D2 | Remove obsolete ADRs and active-review entries | Only current decisions remain |
+| D3 | Record MCP dependency and credential-storage choices | ADRs 0018 and 0019 accepted |
+| D4 | Record the independent in-memory central fixture | ADR 0020 |
+
+## Red test PR
+
+Keep all new tests and fixtures on one feature PR. Do not merge it or start production implementation before G1.
+
+| ID | Owner | Task | Depends on | Expected result before implementation |
 | --- | --- | --- | --- | --- |
-| S1 | Protocol | Draft notification, acknowledgement, wake, retry, and data-boundary behavior without choosing a framework | None | `docs/protocol-v1.md` |
-| G0 | User | Review and approve the protocol draft and acceptance cases | S1 | Approved protocol draft |
-| R1 | Hermes research | Test native webhook auth, duplicate handling, restart behavior, health checks, and fixed prompts | G0 | Compatibility notes |
-| R2 | OpenClaw research | Test session identity, duplicate handling, restart behavior, and immediate wake | G0 | Compatibility notes |
-| D1 | Tooling research | Compare the initial tooling options without selecting one | G0 | Options for user review |
-| UX1 | CLI design | Draft command names, flags, setup flow, output, errors, config behavior, and noninteractive use without writing code | G0 | CLI designs for user review |
-| DIST1 | Distribution research | Compare package registries, standalone files, native installers, package managers, and containers | G0 | Install and publishing options for user review |
-| LAB1 | Local test design | Compare host-side and all-container test setups, including controller and runtime networking | G0, R1, R2 | Local test design for user review |
-| G1 | User | Approve the tooling, CLI design, distribution direction, local test design, and supported OS matrix | D1, UX1, DIST1, LAB1 | Approved choices recorded in ADRs |
+| T1 | Test support | Add loopback fake webhook, raw MCP client, fault controls, secret scanner, and process helpers | D1 | Support code passes |
+| T2 | CLI | Test exactly two required `--name=value` options, foreground lifetime, endpoint output, invalid inputs, and singleton ordering | T1 | Fails on legacy CLI |
+| T3 | Local MCP | Test loopback bind, bearer authentication, `Host` and `Origin`, MCP lifecycle, limits, deadlines, cancellation, and safe errors | T1 | Fails because no MCP listener exists |
+| T4 | Enrollment | Test bootstrap-only catalog, registration forwarding, verification JWT interception, token-free result, tool-list change, persistence failure, restart recovery, and identity replacement rejection | T3 | Fails because enrollment does not exist |
+| T5 | Proxy | Test local schemas without `token`, exact transient upstream `token` injection, caller selector rejection, no automatic side-effect retry, and authentication failure behavior | T4 | Fails because proxying does not exist |
+| T6 | Relay | Test dormant polling before enrollment, ID-only poll validation, commit-before-`ack_notification`, bearer webhook, no `agentId`, retries, separate content acknowledgement, and restart | T1, T4 | Fails on legacy controller and binding relay |
+| T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | Approved ADR 0020 | Fixture contract passes independently |
+| T8 | End to end | Start gateway, register, verify, prove JWT absence, poll an ID, wake fake webhook, retrieve content through MCP, and acknowledge | T2-T7 | Fails on missing gateway behavior |
+| C1 | CI | Run unit tests on Linux, macOS, and Windows; build and run Docker E2E on Ubuntu | T1-T8 | Red feature PR with classified failures |
+| V1 | Review | Confirm every failure is missing product behavior rather than a fixture defect | C1 | Written failure inventory |
+| G1 | User | Review the red suite, fixture contract, proposed MCP SDK, and credential storage | V1 | Approval to implement production behavior |
 
-Before `G1`, agents may add docs and research notes only. They may not add project tooling or dependencies.
+### Required CLI cases
 
-## Write the failing tests
+- Accept only `start --webhook-url=<url> --webhook-token-env=<name>`.
+- Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
+- Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
+- Require the resolved webhook token to match OpenClaw's generated `[0-9a-f]{48}` format.
+- Acquire the singleton lock before resolving the token or touching credentials.
+- Print the endpoint only after successful bind and keep running until cancellation.
+- Never print either token or a credential-bearing MCP URL.
 
-| ID | Agent | Task | Depends On | Result |
+### Required enrollment cases
+
+- Authenticate every local call before reading its body.
+- Expose only `register_agent`, `verify_email`, and `resend_verification` before enrollment.
+- Require structured verification data with exactly one `token` field.
+- Persist before returning token-free success or enabling polls.
+- Reject concurrent replacement, malformed results, oversized results, and token-bearing registration results.
+- After restart, load the JWT through the abstract credential store without exposing it locally.
+
+### Required data scan
+
+Tests scan stdout, stderr, errors, every credential-store artifact, SQLite, WAL, SHM, temporary files, crash artifacts, logs, diagnostics, and support artifacts for known plaintext values:
+
+- webhook token;
+- central JWT;
+- email and verification code;
+- MCP arguments and results; and
+- message content and permission data.
+
+## Production implementation after G1
+
+| ID | Owner | Task | Depends on | Result |
 | --- | --- | --- | --- | --- |
-| T1 | Testkit | Build a fake controller, fake runtime, deterministic clock, and fault controls | S1, G1 | Tests run without a model or external service |
-| T2 | Protocol tests | Cover schemas, versions, authentication, and forbidden content | T1 | Failing protocol tests |
-| T3 | Reliability tests | Cover persistence, retries, duplicates, outbox, crashes, restarts, and backpressure | T1 | Failing relay tests |
-| T4 | CLI tests | Cover setup, status, doctor, service lifecycle, exit codes, and JSON output | T1 | Failing CLI tests |
-| T5 | Adapter tests | Write one adapter contract and apply it to Hermes and OpenClaw | T1, R1, R2 | Failing adapter tests |
-| T6 | Local test setup | Build the approved container setup for the controller, OpenClaw, Hermes, and any model stub needed for offline tests | T1, G1, R1, R2 | Reproducible local test environment |
-| C1 | CI | Run lint, type checks, tests, security checks, and the OS matrix | G1, T2, T3, T4, T5, T6 | CI shows the expected failures |
-| V1 | Test review | Check that each failure comes from missing product behavior, not a bad test or fixture | C1 | Reviewed failure list |
-| G2 | User | Review the tests, exclusions, and CI output | V1 | Approval to start production code |
+| I1 | CLI | Replace command dispatch with the strict two-option foreground `start` | G1 | T2 passes |
+| I2 | MCP | Add the approved SDK, authenticated loopback server, central MCP client, limits, and safe errors | G1, approved ADR 0018 | T3 and T5 transport cases pass |
+| I3 | Credentials | Implement the approved atomic central JWT store and restart loading | G1, approved ADR 0019 | Abstract credential-store cases pass |
+| I4 | Enrollment | Add bootstrap catalog, structured verification interception, sanitization, and identity state | I2, I3 | T4 passes |
+| I5 | Relay | Replace binding protocol with one ID stream and one bearer webhook target | I1, I3 | T6 passes |
+| I6 | Assembly | Start MCP immediately, gate polling on identity, coordinate shutdown, and stream startup output | I1-I5 | T8 passes |
+| I7 | Cleanup | Delete configuration, runtime presets, adapter factory, service manager, obsolete commands, schemas, and tests | I6 | No dead compatibility code remains |
+| C2 | CI | Run all checks, audit production dependencies, and run Docker E2E | I7 | Green matrix and E2E |
 
-Keep the failing suite on one feature PR. Do not hide failures with `continue-on-error` or skipped tests, and do not merge it while it is red.
+Shared CLI, application, protocol, journal, and relay files change sequentially. MCP transport and central fixture work may run in parallel because they own separate directories and interfaces.
 
-Before `G2`, add only tests, fixtures, CI files, and the empty interfaces or entrypoints needed to produce useful failures. Do not implement polling, persistence, adapters, or the daemon.
+## Test service
 
-## Local test setup
+The test service independently implements the remote contract; it does not copy the unlicensed private repository source. It keeps all state and verification delivery in memory.
 
-Use two container layouts for different jobs.
+The container provides:
 
-The existing local acceptance test runs the CLI and gateway relay on the host. The controller, OpenClaw, Hermes, and an optional fake model run in containers with ports bound to host loopback. This tests the current CLI, host paths, credentials, and wake boundary without installing either agent runtime on the host.
+- Streamable HTTP MCP at `/mcp`;
+- registration, verification, resend, message polling, acknowledgement, permission, and action tools;
+- `GET /api/poll_messages?timeout=<seconds>&view=ids` for non-consuming ID notifications;
+- idempotent `POST /api/ack_notification` for relay persistence without consuming MCP content;
+- authenticated test-only endpoints to read a verification code by JSON body, inject a message, reset state, and inspect IDs/status flags; and
+- health and readiness endpoints.
 
-The CI layout runs every component in containers on one private network. It is reproducible and good for Linux restart and failure tests, but it does not prove host service installation.
-
-Test `launchd`, `systemd --user`, Windows startup, OS credential storage, and native paths on their actual operating systems. Docker cannot cover those behaviors.
-
-Pin runtime images by version or digest. Do not use moving `latest` tags in CI. The relay suite stops at wake acceptance. The combined-process proxy suite will use a fake central MCP service and an independent fake agent; it will not implement or exercise real task semantics.
-
-## Make the tests pass
-
-| ID | Agent | Task | Depends On | Result |
-| --- | --- | --- | --- | --- |
-| D2 | Dependency research | Compare options for schema validation, durable storage, HTTP, CLI, logging, and packaging | G2 | Options for user review |
-| G3 | User | Approve each production dependency, packaging tool, or standard-library implementation | D2 | Approved choices recorded in ADRs |
-| I1 | Protocol | Add only the validation needed to pass T2 | G3 | T2 passes |
-| I2 | Storage | Add the approved journal, migrations, state transitions, and outbox | I1 | Storage cases in T3 pass |
-| I3 | Relay | Add long polling, acknowledgements, retries, recovery, and backpressure | I2 | The rest of T3 passes |
-| I4 | Generic adapter | Add the authenticated webhook adapter | I1 | Shared T5 cases pass |
-| I5 | Hermes adapter | Add the behavior supported by the R1 findings | I4 | Hermes T5 cases pass |
-| I6 | OpenClaw adapter | Add the behavior supported by the R2 findings | I4 | OpenClaw T5 cases pass |
-| I7 | CLI | Add commands, configuration, diagnostics, and foreground daemon mode | I3, I4 | T4 passes except service cases |
-| I8 | OS services | Add user-service support for macOS, Linux, and Windows | I7 | All T4 cases pass |
-
-`I5` and `I6` may run in parallel because they own separate adapter directories. Tasks touching shared protocol, storage, or CLI files run sequentially.
-
-## Combined-process transition
-
-The code on `main` implements the ID-only relay, not ADR 0016's local MCP proxy. Complete these tasks before adding proxy production code:
-
-| ID | Agent | Task | Depends On | Result |
-| --- | --- | --- | --- | --- |
-| M1 | Central contract | Confirm global ID scope, per-binding poll state and isolation, redelivery, idempotent acknowledgement, expiry, wake reporting, proxied tool catalog, JWT enrollment and lifecycle, and uncertain side-effect behavior | ADR 0016 | Compatibility options for user review |
-| M2 | Security design | Compare loopback MCP transports and caller-authentication options; define fixed caller-to-binding mapping, authentication replay and rotation, request and response limits, concurrency and per-binding resource caps, deadlines, redirects, TLS, crash artifacts, and credential handling | M1 | Options for user review |
-| M3 | UX and configuration | Draft per-binding JWT references, local MCP identities, setup changes, diagnostics, and service behavior without writing CLI code | M2 | CLI and configuration proposal |
-| G5 | User | Approve ID scope, poll isolation, tool catalog, JWT enrollment and lifecycle, side-effect semantics, local transport, authentication, configuration, CLI, dependencies, and migration behavior | M1, M2, M3 | Approved ADRs |
-| T7 | Proxy tests | Add failing tests for local authentication and replay, JWT injection, cross-binding and resource isolation, request and response limits, cancellation, uncertain side effects, singleton ordering, redaction, crash artifacts, and zero durable MCP content | G5 | Reviewed failing test suite |
-| T8 | Integration tests | Add a fake independent agent and fake central MCP service; cover relay wake followed by authenticated local tool calls | G5 | Reviewed failing integration suite |
-| C2 | CI | Run the proxy suites on Linux, macOS, and Windows without real agent credentials or external services | T7, T8 | Cross-platform expected failures |
-| G6 | User | Review the failures and exclusions before production implementation | C2 | Approval to implement |
-| I9 | Local MCP proxy | Implement only the approved authenticated loopback proxy behavior | G6 | T7 passes |
-| I10 | Combined assembly | Run relay and proxy in one process while keeping journal, diagnostics, metrics, and logs free of MCP content | I9 | T8 passes |
-
-If HTTP is selected, M2 and T7 also cover browser-to-loopback protections such as `Host` and `Origin` validation. Do not add a local listener, MCP framework, per-binding JWT configuration, or new CLI flags before G5. Do not add proxy production behavior before G6.
+CI pins the Python base image by digest and Python packages by version and hash. The fixture uses one non-root worker, no volumes, no access log, and no published CI ports. Docker is required only for the Ubuntu E2E job. Unit and integration tests on macOS and Windows use Node loopback fixtures.
 
 ## Release checks
 
-| ID | Agent | Task | Depends On | Result |
-| --- | --- | --- | --- | --- |
-| Q1 | Security review | Check secret handling, local MCP authentication, cross-binding isolation, replay protection, local endpoints, and durable-data boundaries | I5, I6, I8, I10 | Findings resolved or accepted |
-| Q2 | Reliability | Run relay and proxy crash, cross-platform, soak, upgrade, and migration tests | I5, I6, I8, I10 | Reliability results |
-| Q3 | Release | Build the npm artifact, SBOM, provenance when available, and clean-machine install tests | Q1, Q2 | Release candidate |
-| G7 | User | Review known risks, adapter limits, release files, and docs | Q3 | Approval to release |
+| ID | Task | Result |
+| --- | --- | --- |
+| Q1 | Review local bearer reuse, encrypted credential access, redaction, DNS rebinding protection, and side-effect uncertainty | Findings resolved or accepted |
+| Q2 | Run crash, restart, disk-full, credential-corruption, poll-outage, and soak tests | Reliability report |
+| Q3 | Pack and install the npm artifact on clean Linux, macOS, and Windows environments | Install qualification |
+| G2 | User reviews security findings, dependency audit, central compatibility, and release artifact | Release approval |
 
-## Approval points
+## External blockers
 
-Before tests or CI, the user approves the runtime, package manager, test framework, CI provider, lint and formatting strategy, CLI interface, distribution direction, local test setup, and initial operating-system matrix.
-
-Before production code, the user separately approves schema validation, durable storage, HTTP, CLI parsing, logging, secret storage, and packaging choices.
-
-Approval of one dependency never implies approval of later dependencies.
+- The production central MCP and API URLs are not stable package constants yet.
+- The production central API lacks the non-consuming ID view and separate idempotent notification acknowledgement required by this protocol.
+- The current central MCP wrapper returns Python string representations instead of structured verification data, so safe JWT extraction requires an upstream contract change.
+- The central service has no token reissue path. A crash after remote verification succeeds but before local credential persistence would strand the identity.
+- Docker is available in GitHub's Ubuntu runner, but the local Docker daemon is not running on this machine.

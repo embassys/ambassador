@@ -6,11 +6,11 @@ Date: 2026-08-23
 
 ## Problem
 
-After a lock-owning process exits abruptly, the OS can briefly continue reporting the SQLite lock as busy. An immediate service restart can therefore receive a false `daemon_running` result even though no owner remains.
+After a lock-owning process exits abruptly, the OS can briefly continue reporting the SQLite lock as busy. An immediate process restart can therefore receive a false `daemon_running` result even though no owner remains.
 
 ## Decision
 
-Allow the singleton lock's `BEGIN EXCLUSIVE` operation to wait for up to one second. If the lock remains busy, acquisition fails with `daemon_running` before the process opens the journal, polls, or wakes a runtime.
+Allow the singleton lock's `BEGIN EXCLUSIVE` operation to wait for up to one second. If the lock remains busy, acquisition fails with `daemon_running` before the process resolves tokens, opens credentials, binds MCP, polls, forwards a tool, or sends a webhook.
 
 ## Costs
 
