@@ -10,7 +10,7 @@ The earlier CLI and configuration model asked the gateway to discover or configu
 
 ## Decision
 
-One gateway process owns one webhook target and, after enrollment, one central agent identity. It does not know the local runtime type or agent ID.
+One gateway process owns one webhook target and, after enrollment, one central agent identity. It does not know the local runtime type or a configured local-runtime agent ID.
 
 The normal command has exactly two required named options:
 
@@ -26,7 +26,7 @@ The CLI accepts only the `--name=value` form for these options. The token option
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
-The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential. Compromise of that token therefore grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
+The webhook URL must use the literal loopback address `127.0.0.1`. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
 
 The central API and MCP URLs are product constants, not user-facing CLI options. Tests may inject loopback URLs.
 
@@ -61,7 +61,7 @@ The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` 
 
 The active design has no `setup`, `agent add`, `agent list`, `agent remove`, `agent test`, `stop`, `restart`, `status`, `doctor`, or `run` command. It has no binding IDs, runtime adapters, runtime presets, JSON configuration file, or native service definitions.
 
-The code implementing those behaviors remains in `0.1.0` until the replacement passes the required tests. It will then be deleted rather than kept as compatibility code because no released central integration depends on it.
+The published `0.1.0` package retains those behaviors. Replacement source deletes them after the new design passes the required tests rather than carrying compatibility code into the next release, because no released central integration depends on it.
 
 The replacement uses new `a2a-gateway` state paths and ignores legacy `a2a-sidecar` configuration and journal files. It does not delete them automatically.
 

@@ -14,7 +14,7 @@ If your task conflicts with these documents, stop and ask. Do not expand the sco
 
 ## Project rules
 
-- One foreground gateway process owns one webhook target and one enrolled central identity. Do not add bindings, runtime discovery, agent IDs, general configuration, or native service management.
+- One foreground gateway process owns one webhook target and one enrolled central identity. Do not add bindings, runtime discovery, configured local-runtime agent IDs, general configuration, or native service management.
 - `start` accepts only `--webhook-url=<url>` and `--webhook-token-env=<name>`. The webhook token also authenticates every request to the loopback MCP endpoint.
 - Keep the notification journal ID-only. Never write task text, responses, permission details, grants, tool arguments, email addresses, verification codes, or MCP bodies to SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
 - A successful `verify_email` response is the only source of the central JWT. Intercept it before returning the tool result and persist it only through the approved credential store. It may appear transiently only as the injected `token` argument in an upstream MCP call or the central poll bearer header; never put it in local MCP arguments or results, URLs, the journal, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.

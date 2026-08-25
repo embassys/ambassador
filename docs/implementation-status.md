@@ -10,7 +10,7 @@ Status as of August 25, 2026.
 - The webhook token authenticates both the outbound webhook and every local MCP request.
 - Before enrollment, the MCP server exposes only registration, verification, and resend tools.
 - A successful verification response supplies the central JWT. The gateway persists it, strips it from the local result, starts polling, and adds it only to future transient upstream MCP arguments and central poll authorization.
-- One process owns one webhook and one central identity. There are no bindings or agent IDs.
+- One process owns one webhook and one central identity. There are no bindings or configured local-runtime agent IDs.
 - The relay and SQLite remain ID-only. MCP content and plaintext credentials never enter durable relay state or observability outputs.
 
 ADR `0017-single-webhook-gateway.md` records this design. Obsolete ADRs were deleted at the user's direction.
@@ -39,7 +39,7 @@ This code is useful as a tested source of lock, SQLite, HTTP, and retry behavior
 - Post-verification JWT injection.
 - Polling gated on enrollment.
 - Single-stream ID-only central notification client.
-- Agent-agnostic webhook body without `agentId`.
+- Fixed OpenClaw-compatible webhook body without configured `agentId`.
 - Dockerized in-memory central service and full E2E test.
 
 ## Decisions before production code
@@ -77,5 +77,9 @@ Docker is available in GitHub's Ubuntu runners. The Docker CLI is installed loca
 - Implement and pass the replacement tests.
 - Run the E2E container in CI.
 - Obtain stable production central API and MCP URLs.
+- Obtain a non-consuming production ID notification view.
+- Obtain separate idempotent notification and content acknowledgements.
+- Obtain structured central verification results.
+- Obtain central JWT reissue and revocation behavior.
 - Qualify packed installation on clean Linux, macOS, and Windows environments.
 - Publish a new version through GitHub OIDC after the implementation is ready.
