@@ -92,6 +92,9 @@ test("fails closed on credential-bearing nested results or stored JWT bytes", ()
     assert.throws(() => assertSafeUpstreamResult(result, JWT), McpContractError);
   }
   assert.doesNotThrow(() => assertSafeUpstreamResult({ message: "safe" }, JWT));
+  assert.doesNotThrow(() =>
+    assertSafeUpstreamResult({ agent_id: "agent_fixture", credential_id: "public-reference" }, JWT),
+  );
 });
 
 test("parses exactly one strict verification credential into a token-free local result", () => {
