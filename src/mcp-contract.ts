@@ -69,6 +69,15 @@ function assertNoForbiddenNames(value: unknown, forbiddenNames: ReadonlySet<stri
   }
 }
 
+function containsCredentialBytes(value: unknown, credential: string): boolean {
+  if (typeof value === "string") return value.includes(credential);
+  if (Array.isArray(value)) return value.some((item) => containsCredentialBytes(item, credential));
+  if (!isObject(value)) return false;
+  return Object.entries(value).some(
+    ([name, nested]) => name.includes(credential) || containsCredentialBytes(nested, credential),
+  );
+}
+
 function parseSchema(value: unknown): Record<string, unknown> {
   if (!isObject(value) || value.type !== "object" || !isObject(value.properties)) {
     throw new McpContractError();
@@ -164,16 +173,8 @@ export function upstreamToolArguments(
 
 export function assertSafeUpstreamResult(value: unknown, centralToken?: string): void {
   assertNoForbiddenNames(value, FORBIDDEN_RESULT_NAMES);
-  if (centralToken !== undefined) {
-    let serialized: string;
-    try {
-      serialized = JSON.stringify(value);
-    } catch {
-      throw new McpContractError();
-    }
-    if (serialized === undefined || serialized.includes(centralToken)) {
-      throw new McpContractError();
-    }
+  if (centralToken !== undefined && containsCredentialBytes(value, centralToken)) {
+    throw new McpContractError();
   }
 }
 
@@ -200,7 +201,7 @@ export function parseVerificationSuccess(value: unknown): VerificationSuccess {
     throw new McpContractError();
   }
 
-  return {
+  const verified: VerificationSuccess = {
     token: value.token,
     localResult: {
       verified: true,
@@ -209,4 +210,6 @@ export function parseVerificationSuccess(value: unknown): VerificationSuccess {
       message: value.message,
     },
   };
+  assertSafeUpstreamResult(verified.localResult, verified.token);
+  return verified;
 }

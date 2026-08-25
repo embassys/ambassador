@@ -109,7 +109,11 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
           }),
     });
     context.io.stdout.write(`MCP endpoint: ${application.endpoint}\n`);
-    await waitForAbort(signal);
+    const failure = await Promise.race([
+      waitForAbort(signal).then(() => undefined),
+      application.failure,
+    ]);
+    if (failure !== undefined) throw failure;
     return 0;
   } catch (error) {
     if (error instanceof GatewayOptionsError) {

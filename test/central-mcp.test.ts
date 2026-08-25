@@ -286,6 +286,14 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
         });
         return;
       }
+      if (name === "unexpected_metadata") {
+        writeResult(response, id, {
+          structuredContent: { ok: true },
+          content: [{ type: "text", text: '{"ok":true}' }],
+          _meta: { token: UPSTREAM_SECRET },
+        });
+        return;
+      }
       writeResult(response, id, {
         structuredContent: { token: UPSTREAM_SECRET },
         content: [{ type: "text", text: JSON.stringify({ token: "different" }) }],
@@ -307,6 +315,9 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
   await assert.rejects(client.callTool("duplicate_content", {}), (error: unknown) =>
     assertSafeError(error, "central_mcp_response_invalid"),
   );
+  await assert.rejects(client.callTool("unexpected_metadata", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
   await assert.rejects(client.callTool("mismatched_content", {}), (error: unknown) =>
     assertSafeError(error, "central_mcp_response_invalid"),
   );
@@ -315,6 +326,7 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
     "protocol_failure",
     "authentication_failure",
     "duplicate_content",
+    "unexpected_metadata",
     "mismatched_content",
   ]);
 });

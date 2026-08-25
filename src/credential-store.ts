@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
-import { type FileHandle, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
+import { type FileHandle, link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -425,7 +425,22 @@ export class EncryptedFileCredentialStore implements CredentialStore {
 
       await this.verifyDirectory(directory);
       await this.assertCredentialAbsent();
-      await rename(temporaryPath, this.path);
+      if (this.platform === "win32") {
+        await rename(temporaryPath, this.path);
+      } else {
+        await link(temporaryPath, this.path);
+        published = true;
+        try {
+          await unlink(temporaryPath);
+          temporaryCreated = false;
+        } catch (error) {
+          const temporaryStats = await lstat(temporaryPath, { bigint: true });
+          const finalStats = await lstat(this.path, { bigint: true });
+          if (sameArtifact(temporaryStats, finalStats)) await unlink(this.path);
+          published = false;
+          throw error;
+        }
+      }
       published = true;
 
       const finalFile = await this.openExistingFile(this.path, true);
