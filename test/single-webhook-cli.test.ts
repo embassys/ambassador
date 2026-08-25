@@ -193,6 +193,12 @@ test("invalid startup forms are rejected without reflecting secret-like values",
       exitCode: 4,
     },
     {
+      name: "non-generated token value",
+      args: ["start", `--webhook-url=${validUrl}`, "--webhook-token-env=A2A_WEBHOOK_TOKEN"],
+      env: { A2A_WEBHOOK_TOKEN: "not-an-openclaw-generated-token" },
+      exitCode: 4,
+    },
+    {
       name: "line break in environment value",
       args: ["start", `--webhook-url=${validUrl}`, "--webhook-token-env=A2A_WEBHOOK_TOKEN"],
       env: { A2A_WEBHOOK_TOKEN: "secret-like-value\nsecond-line" },
@@ -204,7 +210,13 @@ test("invalid startup forms are rejected without reflecting secret-like values",
     const root = await directory(t);
     const result = await invoke(item.args, root, item.env);
     assert.equal(result.exitCode, item.exitCode ?? 2, item.name);
-    for (const marker of ["literal-secret-value", "secret-like-value", "second-line", "password"]) {
+    for (const marker of [
+      "literal-secret-value",
+      "secret-like-value",
+      "not-an-openclaw-generated-token",
+      "second-line",
+      "password",
+    ]) {
       assert.ok(!result.stdout.includes(marker), `${item.name} reflected a marker to stdout`);
       assert.ok(!result.stderr.includes(marker), `${item.name} reflected a marker to stderr`);
     }
