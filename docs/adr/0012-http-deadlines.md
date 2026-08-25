@@ -4,29 +4,34 @@ Status: accepted under delegated approval, user review pending
 
 Date: 2026-08-23
 
+Updated: 2026-08-25 for the single-webhook design
+
 ## Problem
 
-An outbound controller or runtime request can otherwise remain open forever. That would stop polling, durable outbox delivery, wake retries, and clean service shutdown.
+Local or central HTTP work can otherwise remain open forever and block polling, webhook retries, MCP calls, or clean shutdown.
 
 ## Decision
 
-Every HTTP client combines the caller's cancellation signal with an internal deadline:
+Every HTTP operation combines caller cancellation with an internal deadline:
 
 | Operation | Deadline |
 | --- | --- |
-| Controller long poll | Configured poll wait plus 10 seconds |
-| Controller acknowledgement or wake report | 10 seconds |
-| Runtime wake | 10 seconds |
-| Runtime health probe | 5 seconds |
+| Central ID long poll | Poll wait plus 10 seconds |
+| Central MCP connection | 5 seconds |
+| Central MCP tool call | 30 seconds unless a shorter approved tool limit applies |
+| Local MCP request | 35 seconds |
+| Webhook wake | 10 seconds |
 
-Tests may inject shorter positive deadlines. Production configuration does not expose these values in v1.
+Tests may inject shorter positive deadlines. V1 does not expose deadline options on the CLI.
 
-The client still rejects redirects. A deadline failure produces a safe typed error or retryable wake outcome without including URLs, credentials, headers, or response bodies.
+Clients reject redirects and bound response bytes. A timeout, cancellation, redirect, or oversized response produces a safe typed error without URLs, credentials, headers, MCP bodies, or remote error text.
+
+Do not automatically retry a central MCP tool call after it may have reached the server. ID polls and webhook wakes follow their separately tested retry rules.
 
 ## Costs
 
-A controller or local runtime that cannot respond within the deadline will be retried. The controller endpoints and native runtime webhooks are expected to acknowledge scheduling rather than wait for task completion.
+A slow central tool or webhook fails even if it would eventually complete. Bounded uncertainty and shutdown are more important than waiting indefinitely.
 
 ## Approval
 
-The user delegated this provisional choice on 2026-08-23 and asked to review it later.
+The user delegated the original choice on 2026-08-23 and authorized documentation updates for the single-webhook design on 2026-08-25.
