@@ -26,7 +26,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: npm audit --omit=dev --audit-level=high
+      - if: always()
+        run: npm audit --omit=dev --audit-level=high
 
   central-fixture:
     name: Central fixture (Docker)

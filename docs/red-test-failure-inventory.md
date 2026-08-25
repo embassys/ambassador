@@ -15,6 +15,15 @@ Date: 2026-08-25
 
 The 142 legacy tests still pass. The dependency-free central contract test also passes.
 
+## CI matrix
+
+| Job | Pass | Fail | Skip | Classification |
+| --- | ---: | ---: | ---: | --- |
+| Ubuntu Node | 143 | 8 | 0 | Expected red failures only |
+| macOS Node | 143 | 8 | 0 | Expected red failures only |
+| Windows Node | 136 | 8 | 7 | Expected red failures plus existing platform skips |
+| Ubuntu Docker fixture | 8 | 0 | 0 | Passing fixture contract and hardened runtime health |
+
 ## Expected failures
 
 | Test | Current failure | Missing behavior |
