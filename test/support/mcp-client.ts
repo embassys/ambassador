@@ -112,16 +112,16 @@ export class TestMcpClient {
       body: JSON.stringify(message),
       redirect: "manual",
     });
+    const body = await response.text();
     assert.ok(
       acceptedStatuses.includes(response.status),
-      `MCP request returned ${response.status}: ${await response.text()}`,
+      `MCP request returned ${response.status}: ${body}`,
     );
 
     if (response.status === 202 || response.status === 204) {
       return { response, parsed: { jsonrpc: "2.0" } };
     }
 
-    const body = await response.text();
     return { response, parsed: parseResponse(response.headers.get("content-type"), body) };
   }
 }
