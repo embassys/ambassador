@@ -6,36 +6,35 @@ Date: 2026-08-25
 
 ## Local Node run
 
-`npm test` compiles the production and test TypeScript, then runs 146 tests.
+`npm test` compiles the production and test TypeScript, then runs 151 tests.
 
 | Result | Count |
 | --- | --- |
-| Pass | 144 |
-| Fail | 2 |
+| Pass | 143 |
+| Fail | 8 |
 
-The 142 legacy tests still pass. The dependency-free central contract test and strict split-option rejection also pass.
+The 142 legacy tests still pass. The dependency-free central contract test also passes.
 
 ## Expected failures
 
-### Removed commands still exist
+| Test | Current failure | Missing behavior |
+| --- | --- | --- |
+| Removed setup | Legacy `setup` exits 0 | Reject removed configuration commands with exit 2 |
+| Removed agent management | Legacy `agent list` exits 0 | Reject removed binding commands with exit 2 |
+| Invalid startup forms | Missing token environment exits 2 | Parse the new options, then classify credential resolution as exit 4 without reflection |
+| Full enrollment and relay | New `start` exits 2 | Foreground MCP, enrollment, persistence, polling, wake, retrieval, acknowledgement, and restart |
+| Malformed verification | New `start` exits 2 | Fail-closed verification-result validation without polling or JWT disclosure |
+| Credential-store failure | New `start` exits 2 | Persist before local success and leave polling dormant on failure |
+| Webhook retry | New `start` exits 2 | Retry the same opaque ID after a failed wake |
+| Executable lifecycle | Packaged CLI exits before startup | Real foreground process, singleton ordering, and graceful `SIGTERM` |
 
-`test/single-webhook-cli.test.ts` expects the legacy `setup` command to exit with code 2. The current implementation exits 0 and writes the old JSON configuration. This is missing replacement behavior, not a fixture defect.
-
-### New foreground start does not exist
-
-`test/single-webhook-e2e.test.ts` invokes:
-
-```text
-a2a-gateway start --webhook-url=<loopback-url> --webhook-token-env=A2A_WEBHOOK_TOKEN
-```
-
-The current CLI exits 2 with `Invalid command or arguments` before binding MCP. This is the first missing behavior in the end-to-end path. Later assertions in the same test define local MCP authentication, enrollment, JWT stripping and injection, ID-only polling, separate acknowledgements, webhook wake, content retrieval, and plaintext scans.
+Later assertions in these tests also lock local bearer checks before body parsing, exact `Host` and `Origin`, body limits, tool-list change notification, removal of local credential selectors, transient upstream token injection, strict central requests, exact webhook shape, restart recovery, and scans of the isolated test home.
 
 ## Fixture status
 
 The Node central fake passes its acknowledgement contract independently: notification acknowledgement stops ID redelivery without hiding content from MCP, and content remains available until idempotent `ack_message` succeeds.
 
-The Dockerized Python/FastMCP fixture is tested in the dedicated Ubuntu CI job because this machine has no running Docker daemon and its system Python is 3.9. The approved fixture requires Python 3.13.
+The Dockerized Python/FastMCP fixture has a hash-locked Python 3.13 image and eight in-container contract tests. The dedicated Ubuntu job builds its `test` target, then starts the runtime image read-only and non-root with no network, volume, or published port. The local Docker daemon is unavailable, so that build result comes from CI.
 
 ## Gate
 
