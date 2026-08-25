@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   GatewayOptionsError,
   parseGatewayStartOptions,
+  resolveDevelopmentCentralUrls,
   resolveWebhookToken,
 } from "../src/gateway-options.js";
 
@@ -106,6 +107,70 @@ test("resolves only an OpenClaw-generated 192-bit hook token", () => {
         error instanceof GatewayOptionsError &&
         error.exitCode === 4 &&
         error.message === "Invalid webhook token",
+    );
+  }
+});
+
+test("resolves only a complete safe pair of development central URLs", () => {
+  assert.equal(resolveDevelopmentCentralUrls({}), undefined);
+  assert.deepEqual(
+    resolveDevelopmentCentralUrls({
+      A2A_DEV_CENTRAL_API_URL: "http://127.0.0.1:8000",
+      A2A_DEV_CENTRAL_MCP_URL: "http://127.0.0.1:8000/mcp",
+    }),
+    {
+      centralApiUrl: "http://127.0.0.1:8000",
+      centralMcpUrl: "http://127.0.0.1:8000/mcp",
+    },
+  );
+  assert.deepEqual(
+    resolveDevelopmentCentralUrls({
+      A2A_DEV_CENTRAL_API_URL: "https://api.dev.example",
+      A2A_DEV_CENTRAL_MCP_URL: "https://mcp.dev.example/mcp",
+    }),
+    {
+      centralApiUrl: "https://api.dev.example",
+      centralMcpUrl: "https://mcp.dev.example/mcp",
+    },
+  );
+  assert.deepEqual(
+    resolveDevelopmentCentralUrls({
+      A2A_DEV_CENTRAL_API_URL: "http://localhost:8000",
+      A2A_DEV_CENTRAL_MCP_URL: "http://[::1]:8000/mcp",
+    }),
+    {
+      centralApiUrl: "http://localhost:8000",
+      centralMcpUrl: "http://[::1]:8000/mcp",
+    },
+  );
+
+  for (const environment of [
+    { A2A_DEV_CENTRAL_API_URL: "http://127.0.0.1:8000" },
+    { A2A_DEV_CENTRAL_MCP_URL: "http://127.0.0.1:8000/mcp" },
+    { A2A_DEV_CENTRAL_API_URL: "", A2A_DEV_CENTRAL_MCP_URL: "http://127.0.0.1/mcp" },
+    {
+      A2A_DEV_CENTRAL_API_URL: "http://central.dev.example",
+      A2A_DEV_CENTRAL_MCP_URL: "http://central.dev.example/mcp",
+    },
+    {
+      A2A_DEV_CENTRAL_API_URL: "https://user:secret@api.dev.example",
+      A2A_DEV_CENTRAL_MCP_URL: "https://mcp.dev.example/mcp",
+    },
+    {
+      A2A_DEV_CENTRAL_API_URL: "https://api.dev.example?secret=value",
+      A2A_DEV_CENTRAL_MCP_URL: "https://mcp.dev.example/mcp#fragment",
+    },
+    {
+      A2A_DEV_CENTRAL_API_URL: "https://api.dev.example/embedded space",
+      A2A_DEV_CENTRAL_MCP_URL: "https://mcp.dev.example/mcp",
+    },
+  ]) {
+    assert.throws(
+      () => resolveDevelopmentCentralUrls(environment),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "Invalid development central endpoints" &&
+        !error.message.includes("secret"),
     );
   }
 });

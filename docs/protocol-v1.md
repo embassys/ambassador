@@ -12,6 +12,8 @@ a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 
 Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
+The `0.2.0` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
+
 `--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must match OpenClaw's generated 192-bit hook-token format, `[0-9a-f]{48}`.
 
 Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Errors never echo an option value, environment value, URL, header, or remote body.
