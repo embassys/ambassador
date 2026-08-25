@@ -27,7 +27,7 @@ PR `#5` implements the approved replacement on the reviewed test branch:
 - restart recovery and fixed safe errors; and
 - deletion of setup, bindings, runtime adapters, JSON configuration, and native service management.
 
-The local replacement suite has 76 passing tests. The independent Dockerized FastMCP fixture exercises eight transport and contract cases in CI. The published `@a2adev/gateway@0.1.0` package remains the older implementation until a later release passes the release gates.
+The local replacement suite has 76 passing tests. Linux and macOS run it in CI. The independent Dockerized FastMCP fixture exercises eight transport and contract cases on Linux. Windows CI is disabled for this implementation PR after its strict credential DACL checks failed on the GitHub runner; Windows support and release qualification remain incomplete. The published `@a2adev/gateway@0.1.0` package remains the older implementation until a later release passes the release gates.
 
 ## Production decisions
 
