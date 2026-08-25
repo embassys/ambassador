@@ -28,6 +28,56 @@ jobs:
       - run: npm run check
       - run: npm audit --omit=dev --audit-level=high
 
+  central-fixture:
+    name: Central fixture (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Build and run fixture contract tests
+        run: >-
+          docker build
+          --platform=linux/amd64
+          --target=test
+          --tag=a2a-central-fixture-test
+          test/fixtures/central
+      - name: Build runtime fixture
+        run: >-
+          docker build
+          --platform=linux/amd64
+          --target=runtime
+          --tag=a2a-central-fixture
+          test/fixtures/central
+      - name: Verify hardened runtime fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          container=a2a-central-fixture-ci
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
+          docker run \
+            --detach \
+            --name "$container" \
+            --network=none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            a2a-central-fixture >/dev/null
+
+          for _ in $(seq 1 30); do
+            health=$(docker inspect --format '{{.State.Health.Status}}' "$container")
+            if [ "$health" = healthy ]; then
+              break
+            fi
+            if [ "$(docker inspect --format '{{.State.Status}}' "$container")" = exited ]; then
+              docker logs "$container"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          test "$(docker inspect --format '{{.State.Health.Status}}' "$container")" = healthy
+          test "$(docker inspect --format '{{.Config.User}}' a2a-central-fixture)" = fixture
+
   publish:
     name: Publish npm package
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
