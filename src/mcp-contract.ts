@@ -11,7 +11,7 @@ export const AUTHENTICATED_TOOLS = [
   "health_check",
 ] as const;
 
-const FORBIDDEN_NAMES = new Set([
+const FORBIDDEN_LOCAL_NAMES = new Set([
   "access_token",
   "agent_id",
   "authorization",
@@ -20,6 +20,8 @@ const FORBIDDEN_NAMES = new Set([
   "jwt",
   "token",
 ]);
+
+const FORBIDDEN_RESULT_NAMES = new Set(["access_token", "authorization", "jwt", "token"]);
 
 export class McpContractError extends Error {
   constructor() {
@@ -48,10 +50,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function assertNoForbiddenNames(value: unknown): void {
+function assertNoForbiddenNames(value: unknown, forbiddenNames: ReadonlySet<string>): void {
   if (Array.isArray(value)) {
     for (const item of value) {
-      assertNoForbiddenNames(item);
+      assertNoForbiddenNames(item, forbiddenNames);
     }
     return;
   }
@@ -60,10 +62,10 @@ function assertNoForbiddenNames(value: unknown): void {
   }
 
   for (const [name, nested] of Object.entries(value)) {
-    if (FORBIDDEN_NAMES.has(name.toLowerCase())) {
+    if (forbiddenNames.has(name.toLowerCase())) {
       throw new McpContractError();
     }
-    assertNoForbiddenNames(nested);
+    assertNoForbiddenNames(nested, forbiddenNames);
   }
 }
 
@@ -128,7 +130,7 @@ export function localToolDefinition(tool: CentralToolDefinition): CentralToolDef
     }
     return name !== "token";
   });
-  assertNoForbiddenNames(properties);
+  assertNoForbiddenNames(properties, FORBIDDEN_LOCAL_NAMES);
 
   return {
     ...tool,
@@ -148,7 +150,7 @@ export function upstreamToolArguments(
   if (!isObject(localArguments)) {
     throw new McpContractError();
   }
-  assertNoForbiddenNames(localArguments);
+  assertNoForbiddenNames(localArguments, FORBIDDEN_LOCAL_NAMES);
   const properties = parseSchema(tool.inputSchema).properties as Record<string, unknown>;
   const requiresToken = Object.hasOwn(properties, "token");
   if (requiresToken && centralToken === undefined) {
@@ -161,7 +163,7 @@ export function upstreamToolArguments(
 }
 
 export function assertSafeUpstreamResult(value: unknown, centralToken?: string): void {
-  assertNoForbiddenNames(value);
+  assertNoForbiddenNames(value, FORBIDDEN_RESULT_NAMES);
   if (centralToken !== undefined) {
     let serialized: string;
     try {

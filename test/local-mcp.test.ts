@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { type LocalMcpRouter, LocalMcpServer } from "../src/local-mcp.js";
 import { TestMcpClient } from "./support/mcp-client.js";
@@ -49,6 +50,18 @@ test("serves an authenticated stateful MCP tool through the official transport",
     echoed: "safe value",
   });
   assert.deepEqual(backend.calls, [{ name: "echo", arguments: { value: "safe value" } }]);
+
+  const secondClient = new TestMcpClient(server.endpoint, TOKEN);
+  await secondClient.initialize();
+  assert.deepEqual(
+    (await secondClient.listTools()).map((tool) => tool.name),
+    ["echo"],
+  );
+
+  const listChanged = client.waitForNotification("notifications/tools/list_changed");
+  await delay(20);
+  await server.sendToolListChanged();
+  await listChanged;
 });
 
 test("rejects host, origin, bearer, and body violations before dispatch", async (t) => {
