@@ -50,6 +50,35 @@ jobs:
           --target=runtime
           --tag=a2a-central-fixture
           test/fixtures/central
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run test:build
+      - name: Run gateway against FastMCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          container=a2a-central-fixture-e2e
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true' EXIT
+          docker run \
+            --detach \
+            --name "$container" \
+            --network=host \
+            a2a-central-fixture >/dev/null
+
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/readyz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl --fail --silent http://127.0.0.1:8000/readyz >/dev/null
+          A2A_FASTMCP_FIXTURE_URL=http://127.0.0.1:8000 \
+            node --test .test-dist/test/fastmcp-e2e.test.js
       - name: Verify hardened runtime fixture
         shell: bash
         run: |
@@ -82,7 +111,7 @@ jobs:
   publish:
     name: Publish npm package
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: check
+    needs: [check, central-fixture]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -88,6 +88,7 @@ test("fails closed on credential-bearing nested results or stored JWT bytes", ()
     { nested: { access_token: "unexpected" } },
     { items: [{ authorization: "unexpected" }] },
     { message: `prefix ${JWT} suffix` },
+    { [JWT]: "unexpected property name" },
   ]) {
     assert.throws(() => assertSafeUpstreamResult(result, JWT), McpContractError);
   }
@@ -123,6 +124,9 @@ test("parses exactly one strict verification credential into a token-free local 
       message: "unexpected field",
     },
     { agent_id: "", username: "fixture-agent", token: JWT, message: "empty identity" },
+    { agent_id: JWT, username: "fixture-agent", token: JWT, message: "unsafe identity" },
+    { agent_id: "agent_123", username: `prefix-${JWT}`, token: JWT, message: "unsafe user" },
+    { agent_id: "agent_123", username: "fixture-agent", token: JWT, message: JWT },
   ]) {
     assert.throws(() => parseVerificationSuccess(invalid), McpContractError);
   }

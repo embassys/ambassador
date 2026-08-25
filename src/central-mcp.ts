@@ -132,7 +132,19 @@ function parseTool(value: unknown): CentralToolDefinition {
 }
 
 function canonicalToolResult(result: unknown): Record<string, unknown> {
-  if (!isRecord(result) || result.isError === true) throw new RemoteRequestFailed();
+  if (!isRecord(result)) throw new InvalidCentralResponse();
+  const keys = Object.keys(result);
+  if (result.isError !== undefined && typeof result.isError !== "boolean") {
+    throw new InvalidCentralResponse();
+  }
+  if (result.isError === true) throw new RemoteRequestFailed();
+  if (
+    !keys.includes("content") ||
+    !keys.includes("structuredContent") ||
+    keys.some((key) => key !== "content" && key !== "structuredContent" && key !== "isError")
+  ) {
+    throw new InvalidCentralResponse();
+  }
   const structuredContent = toPlainRecord(result.structuredContent);
   if (!Array.isArray(result.content)) throw new InvalidCentralResponse();
   if (result.content.length === 0) return structuredContent;

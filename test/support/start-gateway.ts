@@ -22,6 +22,7 @@ interface RunningGateway {
   stateRoot: string;
   stdout: () => string;
   stderr: () => string;
+  waitForExit: () => Promise<number>;
   stop: () => Promise<number>;
 }
 
@@ -118,6 +119,7 @@ export async function startGateway(
     stateRoot,
     stdout: () => stdout,
     stderr: () => stderr,
+    waitForExit: async () => await completion,
     stop,
   };
 }

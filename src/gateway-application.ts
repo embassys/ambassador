@@ -62,6 +62,7 @@ export interface GatewayApplicationOptions {
 
 export interface RunningGatewayApplication {
   endpoint: string;
+  failure: Promise<Error>;
   close(): Promise<void>;
 }
 
@@ -104,6 +105,10 @@ export async function openGatewayApplication(
   let relayRun: Promise<void> | undefined;
   let local: LocalMcpServer;
   let closed = false;
+  let reportFailure: ((error: Error) => void) | undefined;
+  const failure = new Promise<Error>((resolve) => {
+    reportFailure = resolve;
+  });
 
   const requireCentral = (): CentralMcpClient => {
     if (central === undefined) throw safeFailure();
@@ -151,7 +156,11 @@ export async function openGatewayApplication(
         error.code === "central_authentication_failed"
       ) {
         await stopRelayForAuthenticationFailure();
+        return;
       }
+      relay = undefined;
+      reportFailure?.(safeFailure());
+      reportFailure = undefined;
     });
   };
 
@@ -161,9 +170,11 @@ export async function openGatewayApplication(
       if (!currentIdentity.enrolled) {
         return BOOTSTRAP_DEFINITIONS.map(localToolDefinition);
       }
-      currentIdentity.authenticatedToken();
+      const centralToken = currentIdentity.authenticatedToken();
       const catalog = await requireCentral().listTools();
-      return selectCentralTools(catalog, true).map(localToolDefinition);
+      const localCatalog = selectCentralTools(catalog, true).map(localToolDefinition);
+      assertSafeUpstreamResult(localCatalog, centralToken);
+      return localCatalog;
     },
 
     async callTool(name, arguments_, signal) {
@@ -232,6 +243,7 @@ export async function openGatewayApplication(
 
   return {
     endpoint: local.endpoint,
+    failure,
     async close() {
       if (closed) return;
       closed = true;

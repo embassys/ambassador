@@ -100,6 +100,8 @@ export interface FakeCentral {
   jwt: string;
   pollCount: () => number;
   calls: ToolCallRecord[];
+  setPollResponse: (response: unknown) => void;
+  setToolDescription: (name: string, description: string | undefined) => void;
   setVerificationResult: (result: Record<string, unknown> | undefined) => void;
   injectMessage: (id: string, content: string) => void;
   messageState: (id: string) => MessageRecord;
@@ -109,6 +111,8 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   const messages = new Map<string, MessageRecord>();
   const calls: ToolCallRecord[] = [];
   let pollCount = 0;
+  let pollResponse: unknown;
+  const toolDescriptions = new Map<string, string>();
   let verificationResult: Record<string, unknown> | undefined;
 
   const server = createServer(async (request, response) => {
@@ -129,11 +133,15 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
           json(response, 422, { detail: "invalid query" });
           return;
         }
-        json(response, 200, {
-          messages: [...messages.values()]
-            .filter((message) => !message.notificationAcknowledged)
-            .map((message) => ({ id: message.id })),
-        });
+        json(
+          response,
+          200,
+          pollResponse ?? {
+            messages: [...messages.values()]
+              .filter((message) => !message.notificationAcknowledged)
+              .map((message) => ({ id: message.id })),
+          },
+        );
         return;
       }
 
@@ -181,7 +189,19 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
           return;
         }
         if (message.method === "tools/list") {
-          json(response, 200, { jsonrpc: "2.0", id, result: { tools } });
+          json(response, 200, {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              tools: tools.map((definition) => {
+                const name = String((definition as { name?: unknown }).name);
+                const description = toolDescriptions.get(name);
+                return description === undefined
+                  ? definition
+                  : { ...(definition as Record<string, unknown>), description };
+              }),
+            },
+          });
           return;
         }
         if (message.method === "tools/call") {
@@ -332,6 +352,13 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
     jwt: CENTRAL_JWT,
     pollCount: () => pollCount,
     calls,
+    setPollResponse(response) {
+      pollResponse = response;
+    },
+    setToolDescription(name, description) {
+      if (description === undefined) toolDescriptions.delete(name);
+      else toolDescriptions.set(name, description);
+    },
     setVerificationResult(result) {
       verificationResult = result;
     },

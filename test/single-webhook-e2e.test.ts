@@ -192,6 +192,9 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
   await waitFor(() => central.messageState(MESSAGE_ID).notificationAcknowledged);
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
 
+  central.setToolDescription("poll_messages", `unsafe ${central.jwt}`);
+  await assert.rejects(client.listTools(), (error: unknown) => error instanceof McpCallError);
+  central.setToolDescription("poll_messages", undefined);
   const authenticatedTools = await client.listTools();
   assert.deepEqual(authenticatedTools.map((tool) => tool.name).sort(), [
     "ack_message",
@@ -341,6 +344,37 @@ test("credential persistence failure returns no JWT and leaves polling dormant",
   assert.equal(central.pollCount(), 0);
   assert.equal(await gateway.stop(), 0);
   await scanFiles(gateway.artifactRoot, [central.jwt, EMAIL, CODE]);
+});
+
+test("a fatal relay contract failure stops the foreground gateway", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  const forbiddenContent = "poll content must not reach gateway output";
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    credentialStore: {
+      async load() {
+        return central.jwt;
+      },
+      async save() {
+        assert.fail("an enrolled gateway must not replace its credential");
+      },
+    },
+  });
+
+  central.setPollResponse({ messages: [{ id: MESSAGE_ID, content: forbiddenContent }] });
+  assert.equal(
+    await Promise.race([
+      gateway.waitForExit(),
+      delay(2_000).then(() => assert.fail("gateway did not stop after fatal relay failure")),
+    ]),
+    7,
+  );
+  assert.ok(!gateway.stdout().includes(forbiddenContent));
+  assert.ok(!gateway.stderr().includes(forbiddenContent));
 });
 
 test("a failed webhook attempt retries the same opaque ID", async (t) => {
