@@ -1,6 +1,6 @@
 # 0003 Controller HTTP transport
 
-Status: accepted under delegated approval, user review pending
+Status: superseded by ADR `0016-combined-gateway-mcp-proxy.md`
 
 Date: 2026-08-23
 
