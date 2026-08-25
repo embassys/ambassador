@@ -57,7 +57,7 @@ After enrollment, remove the bootstrap tools and expose this allowlist when the 
 - `ack_message`
 - `health_check`
 
-Advertise MCP tool-list change support and send `notifications/tools/list_changed` after the JWT is durably stored. Remove the upstream `token` property from every local input schema. Reject local calls containing `token`, `jwt`, a credential selector, or an identity selector. Add `token: <central-agent-jwt>` only to the transient upstream `tools/call` arguments required by the current central MCP server.
+Advertise MCP tool-list change support and send `notifications/tools/list_changed` after the JWT is durably stored. Remove the upstream `token` property from every local input schema. Reject local calls containing `token`, `jwt`, a credential selector, or an identity selector. When an allowlisted upstream tool schema contains the central server's required `token` argument, add `token: <central-agent-jwt>` only to that transient upstream `tools/call`. Do not add it to `health_check`, whose upstream schema has no token.
 
 Before returning any upstream result, reject it if any nested field is named `token`, `jwt`, `access_token`, or `authorization`, or if its serialization contains the stored JWT bytes. Apply the same rule to bootstrap and authenticated tools. Never pass upstream error text to the local caller.
 
