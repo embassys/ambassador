@@ -14,6 +14,8 @@ Both options are required exactly once. The CLI accepts only the `--name=value` 
 
 `--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must be non-empty and contain no CR or LF.
 
+Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Errors never echo an option value, environment value, URL, header, or remote body.
+
 The process acquires its singleton lock before resolving durable credentials, binding MCP, polling, forwarding tools, or sending webhooks. It binds `127.0.0.1:8787` and prints this line only after the endpoint is ready:
 
 ```text
@@ -131,6 +133,8 @@ Content-Type: application/json
 ```
 
 This acknowledgement stops ID notification redelivery. It does not mark the message content delivered or processed and does not hide it from MCP `poll_messages`.
+
+After the ID commit, notification acknowledgement and webhook wake proceed independently. A delayed or failed `ack_notification` does not block the first wake; its ID-only outbox retries until the central service confirms it.
 
 ## Durable relay
 

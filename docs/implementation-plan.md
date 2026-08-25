@@ -49,7 +49,8 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 ### Required CLI cases
 
 - Accept only `start --webhook-url=<url> --webhook-token-env=<name>`.
-- Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and agent IDs.
+- Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
+- Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
 - Acquire the singleton lock before resolving the token or touching credentials.
 - Print the endpoint only after successful bind and keep running until cancellation.
 - Never print either token or a credential-bearing MCP URL.

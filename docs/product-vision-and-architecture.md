@@ -72,9 +72,9 @@ If persistence fails, verification does not report local success. A second verif
 
 1. The gateway polls the central ID view with the stored JWT.
 2. The central service returns opaque message IDs without consuming the content-bearing MCP message.
-3. The gateway stores each new ID and then sends the separate idempotent `ack_notification` persistence acknowledgement.
-4. Notification acknowledgement stops ID redelivery but leaves the content available through MCP.
-5. The gateway wakes the webhook with a fixed instruction and an idempotency header.
+3. The gateway stores each new ID, then independently queues the idempotent `ack_notification` persistence acknowledgement and webhook wake.
+4. Notification acknowledgement stops ID redelivery but leaves the content available through MCP; acknowledgement retries do not block the wake.
+5. The webhook receives a fixed instruction and an idempotency header.
 6. The agent calls the gateway's MCP `poll_messages` tool to retrieve content from the central MCP server.
 7. The agent processes the message and calls the separate `ack_message` content acknowledgement through the gateway. Content remains retrievable and the same wake ID remains eligible for redrive until this succeeds.
 
