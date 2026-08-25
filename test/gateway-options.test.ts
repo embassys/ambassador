@@ -19,6 +19,14 @@ test("accepts exactly the two named start options in either order", () => {
     ]),
     { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN" },
   );
+  assert.equal(
+    parseGatewayStartOptions([
+      "start",
+      "--webhook-url=http://127.0.0.1:80/hooks/agent",
+      "--webhook-token-env=OPENCLAW_HOOK_TOKEN",
+    ]).webhookUrl,
+    "http://127.0.0.1:80/hooks/agent",
+  );
   assert.deepEqual(
     parseGatewayStartOptions([
       "start",
@@ -80,7 +88,14 @@ test("requires a literal loopback URL with an explicit valid port", () => {
 test("resolves only an OpenClaw-generated 192-bit hook token", () => {
   assert.equal(resolveWebhookToken({ OPENCLAW_HOOK_TOKEN: TOKEN }, "OPENCLAW_HOOK_TOKEN"), TOKEN);
 
-  for (const value of [undefined, "", "a".repeat(47), "g".repeat(48), `${TOKEN}\n`]) {
+  for (const value of [
+    undefined,
+    "",
+    "a".repeat(47),
+    "A".repeat(48),
+    "g".repeat(48),
+    `${TOKEN}\n`,
+  ]) {
     assert.throws(
       () =>
         resolveWebhookToken(
