@@ -89,9 +89,9 @@ If persistence fails, verification does not report local success. A second verif
 
 ## Current release boundary
 
-The published `0.1.0` package implements the discarded setup, binding, adapter, and controller contract. It does not implement this design. Do not present `0.1.0` as an end-to-end A2A integration.
+Version `0.2.0` packages the single-webhook replacement for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
-The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation.
+The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central contract and recovery work listed below.
 
 ## Open decisions
 

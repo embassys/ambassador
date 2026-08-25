@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-08-25
 
+Updated: 2026-08-25 for the temporary development endpoint override
+
 ## Problem
 
 The earlier CLI and configuration model asked the gateway to discover or configure runtimes, manage bindings, and receive a central JWT before startup. The intended user flow is smaller. A user already has a local webhook URL and token. Central registration happens later through MCP.
@@ -28,7 +30,7 @@ MCP endpoint: http://127.0.0.1:8787/mcp
 
 The webhook URL must use the literal loopback address `127.0.0.1`. The webhook token must use OpenClaw's generated 48-character lowercase hexadecimal format. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
 
-The central API and MCP URLs are product constants, not user-facing CLI options. Tests may inject loopback URLs.
+The central API and MCP URLs are product constants, not user-facing CLI options. Until those constants are available, the `0.2.0` development release accepts `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` as a paired environment override. A development flow sets both. Remote values require HTTPS, while loopback development servers may use HTTP. The override does not change the two-option CLI or add general configuration.
 
 ## Enrollment
 
