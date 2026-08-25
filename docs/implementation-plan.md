@@ -14,7 +14,7 @@ Read `docs/product-vision-and-architecture.md`, `docs/protocol-v1.md`, this plan
 - Do not add publishing or installation tooling until the user approves the distribution plan.
 - A dependency proposal must explain why we need it, the alternatives, the recommendation, its license and maintenance status, and its effect on packaging.
 - Agents own separate directories or files where possible. Tasks that share files run sequentially.
-- Remote MCP tools, task content, permissions, results, ACP, Grok Bot, and a GUI remain out of scope.
+- The authenticated local MCP proxy from ADR 0016 is in scope. Implementing the central MCP service, persisting task or MCP content, ACP, Grok Bot, hosted-agent connectors, and a GUI remain out of scope.
 
 ## Before code
 
@@ -54,13 +54,13 @@ Before `G2`, add only tests, fixtures, CI files, and the empty interfaces or ent
 
 Use two container layouts for different jobs.
 
-The main local acceptance test runs the CLI and sidecar on the host. The controller, OpenClaw, Hermes, and an optional fake model run in containers with ports bound to host loopback. This tests the real CLI, host paths, credentials, and network boundary without installing either agent runtime on the host.
+The existing local acceptance test runs the CLI and gateway relay on the host. The controller, OpenClaw, Hermes, and an optional fake model run in containers with ports bound to host loopback. This tests the current CLI, host paths, credentials, and wake boundary without installing either agent runtime on the host.
 
 The CI layout runs every component in containers on one private network. It is reproducible and good for Linux restart and failure tests, but it does not prove host service installation.
 
 Test `launchd`, `systemd --user`, Windows startup, OS credential storage, and native paths on their actual operating systems. Docker cannot cover those behaviors.
 
-Pin runtime images by version or digest. Do not use moving `latest` tags in CI. The sidecar test suite stops at wake acceptance. A full task claim needs a controller environment that supplies its own MCP endpoint, which remains outside this repository.
+Pin runtime images by version or digest. Do not use moving `latest` tags in CI. The relay suite stops at wake acceptance. The combined-process proxy suite will use a fake central MCP service and an independent fake agent; it will not implement or exercise real task semantics.
 
 ## Make the tests pass
 
@@ -79,14 +79,33 @@ Pin runtime images by version or digest. Do not use moving `latest` tags in CI. 
 
 `I5` and `I6` may run in parallel because they own separate adapter directories. Tasks touching shared protocol, storage, or CLI files run sequentially.
 
+## Combined-process transition
+
+The code on `main` implements the ID-only relay, not ADR 0016's local MCP proxy. Complete these tasks before adding proxy production code:
+
+| ID | Agent | Task | Depends On | Result |
+| --- | --- | --- | --- | --- |
+| M1 | Central contract | Confirm global ID scope, per-binding poll state and isolation, redelivery, idempotent acknowledgement, expiry, wake reporting, proxied tool catalog, JWT enrollment and lifecycle, and uncertain side-effect behavior | ADR 0016 | Compatibility options for user review |
+| M2 | Security design | Compare loopback MCP transports and caller-authentication options; define fixed caller-to-binding mapping, authentication replay and rotation, request and response limits, concurrency and per-binding resource caps, deadlines, redirects, TLS, crash artifacts, and credential handling | M1 | Options for user review |
+| M3 | UX and configuration | Draft per-binding JWT references, local MCP identities, setup changes, diagnostics, and service behavior without writing CLI code | M2 | CLI and configuration proposal |
+| G5 | User | Approve ID scope, poll isolation, tool catalog, JWT enrollment and lifecycle, side-effect semantics, local transport, authentication, configuration, CLI, dependencies, and migration behavior | M1, M2, M3 | Approved ADRs |
+| T7 | Proxy tests | Add failing tests for local authentication and replay, JWT injection, cross-binding and resource isolation, request and response limits, cancellation, uncertain side effects, singleton ordering, redaction, crash artifacts, and zero durable MCP content | G5 | Reviewed failing test suite |
+| T8 | Integration tests | Add a fake independent agent and fake central MCP service; cover relay wake followed by authenticated local tool calls | G5 | Reviewed failing integration suite |
+| C2 | CI | Run the proxy suites on Linux, macOS, and Windows without real agent credentials or external services | T7, T8 | Cross-platform expected failures |
+| G6 | User | Review the failures and exclusions before production implementation | C2 | Approval to implement |
+| I9 | Local MCP proxy | Implement only the approved authenticated loopback proxy behavior | G6 | T7 passes |
+| I10 | Combined assembly | Run relay and proxy in one process while keeping journal, diagnostics, metrics, and logs free of MCP content | I9 | T8 passes |
+
+If HTTP is selected, M2 and T7 also cover browser-to-loopback protections such as `Host` and `Origin` validation. Do not add a local listener, MCP framework, per-binding JWT configuration, or new CLI flags before G5. Do not add proxy production behavior before G6.
+
 ## Release checks
 
 | ID | Agent | Task | Depends On | Result |
 | --- | --- | --- | --- | --- |
-| Q1 | Security review | Check secret handling, authentication, replay protection, local endpoints, and the data boundary | I5, I6, I8 | Findings resolved or accepted |
-| Q2 | Reliability | Run crash, cross-platform, soak, upgrade, and migration tests | I5, I6, I8 | Reliability results |
-| Q3 | Release | Build signed files, checksums, SBOM, provenance, and clean-machine install tests | Q1, Q2 | Release candidate |
-| G4 | User | Review known risks, adapter limits, release files, and docs | Q3 | Approval to release |
+| Q1 | Security review | Check secret handling, local MCP authentication, cross-binding isolation, replay protection, local endpoints, and durable-data boundaries | I5, I6, I8, I10 | Findings resolved or accepted |
+| Q2 | Reliability | Run relay and proxy crash, cross-platform, soak, upgrade, and migration tests | I5, I6, I8, I10 | Reliability results |
+| Q3 | Release | Build the npm artifact, SBOM, provenance when available, and clean-machine install tests | Q1, Q2 | Release candidate |
+| G7 | User | Review known risks, adapter limits, release files, and docs | Q3 | Approval to release |
 
 ## Approval points
 
