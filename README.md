@@ -1,6 +1,8 @@
-# A2A sidecar
+# A2A gateway
 
-The A2A sidecar is a per-user daemon that wakes local agent runtimes after a central controller authorizes work. It receives opaque IDs and timing metadata. Task text, results, permissions, grants, and MCP payloads do not cross this process.
+The A2A gateway is a per-user daemon that wakes local agent runtimes after a central controller authorizes work. The published `0.1.0` development preview implements a locally durable, ID-only relay against its fake v1 controller contract.
+
+ADR `0016-combined-gateway-mcp-proxy.md` approves the next short- and medium-term design: the same process will also expose an authenticated loopback MCP proxy and inject a central agent JWT for each binding. MCP content may then pass through process memory, but it must never enter configuration, SQLite, diagnostics, metrics, or logs. The proxy is not implemented yet.
 
 This repository contains a working development preview. It is not ready for public beta. See `docs/implementation-status.md` for the remaining release work.
 
@@ -35,7 +37,9 @@ The local machine may use another Node release for development, but CI and relea
 
 ## Configure
 
-The CLI stores references to environment variables, never literal credentials.
+The current CLI stores references to environment variables, never literal credentials. This configuration covers the existing relay; the approved per-binding central JWT and local MCP settings still need a separate CLI and configuration review.
+
+The available central `/api/poll_messages` implementation is not compatible with the relay's crash-safety contract yet: it marks messages delivered while polling and lacks durable redelivery and idempotent acknowledgement. Do not treat the current setup as end-to-end durable against that service.
 
 ```sh
 export A2A_CONTROLLER_TOKEN='controller-issued-token'
@@ -76,6 +80,12 @@ a2a-gateway run
 
 Every command accepts `--config <path>`. Read-only and fully noninteractive commands accept `--json`.
 
+## Planned local MCP proxy
+
+Independently running agents will call an authenticated MCP endpoint bound to loopback. The combined gateway process will map each authenticated local caller to one fixed binding and inject that binding's central JWT. Central JWTs will not be MCP tool arguments.
+
+Every G5 decision listed in `docs/implementation-plan.md`, including ID scope, tool catalog, JWT lifecycle, side-effect semantics, transport, authentication, configuration, CLI, dependencies, and migration, remains unapproved. Registration or verification tools will not return central JWTs through the local proxy. Do not configure an agent against a gateway MCP URL yet.
+
 ## Background gateway
 
 One gateway handles every configured agent. `start` uses `launchd` on macOS, `systemd --user` on Linux, and Task Scheduler on Windows. It registers the native user service automatically on first use.
@@ -91,7 +101,7 @@ Service definitions contain the executable, CLI path, and config path. They do n
 
 ## Delivery behavior
 
-The sidecar commits each notification and cursor to SQLite before acknowledgement. A wake retry keeps the same `delivery_id`. Reports stay in a durable outbox until the controller confirms them.
+The gateway relay commits each notification and cursor to SQLite before acknowledgement. A wake retry keeps the same `delivery_id`. Reports stay in a durable outbox until the controller confirms them.
 
 The generic webhook sends this strict body:
 
@@ -121,3 +131,4 @@ The GitHub Actions workflow runs lint, type checks, tests, and the production de
 - `docs/protocol-v1.md` defines wire behavior and state transitions.
 - `docs/decisions-to-review.md` lists every provisional choice made under delegated approval.
 - `docs/adr/` contains the corresponding decision records.
+- `docs/adr/0016-combined-gateway-mcp-proxy.md` records the approved interim combined-process architecture.
