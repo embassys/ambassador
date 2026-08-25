@@ -11,7 +11,7 @@ import { McpCallError, type McpTool, TestMcpClient } from "./support/mcp-client.
 import { rawPost } from "./support/raw-http.js";
 import { startGateway } from "./support/start-gateway.js";
 
-const WEBHOOK_TOKEN = "fixture-webhook-token-never-persist";
+const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const EMAIL = "fixture-agent@example.test";
 const CODE = "246810";
 const MESSAGE_ID = "message_fixture_01";
@@ -372,7 +372,7 @@ test("a failed webhook attempt retries the same opaque ID", async (t) => {
 
 test("the packaged CLI stays foreground, owns one instance, and stops on SIGTERM", async (t) => {
   const webhook = await startFakeWebhook(t);
-  const token = "process-lifecycle-token-must-not-appear";
+  const token = "fedcba9876543210fedcba9876543210fedcba9876543210";
   const gateway = await startGatewayProcess(t, { webhookUrl: webhook.url, webhookToken: token });
   assert.equal(gateway.endpoint, "http://127.0.0.1:8787/mcp");
 
