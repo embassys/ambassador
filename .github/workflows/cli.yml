@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  PNPM_CONFIG_MINIMUM_RELEASE_AGE: "1440"
+  PNPM_CONFIG_MINIMUM_RELEASE_AGE_STRICT: "true"
+  PNPM_CONFIG_BLOCK_EXOTIC_SUBDEPS: "true"
+
 jobs:
   check:
     name: Check (${{ matrix.os }})
@@ -23,11 +28,17 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24.19.0
-          cache: npm
-      - run: npm ci
-      - run: npm run check
+      - name: Enable qualified pnpm
+        run: |
+          corepack enable pnpm
+          corepack install
+          test "$(pnpm --version)" = 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
       - if: always()
-        run: npm audit --omit=dev --audit-level=high
+        run: pnpm audit --prod --audit-level=high
+      - if: always()
+        run: pnpm audit signatures
 
   central-fixture:
     name: Central fixture (Docker)
@@ -54,9 +65,13 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24.19.0
-          cache: npm
-      - run: npm ci
-      - run: npm run test:build
+      - name: Enable qualified pnpm
+        run: |
+          corepack enable pnpm
+          corepack install
+          test "$(pnpm --version)" = 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:build
       - name: Run gateway against FastMCP
         shell: bash
         run: |
@@ -127,19 +142,27 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24.19.0
-          cache: npm
-      - name: Use qualified npm
-        run: npm install --global npm@11.19.0
-      - run: npm ci
-      - run: npm run test:build
+      - name: Enable qualified pnpm
+        run: |
+          corepack enable pnpm
+          corepack install
+          test "$(pnpm --version)" = 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:build
       - name: Pack and install release artifact
         shell: bash
         run: |
           set -euo pipefail
-          npm pack --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/a2a-pack.json"
-          tarball=$(node -e 'const [pack] = require(process.argv[1]); process.stdout.write(pack.filename)' "$RUNNER_TEMP/a2a-pack.json")
+          tarball="$RUNNER_TEMP/a2adev-gateway-$(node -p "require('./package.json').version").tgz"
+          pnpm pack --out "$tarball"
           install_root="$RUNNER_TEMP/a2a-install"
-          npm install --prefix "$install_root" "$RUNNER_TEMP/$tarball"
+          mkdir -p "$install_root"
+          pnpm \
+            --dir "$install_root" \
+            --allow-build=better-sqlite3 \
+            add "$tarball"
+          pnpm --dir "$install_root" audit --prod --audit-level=high
+          pnpm --dir "$install_root" audit signatures
           test -x "$install_root/node_modules/.bin/a2a-gateway"
           test_output=$(
             A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
@@ -161,7 +184,10 @@ jobs:
           set -euo pipefail
           install_root="$RUNNER_TEMP/a2a-install"
           openclaw_root="$RUNNER_TEMP/openclaw-install"
-          npm install --prefix "$openclaw_root" --ignore-scripts openclaw@2026.7.1-2
+          mkdir -p "$openclaw_root"
+          pnpm \
+            --dir "$openclaw_root" \
+            add --ignore-scripts openclaw@2026.7.1-2
           A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
           A2A_OPENCLAW_CLI="$openclaw_root/node_modules/openclaw/openclaw.mjs" \
             node --test .test-dist/test/openclaw-e2e.test.js
@@ -183,16 +209,19 @@ jobs:
           node-version: 24.19.0
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Use qualified npm
-        run: npm install --global npm@11.19.0
-      - run: npm ci
+      - name: Enable qualified pnpm
+        run: |
+          corepack enable pnpm
+          corepack install
+          test "$(pnpm --version)" = 11.22.0
+      - run: pnpm install --frozen-lockfile
       - name: Check published version
         id: version
         shell: bash
         run: |
           package_name=$(node -p "require('./package.json').name")
           package_version=$(node -p "require('./package.json').version")
-          if npm view "$package_name@$package_version" version >/dev/null 2>&1; then
+          if pnpm view "$package_name@$package_version" version >/dev/null 2>&1; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
@@ -203,11 +232,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run test:build
-          npm pack --json --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/a2a-publish-pack.json"
-          tarball=$(node -e 'const [pack] = require(process.argv[1]); process.stdout.write(pack.filename)' "$RUNNER_TEMP/a2a-publish-pack.json")
+          pnpm run test:build
+          tarball="$RUNNER_TEMP/a2adev-gateway-$(node -p "require('./package.json').version").tgz"
+          pnpm pack --out "$tarball"
           install_root="$RUNNER_TEMP/a2a-publish-install"
-          npm install --prefix "$install_root" "$RUNNER_TEMP/$tarball"
+          mkdir -p "$install_root"
+          pnpm \
+            --dir "$install_root" \
+            --allow-build=better-sqlite3 \
+            add "$tarball"
+          pnpm --dir "$install_root" audit --prod --audit-level=high
+          pnpm --dir "$install_root" audit signatures
           test -x "$install_root/node_modules/.bin/a2a-gateway"
           test_output=$(
             A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
@@ -222,7 +257,10 @@ jobs:
             node --test .test-dist/test/hermes-e2e.test.js
           A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
             node --test .test-dist/test/hermes-webhook-bridge.test.js
-          echo "tarball=$RUNNER_TEMP/$tarball" >> "$GITHUB_OUTPUT"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - name: Use OIDC-capable npm publisher
+        if: steps.version.outputs.publish == 'true'
+        run: npm install --global npm@11.19.0
       - name: Publish package
         if: steps.version.outputs.publish == 'true'
         run: npm publish "${{ steps.artifact.outputs.tarball }}"

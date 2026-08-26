@@ -20,7 +20,7 @@ Use the official split version 2 packages. Compatibility tests must prove intero
 
 ## Packaging impact
 
-The packages are pure JavaScript and do not add another runtime or executable. Exact versions and transitive dependencies must be committed in `package-lock.json`, audited, and included in packed-install tests.
+The packages are pure JavaScript and do not add another runtime or executable. Exact versions and transitive dependencies must be committed in `pnpm-lock.yaml`, audited, and included in packed-install tests.
 
 ## Approval
 

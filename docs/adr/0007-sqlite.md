@@ -1,6 +1,6 @@
 # 0007 SQLite
 
-Status: accepted under delegated approval, user review pending
+Status: accepted
 
 Date: 2026-08-23
 
@@ -26,7 +26,7 @@ Database work stays synchronous and serialized. The gateway workload is small, s
 
 ## Risks
 
-Version 13 has a recent N-API rewrite. CI must load and exercise the exact package on every target OS. Release builds must include the matching native binary and run clean-machine migration and crash tests.
+Version 13 has a recent N-API rewrite. CI must load and exercise the exact package on every target OS. pnpm permits this package alone to run its required native build step. Release builds must include the matching native binary and run clean-machine migration and crash tests.
 
 Synchronous queries block the event loop. Do not add long scans or reporting queries to the daemon.
 
@@ -40,4 +40,4 @@ Build release archives on their target operating systems. Do not copy one platfo
 
 ## Approval
 
-The user delegated this provisional choice on 2026-08-23 and asked to review it later.
+The user delegated the provisional choice on 2026-08-23 and approved it after review on 2026-08-26.

@@ -1,6 +1,6 @@
 # 0014 Lock handoff timeout
 
-Status: accepted under delegated approval, user review pending
+Status: accepted
 
 Date: 2026-08-23
 
@@ -18,4 +18,4 @@ A genuine second daemon can take up to one second to report the ownership confli
 
 ## Approval
 
-The user delegated this provisional choice on 2026-08-23 and asked to review it later.
+The user delegated the provisional choice on 2026-08-23 and approved it after review on 2026-08-26.
