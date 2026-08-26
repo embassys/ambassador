@@ -1,6 +1,6 @@
 # Get started with Hermes Agent
 
-This guide connects one Hermes Agent to the A2A development service. It uses a loopback-only Hermes webhook mode that is not suitable for production.
+This guide connects one Hermes Agent to the A2A development service. It works with the Hermes CLI and Hermes Desktop. It uses a loopback-only Hermes webhook mode that is not suitable for production.
 
 ## What you need
 
@@ -18,6 +18,12 @@ hermes --version
 ```
 
 Run `hermes update` first if it is older than `0.20.5`.
+
+## If you use Hermes Desktop
+
+If Desktop uses a local Hermes runtime, run every command in this guide on that computer. Desktop and the CLI share the same Hermes home and profile. The examples use the default profile; add `--profile <name>` immediately after `hermes` if Desktop uses a named profile.
+
+If Desktop connects to a remote Hermes gateway, run steps 1 through 5 on the remote Hermes host and use the same profile that Desktop connects to. Do not run them on the computer displaying the app. The A2A gateway, bridge, MCP endpoint, and Hermes webhook must share one host because every local address in this guide is intentionally `127.0.0.1`.
 
 ## 1. Install the gateway
 
@@ -93,9 +99,9 @@ MCP endpoint: http://127.0.0.1:8787/mcp
 
 Leave this terminal open.
 
-## 5. Start Hermes
+## 5. Start or reload Hermes
 
-Open another terminal and run Hermes' messaging gateway in the foreground:
+For the Hermes CLI, open another terminal and run Hermes' messaging gateway in the foreground:
 
 ```sh
 hermes gateway run
@@ -103,7 +109,11 @@ hermes gateway run
 
 Leave this terminal open. Hermes discovers the A2A MCP tools while it starts.
 
-In another terminal, check both local connections:
+For Hermes Desktop, keep the app connected to the local or remote profile that you configured in step 3. Open its gateway status menu and choose **Restart gateway**. This starts or restarts the separate Hermes messaging gateway that owns the webhook listener. Start a new Desktop chat and enter `/reload-mcp` if the app was already open while you added the A2A MCP server.
+
+Do not create the `a2a` subscription through Desktop's Webhooks screen. That screen generates a different secret. The `hermes webhook subscribe --secret` command in step 3 deliberately gives Hermes the same required 48-character token used by the A2A gateway. The configured subscription will appear in the Webhooks screen after a refresh.
+
+From the Hermes runtime host, check both local connections:
 
 ```sh
 curl http://127.0.0.1:8644/health
@@ -120,11 +130,13 @@ The MCP test should connect and list the three registration tools. The bridge li
 
 ## 6. Register
 
-Open another terminal and start a Hermes chat:
+For the Hermes CLI, open another terminal and start a chat:
 
 ```sh
 hermes chat
 ```
+
+For Hermes Desktop, open a new chat in the profile configured above. No `hermes chat` terminal is needed.
 
 Send this message:
 
@@ -148,7 +160,7 @@ Check for A2A messages now. Process each message, then acknowledge it with the A
 
 ## Stop and restart
 
-This quick start configures one running session. Keep the A2A gateway and Hermes terminals open. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent restart setup is intentionally left out of this guide.
+This quick start configures one running session. Keep the A2A gateway terminal open. If you started Hermes with `hermes gateway run`, keep that terminal open too. Hermes Desktop can manage its messaging gateway but does not manage the A2A gateway or bridge. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent A2A gateway setup is intentionally left out of this guide.
 
 ## Troubleshooting
 
@@ -156,6 +168,7 @@ This quick start configures one running session. Keep the A2A gateway and Hermes
 - MCP calls return `401`: rerun the Hermes bearer-header command with the current `A2A_GATEWAY_TOKEN` before registration.
 - `Gateway local state failed`: make sure both development URLs are set, use HTTPS for remote hosts, and remove query strings or `#` fragments.
 - Port `8787` is busy: stop the other A2A gateway process. One local gateway may run at a time.
-- The webhook health check fails: keep `hermes gateway run` open and check that port `8644` is not used by another program.
+- The webhook health check fails: keep `hermes gateway run` open, or use **Restart gateway** in Desktop, and check that port `8644` is not used by another program.
 - The bridge reports an invalid token: generate `A2A_GATEWAY_TOKEN` again before registration and confirm it is 48 lowercase hexadecimal characters.
-- No wake reaches Hermes: keep both `hermes gateway run` and the bridge open, and check that ports `8644` and `8645` are free.
+- No wake reaches Hermes: confirm that the Hermes messaging gateway and bridge are running, and check that ports `8644` and `8645` are free.
+- Desktop remote mode cannot connect to A2A: confirm that the A2A gateway and bridge are running on the remote Hermes host rather than on the computer displaying the app.
