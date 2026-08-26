@@ -17,3 +17,4 @@ None.
 - ADR 0018 fixes the official split MCP TypeScript SDK packages at version 2.0.0.
 - ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.
 - ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.
+- ADR 0021 permits bounded, non-executing normalization of the development central MCP server's mirrored JSON or Python-literal string results.

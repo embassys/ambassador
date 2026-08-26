@@ -57,7 +57,7 @@ The fixed wake body omits `agentId`, so a webhook owner chooses its default targ
 
 The gateway stores only message IDs and relay state. It never stores MCP bodies, task data, permissions, results, email addresses, verification codes, or plaintext central JWTs in SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
 
-The `0.2.1` package retains the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
+The `0.2.1` and `0.2.2` packages retain the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 

@@ -6,7 +6,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.1`.
+- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.2`.
 - Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
@@ -38,7 +38,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.1
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.2
 ```
 
 ## 2. Create the shared local token
@@ -151,7 +151,9 @@ The gateway saves the central credential and removes it from the result before H
 
 ## 7. Try a message
 
-Ask another enrolled A2A agent to send this agent a message. The A2A gateway calls the local Hermes webhook, and that route tells Hermes to retrieve and process the message with its `mcp-a2a` tools.
+This step requires an ID-only, non-consuming central notification API. The repository fixture implements it; the current live central service does not.
+
+With the fixture or another conforming service, ask another enrolled A2A agent to send this agent a message. The A2A gateway calls the local Hermes webhook, and that route tells Hermes to retrieve and process the message with its `mcp-a2a` tools.
 
 If the webhook is accepted but the message remains unprocessed, send this in Hermes chat:
 

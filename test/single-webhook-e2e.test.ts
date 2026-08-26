@@ -139,12 +139,20 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
   });
   await client.initialize();
   assert.deepEqual(client.serverCapabilities.tools, { listChanged: true });
+  central.setToolDescription(
+    "verify_email",
+    "Verify the pending registration with the code supplied by the user.",
+  );
   const bootstrapTools = await client.listTools();
   assert.deepEqual(bootstrapTools.map((tool) => tool.name).sort(), [
     "register_agent",
     "resend_verification",
     "verify_email",
   ]);
+  assert.equal(
+    bootstrapTools.find((tool) => tool.name === "verify_email")?.description,
+    "Verify the pending registration with the code supplied by the user.",
+  );
   for (const tool of bootstrapTools) {
     assertNoCredentialSelector(tool);
   }
@@ -325,6 +333,41 @@ test("malformed verification output never activates polling or reaches the local
   assert.equal(central.pollCount(), 0);
   assert.equal(await gateway.stop(), 0);
   await scanFiles(gateway.artifactRoot, [central.jwt, secondToken, EMAIL, CODE]);
+});
+
+test("a strict Python-literal verification wrapper enrolls without exposing its JWT", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  central.setVerificationResult(
+    `{'agent_id': 'agent_fixture', 'username': 'fixture-agent', 'token': '${central.jwt}', 'message': 'Email verified successfully.', 'note': 'The gateway owns the issued credential.'}`,
+  );
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+
+  const listChanged = client.waitForNotification("notifications/tools/list_changed");
+  const verification = await client.callTool("verify_email", { email: EMAIL, code: CODE });
+  assert.deepEqual(verification, {
+    verified: true,
+    agent_id: "agent_fixture",
+    username: "fixture-agent",
+    message: "Email verified successfully.",
+  });
+  await listChanged;
+  assert.deepEqual((await client.listTools()).map((tool) => tool.name).sort(), [
+    "ack_message",
+    "poll_messages",
+  ]);
+
+  assert.equal(await gateway.stop(), 0);
+  await scanFiles(gateway.artifactRoot, [central.jwt, EMAIL, CODE]);
 });
 
 test("credential persistence failure returns no JWT and leaves polling dormant", async (t) => {

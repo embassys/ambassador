@@ -162,7 +162,26 @@ jobs:
             --allow-build=better-sqlite3 \
             add "$tarball"
           pnpm --dir "$install_root" audit --prod --audit-level=high
-          pnpm --dir "$install_root" audit signatures
+          set +e
+          signature_report=$(pnpm --dir "$install_root" audit signatures --json)
+          signature_status=$?
+          set -e
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+          SIGNATURE_STATUS="$signature_status" \
+          SIGNATURE_REPORT="$signature_report" \
+          PACKAGE_NAME="$package_name" \
+          PACKAGE_VERSION="$package_version" \
+            node --input-type=module -e '
+              const report = JSON.parse(process.env.SIGNATURE_REPORT);
+              const status = Number(process.env.SIGNATURE_STATUS);
+              const name = process.env.PACKAGE_NAME;
+              const version = process.env.PACKAGE_VERSION;
+              const clean = Array.isArray(report.missing) && report.missing.length === 0;
+              const allVerified = status === 0 && clean && report.invalid?.length === 0 && report.audited === report.verified;
+              const localOnly = status === 1 && clean && report.invalid?.length === 1 && report.audited === report.verified + 1 && report.invalid[0]?.name === name && report.invalid[0]?.version === version && report.invalid[0]?.registry === "https://registry.npmjs.org/" && report.invalid[0]?.reason === `Missing registry metadata for ${name}@${version}`;
+              if (!allVerified && !localOnly) process.exit(1);
+            '
           test -x "$install_root/node_modules/.bin/a2a-gateway"
           test_output=$(
             A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
@@ -188,6 +207,8 @@ jobs:
           pnpm \
             --dir "$openclaw_root" \
             add --ignore-scripts openclaw@2026.7.1-2
+          # OpenClaw is a pinned test runtime, not a gateway dependency. Verify its registry graph before execution.
+          pnpm --dir "$openclaw_root" audit signatures
           A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
           A2A_OPENCLAW_CLI="$openclaw_root/node_modules/openclaw/openclaw.mjs" \
             node --test .test-dist/test/openclaw-e2e.test.js
@@ -242,7 +263,26 @@ jobs:
             --allow-build=better-sqlite3 \
             add "$tarball"
           pnpm --dir "$install_root" audit --prod --audit-level=high
-          pnpm --dir "$install_root" audit signatures
+          set +e
+          signature_report=$(pnpm --dir "$install_root" audit signatures --json)
+          signature_status=$?
+          set -e
+          package_name=$(node -p "require('./package.json').name")
+          package_version=$(node -p "require('./package.json').version")
+          SIGNATURE_STATUS="$signature_status" \
+          SIGNATURE_REPORT="$signature_report" \
+          PACKAGE_NAME="$package_name" \
+          PACKAGE_VERSION="$package_version" \
+            node --input-type=module -e '
+              const report = JSON.parse(process.env.SIGNATURE_REPORT);
+              const status = Number(process.env.SIGNATURE_STATUS);
+              const name = process.env.PACKAGE_NAME;
+              const version = process.env.PACKAGE_VERSION;
+              const clean = Array.isArray(report.missing) && report.missing.length === 0;
+              const allVerified = status === 0 && clean && report.invalid?.length === 0 && report.audited === report.verified;
+              const localOnly = status === 1 && clean && report.invalid?.length === 1 && report.audited === report.verified + 1 && report.invalid[0]?.name === name && report.invalid[0]?.version === version && report.invalid[0]?.registry === "https://registry.npmjs.org/" && report.invalid[0]?.reason === `Missing registry metadata for ${name}@${version}`;
+              if (!allVerified && !localOnly) process.exit(1);
+            '
           test -x "$install_root/node_modules/.bin/a2a-gateway"
           test_output=$(
             A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \

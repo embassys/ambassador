@@ -118,6 +118,6 @@ CI pins the Python base image by digest and Python packages by version and hash.
 
 - The production central MCP and API URLs are not stable package constants yet.
 - The production central API lacks the non-consuming ID view and separate idempotent notification acknowledgement required by this protocol.
-- The current central MCP wrapper returns Python string representations instead of structured verification data, so safe JWT extraction requires an upstream contract change.
+- The current central MCP wrapper returns Python string representations. ADR 0021 permits bounded, non-executing normalization as a temporary compatibility measure; native structured results remain preferred.
 - The central service has no token reissue path. A crash after remote verification succeeds but before local credential persistence would strand the identity.
-- Docker is available in GitHub's Ubuntu runner, but the local Docker daemon is not running on this machine.
+- Docker is available in GitHub's Ubuntu runner and on the local acceptance-test host.
