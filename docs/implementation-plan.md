@@ -111,7 +111,7 @@ CI pins the Python base image by digest and Python packages by version and hash.
 | --- | --- | --- |
 | Q1 | Review local bearer reuse, encrypted credential access, redaction, DNS rebinding protection, and side-effect uncertainty | Findings resolved or accepted |
 | Q2 | Run crash, restart, disk-full, credential-corruption, poll-outage, and soak tests | Reliability report |
-| Q3 | Pack and install the npm artifact on clean Linux, macOS, and Windows environments | Install qualification |
+| Q3 | Pack and install the npm-registry artifact on clean Linux, macOS, and Windows environments | Install qualification |
 | G2 | User reviews security findings, dependency audit, central compatibility, and release artifact | Release approval |
 
 ## External blockers
