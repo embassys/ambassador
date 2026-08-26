@@ -2,7 +2,7 @@
 
 Use this runbook for periodic model-driven acceptance. CI remains the release gate. This run adds a real OpenClaw model turn through the Hermes model proxy and can also check a local Hermes Agent webhook.
 
-The repeatable path uses the in-memory central fixture. It can inject a synthetic calendar response, so it proves wake, `poll_messages`, model handling, and `ack_message` without registering throwaway identities or depending on the current development central notification behavior.
+The repeatable path uses the in-memory central fixture. It can inject a synthetic calendar response, so it proves consuming REST delivery, the gateway's memory-only `poll_messages`, model handling, and `ack_message` without registering throwaway identities.
 
 Run these commands from a source checkout. The packaged copy is a reference; the npm tarball does not include the test fixture or project test scripts. The Docker model lane below is qualified on Docker Desktop for macOS. Linux remains covered by the automated package and OpenClaw interoperability jobs. Do not make the Hermes proxy reachable beyond host loopback to adapt this lane to a native Linux bridge.
 
@@ -259,7 +259,7 @@ docker exec \
   '
 ```
 
-The gateway should receive the opaque ID, acknowledge notification persistence, and wake OpenClaw. If the webhook turn does not process the message, issue one explicit turn:
+The gateway should consume and buffer the full message, journal only its ID, and wake OpenClaw. If the webhook turn does not process the message, issue one explicit turn:
 
 ```sh
 docker exec a2a-e2e-openclaw node openclaw.mjs agent \
@@ -276,7 +276,7 @@ Pass criteria:
 - OpenClaw reports August 27, 2026, both synthetic events, and UTC.
 - OpenClaw calls `poll_messages` without a local credential argument.
 - OpenClaw calls `ack_message` with the returned opaque ID.
-- Fixture inspection reports `notification_acknowledged`, `content_delivered`, and `content_acknowledged` as true.
+- Fixture inspection reports the message status as `acked`.
 - Gateway state, logs, and output contain no synthetic content, email, code, webhook token, or plaintext central JWT.
 
 Inspect status flags only:
@@ -291,9 +291,7 @@ docker exec a2a-e2e-openclaw node --input-type=module -e '
   const body = await response.json();
   console.log(JSON.stringify(body.messages.map((message) => ({
     id: message.id,
-    notification_acknowledged: message.notification_acknowledged,
-    content_delivered: message.content_delivered,
-    content_acknowledged: message.content_acknowledged
+    status: message.status
   }))));
 '
 ```
@@ -308,7 +306,7 @@ Run this lane separately because Hermes and the OpenClaw fixture lane both need 
 4. Register `hermes-e2e@example.test` and verify once with fixture code `246810`.
 5. Inject a synthetic message through `POST /__test/messages` for the verified Hermes agent ID.
 6. Confirm Hermes accepts the HMAC V2 webhook, calls `poll_messages`, reports the synthetic content, and calls `ack_message`.
-7. Inspect only fixture IDs and acknowledgement flags.
+7. Inspect only fixture IDs and message status.
 
 The automated `test/hermes-e2e.test.ts` remains the deterministic signature and body check. The manual lane adds a real Hermes model turn.
 
@@ -330,7 +328,7 @@ Check these items without recording MCP bodies:
 - permission and action calls inject `token` only upstream; and
 - Python dictionary and top-level list wrappers normalize successfully.
 
-The current live notification API consumes content and does not provide the required ID-only view. Record live wake and redelivery as blocked rather than weakening the fixture contract or claiming production readiness.
+The gateway now matches the live consuming notification API. Confirm one automatic wake, local buffered retrieval, and `ack_message`. Restart recovery remains blocked because central cannot re-fetch a delivered but unacknowledged message; do not claim production readiness from this smoke test.
 
 ## Cleanup
 

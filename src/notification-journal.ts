@@ -631,6 +631,14 @@ export class NotificationJournal {
       .immediate();
   }
 
+  /** Remove wakes whose message bodies were consumed by central but lost with the prior process. */
+  discardUnrecoverable(): number {
+    const result = resourcesFor(this)
+      .database.prepare("DELETE FROM notification_relay WHERE wake_state != 'content_acknowledged'")
+      .run();
+    return changes(result.changes, "unrecoverable notification discard");
+  }
+
   recoverInFlight(
     nowMs: number,
     nextWakeRetryAtMs: (attemptCount: number) => number,

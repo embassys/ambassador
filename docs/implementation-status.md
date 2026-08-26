@@ -1,6 +1,6 @@
 # Implementation status
 
-Status as of August 26, 2026.
+Status as of August 27, 2026.
 
 ## Approved target
 
@@ -11,7 +11,7 @@ Status as of August 26, 2026.
 - Before enrollment, the MCP server exposes only registration, verification, and resend tools.
 - A successful verification response supplies the central JWT. The gateway persists it, strips it from the local result, starts polling, and adds it only to future transient upstream MCP arguments and central poll authorization.
 - One process owns one webhook and one central identity. There are no bindings or configured local-runtime agent IDs.
-- The relay and SQLite remain ID-only. MCP content and plaintext credentials never enter durable relay state or observability outputs.
+- Full messages consumed from the live REST API remain only in a bounded in-memory inbox. SQLite remains ID-only, and message content and plaintext credentials never enter durable relay state or observability outputs.
 
 ADR `0017-single-webhook-gateway.md` records this design. Obsolete ADRs were deleted at the user's direction.
 
@@ -22,7 +22,7 @@ PR `#5` implements the approved replacement on the reviewed test branch:
 - strict two-option foreground `start` and lock-first startup;
 - authenticated, bounded Streamable HTTP MCP on `127.0.0.1:8787`;
 - bootstrap enrollment, encrypted JWT persistence, token-free verification, and authenticated tool proxying;
-- ID-only SQLite notification state with independent persistence acknowledgement and webhook work;
+- ID-only SQLite notification state and webhook work;
 - accepted-wake redrive until confirmed MCP `ack_message`;
 - restart recovery and fixed safe errors; and
 - deletion of setup, bindings, runtime adapters, JSON configuration, and native service management.
@@ -35,6 +35,8 @@ Version `0.2.1` adds a generic timestamped HMAC V2 signature and `X-Request-ID` 
 
 Version `0.2.2` projects the live central bootstrap schemas, accepts the central server's bounded Python-literal result wrapper and harmless verification extensions, preserves top-level arrays under `result`, and rejects credential-bearing metadata or unsupported literal syntax. Live OpenClaw acceptance covers natural registration, code-only verification, restart recovery, authenticated tools, permission and action delivery, and a synthetic calendar response through `poll_messages` and `ack_message`.
 
+Version `0.2.3` matches the live consuming REST interface. It buffers one validated full-message response in memory, serves that inbox through local `poll_messages`, forwards the live `{message_id,status:"acked"}` acknowledgement contract, removes `ack_notification`, and handles ID-less messages as unique one-shot deliveries without durable deduplication or acknowledgement.
+
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
@@ -44,16 +46,14 @@ The user approved the red failures and authorized production implementation on 2
 
 ## External central changes
 
-- Add a non-consuming ID view such as `GET /api/poll_messages?timeout=30&view=ids`.
-- Add idempotent `POST /api/ack_notification` for gateway persistence without consuming message content.
-- Keep full message content available through the MCP `poll_messages` tool after the gateway observes its ID.
-- Keep MCP `ack_message` as a separate idempotent content-processing acknowledgement.
+- Add redelivery or retrieval of delivered but unacknowledged messages so gateway restarts cannot lose consumed in-memory content.
+- Make `ack_message` idempotent so an uncertain acknowledgement can be safely repeated.
 - Return native structured MCP results so the temporary Python-literal compatibility parser can be removed.
 - Define JWT expiry, revocation, reissue, and deliberate local identity reset.
 
 Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
 
-The inspected central implementation currently returns message content and marks it delivered during REST polling. Its MCP wrapper also returns Python string representations. ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results, but the REST notification behavior still requires central changes.
+The inspected central implementation returns message content and marks it delivered during REST polling. Version `0.2.3` matches that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
 
 ## Test work
 
@@ -64,7 +64,7 @@ Docker runs in GitHub's Ubuntu runners and on the local acceptance-test host.
 ## Production release blockers
 
 - Obtain stable production central API and MCP URLs.
-- Obtain a non-consuming production ID notification view.
-- Obtain separate idempotent notification and content acknowledgements.
+- Obtain central redelivery or delivered-message retrieval for restart recovery.
+- Make content acknowledgement idempotent.
 - Obtain central JWT reissue and revocation behavior.
 - Qualify packed installation and credential permissions on Windows.

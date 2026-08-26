@@ -1,10 +1,10 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 import { requestTimeout, withDeadline } from "./http.js";
+import { assertSafeUpstreamResult } from "./mcp-contract.js";
 import { type NotificationJournal, validateNotificationId } from "./notification-journal.js";
 
 const POLL_DEADLINE_MS = 40_000;
-const REMOTE_REQUEST_DEADLINE_MS = 10_000;
 const WEBHOOK_DEADLINE_MS = 10_000;
 const RETRY_BASE_MS = 1_000;
 const RETRY_CAP_MS = 60_000;
@@ -12,6 +12,8 @@ const ACCEPTED_REDRIVE_MS = 60_000;
 const IDLE_INTERVAL_MS = 1_000;
 const POLL_RETRY_MS = 1_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_JSON_DEPTH = 100;
+const MAX_LOCAL_POLL_SECONDS = 30;
 
 export type NotificationFetch = (url: URL, init: RequestInit) => Promise<Response>;
 
@@ -45,7 +47,6 @@ export interface NotificationRelayOptions {
   now?: () => number;
   random?: () => number;
   pollDeadlineMs?: number;
-  remoteRequestDeadlineMs?: number;
   webhookDeadlineMs?: number;
   retryBaseMs?: number;
   retryCapMs?: number;
@@ -54,8 +55,34 @@ export interface NotificationRelayOptions {
   pollRetryMs?: number;
 }
 
+interface ParsedMessage {
+  message: Record<string, unknown>;
+  serialized: string;
+  id?: string;
+}
+
 interface PollResponse {
-  messages: Array<{ id: string }>;
+  messages: ParsedMessage[];
+}
+
+interface BufferedMessage extends ParsedMessage {
+  wakeId: string;
+}
+
+interface VolatileWake {
+  wakeId: string;
+  state: "pending" | "in_flight" | "retry_wait";
+  attemptCount: number;
+  nextAttemptAtMs?: number;
+  mayHaveReachedWebhook: boolean;
+}
+
+interface WakeClaim {
+  wakeId: string;
+  centralId?: string;
+  attemptCount: number;
+  mayHaveReachedWebhook: boolean;
+  volatile: boolean;
 }
 
 class RequestFailed extends Error {}
@@ -91,16 +118,38 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function parsePollResponse(bytes: Uint8Array): PollResponse {
+function invalidPollResponse(): never {
+  throw new NotificationRelayError(
+    "invalid_notification_response",
+    "Central notification response is invalid",
+  );
+}
+
+function assertBoundedJsonDepth(value: unknown): void {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) break;
+    if (current.depth > MAX_JSON_DEPTH) invalidPollResponse();
+    if (Array.isArray(current.value)) {
+      for (const nested of current.value) {
+        pending.push({ value: nested, depth: current.depth + 1 });
+      }
+    } else if (current.value !== null && typeof current.value === "object") {
+      for (const nested of Object.values(current.value)) {
+        pending.push({ value: nested, depth: current.depth + 1 });
+      }
+    }
+  }
+}
+
+function parsePollResponse(bytes: Uint8Array, centralToken: string): PollResponse {
   let parsed: unknown;
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     parsed = JSON.parse(text);
   } catch {
-    throw new NotificationRelayError(
-      "invalid_notification_response",
-      "Central notification response is invalid",
-    );
+    invalidPollResponse();
   }
   if (
     parsed === null ||
@@ -108,40 +157,44 @@ function parsePollResponse(bytes: Uint8Array): PollResponse {
     Array.isArray(parsed) ||
     !exactKeys(parsed as Record<string, unknown>, ["messages"])
   ) {
-    throw new NotificationRelayError(
-      "invalid_notification_response",
-      "Central notification response is invalid",
-    );
+    invalidPollResponse();
   }
 
   const messages = (parsed as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) {
-    throw new NotificationRelayError(
-      "invalid_notification_response",
-      "Central notification response is invalid",
-    );
-  }
-  const validated: Array<{ id: string }> = [];
+  if (!Array.isArray(messages)) invalidPollResponse();
+
+  const validated: ParsedMessage[] = [];
+  const ids = new Map<string, string>();
   for (const item of messages) {
-    if (
-      item === null ||
-      typeof item !== "object" ||
-      Array.isArray(item) ||
-      !exactKeys(item as Record<string, unknown>, ["id"])
-    ) {
-      throw new NotificationRelayError(
-        "invalid_notification_response",
-        "Central notification response is invalid",
-      );
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      invalidPollResponse();
     }
+    assertBoundedJsonDepth(item);
     try {
-      validated.push({ id: validateNotificationId((item as { id?: unknown }).id) });
+      assertSafeUpstreamResult(item, centralToken);
     } catch {
-      throw new NotificationRelayError(
-        "invalid_notification_response",
-        "Central notification response is invalid",
-      );
+      invalidPollResponse();
     }
+
+    let id: string | undefined;
+    if (Object.hasOwn(item, "id")) {
+      try {
+        id = validateNotificationId((item as { id?: unknown }).id);
+      } catch {
+        invalidPollResponse();
+      }
+    }
+    const message = item as Record<string, unknown>;
+    const serialized = JSON.stringify(message);
+    if (id !== undefined) {
+      const existing = ids.get(id);
+      if (existing !== undefined) {
+        if (existing !== serialized) invalidPollResponse();
+        continue;
+      }
+      ids.set(id, serialized);
+    }
+    validated.push({ message, serialized, ...(id === undefined ? {} : { id }) });
   }
   return { messages: validated };
 }
@@ -210,7 +263,7 @@ function safeRunError(error: unknown): NotificationRelayError {
 export class NotificationRelay {
   private readonly journal: NotificationJournal;
   private readonly centralPollUrl: URL;
-  private readonly centralAcknowledgementUrl: URL;
+  private readonly centralToken: string;
   private readonly centralAuthorization: string;
   private readonly webhookUrl: URL;
   private readonly webhookToken: string;
@@ -219,13 +272,14 @@ export class NotificationRelay {
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly pollDeadlineMs: number;
-  private readonly remoteRequestDeadlineMs: number;
   private readonly webhookDeadlineMs: number;
   private readonly retryBaseMs: number;
   private readonly retryCapMs: number;
   private readonly acceptedRedriveMs: number;
   private readonly idleIntervalMs: number;
   private readonly pollRetryMs: number;
+  private readonly inbox: BufferedMessage[] = [];
+  private readonly volatileWakes = new Map<string, VolatileWake>();
   private readonly waiters = new Set<() => void>();
   private revision = 0;
   private runController: AbortController | undefined;
@@ -235,9 +289,9 @@ export class NotificationRelay {
   constructor(options: NotificationRelayOptions) {
     this.journal = options.journal;
     const centralApiUrl = safeUrl(options.centralApiUrl);
-    this.centralPollUrl = new URL("/api/poll_messages?timeout=30&view=ids", centralApiUrl);
-    this.centralAcknowledgementUrl = new URL("/api/ack_notification", centralApiUrl);
-    this.centralAuthorization = `Bearer ${safeToken(options.centralToken)}`;
+    this.centralPollUrl = new URL("/api/poll_messages?timeout=30", centralApiUrl);
+    this.centralToken = safeToken(options.centralToken);
+    this.centralAuthorization = `Bearer ${this.centralToken}`;
     this.webhookUrl = safeUrl(options.webhookUrl);
     this.webhookToken = safeToken(options.webhookToken);
     this.webhookAuthorization = `Bearer ${this.webhookToken}`;
@@ -248,11 +302,6 @@ export class NotificationRelay {
       options.pollDeadlineMs,
       POLL_DEADLINE_MS,
       "pollDeadlineMs",
-    );
-    this.remoteRequestDeadlineMs = requestTimeout(
-      options.remoteRequestDeadlineMs,
-      REMOTE_REQUEST_DEADLINE_MS,
-      "remoteRequestDeadlineMs",
     );
     this.webhookDeadlineMs = requestTimeout(
       options.webhookDeadlineMs,
@@ -302,11 +351,48 @@ export class NotificationRelay {
     await this.running;
   }
 
+  async pollMessages(
+    timeoutSeconds: number,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (
+      !Number.isInteger(timeoutSeconds) ||
+      timeoutSeconds < 0 ||
+      timeoutSeconds > MAX_LOCAL_POLL_SECONDS
+    ) {
+      throw new NotificationRelayError("invalid_configuration", "Relay configuration is invalid");
+    }
+    const deadline = Date.now() + timeoutSeconds * 1_000;
+    while (this.inbox.length === 0 && !signal.aborted) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await this.wait(remaining, signal, this.revision);
+    }
+    if (signal.aborted) throw new RequestCancelled();
+
+    const messages = this.inbox.map(({ message }) => message);
+    let removed = false;
+    for (let index = this.inbox.length - 1; index >= 0; index -= 1) {
+      const item = this.inbox[index];
+      if (item?.id !== undefined) continue;
+      if (item !== undefined) this.volatileWakes.delete(item.wakeId);
+      this.inbox.splice(index, 1);
+      removed = true;
+    }
+    if (removed) this.notifyWork();
+    return { messages };
+  }
+
   /** Call only after the central ack_message operation has returned success. */
   confirmContentAcknowledgement(messageId: string): boolean {
     try {
       const confirmed = this.journal.confirmContentAcknowledgement(messageId);
-      if (confirmed) this.notifyWork();
+      if (confirmed) {
+        for (let index = this.inbox.length - 1; index >= 0; index -= 1) {
+          if (this.inbox[index]?.id === messageId) this.inbox.splice(index, 1);
+        }
+        this.notifyWork();
+      }
       return confirmed;
     } catch {
       throw new NotificationRelayError("journal_failed", "Notification journal operation failed");
@@ -320,19 +406,10 @@ export class NotificationRelay {
   ): Promise<void> {
     if (signal.aborted) return;
     try {
-      const recoveredAt = this.currentTime();
-      this.journalOperation(() =>
-        this.journal.recoverInFlight(recoveredAt, (count) =>
-          this.addTime(recoveredAt, this.retryDelay(count)),
-        ),
-      );
+      this.journalOperation(() => this.journal.discardUnrecoverable());
       this.notifyWork();
 
-      const loops = [
-        this.pollLoop(signal),
-        this.notificationAcknowledgementLoop(signal),
-        this.wakeLoop(signal),
-      ];
+      const loops = [this.pollLoop(signal), this.wakeLoop(signal)];
       try {
         await Promise.all(loops);
       } catch (error) {
@@ -353,6 +430,9 @@ export class NotificationRelay {
       const revision = this.revision;
       try {
         await this.pollOnce(signal);
+        while (this.inbox.length > 0 && !signal.aborted) {
+          await this.wait(this.idleIntervalMs, signal, this.revision);
+        }
       } catch (error) {
         if (signal.aborted || error instanceof RequestCancelled) return;
         if (error instanceof NotificationRelayError) throw error;
@@ -402,78 +482,39 @@ export class NotificationRelay {
       }
       throw error;
     }
-    const poll = parsePollResponse(bytes);
-    const observedAt = this.currentTime();
-    this.journalOperation(() =>
-      this.journal.ingest(
-        poll.messages.map(({ id }) => id),
-        observedAt,
-      ),
-    );
-    this.notifyWork();
-  }
-
-  private async notificationAcknowledgementLoop(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      const revision = this.revision;
-      const now = this.currentTime();
-      const claim = this.journalOperation(() =>
-        this.journal.claimDueNotificationAcknowledgement(now),
-      );
-      if (claim === undefined) {
-        const nextAt = this.journalOperation(() =>
-          this.journal.nextNotificationAcknowledgementAtMs(),
-        );
-        await this.waitUntil(nextAt, now, signal, revision);
-        continue;
-      }
-
-      let response: Response;
-      try {
-        response = await this.fetchResponse(
-          this.centralAcknowledgementUrl,
-          {
-            method: "POST",
-            headers: {
-              Authorization: this.centralAuthorization,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ message_id: claim.messageId }),
-          },
-          this.remoteRequestDeadlineMs,
-          signal,
-        );
-      } catch (error) {
-        if (signal.aborted || error instanceof RequestCancelled) return;
-        this.scheduleNotificationAcknowledgementRetry(claim.messageId, claim.attemptCount);
-        continue;
-      }
-
-      if (response.status === 401) {
-        await cancelBody(response);
-        throw new NotificationRelayError(
-          "central_authentication_failed",
-          "Central authentication failed",
-        );
-      }
-      if (!response.ok || isRedirect(response)) {
-        await cancelBody(response);
-        this.scheduleNotificationAcknowledgementRetry(claim.messageId, claim.attemptCount);
-        continue;
-      }
-      await cancelBody(response);
-      this.journalOperation(() =>
-        this.journal.recordNotificationAcknowledgementSuccess(claim.messageId),
-      );
-      this.notifyWork();
+    const poll = parsePollResponse(bytes, this.centralToken);
+    for (const item of poll.messages) {
+      if (item.id === undefined) continue;
+      const buffered = this.inbox.find((candidate) => candidate.id === item.id);
+      if (buffered !== undefined && buffered.serialized !== item.serialized) invalidPollResponse();
     }
-  }
 
-  private scheduleNotificationAcknowledgementRetry(messageId: string, attemptCount: number): void {
-    const nextAttemptAt = this.addTime(this.currentTime(), this.retryDelay(attemptCount));
-    this.journalOperation(() =>
-      this.journal.recordNotificationAcknowledgementRetry(messageId, nextAttemptAt),
-    );
+    const observedAt = this.currentTime();
+    const ids = poll.messages.flatMap(({ id }) => (id === undefined ? [] : [id]));
+    this.journalOperation(() => this.journal.ingest(ids, observedAt));
+    for (const item of poll.messages) {
+      if (item.id !== undefined) {
+        const record = this.journalOperation(() => this.journal.get(item.id as string));
+        if (
+          record?.wakeState === "content_acknowledged" ||
+          this.inbox.some((candidate) => candidate.id === item.id)
+        ) {
+          continue;
+        }
+        this.inbox.push({ ...item, wakeId: item.id });
+        continue;
+      }
+
+      const wakeId = randomUUID();
+      this.inbox.push({ ...item, wakeId });
+      this.volatileWakes.set(wakeId, {
+        wakeId,
+        state: "pending",
+        attemptCount: 0,
+        nextAttemptAtMs: observedAt,
+        mayHaveReachedWebhook: false,
+      });
+    }
     this.notifyWork();
   }
 
@@ -481,17 +522,20 @@ export class NotificationRelay {
     while (!signal.aborted) {
       const revision = this.revision;
       const now = this.currentTime();
-      const claim = this.journalOperation(() => this.journal.claimDueWake(now));
+      const claim = this.claimDueWake(now);
       if (claim === undefined) {
-        const nextAt = this.journalOperation(() => this.journal.nextWakeAtMs());
-        await this.waitUntil(nextAt, now, signal, revision);
+        await this.waitUntil(this.nextWakeAtMs(), now, signal, revision);
         continue;
       }
 
       let response: Response;
       try {
+        const instruction =
+          claim.centralId === undefined
+            ? "An A2A message is ready. Use the A2A MCP tools to retrieve and process it."
+            : `A2A message ${claim.centralId} is ready. Use the A2A MCP tools to retrieve and process it.`;
         const body = JSON.stringify({
-          message: `A2A message ${claim.messageId} is ready. Use the A2A MCP tools to retrieve and process it.`,
+          message: instruction,
           name: "A2A Gateway",
           deliver: false,
           wakeMode: "now",
@@ -508,9 +552,9 @@ export class NotificationRelay {
             method: "POST",
             headers: {
               Authorization: this.webhookAuthorization,
-              "Idempotency-Key": claim.messageId,
+              "Idempotency-Key": claim.wakeId,
               "Content-Type": "application/json",
-              "X-Request-ID": claim.messageId,
+              "X-Request-ID": claim.wakeId,
               "X-Webhook-Timestamp": timestamp,
               "X-Webhook-Signature-V2": signature,
             },
@@ -521,31 +565,99 @@ export class NotificationRelay {
         );
       } catch (error) {
         if (signal.aborted || error instanceof RequestCancelled) return;
-        this.scheduleWakeRetry(claim.messageId, claim.attemptCount, true);
+        this.scheduleWakeRetry(claim, true);
         continue;
       }
 
       if (!response.ok || isRedirect(response)) {
         await cancelBody(response);
-        this.scheduleWakeRetry(claim.messageId, claim.attemptCount, claim.mayHaveReachedWebhook);
+        this.scheduleWakeRetry(claim, claim.mayHaveReachedWebhook);
         continue;
       }
       await cancelBody(response);
-      const nextAttemptAt = this.addTime(this.currentTime(), this.acceptedRedriveMs);
-      this.journalOperation(() => this.journal.recordWakeAccepted(claim.messageId, nextAttemptAt));
+      if (claim.volatile) {
+        this.volatileWakes.delete(claim.wakeId);
+      } else {
+        const nextAttemptAt = this.addTime(this.currentTime(), this.acceptedRedriveMs);
+        this.journalOperation(() => this.journal.recordWakeAccepted(claim.wakeId, nextAttemptAt));
+      }
       this.notifyWork();
     }
   }
 
-  private scheduleWakeRetry(
-    messageId: string,
-    attemptCount: number,
-    mayHaveReachedWebhook: boolean,
-  ): void {
-    const nextAttemptAt = this.addTime(this.currentTime(), this.retryDelay(attemptCount));
-    this.journalOperation(() =>
-      this.journal.recordWakeRetry(messageId, nextAttemptAt, mayHaveReachedWebhook),
-    );
+  private claimDueWake(nowMs: number): WakeClaim | undefined {
+    const volatile = [...this.volatileWakes.values()]
+      .filter(
+        (wake) =>
+          (wake.state === "pending" || wake.state === "retry_wait") &&
+          wake.nextAttemptAtMs !== undefined &&
+          wake.nextAttemptAtMs <= nowMs,
+      )
+      .sort(
+        (left, right) =>
+          (left.nextAttemptAtMs as number) - (right.nextAttemptAtMs as number) ||
+          left.wakeId.localeCompare(right.wakeId),
+      )[0];
+    if (volatile !== undefined) {
+      if (volatile.attemptCount === Number.MAX_SAFE_INTEGER) {
+        throw new NotificationRelayError("relay_failed", "Notification relay failed");
+      }
+      volatile.state = "in_flight";
+      volatile.attemptCount += 1;
+      delete volatile.nextAttemptAtMs;
+      return {
+        wakeId: volatile.wakeId,
+        attemptCount: volatile.attemptCount,
+        mayHaveReachedWebhook: volatile.mayHaveReachedWebhook,
+        volatile: true,
+      };
+    }
+
+    const durable = this.journalOperation(() => this.journal.claimDueWake(nowMs));
+    return durable === undefined
+      ? undefined
+      : {
+          wakeId: durable.messageId,
+          centralId: durable.messageId,
+          attemptCount: durable.attemptCount,
+          mayHaveReachedWebhook: durable.mayHaveReachedWebhook,
+          volatile: false,
+        };
+  }
+
+  private nextWakeAtMs(): number | null {
+    const durable = this.journalOperation(() => this.journal.nextWakeAtMs());
+    let volatile: number | null = null;
+    for (const wake of this.volatileWakes.values()) {
+      if (
+        (wake.state === "pending" || wake.state === "retry_wait") &&
+        wake.nextAttemptAtMs !== undefined &&
+        (volatile === null || wake.nextAttemptAtMs < volatile)
+      ) {
+        volatile = wake.nextAttemptAtMs;
+      }
+    }
+    if (durable === null) return volatile;
+    if (volatile === null) return durable;
+    return Math.min(durable, volatile);
+  }
+
+  private scheduleWakeRetry(claim: WakeClaim, mayHaveReachedWebhook: boolean): void {
+    const nextAttemptAt = this.addTime(this.currentTime(), this.retryDelay(claim.attemptCount));
+    if (claim.volatile) {
+      const wake = this.volatileWakes.get(claim.wakeId);
+      if (wake === undefined) return;
+      if (wake.state !== "in_flight") {
+        throw new NotificationRelayError("relay_failed", "Notification relay failed");
+      }
+      wake.state = "retry_wait";
+      wake.nextAttemptAtMs = nextAttemptAt;
+      wake.mayHaveReachedWebhook ||= mayHaveReachedWebhook;
+    } else {
+      this.journalOperation(() =>
+        this.journal.recordWakeRetry(claim.wakeId, nextAttemptAt, mayHaveReachedWebhook),
+      );
+    }
     this.notifyWork();
   }
 

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
@@ -29,17 +28,6 @@ async function control<T>(baseUrl: string, path: string, body: object): Promise<
   });
   assert.equal(response.status, 200);
   return (await response.json()) as T;
-}
-
-async function waitForAcknowledgement(baseUrl: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const inspection = await control<{
-      messages: Array<{ id: string; notification_acknowledged: boolean }>;
-    }>(baseUrl, "/__test/inspect", { message_id: MESSAGE_ID });
-    if (inspection.messages[0]?.notification_acknowledged === true) return;
-    await delay(20);
-  }
-  assert.fail("notification acknowledgement was not observed");
 }
 
 async function assertFilesExclude(root: string, markers: string[]): Promise<void> {
@@ -93,7 +81,6 @@ test("enrolls and relays through the pinned FastMCP fixture", {
   });
   const wake = await webhook.waitForWake();
   assert.equal(wake.headers["idempotency-key"], MESSAGE_ID);
-  await waitForAcknowledgement(FIXTURE_URL);
 
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.ok(Array.isArray(polled.messages));
@@ -102,9 +89,9 @@ test("enrolls and relays through the pinned FastMCP fixture", {
   await client.callTool("ack_message", { message_id: MESSAGE_ID });
 
   const inspection = await control<{
-    messages: Array<{ content_acknowledged: boolean }>;
+    messages: Array<{ status: string }>;
   }>(FIXTURE_URL, "/__test/inspect", { message_id: MESSAGE_ID });
-  assert.equal(inspection.messages[0]?.content_acknowledged, true);
+  assert.equal(inspection.messages[0]?.status, "acked");
   assert.equal(await gateway.stop(), 0);
   await assertFilesExclude(gateway.artifactRoot, [EMAIL, CODE, USERNAME, agentId, MESSAGE_CONTENT]);
 });

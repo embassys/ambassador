@@ -227,19 +227,22 @@ export function upstreamToolArguments(
   localArguments: unknown,
   centralToken: string | undefined,
 ): Record<string, unknown> {
-  if (!isObject(localArguments)) {
-    throw new McpContractError();
-  }
-  assertNoForbiddenNames(localArguments, FORBIDDEN_LOCAL_NAMES);
+  const validatedArguments = safeLocalToolArguments(localArguments);
   const properties = parseSchema(tool.inputSchema).properties as Record<string, unknown>;
   const requiresToken = Object.hasOwn(properties, "token");
   if (requiresToken && centralToken === undefined) {
     throw new McpContractError();
   }
   return {
-    ...localArguments,
+    ...validatedArguments,
     ...(requiresToken ? { token: centralToken } : {}),
   };
+}
+
+export function safeLocalToolArguments(value: unknown): Record<string, unknown> {
+  if (!isObject(value)) throw new McpContractError();
+  assertNoForbiddenNames(value, FORBIDDEN_LOCAL_NAMES);
+  return value;
 }
 
 export function assertSafeUpstreamResult(value: unknown, centralToken?: string): void {
