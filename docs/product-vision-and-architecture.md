@@ -91,7 +91,7 @@ If persistence fails, verification does not report local success. A second verif
 
 Version `0.2.1` packages the single-webhook replacement for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
-The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central contract and recovery work listed below.
+The replacement keeps Node 24, npm-registry distribution, pnpm project tooling, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central contract and recovery work listed below.
 
 ## Open decisions
 

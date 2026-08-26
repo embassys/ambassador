@@ -10,14 +10,22 @@ Requirements:
 
 - macOS or Linux; Windows remains unqualified for `0.2.1`
 - Node.js 24.19.x
-- npm 11
+- pnpm 11.22.0 through Corepack
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
 - The API and MCP URLs for an A2A development service
 
 Install the package:
 
 ```sh
-npm install --global @a2adev/gateway@0.2.1
+corepack enable pnpm
+corepack install --global pnpm@11.22.0
+pnpm setup
+```
+
+Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
+
+```sh
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.1
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -102,16 +110,19 @@ The source tree and `0.2.1` package implement the single-webhook gateway. The de
 ## Development
 
 ```sh
-npm ci
-npm run check
-npm run build
+corepack enable pnpm
+corepack install
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run build
 ```
 
 Additional checks:
 
 ```sh
-npm run test:coverage
-npm audit --omit=dev --audit-level=high
+pnpm run test:coverage
+pnpm audit --prod --audit-level=high
+pnpm audit signatures
 ```
 
 The suite uses Node's test runner, temporary SQLite files, loopback HTTP fixtures, and a Dockerized Python/FastMCP central fixture with in-memory verification. Docker E2E runs on Ubuntu CI; the local Docker daemon must be running for local container tests.
