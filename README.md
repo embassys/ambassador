@@ -2,22 +2,22 @@
 
 The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
-Version `0.2.0` supports the complete flow against an A2A development service supplied through environment variables. It is not a production release: the production central contract and stable endpoint constants are still pending.
+Version `0.2.1` supports the complete flow against an A2A development service supplied through environment variables. It is not a production release: the production central contract and stable endpoint constants are still pending.
 
 ## Target usage
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.0`
+- macOS or Linux; Windows remains unqualified for `0.2.1`
 - Node.js 24.19.x
 - npm 11
-- A local webhook URL and its OpenClaw-generated 48-character lowercase hexadecimal bearer token
+- A local webhook URL and a shared 48-character lowercase hexadecimal token
 - The API and MCP URLs for an A2A development service
 
 Install the package:
 
 ```sh
-npm install --global @a2adev/gateway
+npm install --global @a2adev/gateway@0.2.1
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -91,13 +91,13 @@ The gateway then starts notification polling. Later local MCP calls have no `tok
 
 ## Delivery
 
-The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed OpenClaw-compatible webhook wake with the same ID as its idempotency key. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`. Until that acknowledgement succeeds, content remains retrievable and the gateway periodically re-drives the same wake ID.
+The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed webhook wake with bearer and timestamped HMAC authentication. The same opaque ID is used for `Idempotency-Key` and `X-Request-ID`. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`. Until that acknowledgement succeeds, content remains retrievable and the gateway periodically re-drives the same wake ID.
 
 SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
 ## Current implementation
 
-The source tree and `0.2.0` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. Production use remains blocked on stable central API and MCP URLs, the ID-only notification view, structured verification results, and central JWT reissue.
+The source tree and `0.2.1` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. Production use remains blocked on stable central API and MCP URLs, the ID-only notification view, structured verification results, and central JWT reissue.
 
 ## Development
 

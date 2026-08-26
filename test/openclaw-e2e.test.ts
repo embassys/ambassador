@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -167,6 +168,7 @@ async function observeOpenClawWebhook(t: TestContext): Promise<{
   url: string;
   waitForWake: () => Promise<{
     headers: IncomingHttpHeaders;
+    rawBody: Buffer;
     body: Record<string, unknown>;
     openclawStatus: number;
   }>;
@@ -174,12 +176,14 @@ async function observeOpenClawWebhook(t: TestContext): Promise<{
   let resolveWake:
     | ((wake: {
         headers: IncomingHttpHeaders;
+        rawBody: Buffer;
         body: Record<string, unknown>;
         openclawStatus: number;
       }) => void)
     | undefined;
   const wake = new Promise<{
     headers: IncomingHttpHeaders;
+    rawBody: Buffer;
     body: Record<string, unknown>;
     openclawStatus: number;
   }>((resolve) => {
@@ -196,12 +200,20 @@ async function observeOpenClawWebhook(t: TestContext): Promise<{
           Authorization: String(request.headers.authorization),
           "Content-Type": String(request.headers["content-type"]),
           "Idempotency-Key": String(request.headers["idempotency-key"]),
+          "X-Request-ID": String(request.headers["x-request-id"]),
+          "X-Webhook-Timestamp": String(request.headers["x-webhook-timestamp"]),
+          "X-Webhook-Signature-V2": String(request.headers["x-webhook-signature-v2"]),
         },
         body: bytes,
       });
       await upstream.body?.cancel();
       const body = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
-      resolveWake?.({ headers: request.headers, body, openclawStatus: upstream.status });
+      resolveWake?.({
+        headers: request.headers,
+        rawBody: bytes,
+        body,
+        openclawStatus: upstream.status,
+      });
       response.writeHead(upstream.status, { "content-type": "application/json" });
       response.end('{"ok":true}');
     } catch {
@@ -275,6 +287,17 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
   const wake = await webhook.waitForWake();
   assert.equal(wake.openclawStatus, 200);
   assert.equal(wake.headers["idempotency-key"], "openclaw_message_01");
+  assert.equal(wake.headers["x-request-id"], "openclaw_message_01");
+  const timestamp = String(wake.headers["x-webhook-timestamp"]);
+  assert.ok(Math.abs(Date.now() / 1_000 - Number(timestamp)) < 10);
+  assert.equal(
+    wake.headers["x-webhook-signature-v2"],
+    createHmac("sha256", WEBHOOK_TOKEN)
+      .update(timestamp)
+      .update(".")
+      .update(wake.rawBody)
+      .digest("hex"),
+  );
   assert.deepEqual(wake.body, {
     message:
       "A2A message openclaw_message_01 is ready. Use the A2A MCP tools to retrieve and process it.",

@@ -9,7 +9,7 @@ test("package metadata exposes the approved public gateway", async () => {
   ) as Record<string, unknown>;
 
   assert.equal(packageJson.name, "@a2adev/gateway");
-  assert.equal(packageJson.version, "0.2.0");
+  assert.equal(packageJson.version, "0.2.1");
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, "MIT");
   assert.deepEqual(packageJson.bin, { "a2a-gateway": "dist/cli.js" });

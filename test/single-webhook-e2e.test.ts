@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { startFakeCentral } from "./support/fake-central.js";
-import { startFakeWebhook } from "./support/fake-webhook.js";
+import { startFakeWebhook, type WebhookWake } from "./support/fake-webhook.js";
 import { runSecondGateway, startGatewayProcess } from "./support/gateway-process.js";
 import { McpCallError, type McpTool, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
@@ -17,6 +18,21 @@ const EMAIL = "fixture-agent@example.test";
 const CODE = "246810";
 const MESSAGE_ID = "message_fixture_01";
 const MESSAGE_CONTENT = "fixture message body must stay out of gateway state";
+
+function assertWakeAuthentication(wake: WebhookWake, messageId: string): string {
+  assert.equal(wake.headers.authorization, `Bearer ${WEBHOOK_TOKEN}`);
+  assert.equal(wake.headers["idempotency-key"], messageId);
+  assert.equal(wake.headers["x-request-id"], messageId);
+  const timestamp = String(wake.headers["x-webhook-timestamp"]);
+  assert.ok(Math.abs(Date.now() / 1_000 - Number(timestamp)) < 10);
+  const signature = createHmac("sha256", WEBHOOK_TOKEN)
+    .update(timestamp)
+    .update(".")
+    .update(wake.rawBody)
+    .digest("hex");
+  assert.equal(wake.headers["x-webhook-signature-v2"], signature);
+  return signature;
+}
 
 function propertyNames(tool: McpTool): string[] {
   const properties = tool.inputSchema.properties;
@@ -177,8 +193,7 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
   assert.equal(wake.method, "POST");
   assert.equal(wake.path, "/hooks/agent");
   assert.equal(wake.contentType, "application/json");
-  assert.ok(wake.headers.authorization === `Bearer ${WEBHOOK_TOKEN}`);
-  assert.equal(wake.headers["idempotency-key"], MESSAGE_ID);
+  const wakeSignature = assertWakeAuthentication(wake, MESSAGE_ID);
   assert.deepEqual(Object.keys(wake.body).sort(), ["deliver", "message", "name", "wakeMode"]);
   assert.equal(wake.body.name, "A2A Gateway");
   assert.equal(wake.body.deliver, false);
@@ -269,6 +284,7 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
     "Fixture Agent",
     "agent_fixture",
     "Verification code sent.",
+    wakeSignature,
   ];
   await scanFiles(gateway.artifactRoot, forbidden);
   for (const marker of forbidden) {
@@ -396,8 +412,9 @@ test("a failed webhook attempt retries the same opaque ID", async (t) => {
 
   const first = await webhook.waitForWake();
   const second = await webhook.waitForWake();
-  assert.equal(first.headers["idempotency-key"], MESSAGE_ID);
-  assert.equal(second.headers["idempotency-key"], MESSAGE_ID);
+  assertWakeAuthentication(first, MESSAGE_ID);
+  assertWakeAuthentication(second, MESSAGE_ID);
+  assert.equal(first.rawBody.toString("utf8"), second.rawBody.toString("utf8"));
   assert.equal(first.body.message, second.body.message);
   assert.deepEqual(Object.keys(first.body).sort(), Object.keys(second.body).sort());
 
@@ -469,7 +486,7 @@ test("the CLI completes the flow through development central URLs", async (t) =>
 
   central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
   const wake = await webhook.waitForWake();
-  assert.equal(wake.headers["idempotency-key"], MESSAGE_ID);
+  const wakeSignature = assertWakeAuthentication(wake, MESSAGE_ID);
   await waitFor(() => central.messageState(MESSAGE_ID).notificationAcknowledged);
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, MESSAGE_ID);
@@ -485,6 +502,7 @@ test("the CLI completes the flow through development central URLs", async (t) =>
     EMAIL,
     CODE,
     MESSAGE_CONTENT,
+    wakeSignature,
   ];
   await scanFiles(gateway.artifactRoot, forbiddenArtifacts);
   for (const marker of forbiddenArtifacts) {
