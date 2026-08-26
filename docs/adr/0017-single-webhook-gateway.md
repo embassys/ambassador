@@ -28,7 +28,7 @@ The CLI accepts only the `--name=value` form for these options. The token option
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
-The webhook URL must use the literal loopback address `127.0.0.1`. The webhook token must use OpenClaw's generated 48-character lowercase hexadecimal format. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
+The webhook URL must use the literal loopback address `127.0.0.1`. The webhook token must contain 192 random bits as 48 lowercase hexadecimal characters. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
 
 The central API and MCP URLs are product constants, not user-facing CLI options. Until those constants are available, the `0.2.0` development release accepts `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` as a paired environment override. A development flow sets both. Remote values require HTTPS, while loopback development servers may use HTTP. The override does not change the two-option CLI or add general configuration.
 

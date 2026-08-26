@@ -36,7 +36,7 @@ Version `0.2.1` adds a generic timestamped HMAC V2 signature and `X-Request-ID` 
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
-- ADR `0019-central-credential-storage.md` approves an AES-256-GCM credential file keyed from an OpenClaw-generated 192-bit webhook token.
+- ADR `0019-central-credential-storage.md` approves an AES-256-GCM credential file keyed from the shared 192-bit webhook token.
 
 The user approved the red failures and authorized production implementation on 2026-08-25. OS credential-vault storage and DPoP remain stronger future improvements; DPoP also requires central support.
 
