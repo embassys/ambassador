@@ -235,13 +235,23 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
     assert.equal(central.calls.length, callsBefore, "an invalid timeout reached central MCP");
   }
 
+  central.setMcpAvailable(false);
   const polled = await client.callTool("poll_messages", { timeout: 0 });
+  central.setMcpAvailable(true);
   assert.ok(!JSON.stringify(polled).includes(central.jwt));
   const messages = polled.messages;
   assert.ok(Array.isArray(messages) && messages.length === 1);
   const message = messages[0] as Record<string, unknown>;
   assert.equal(message.id, MESSAGE_ID);
   assert.ok(message.content === MESSAGE_CONTENT);
+  central.setAcknowledgementMode("mismatch");
+  await assert.rejects(
+    client.callTool("ack_message", { message_id: MESSAGE_ID }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
+  assert.deepEqual(await client.callTool("poll_messages", { timeout: 0 }), polled);
+  central.setAcknowledgementMode("normal");
   await client.callTool("ack_message", { message_id: MESSAGE_ID });
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, true);
 
@@ -255,7 +265,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
   const authenticatedCalls = central.calls.filter((call) =>
     ["poll_messages", "ack_message"].includes(call.name),
   );
-  assert.equal(authenticatedCalls.length, 1);
+  assert.equal(authenticatedCalls.length, 2);
   for (const call of authenticatedCalls) {
     assert.ok(call.args.token === central.jwt);
     assert.equal(call.name, "ack_message");
@@ -298,6 +308,44 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
     assert.ok(!restarted.stdout().includes(marker));
     assert.ok(!restarted.stderr().includes(marker));
   }
+});
+
+test("an uncertain ack_message outcome keeps the consumed body locally retrievable", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    credentialStore: {
+      async load() {
+        return central.jwt;
+      },
+      async save() {
+        assert.fail("an enrolled gateway must not replace its credential");
+      },
+    },
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+  await client.listTools();
+  await webhook.waitForWake();
+
+  const polled = await client.callTool("poll_messages", { timeout: 0 });
+  central.setAcknowledgementMode("disconnect");
+  await assert.rejects(
+    client.callTool("ack_message", { message_id: MESSAGE_ID }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
+  assert.deepEqual(await client.callTool("poll_messages", { timeout: 0 }), polled);
+
+  assert.equal(await gateway.stop(), 0);
+  await scanFiles(gateway.artifactRoot, [central.jwt, MESSAGE_CONTENT]);
 });
 
 test("malformed verification output never activates polling or reaches the local result", async (t) => {

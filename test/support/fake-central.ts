@@ -101,6 +101,8 @@ export interface FakeCentral {
   pollCount: () => number;
   calls: ToolCallRecord[];
   setPollResponse: (response: unknown) => void;
+  setMcpAvailable: (available: boolean) => void;
+  setAcknowledgementMode: (mode: "normal" | "mismatch" | "disconnect") => void;
   setToolDescription: (name: string, description: string | undefined) => void;
   setVerificationResult: (result: Record<string, unknown> | string | undefined) => void;
   injectMessage: (id: string, content: string) => void;
@@ -112,6 +114,8 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   const calls: ToolCallRecord[] = [];
   let pollCount = 0;
   let pollResponse: unknown;
+  let mcpAvailable = true;
+  let acknowledgementMode: "normal" | "mismatch" | "disconnect" = "normal";
   const toolDescriptions = new Map<string, string>();
   let verificationResult: Record<string, unknown> | string | undefined;
 
@@ -143,6 +147,10 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
       }
 
       if (request.method === "POST" && url.pathname === "/mcp") {
+        if (!mcpAvailable) {
+          json(response, 503, { detail: "unavailable" });
+          return;
+        }
         const message = await readObject(request);
         const id = message.id;
         if (message.method === "initialize") {
@@ -300,6 +308,18 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
             return;
           }
           if (name === "ack_message") {
+            if (acknowledgementMode === "disconnect") {
+              request.socket.destroy();
+              return;
+            }
+            if (acknowledgementMode === "mismatch") {
+              json(
+                response,
+                200,
+                toolResult(id, { message_id: "different-message", status: "acked" }),
+              );
+              return;
+            }
             const item = messages.get(String(args.message_id));
             if (item === undefined || !item.delivered || item.contentAcknowledged) {
               json(response, 200, {
@@ -341,6 +361,12 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
     calls,
     setPollResponse(response) {
       pollResponse = response;
+    },
+    setMcpAvailable(available) {
+      mcpAvailable = available;
+    },
+    setAcknowledgementMode(mode) {
+      acknowledgementMode = mode;
     },
     setToolDescription(name, description) {
       if (description === undefined) toolDescriptions.delete(name);
