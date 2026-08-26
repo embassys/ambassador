@@ -1,6 +1,6 @@
 # Gateway protocol v1
 
-Status: accepted for the single-webhook design on 2026-08-25
+Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication accepted on 2026-08-26
 
 ## Startup contract
 
