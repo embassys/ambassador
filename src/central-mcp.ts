@@ -7,13 +7,15 @@ import {
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 
-import type { CentralToolDefinition } from "./mcp-contract.js";
+import { assertSafeUpstreamResult, type CentralToolDefinition } from "./mcp-contract.js";
 
 const CONNECT_DEADLINE_MS = 5_000;
 const CALL_DEADLINE_MS = 30_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_JSON_DEPTH = 100;
 const PROTOCOL_VERSION = "2025-06-18";
+const UNPARSED_WRAPPED_VALUE = Symbol("unparsed wrapped value");
+type WrappedLiteralDialect = "json" | "python";
 
 export type CentralMcpErrorCode =
   | "central_mcp_authentication_failed"
@@ -113,6 +115,291 @@ function toPlainRecord(value: unknown): Record<string, unknown> {
   return plain;
 }
 
+class WrappedLiteralParser {
+  #index = 0;
+
+  constructor(
+    private readonly source: string,
+    private readonly dialect: WrappedLiteralDialect,
+  ) {}
+
+  parse(): unknown {
+    this.#skipWhitespace();
+    const value = this.#parseValue(0);
+    this.#skipWhitespace();
+    if (this.#index !== this.source.length) throw new InvalidCentralResponse();
+    return value;
+  }
+
+  #parseValue(depth: number): unknown {
+    if (depth > MAX_JSON_DEPTH) throw new InvalidCentralResponse();
+    this.#skipWhitespace();
+    const next = this.source[this.#index];
+    if (this.#isStringQuote(next)) return this.#parseString();
+    if (next === "{") return this.#parseObject(depth);
+    if (next === "[") return this.#parseArray(depth);
+    if (next === "-" || (next !== undefined && next >= "0" && next <= "9")) {
+      return this.#parseNumber();
+    }
+    if (this.dialect === "python" && this.source.startsWith("True", this.#index)) {
+      this.#index += 4;
+      return true;
+    }
+    if (this.dialect === "python" && this.source.startsWith("False", this.#index)) {
+      this.#index += 5;
+      return false;
+    }
+    if (this.dialect === "python" && this.source.startsWith("None", this.#index)) {
+      this.#index += 4;
+      return null;
+    }
+    if (this.dialect === "json" && this.source.startsWith("true", this.#index)) {
+      this.#index += 4;
+      return true;
+    }
+    if (this.dialect === "json" && this.source.startsWith("false", this.#index)) {
+      this.#index += 5;
+      return false;
+    }
+    if (this.dialect === "json" && this.source.startsWith("null", this.#index)) {
+      this.#index += 4;
+      return null;
+    }
+    throw new InvalidCentralResponse();
+  }
+
+  #parseObject(depth: number): Record<string, unknown> {
+    this.#index += 1;
+    this.#skipWhitespace();
+    if (this.source[this.#index] === "}") {
+      this.#index += 1;
+      return {};
+    }
+
+    const entries = new Map<string, unknown>();
+    while (true) {
+      const next = this.source[this.#index];
+      if (!this.#isStringQuote(next)) throw new InvalidCentralResponse();
+      const key = this.#parseString();
+      if (entries.has(key)) throw new InvalidCentralResponse();
+      this.#skipWhitespace();
+      if (this.source[this.#index] !== ":") throw new InvalidCentralResponse();
+      this.#index += 1;
+      entries.set(key, this.#parseValue(depth + 1));
+      this.#skipWhitespace();
+      const separator = this.source[this.#index];
+      if (separator === "}") {
+        this.#index += 1;
+        return Object.fromEntries(entries);
+      }
+      if (separator !== ",") throw new InvalidCentralResponse();
+      this.#index += 1;
+      this.#skipWhitespace();
+      if (this.source[this.#index] === "}") throw new InvalidCentralResponse();
+    }
+  }
+
+  #parseArray(depth: number): unknown[] {
+    this.#index += 1;
+    this.#skipWhitespace();
+    if (this.source[this.#index] === "]") {
+      this.#index += 1;
+      return [];
+    }
+
+    const values: unknown[] = [];
+    while (true) {
+      values.push(this.#parseValue(depth + 1));
+      this.#skipWhitespace();
+      const separator = this.source[this.#index];
+      if (separator === "]") {
+        this.#index += 1;
+        return values;
+      }
+      if (separator !== ",") throw new InvalidCentralResponse();
+      this.#index += 1;
+      this.#skipWhitespace();
+      if (this.source[this.#index] === "]") throw new InvalidCentralResponse();
+    }
+  }
+
+  #parseString(): string {
+    const quote = this.source[this.#index];
+    if (quote !== "'" && quote !== '"') throw new InvalidCentralResponse();
+    this.#index += 1;
+    let value = "";
+
+    while (this.#index < this.source.length) {
+      const character = this.source[this.#index];
+      this.#index += 1;
+      if (character === quote) return value;
+      if (character === "\n" || character === "\r" || character === undefined) {
+        throw new InvalidCentralResponse();
+      }
+      if (character !== "\\") {
+        if (character.charCodeAt(0) < 0x20) throw new InvalidCentralResponse();
+        value += character;
+        continue;
+      }
+
+      const escaped = this.source[this.#index];
+      this.#index += 1;
+      switch (escaped) {
+        case "\\":
+          value += escaped;
+          break;
+        case "'":
+          if (this.dialect !== "python") throw new InvalidCentralResponse();
+          value += escaped;
+          break;
+        case '"':
+          value += escaped;
+          break;
+        case "/":
+          if (this.dialect !== "json") throw new InvalidCentralResponse();
+          value += escaped;
+          break;
+        case "a":
+          if (this.dialect !== "python") throw new InvalidCentralResponse();
+          value += "\u0007";
+          break;
+        case "b":
+          value += "\b";
+          break;
+        case "f":
+          value += "\f";
+          break;
+        case "n":
+          value += "\n";
+          break;
+        case "r":
+          value += "\r";
+          break;
+        case "t":
+          value += "\t";
+          break;
+        case "v":
+          if (this.dialect !== "python") throw new InvalidCentralResponse();
+          value += "\v";
+          break;
+        case "x":
+          if (this.dialect !== "python") throw new InvalidCentralResponse();
+          value += String.fromCharCode(this.#parseHex(2));
+          break;
+        case "u":
+          value += String.fromCharCode(this.#parseHex(4));
+          break;
+        case "U": {
+          if (this.dialect !== "python") throw new InvalidCentralResponse();
+          const codePoint = this.#parseHex(8);
+          if (codePoint > 0x10ffff) throw new InvalidCentralResponse();
+          value += String.fromCodePoint(codePoint);
+          break;
+        }
+        default:
+          throw new InvalidCentralResponse();
+      }
+    }
+    throw new InvalidCentralResponse();
+  }
+
+  #parseHex(length: number): number {
+    const value = this.source.slice(this.#index, this.#index + length);
+    if (value.length !== length || !/^[0-9A-Fa-f]+$/u.test(value)) {
+      throw new InvalidCentralResponse();
+    }
+    this.#index += length;
+    return Number.parseInt(value, 16);
+  }
+
+  #parseNumber(): number {
+    const start = this.#index;
+    if (this.source[this.#index] === "-") this.#index += 1;
+    if (this.source[this.#index] === "0") {
+      this.#index += 1;
+    } else {
+      if (!this.#isDigit(this.source[this.#index], "1")) throw new InvalidCentralResponse();
+      while (this.#isDigit(this.source[this.#index])) this.#index += 1;
+    }
+    if (this.source[this.#index] === ".") {
+      this.#index += 1;
+      if (!this.#isDigit(this.source[this.#index])) throw new InvalidCentralResponse();
+      while (this.#isDigit(this.source[this.#index])) this.#index += 1;
+    }
+    const exponent = this.source[this.#index];
+    if (exponent === "e" || exponent === "E") {
+      this.#index += 1;
+      const sign = this.source[this.#index];
+      if (sign === "+" || sign === "-") this.#index += 1;
+      if (!this.#isDigit(this.source[this.#index])) throw new InvalidCentralResponse();
+      while (this.#isDigit(this.source[this.#index])) this.#index += 1;
+    }
+    const value = Number(this.source.slice(start, this.#index));
+    if (!Number.isFinite(value)) throw new InvalidCentralResponse();
+    return value;
+  }
+
+  #isDigit(value: string | undefined, minimum = "0"): boolean {
+    return value !== undefined && value >= minimum && value <= "9";
+  }
+
+  #isStringQuote(value: string | undefined): value is "'" | '"' {
+    return value === '"' || (this.dialect === "python" && value === "'");
+  }
+
+  #skipWhitespace(): void {
+    while (/^[\t\n\r ]$/u.test(this.source[this.#index] ?? "")) this.#index += 1;
+  }
+}
+
+function parseWrappedValue(value: string): unknown | typeof UNPARSED_WRAPPED_VALUE {
+  for (const dialect of ["json", "python"] as const) {
+    try {
+      return toPlainJson(new WrappedLiteralParser(value, dialect).parse());
+    } catch {
+      // Try the other approved data grammar.
+    }
+  }
+  return UNPARSED_WRAPPED_VALUE;
+}
+
+function looksLikeUnsupportedLiteral(value: string): boolean {
+  const trimmed = value.trimStart();
+  return (
+    /^[#'"(]/u.test(trimmed) ||
+    /^(?:[bBrRuUfF]{1,2})['"]/u.test(trimmed) ||
+    ["[", "]", "{", "}", "(", ")"].some((delimiter) => trimmed.includes(delimiter))
+  );
+}
+
+function parseMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  try {
+    const metadata = toPlainRecord(value);
+    assertSafeUpstreamResult(metadata);
+    return metadata;
+  } catch {
+    throw new InvalidCentralResponse();
+  }
+}
+
+function assertMetadataCredentialFree(
+  metadata: readonly (Record<string, unknown> | undefined)[],
+  result: Record<string, unknown>,
+  storedCredential?: string,
+): void {
+  const issuedCredential = typeof result.token === "string" ? result.token : undefined;
+  try {
+    for (const value of metadata) {
+      if (value === undefined) continue;
+      if (storedCredential !== undefined) assertSafeUpstreamResult(value, storedCredential);
+      if (issuedCredential !== undefined) assertSafeUpstreamResult(value, issuedCredential);
+    }
+  } catch {
+    throw new InvalidCentralResponse();
+  }
+}
+
 function parseTool(value: unknown): CentralToolDefinition {
   if (!isRecord(value) || typeof value.name !== "string" || value.name.length === 0) {
     throw new InvalidCentralResponse();
@@ -131,37 +418,63 @@ function parseTool(value: unknown): CentralToolDefinition {
   };
 }
 
-function canonicalToolResult(result: unknown): Record<string, unknown> {
+function canonicalToolResult(result: unknown, storedCredential?: string): Record<string, unknown> {
   if (!isRecord(result)) throw new InvalidCentralResponse();
   const keys = Object.keys(result);
   if (result.isError !== undefined && typeof result.isError !== "boolean") {
     throw new InvalidCentralResponse();
   }
   if (result.isError === true) throw new RemoteRequestFailed();
+  const resultMetadata = parseMetadata(result._meta);
   if (
     !keys.includes("content") ||
     !keys.includes("structuredContent") ||
-    keys.some((key) => key !== "content" && key !== "structuredContent" && key !== "isError")
+    keys.some(
+      (key) =>
+        key !== "content" && key !== "structuredContent" && key !== "isError" && key !== "_meta",
+    )
   ) {
     throw new InvalidCentralResponse();
   }
   const structuredContent = toPlainRecord(result.structuredContent);
   if (!Array.isArray(result.content)) throw new InvalidCentralResponse();
-  if (result.content.length === 0) return structuredContent;
+  if (result.content.length === 0) {
+    assertMetadataCredentialFree([resultMetadata], structuredContent, storedCredential);
+    return structuredContent;
+  }
   if (result.content.length !== 1) throw new InvalidCentralResponse();
 
   const mirror = result.content[0];
   if (!isRecord(mirror) || mirror.type !== "text" || typeof mirror.text !== "string") {
     throw new InvalidCentralResponse();
   }
+  const contentMetadata = parseMetadata(mirror._meta);
+  let canonical = structuredContent;
   let serialized: string;
   try {
     serialized = JSON.stringify(structuredContent);
   } catch {
     throw new InvalidCentralResponse();
   }
-  if (mirror.text !== serialized) throw new InvalidCentralResponse();
-  return structuredContent;
+  if (mirror.text !== serialized) {
+    const structuredKeys = Object.keys(structuredContent);
+    if (
+      structuredKeys.length !== 1 ||
+      structuredKeys[0] !== "result" ||
+      typeof structuredContent.result !== "string" ||
+      mirror.text !== structuredContent.result
+    ) {
+      throw new InvalidCentralResponse();
+    }
+    const normalized = parseWrappedValue(structuredContent.result);
+    if (normalized !== UNPARSED_WRAPPED_VALUE) {
+      canonical = isRecord(normalized) ? normalized : { result: normalized };
+    } else if (looksLikeUnsupportedLiteral(structuredContent.result)) {
+      throw new InvalidCentralResponse();
+    }
+  }
+  assertMetadataCredentialFree([resultMetadata, contentMetadata], canonical, storedCredential);
+  return canonical;
 }
 
 async function cancelBody(response: Response): Promise<void> {
@@ -308,6 +621,7 @@ export class CentralMcpClient {
     name: string,
     arguments_: Record<string, unknown>,
     callerSignal?: AbortSignal,
+    storedCredential?: string,
   ): Promise<Record<string, unknown>> {
     if (callerSignal?.aborted) throw new CentralMcpError("central_mcp_cancelled");
     const client = await this.getClient(callerSignal);
@@ -329,7 +643,7 @@ export class CentralMcpClient {
           },
         ),
       );
-      return canonicalToolResult(result);
+      return canonicalToolResult(result, storedCredential);
     } catch (error) {
       throw this.safeError(error, "request", callerSignal);
     }

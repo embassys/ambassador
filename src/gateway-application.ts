@@ -13,43 +13,6 @@ import {
 import { NotificationJournal, validateNotificationId } from "./notification-journal.js";
 import { NotificationRelay, NotificationRelayError } from "./notification-relay.js";
 
-const BOOTSTRAP_DEFINITIONS: CentralToolDefinition[] = [
-  {
-    name: "register_agent",
-    description: "Register this agent with A2A.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        username: { type: "string" },
-        email: { type: "string" },
-        display_name: { type: "string" },
-      },
-      required: ["username", "email"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "verify_email",
-    description: "Verify this agent's email address.",
-    inputSchema: {
-      type: "object",
-      properties: { email: { type: "string" }, code: { type: "string" } },
-      required: ["email", "code"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "resend_verification",
-    description: "Resend this agent's verification code.",
-    inputSchema: {
-      type: "object",
-      properties: { email: { type: "string" } },
-      required: ["email"],
-      additionalProperties: false,
-    },
-  },
-];
-
 export interface GatewayApplicationOptions {
   webhookUrl: string;
   webhookToken: string;
@@ -178,12 +141,13 @@ export async function openGatewayApplication(
   const router: LocalMcpRouter = {
     async listTools() {
       const currentIdentity = requireIdentity();
-      if (!currentIdentity.enrolled) {
-        return BOOTSTRAP_DEFINITIONS.map(localToolDefinition);
-      }
-      const centralToken = currentIdentity.authenticatedToken();
       const catalog = await requireCentral().listTools();
-      const localCatalog = selectCentralTools(catalog, true).map(localToolDefinition);
+      const localCatalog = selectCentralTools(catalog, currentIdentity.enrolled).map(
+        localToolDefinition,
+      );
+      const centralToken = currentIdentity.enrolled
+        ? currentIdentity.authenticatedToken()
+        : undefined;
       assertSafeUpstreamResult(localCatalog, centralToken);
       return localCatalog;
     },
@@ -214,7 +178,12 @@ export async function openGatewayApplication(
         const centralToken = currentIdentity.authenticatedToken();
         const tool = await remoteTool(name, true, signal);
         const upstreamArguments = upstreamToolArguments(tool, arguments_, centralToken);
-        const result = await requireCentral().callTool(name, upstreamArguments, signal);
+        const result = await requireCentral().callTool(
+          name,
+          upstreamArguments,
+          signal,
+          centralToken,
+        );
         assertSafeUpstreamResult(result, centralToken);
         if (name === "ack_message") {
           relay?.confirmContentAcknowledgement(contentAcknowledgement(result, arguments_));

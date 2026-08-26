@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-24
 
-Updated: 2026-08-26 for pnpm installation and build tooling
+Updated: 2026-08-26 for the `0.2.2` central compatibility release
 
 ## Problem
 
@@ -25,13 +25,13 @@ Initialize pnpm's user-owned global binary directory once with `pnpm setup`. Glo
 
 Publish production releases from the `main` branch only after Linux, macOS, and Windows checks pass. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
 
-The user approved `0.2.0` and its `0.2.1` patch as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. Windows packaging and credential permissions remain unqualified, so their documentation excludes Windows and does not present either version as a production release.
+The user approved `0.2.0`, `0.2.1`, and `0.2.2` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. Windows packaging and credential permissions remain unqualified, so their documentation excludes Windows and does not present these versions as production releases.
 
 Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
 
 ## Security
 
-Publish a minimal tarball containing built runtime files and package documentation. The `0.2.1` tarball keeps the packaged `0.2.0` Hermes bridge only so existing development installations can upgrade without breaking their configured loopback target; new setup does not use it. Test and audit a pnpm installation of the tarball with strict release-age, exotic-subdependency, and build-script policies before publishing. pnpm 11 applies the age and exotic-source checks to user installs by default, with non-strict age handling so an explicitly selected new gateway release can install. Keep exact dependency versions and publish from a GitHub-hosted runner with npm provenance when the source repository is public.
+Publish a minimal tarball containing built runtime files and package documentation. Releases after `0.2.0` keep the packaged Hermes bridge only so existing development installations can upgrade without breaking their configured loopback target; new setup does not use it. Test and audit a pnpm installation of the tarball with strict release-age, exotic-subdependency, and build-script policies before publishing. pnpm 11 applies the age and exotic-source checks to user installs by default, with non-strict age handling so an explicitly selected new gateway release can install. Keep exact dependency versions and publish from a GitHub-hosted runner with npm provenance when the source repository is public.
 
 After trusted publishing works, configure npm to require two-factor authentication and disallow traditional tokens for package publishing.
 
@@ -43,4 +43,4 @@ The current private GitHub repository can use trusted publishing, but npm cannot
 
 ## Approval
 
-The user reviewed and approved npm-registry distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows remains unqualified. On 2026-08-26, the user approved the `0.2.1` dual-authentication patch release under the same qualification boundary, then approved pnpm for installation and project tooling while retaining npm solely for the trusted OIDC upload.
+The user reviewed and approved npm-registry distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows remains unqualified. On 2026-08-26, the user approved the `0.2.1` dual-authentication patch, pnpm for installation and project tooling, and the `0.2.2` central compatibility release under the same qualification boundary. npm remains solely the trusted OIDC uploader.

@@ -69,6 +69,76 @@ function assertNoForbiddenNames(value: unknown, forbiddenNames: ReadonlySet<stri
   }
 }
 
+function assertNoForbiddenRequiredNames(value: unknown, forbiddenNames: ReadonlySet<string>): void {
+  if (!isObject(value)) return;
+
+  const assertPropertyNames = (names: unknown): void => {
+    if (!Array.isArray(names)) throw new McpContractError();
+    for (const name of names) {
+      if (typeof name !== "string" || forbiddenNames.has(name.toLowerCase())) {
+        throw new McpContractError();
+      }
+    }
+  };
+  if (value.required !== undefined) assertPropertyNames(value.required);
+
+  for (const keyword of [
+    "$defs",
+    "definitions",
+    "dependentSchemas",
+    "patternProperties",
+    "properties",
+  ]) {
+    const schemas = value[keyword];
+    if (schemas === undefined) continue;
+    if (!isObject(schemas)) throw new McpContractError();
+    for (const schema of Object.values(schemas)) {
+      assertNoForbiddenRequiredNames(schema, forbiddenNames);
+    }
+  }
+  for (const keyword of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
+    const schemas = value[keyword];
+    if (schemas === undefined) continue;
+    if (!Array.isArray(schemas)) throw new McpContractError();
+    for (const schema of schemas) assertNoForbiddenRequiredNames(schema, forbiddenNames);
+  }
+  for (const keyword of [
+    "additionalItems",
+    "additionalProperties",
+    "contains",
+    "contentSchema",
+    "else",
+    "if",
+    "not",
+    "propertyNames",
+    "then",
+    "unevaluatedItems",
+    "unevaluatedProperties",
+  ]) {
+    assertNoForbiddenRequiredNames(value[keyword], forbiddenNames);
+  }
+
+  const items = value.items;
+  if (Array.isArray(items)) {
+    for (const schema of items) assertNoForbiddenRequiredNames(schema, forbiddenNames);
+  } else {
+    assertNoForbiddenRequiredNames(items, forbiddenNames);
+  }
+  const dependentRequired = value.dependentRequired;
+  if (dependentRequired !== undefined) {
+    if (!isObject(dependentRequired)) throw new McpContractError();
+    for (const names of Object.values(dependentRequired)) assertPropertyNames(names);
+  }
+  const dependencies = value.dependencies;
+  if (dependencies !== undefined) {
+    if (!isObject(dependencies)) throw new McpContractError();
+    for (const dependency of Object.values(dependencies)) {
+      if (Array.isArray(dependency)) assertPropertyNames(dependency);
+      else assertNoForbiddenRequiredNames(dependency, forbiddenNames);
+    }
+  }
+}
+
 function containsCredentialBytes(value: unknown, credential: string): boolean {
   if (typeof value === "string") return value.includes(credential);
   if (Array.isArray(value)) return value.some((item) => containsCredentialBytes(item, credential));
@@ -139,9 +209,7 @@ export function localToolDefinition(tool: CentralToolDefinition): CentralToolDef
     }
     return name !== "token";
   });
-  assertNoForbiddenNames(properties, FORBIDDEN_LOCAL_NAMES);
-
-  return {
+  const localSchema = {
     ...tool,
     inputSchema: {
       ...schema,
@@ -149,6 +217,9 @@ export function localToolDefinition(tool: CentralToolDefinition): CentralToolDef
       ...(localRequired.length === 0 ? { required: [] } : { required: localRequired }),
     },
   };
+  assertNoForbiddenNames(localSchema.inputSchema, FORBIDDEN_LOCAL_NAMES);
+  assertNoForbiddenRequiredNames(localSchema.inputSchema, FORBIDDEN_LOCAL_NAMES);
+  return localSchema;
 }
 
 export function upstreamToolArguments(
@@ -182,13 +253,7 @@ export function parseVerificationSuccess(value: unknown): VerificationSuccess {
   if (!isObject(value)) {
     throw new McpContractError();
   }
-  const keys = Object.keys(value).sort();
   if (
-    keys.length !== 4 ||
-    keys[0] !== "agent_id" ||
-    keys[1] !== "message" ||
-    keys[2] !== "token" ||
-    keys[3] !== "username" ||
     typeof value.agent_id !== "string" ||
     value.agent_id.length === 0 ||
     typeof value.message !== "string" ||
@@ -210,6 +275,9 @@ export function parseVerificationSuccess(value: unknown): VerificationSuccess {
       message: value.message,
     },
   };
-  assertSafeUpstreamResult(verified.localResult, verified.token);
+  assertSafeUpstreamResult(
+    Object.fromEntries(Object.entries(value).filter(([name]) => name !== "token")),
+    verified.token,
+  );
   return verified;
 }

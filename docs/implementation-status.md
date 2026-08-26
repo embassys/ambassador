@@ -33,6 +33,8 @@ Version `0.2.0` introduced the paired `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CEN
 
 Version `0.2.1` adds a generic timestamped HMAC V2 signature and `X-Request-ID` to every bearer-authenticated wake, so Hermes can verify the gateway directly without a runtime option or bridge. The old bridge remains packaged only for existing `0.2.0` configurations.
 
+Version `0.2.2` projects the live central bootstrap schemas, accepts the central server's bounded Python-literal result wrapper and harmless verification extensions, preserves top-level arrays under `result`, and rejects credential-bearing metadata or unsupported literal syntax. Live OpenClaw acceptance covers natural registration, code-only verification, restart recovery, authenticated tools, permission and action delivery, and a synthetic calendar response through `poll_messages` and `ack_message`.
+
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
@@ -46,24 +48,23 @@ The user approved the red failures and authorized production implementation on 2
 - Add idempotent `POST /api/ack_notification` for gateway persistence without consuming message content.
 - Keep full message content available through the MCP `poll_messages` tool after the gateway observes its ID.
 - Keep MCP `ack_message` as a separate idempotent content-processing acknowledgement.
-- Return structured verification data so the gateway can extract exactly one JWT safely.
+- Return native structured MCP results so the temporary Python-literal compatibility parser can be removed.
 - Define JWT expiry, revocation, reissue, and deliberate local identity reset.
 
 Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
 
-The inspected central implementation currently returns message content and marks it delivered during REST polling. Its MCP wrapper calls the same endpoint and returns Python string representations. The target flow cannot be end-to-end safe against that behavior without central changes.
+The inspected central implementation currently returns message content and marks it delivered during REST polling. Its MCP wrapper also returns Python string representations. ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results, but the REST notification behavior still requires central changes.
 
 ## Test work
 
 PR `#4` recorded the reviewed red suite and failure inventory before production implementation. PR `#5` turns all eight expected failures green without changing their assertions. The Docker fixture independently implements the central contract with in-memory state; it copies no source from the unlicensed private central repository.
 
-Docker runs in GitHub's Ubuntu runners. The Docker CLI is installed locally, but the local daemon is not running.
+Docker runs in GitHub's Ubuntu runners and on the local acceptance-test host.
 
 ## Production release blockers
 
 - Obtain stable production central API and MCP URLs.
 - Obtain a non-consuming production ID notification view.
 - Obtain separate idempotent notification and content acknowledgements.
-- Obtain structured central verification results.
 - Obtain central JWT reissue and revocation behavior.
 - Qualify packed installation and credential permissions on Windows.

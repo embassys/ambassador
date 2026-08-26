@@ -89,13 +89,14 @@ If persistence fails, verification does not report local success. A second verif
 
 ## Current release boundary
 
-Version `0.2.1` packages the single-webhook replacement for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
+Version `0.2.2` packages the single-webhook replacement and central-wrapper compatibility fixes for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
 The replacement keeps Node 24, npm-registry distribution, pnpm project tooling, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central contract and recovery work listed below.
 
 ## Open decisions
 
 - Obtain stable production central API and MCP URLs for package constants.
-- Add central support for an ID-only, non-consuming notification view and structured verification results.
+- Add central support for an ID-only, non-consuming notification view.
+- Replace the temporary Python-literal MCP wrapper with native structured results before removing the bounded gateway compatibility parser.
 - Define central JWT revocation, reissue, and intentional local reset.
 - Require central token reissue before relying on one-time verification in public use; a crash after remote issuance but before local persistence is otherwise unrecoverable.

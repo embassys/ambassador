@@ -58,10 +58,10 @@ async function startOpenClaw(
           path: "/hooks",
           token: `\${A2A_HOOK_TOKEN}`,
         },
-        gateway: { mode: "local" },
+        gateway: { mode: "local", bind: "loopback" },
         mcp: {
           servers: {
-            a2a: {
+            a2adev_gateway: {
               url: "http://127.0.0.1:8787/mcp",
               transport: "streamable-http",
               headers: { Authorization: `Bearer \${A2A_HOOK_TOKEN}` },
@@ -153,7 +153,7 @@ async function startOpenClaw(
 async function probeOpenClaw(executable: string, env: NodeJS.ProcessEnv): Promise<string[]> {
   const { stdout } = await execFileAsync(
     process.execPath,
-    [executable, "mcp", "probe", "a2a", "--json"],
+    [executable, "mcp", "probe", "a2adev_gateway", "--json"],
     {
       env,
       maxBuffer: 1_048_576,
@@ -260,9 +260,9 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
     executable: GATEWAY_CLI,
   });
   assert.deepEqual(await probeOpenClaw(OPENCLAW_CLI, openclaw.env), [
-    "a2a__register_agent",
-    "a2a__resend_verification",
-    "a2a__verify_email",
+    "a2adev_gateway__register_agent",
+    "a2adev_gateway__resend_verification",
+    "a2adev_gateway__verify_email",
   ]);
 
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
@@ -279,8 +279,8 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
   assert.equal(verification.verified, true);
   await listChanged;
   assert.deepEqual(await probeOpenClaw(OPENCLAW_CLI, openclaw.env), [
-    "a2a__ack_message",
-    "a2a__poll_messages",
+    "a2adev_gateway__ack_message",
+    "a2adev_gateway__poll_messages",
   ]);
 
   central.injectMessage("openclaw_message_01", "OpenClaw interoperability content");

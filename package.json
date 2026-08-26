@@ -1,6 +1,6 @@
 {
   "name": "@a2adev/gateway",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Content-blind gateway for waking local AI agent runtimes",
   "license": "MIT",
   "repository": {
@@ -11,7 +11,8 @@
     "dist",
     "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
-    "docs/getting-started-openclaw.md"
+    "docs/getting-started-openclaw.md",
+    "docs/live-e2e-openclaw-hermes.md"
   ],
   "publishConfig": {
     "access": "public"
