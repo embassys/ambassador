@@ -1,14 +1,14 @@
 # In-memory central test fixture
 
-This fixture independently implements the central boundaries used by gateway end-to-end tests. It does not contain source from the inspected central service. All agents, codes, tokens, permissions, actions, messages, and acknowledgement state disappear when the process stops or `POST /__test/reset` runs.
+This fixture independently implements the central boundaries used by gateway end-to-end tests. It does not contain source from the inspected central service. All agents, codes, tokens, permissions, actions, messages, and delivery state disappear when the process stops or `POST /__test/reset` runs.
 
 ## Container contract
 
 - Streamable HTTP MCP: `http://127.0.0.1:8000/mcp`
 - Health: `GET /healthz`
 - Readiness: `GET /readyz`
-- ID notification poll: `GET /api/poll_messages?timeout=30&view=ids`
-- Notification acknowledgement: `POST /api/ack_notification`
+- Message poll: `GET /api/poll_messages?timeout=30`
+- Message acknowledgement: `POST /api/ack_message`
 - Test-control header: `X-A2A-Test-Key: central-fixture-control`
 
 `/api` requests use the central token as a bearer token. The MCP catalog matches the inspected central service:
@@ -26,9 +26,9 @@ The protected test endpoints are:
 - `POST /__test/messages` with a verified `recipient_agent_id`, `content`, and optional `message_id`, `sender_agent_id`, and `kind`
 - `POST /__test/inspect` with optional `agent_id` and `message_id` filters
 
-The verification code is always `246810`. The code lookup endpoint is the only test endpoint that returns it. Inspection returns IDs and status flags only. It never returns registration fields, tokens, permission details, action details, or message content.
+The verification code is always `246810`. The code lookup endpoint is the only test endpoint that returns it. Inspection returns IDs and each message's `queued`, `delivered`, or `acked` status. It never returns registration fields, tokens, permission details, action details, or message content.
 
-Notification acknowledgement and content acknowledgement are separate. `ack_notification` stops ID redelivery but does not hide content from MCP `poll_messages`. MCP `ack_message` marks content processed and is independently idempotent.
+REST and MCP `poll_messages` consume the same queue. A poll returns each full queued message once and atomically marks it delivered, so the other interface cannot poll it again. REST and MCP `ack_message` accept only delivered messages and return `{"message_id":"...","status":"acked"}`. A second acknowledgement fails.
 
 ## Local container tests
 

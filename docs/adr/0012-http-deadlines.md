@@ -16,7 +16,7 @@ Every HTTP operation combines caller cancellation with an internal deadline:
 
 | Operation | Deadline |
 | --- | --- |
-| Central ID long poll | 40 seconds for a server-held 30-second poll |
+| Central consuming message long poll | 40 seconds for a server-held 30-second poll |
 | Central MCP connection | 5 seconds |
 | Central MCP tool call | 30 seconds unless a shorter approved tool limit applies |
 | Local MCP request | 35 seconds |
@@ -26,7 +26,7 @@ Tests may inject shorter positive deadlines. V1 does not expose deadline options
 
 Clients reject redirects and bound response bytes. A timeout, cancellation, redirect, or oversized response produces a safe typed error without URLs, credentials, headers, MCP bodies, or remote error text.
 
-Do not automatically retry a central MCP tool call after it may have reached the server. ID polls and webhook wakes follow their separately tested retry rules.
+Do not automatically retry a central MCP tool call after it may have reached the server. Consuming message polls and webhook wakes follow their separately tested retry rules.
 
 ## Costs
 

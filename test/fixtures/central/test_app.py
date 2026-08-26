@@ -197,113 +197,191 @@ class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(extra_field.status_code, 422)
 
-    async def test_notification_and_content_acknowledgements_are_independent(self) -> None:
+    async def test_rest_and_mcp_polls_share_one_delivered_message_stream(self) -> None:
         agent_id, token = await self.enroll()
-        injected = await self.http.post(
+        _, other_token = await self.enroll(
+            username="other-agent",
+            display_name=None,
+            email="other@example.test",
+        )
+        auth = {"Authorization": f"Bearer {token}"}
+        other_auth = {"Authorization": f"Bearer {other_token}"}
+        rest_content = "content delivered through REST"
+        mcp_content = "content delivered through MCP"
+
+        async def inspect_status(message_id: str) -> str:
+            inspection = await self.http.post(
+                "/__test/inspect",
+                headers=CONTROL_HEADERS,
+                json={"message_id": message_id},
+            )
+            self.assertEqual(inspection.status_code, 200)
+            self.assert_control_omits(
+                inspection, rest_content, mcp_content, token, other_token
+            )
+            return inspection.json()["messages"][0]["status"]
+
+        rest_message = await self.http.post(
             "/__test/messages",
             headers=CONTROL_HEADERS,
             json={
                 "recipient_agent_id": agent_id,
-                "message_id": "message_fixture_1",
-                "content": "content visible only through MCP",
+                "message_id": "rest_message",
+                "content": rest_content,
             },
         )
-        self.assertEqual(injected.status_code, 200)
+        self.assertEqual(rest_message.status_code, 200)
+        self.assertEqual(await inspect_status("rest_message"), "queued")
 
-        auth = {"Authorization": f"Bearer {token}"}
-        notification = await self.http.get(
+        premature_rest_ack = await self.http.post(
+            "/api/ack_message",
+            headers=auth,
+            json={"message_id": "rest_message"},
+        )
+        self.assertEqual(premature_rest_ack.status_code, 404)
+
+        rest_poll = await self.http.get(
             "/api/poll_messages",
             headers=auth,
-            params={"timeout": 0, "view": "ids"},
+            params={"timeout": 0},
         )
-        self.assertEqual(notification.json(), {"messages": [{"id": "message_fixture_1"}]})
-        self.assertNotIn("content", notification.text)
-
-        for _ in range(2):
-            acknowledged = await self.http.post(
-                "/api/ack_notification",
-                headers=auth,
-                json={"message_id": "message_fixture_1"},
-            )
-            self.assertEqual(acknowledged.status_code, 200)
-            self.assertEqual(
-                acknowledged.json(),
-                {"message_id": "message_fixture_1", "acknowledged": True},
-            )
-
-        no_redelivery = await self.http.get(
-            "/api/poll_messages",
-            headers=auth,
-            params={"timeout": 0, "view": "ids"},
+        self.assertEqual(
+            rest_poll.json(),
+            {
+                "messages": [
+                    {
+                        "id": "rest_message",
+                        "sender_agent_id": "test_sender",
+                        "kind": "message",
+                        "content": rest_content,
+                    }
+                ]
+            },
         )
-        self.assertEqual(no_redelivery.json(), {"messages": []})
+        self.assertEqual(await inspect_status("rest_message"), "delivered")
+
+        wrong_rest_recipient = await self.http.post(
+            "/api/ack_message",
+            headers=other_auth,
+            json={"message_id": "rest_message"},
+        )
+        self.assertEqual(wrong_rest_recipient.status_code, 404)
 
         async with Client(self.mcp) as client:
-            content = await client.call_tool(
+            consumed_by_rest = await client.call_tool(
                 "poll_messages", {"token": token, "timeout": 0}
             )
             self.assertEqual(
-                content.structured_content["messages"][0]["id"],
-                "message_fixture_1",
+                consumed_by_rest.structured_content,
+                {"messages": []},
             )
-            self.assert_same_sensitive_text(
-                content.structured_content["messages"][0]["content"],
-                "content visible only through MCP",
-            )
-            repeated = await client.call_tool(
-                "poll_messages", {"token": token, "timeout": 0}
-            )
-            self.assertEqual(
-                repeated.structured_content["messages"][0]["id"],
-                "message_fixture_1",
-            )
-            self.assert_same_sensitive_text(
-                repeated.structured_content["messages"][0]["content"],
-                "content visible only through MCP",
-            )
-            for _ in range(2):
-                acknowledged = await client.call_tool(
-                    "ack_message",
-                    {"token": token, "message_id": "message_fixture_1"},
-                )
-                self.assertEqual(
-                    acknowledged.structured_content,
-                    {"message_id": "message_fixture_1", "acknowledged": True},
-                )
-            empty = await client.call_tool(
-                "poll_messages", {"token": token, "timeout": 0}
-            )
-            self.assertEqual(empty.structured_content, {"messages": []})
 
-        inspection = await self.http.post(
-            "/__test/inspect",
+        rest_ack = await self.http.post(
+            "/api/ack_message",
+            headers=auth,
+            json={"message_id": "rest_message"},
+        )
+        self.assertEqual(rest_ack.status_code, 200)
+        self.assertEqual(
+            rest_ack.json(),
+            {"message_id": "rest_message", "status": "acked"},
+        )
+        repeated_rest_ack = await self.http.post(
+            "/api/ack_message",
+            headers=auth,
+            json={"message_id": "rest_message"},
+        )
+        self.assertEqual(repeated_rest_ack.status_code, 404)
+        self.assertEqual(await inspect_status("rest_message"), "acked")
+
+        mcp_message = await self.http.post(
+            "/__test/messages",
             headers=CONTROL_HEADERS,
-            json={"message_id": "message_fixture_1"},
+            json={
+                "recipient_agent_id": agent_id,
+                "message_id": "mcp_message",
+                "content": mcp_content,
+            },
         )
-        self.assertEqual(inspection.status_code, 200)
-        message = inspection.json()["messages"][0]
-        self.assertTrue(message["notification_acknowledged"])
-        self.assertTrue(message["content_delivered"])
-        self.assertTrue(message["content_acknowledged"])
-        self.assert_control_omits(
-            inspection,
-            "content visible only through MCP",
-            token,
-        )
+        self.assertEqual(mcp_message.status_code, 200)
 
-    async def test_id_poll_requires_bearer_and_exact_view(self) -> None:
+        async with Client(self.mcp) as client:
+            premature_mcp_ack = await client.call_tool(
+                "ack_message",
+                {"token": token, "message_id": "mcp_message"},
+                raise_on_error=False,
+            )
+            self.assertTrue(premature_mcp_ack.is_error)
+            mcp_poll = await client.call_tool(
+                "poll_messages", {"token": token, "timeout": 0}
+            )
+            self.assertEqual(
+                mcp_poll.structured_content,
+                {
+                    "messages": [
+                        {
+                            "id": "mcp_message",
+                            "sender_agent_id": "test_sender",
+                            "kind": "message",
+                            "content": mcp_content,
+                        }
+                    ]
+                },
+            )
+            consumed_by_mcp = await self.http.get(
+                "/api/poll_messages",
+                headers=auth,
+                params={"timeout": 0},
+            )
+            self.assertEqual(consumed_by_mcp.json(), {"messages": []})
+            wrong_mcp_recipient = await client.call_tool(
+                "ack_message",
+                {"token": other_token, "message_id": "mcp_message"},
+                raise_on_error=False,
+            )
+            self.assertTrue(wrong_mcp_recipient.is_error)
+            mcp_ack = await client.call_tool(
+                "ack_message",
+                {"token": token, "message_id": "mcp_message"},
+            )
+            self.assertEqual(
+                mcp_ack.structured_content,
+                {"message_id": "mcp_message", "status": "acked"},
+            )
+            repeated_mcp_ack = await client.call_tool(
+                "ack_message",
+                {"token": token, "message_id": "mcp_message"},
+                raise_on_error=False,
+            )
+            self.assertTrue(repeated_mcp_ack.is_error)
+
+        self.assertEqual(await inspect_status("mcp_message"), "acked")
+        removed_ack = await self.http.post(
+            "/api/ack_notification",
+            headers=auth,
+            json={"message_id": "mcp_message"},
+        )
+        self.assertEqual(removed_ack.status_code, 404)
+
+    async def test_rest_poll_requires_bearer_and_bounded_timeout(self) -> None:
         unauthenticated = await self.http.get(
-            "/api/poll_messages", params={"timeout": 0, "view": "ids"}
+            "/api/poll_messages", params={"timeout": 0}
         )
         self.assertEqual(unauthenticated.status_code, 401)
 
         _, token = await self.enroll()
-        wrong_view = await self.http.get(
-            "/api/poll_messages",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"timeout": 0, "view": "full"},
+        auth = {"Authorization": f"Bearer {token}"}
+        missing_timeout = await self.http.get("/api/poll_messages", headers=auth)
+        self.assertEqual(missing_timeout.status_code, 422)
+        for timeout in (-1, 31):
+            outside_range = await self.http.get(
+                "/api/poll_messages", headers=auth, params={"timeout": timeout}
+            )
+            self.assertEqual(outside_range.status_code, 422)
+        poll = await self.http.get(
+            "/api/poll_messages", headers=auth, params={"timeout": 0}
         )
-        self.assertEqual(wrong_view.status_code, 422)
+        self.assertEqual(poll.json(), {"messages": []})
 
     async def test_long_poll_wakes_when_a_message_is_injected(self) -> None:
         agent_id, token = await self.enroll()
@@ -311,7 +389,7 @@ class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
             self.http.get(
                 "/api/poll_messages",
                 headers={"Authorization": f"Bearer {token}"},
-                params={"timeout": 2, "view": "ids"},
+                params={"timeout": 2},
             )
         )
         await asyncio.sleep(0.01)
@@ -321,12 +399,31 @@ class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
             json={
                 "recipient_agent_id": agent_id,
                 "message_id": "long_poll_message",
-                "content": "wake the pending ID poll",
+                "content": "wake the pending message poll",
             },
         )
 
         response = await asyncio.wait_for(poll, timeout=1)
-        self.assertEqual(response.json(), {"messages": [{"id": "long_poll_message"}]})
+        self.assertEqual(
+            response.json(),
+            {
+                "messages": [
+                    {
+                        "id": "long_poll_message",
+                        "sender_agent_id": "test_sender",
+                        "kind": "message",
+                        "content": "wake the pending message poll",
+                    }
+                ]
+            },
+        )
+        inspection = await self.http.post(
+            "/__test/inspect",
+            headers=CONTROL_HEADERS,
+            json={"message_id": "long_poll_message"},
+        )
+        self.assertEqual(inspection.json()["messages"][0]["status"], "delivered")
+        self.assert_control_omits(inspection, "wake the pending message poll", token)
 
     async def test_reset_clears_state_and_invalidates_jwt(self) -> None:
         _, token = await self.enroll()
@@ -344,7 +441,7 @@ class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
         rejected = await self.http.get(
             "/api/poll_messages",
             headers={"Authorization": f"Bearer {token}"},
-            params={"timeout": 0, "view": "ids"},
+            params={"timeout": 0},
         )
         self.assertEqual(rejected.status_code, 401)
 

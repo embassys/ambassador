@@ -7,6 +7,7 @@ import {
   type CentralToolDefinition,
   localToolDefinition,
   McpContractError,
+  safeLocalToolArguments,
   selectCentralTools,
   upstreamToolArguments,
 } from "./mcp-contract.js";
@@ -47,15 +48,30 @@ function contentAcknowledgement(
   const keys = Object.keys(result).sort();
   if (
     keys.length !== 2 ||
-    keys[0] !== "acknowledged" ||
-    keys[1] !== "message_id" ||
-    result.acknowledged !== true ||
+    keys[0] !== "message_id" ||
+    keys[1] !== "status" ||
     typeof result.message_id !== "string" ||
-    result.message_id !== arguments_.message_id
+    result.message_id !== arguments_.message_id ||
+    result.status !== "acked"
   ) {
     throw new McpContractError();
   }
   return validateNotificationId(result.message_id);
+}
+
+function pollTimeout(arguments_: Record<string, unknown>): number {
+  const keys = Object.keys(arguments_);
+  if (keys.some((key) => key !== "timeout")) throw new McpContractError();
+  if (arguments_.timeout === undefined) return 30;
+  if (
+    typeof arguments_.timeout !== "number" ||
+    !Number.isInteger(arguments_.timeout) ||
+    arguments_.timeout < 0 ||
+    arguments_.timeout > 60
+  ) {
+    throw new McpContractError();
+  }
+  return Math.min(arguments_.timeout, 30);
 }
 
 export async function openGatewayApplication(
@@ -92,6 +108,11 @@ export async function openGatewayApplication(
   const requireIdentity = (): GatewayIdentity => {
     if (identity === undefined) throw safeFailure();
     return identity;
+  };
+
+  const requireRelay = (): NotificationRelay => {
+    if (relay === undefined) throw safeFailure();
+    return relay;
   };
 
   const remoteTool = async (
@@ -177,6 +198,12 @@ export async function openGatewayApplication(
 
         const centralToken = currentIdentity.authenticatedToken();
         const tool = await remoteTool(name, true, signal);
+        if (name === "poll_messages") {
+          const localArguments = safeLocalToolArguments(arguments_);
+          const result = await requireRelay().pollMessages(pollTimeout(localArguments), signal);
+          assertSafeUpstreamResult(result, centralToken);
+          return result;
+        }
         const upstreamArguments = upstreamToolArguments(tool, arguments_, centralToken);
         const result = await requireCentral().callTool(
           name,
@@ -186,7 +213,7 @@ export async function openGatewayApplication(
         );
         assertSafeUpstreamResult(result, centralToken);
         if (name === "ack_message") {
-          relay?.confirmContentAcknowledgement(contentAcknowledgement(result, arguments_));
+          requireRelay().confirmContentAcknowledgement(contentAcknowledgement(result, arguments_));
         }
         return result;
       } catch (error) {

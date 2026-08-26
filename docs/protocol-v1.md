@@ -1,6 +1,6 @@
 # Gateway protocol v1
 
-Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication and bounded central-result normalization accepted on 2026-08-26
+Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication and bounded central-result normalization accepted on 2026-08-26; live consuming notification compatibility accepted on 2026-08-27
 
 ## Startup contract
 
@@ -12,7 +12,7 @@ a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 
 Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
-The `0.2.2` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
+The `0.2.3` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
 
 `--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must contain exactly 192 random bits in `[0-9a-f]{48}` format.
 
@@ -124,36 +124,34 @@ An upstream `401` stops notification polling and rejects authenticated tools wit
 
 ## Notification API
 
-After enrollment, the gateway sends a JWT-authenticated long poll:
+After enrollment, the gateway sends the live central API's JWT-authenticated long poll:
 
 ```text
-GET /api/poll_messages?timeout=30&view=ids
+GET /api/poll_messages?timeout=30
 Authorization: Bearer <central-agent-jwt>
 ```
 
-The response contains only opaque IDs:
+The response contains full queued messages. A representative action message is:
 
 ```json
-{"messages":[{"id":"0f56d6f4-6073-4f75-9f31-72d7d760271a"}]}
+{
+  "messages": [
+    {
+      "id": "0f56d6f4-6073-4f75-9f31-72d7d760271a",
+      "sender_agent_id": "agent_123",
+      "action_type_id": "action_456",
+      "payload": {"date": "2026-08-27"},
+      "created_at": "2026-08-27T12:00:00Z"
+    }
+  ]
+}
 ```
 
-The ID view does not mark the content message delivered or acknowledged. It repeats an unacknowledged ID after reconnects. IDs are unique within the one enrolled identity and use 1 to 128 URI-unreserved ASCII characters.
+The central service atomically marks returned messages delivered. They are no longer available from a later central REST or MCP `poll_messages` call. The API has no separate `ack_notification` operation.
 
-The gateway validates the full response before storing any ID. Unknown fields, duplicate conflicts, invalid IDs, task content, permission content, tool arguments, and results reject the response.
+The gateway reads at most 4 MiB, validates the complete JSON response and credential boundary before changing local state, and requires an exact top-level `messages` array of JSON objects. A present `id` must be a string containing 1 to 128 URI-unreserved ASCII characters. An absent ID is valid; a present invalid ID rejects the response. Duplicate IDs with conflicting bodies reject the complete response.
 
-After the SQLite commit, the gateway sends an idempotent persistence acknowledgement:
-
-```http
-POST /api/ack_notification
-Authorization: Bearer <central-agent-jwt>
-Content-Type: application/json
-
-{"message_id":"0f56d6f4-6073-4f75-9f31-72d7d760271a"}
-```
-
-This acknowledgement stops ID notification redelivery. It does not mark the message content delivered or processed and does not hide it from MCP `poll_messages`.
-
-After the ID commit, notification acknowledgement and webhook wake proceed independently. A delayed or failed `ack_notification` does not block the first wake; its ID-only outbox retries until the central service confirms it.
+The validated messages remain in process memory only. The gateway pauses central polling while the inbox is nonempty, bounding retained content to one response. It stores only present IDs and wake state in SQLite. It never writes message bodies to SQLite, files, output, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
 ## Durable relay
 
@@ -166,13 +164,15 @@ SQLite stores only:
 - whether a wake may have reached the webhook; and
 - terminal acknowledgement observation.
 
-The journal keeps an ID-only outbox entry until `ack_notification` succeeds. Repeated notification acknowledgements return success.
-
 SQLite contains no binding, cursor, webhook URL, webhook token, central JWT, MCP argument, MCP result, registration data, or task content.
 
 The replacement uses new `a2a-gateway` state directories and does not read the legacy `a2a-sidecar` configuration or journal. It leaves legacy files untouched; no shipped central integration depends on migrating them.
 
-An exact repeated ID is coalesced. One wake attempt per ID runs at a time. The gateway records an attempt before sending the webhook. A failed or uncertain attempt retries the same ID with equal jitter between half and all of an exponential delay with a one-second base and 60-second cap. An accepted wake is re-driven after 60 seconds while content remains unacknowledged. There is no attempt-count terminal state; successful `ack_message` is terminal.
+An exact repeated ID with an identical body is coalesced while active. One wake attempt per ID runs at a time. The gateway records an attempt before sending the webhook. A failed or uncertain attempt retries the same ID with equal jitter between half and all of an exponential delay with a one-second base and 60-second cap. An accepted ID-bearing wake is re-driven after 60 seconds while content remains unacknowledged. There is no attempt-count terminal state; successful `ack_message` is terminal.
+
+Each ID-less message is a separate volatile observation, including two structurally identical messages in one response. It receives a random process-local wake key for webhook retry headers but is not written to the journal. Its wake retries until accepted, is not re-driven after acceptance, and its body is removed after the first local `poll_messages` result. It is never sent to `ack_message`.
+
+Because the central API cannot re-fetch delivered messages and bodies cannot be persisted, a gateway stop or crash with a nonempty inbox loses those bodies. At startup the gateway deletes nonterminal journal rows that no longer have recoverable in-memory bodies, preventing stale wakes. Central redelivery or delivered-message retrieval is required for durable recovery.
 
 ## Webhook wake
 
@@ -190,7 +190,7 @@ Content-Type: application/json
 
 The signature key is the resolved webhook token. Its signed bytes are the ASCII timestamp, one `.` byte, and the exact UTF-8 request body. The gateway generates a new timestamp and signature for every attempt. It always sends both authentication formats without selecting or identifying a local runtime: bearer-aware webhooks use `Authorization`, while HMAC V2 webhooks use the timestamp and signature. `Idempotency-Key` and `X-Request-ID` carry the same opaque message ID.
 
-The body is:
+For an ID-bearing message, the body is:
 
 ```json
 {
@@ -203,17 +203,19 @@ The body is:
 
 The body omits `agentId`, so the webhook owner chooses its default target. The message ID is the only variable content. A `2xx` response means the webhook accepted the wake, not that the agent completed the work.
 
+For an ID-less message, the body uses the generic instruction `An A2A message is ready. Use the A2A MCP tools to retrieve and process it.` The random wake key appears only in `Idempotency-Key` and `X-Request-ID`; it is not added to the central message or passed to `ack_message`.
+
 ## MCP message retrieval and acknowledgement
 
-The local agent calls `poll_messages` through the gateway after waking. The gateway injects the central JWT and the central MCP server returns the full message. That content never enters the relay journal. Polling content does not consume it: the central MCP server returns it again after a disconnect or agent crash until `ack_message` succeeds.
+The local agent calls `poll_messages` through the gateway after waking. The gateway validates the local arguments and serves its in-memory inbox instead of forwarding this tool to central MCP. ID-bearing messages remain visible on repeated local polls until acknowledged. ID-less messages appear once and are then removed. A positive timeout waits for in-memory work for at most 30 seconds; zero returns immediately.
 
-The local agent calls `ack_message` after processing. The gateway forwards it with the central JWT and marks the matching local ID terminal only after the central service confirms an idempotent content acknowledgement. `ack_message` does not serve as the relay persistence acknowledgement.
+The local agent calls `ack_message` after processing an ID-bearing message. The gateway forwards it once with the central JWT. A successful live response has exactly `{"message_id":"...","status":"acked"}`. Only then does the gateway mark the ID terminal, stop accepted-wake redelivery, and remove the in-memory body. An uncertain or failed acknowledgement leaves the body available locally; the gateway does not retry the side-effecting call automatically.
 
 ## Deadlines and limits
 
 | Operation | Deadline |
 | --- | --- |
-| Central ID long poll | 40 seconds for a 30-second poll |
+| Central consuming message long poll | 40 seconds for a 30-second poll |
 | Remote MCP connect | 5 seconds |
 | Remote MCP tool call | 30 seconds unless the approved tool contract is shorter |
 | Webhook wake | 10 seconds |
@@ -245,15 +247,16 @@ The approved credential store is the sole durable exception for the central JWT.
 | V02 | Credential persistence fails | Return failure, expose no JWT, and do not enable polling |
 | V03 | JWT appears in an unexpected result shape | Fail closed and persist nothing |
 | V04 | Verification tries to replace an identity | Reject without changing the stored JWT |
-| P01 | Valid ID notification | Store the ID before waking |
-| P02 | Poll response contains content or unknown fields | Reject and store nothing |
-| P03 | Restart before remote acknowledgement | Poll and wake the same ID again |
-| P04 | Crash after ID commit before notification acknowledgement | Resend `ack_notification` without losing the wake |
-| P05 | Repeated `ack_notification` | Central service returns success and leaves content available to MCP |
+| P01 | Valid full message with an ID | Keep the body in memory, store only the ID, then wake |
+| P02 | Poll response is malformed, credential-bearing, oversized, or has conflicting duplicate IDs | Reject and store nothing |
+| P03 | Two ID-less messages have identical bodies | Treat both as unique, wake both, return both once, journal neither |
+| P04 | Poll while an ID-bearing message is buffered | Return it again without another central poll |
+| P05 | Restart with a nonterminal durable wake but no body | Delete the stale row and do not wake |
 | W01 | Valid webhook wake | Send the fixed body, bearer token, valid HMAC V2 headers, and the same ID in both deduplication headers |
 | W02 | Uncertain webhook outcome | Retry the same ID and body with a fresh timestamp and signature, never a new ID |
-| A01 | Agent acknowledges through MCP | Forward with injected JWT and mark local ID terminal after confirmation |
-| A02 | Notification was acknowledged before agent MCP poll | MCP still returns the full message content |
-| A03 | Agent crashes after content poll before `ack_message` | Content remains retrievable and the gateway re-drives the same wake ID |
+| A01 | Agent acknowledges through MCP | Forward with injected JWT and remove the buffered ID only after `{message_id,status:"acked"}` |
+| A02 | Agent polls locally after the REST poll consumed central content | Return the in-memory full message without forwarding central `poll_messages` |
+| A03 | Local agent call fails before `ack_message` while gateway remains running | Content remains locally retrievable and the gateway re-drives the same wake ID |
+| A04 | Message has no ID | Return it once and do not call `ack_message` |
 | S01 | Inspect files, SQLite, output, logs, diagnostics, and errors | Find no forbidden plaintext or MCP body data |
 | S02 | Side-effecting upstream call times out | Do not retry automatically |

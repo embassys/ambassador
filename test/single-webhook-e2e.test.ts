@@ -65,17 +65,7 @@ async function scanFiles(root: string, markers: string[]): Promise<void> {
   }
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (predicate()) {
-      return;
-    }
-    await delay(10);
-  }
-  assert.fail("timed out waiting for expected state transition");
-}
-
-test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies transient", async (t) => {
+test("enrolls one identity, buffers a consumed message, and keeps bodies transient", async (t) => {
   const central = await startFakeCentral(t);
   const webhook = await startFakeWebhook(t);
   central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
@@ -213,7 +203,7 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
   const serializedWake = JSON.stringify(wake.body);
   assert.ok(!serializedWake.includes(central.jwt));
   assert.ok(!serializedWake.includes(WEBHOOK_TOKEN));
-  await waitFor(() => central.messageState(MESSAGE_ID).notificationAcknowledged);
+  assert.equal(central.messageState(MESSAGE_ID).delivered, true);
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
 
   central.setToolDescription("poll_messages", `unsafe ${central.jwt}`);
@@ -236,6 +226,14 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
     );
     assert.equal(central.calls.length, callsBefore, `${selector} reached the central fixture`);
   }
+  for (const timeout of [-1, 1.5, 61, "0"]) {
+    const callsBefore = central.calls.length;
+    await assert.rejects(
+      client.callTool("poll_messages", { timeout }),
+      (error: unknown) => error instanceof McpCallError,
+    );
+    assert.equal(central.calls.length, callsBefore, "an invalid timeout reached central MCP");
+  }
 
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.ok(!JSON.stringify(polled).includes(central.jwt));
@@ -257,12 +255,11 @@ test("enrolls one identity, relays an ID, and keeps credentials and MCP bodies t
   const authenticatedCalls = central.calls.filter((call) =>
     ["poll_messages", "ack_message"].includes(call.name),
   );
-  assert.equal(authenticatedCalls.length, 2);
+  assert.equal(authenticatedCalls.length, 1);
   for (const call of authenticatedCalls) {
     assert.ok(call.args.token === central.jwt);
-    const expectedKeys =
-      call.name === "poll_messages" ? ["timeout", "token"] : ["message_id", "token"];
-    assert.deepEqual(Object.keys(call.args).sort(), expectedKeys);
+    assert.equal(call.name, "ack_message");
+    assert.deepEqual(Object.keys(call.args).sort(), ["message_id", "token"]);
   }
 
   assert.equal(await gateway.stop(), 0);
@@ -425,7 +422,9 @@ test("a fatal relay contract failure stops the foreground gateway", async (t) =>
     },
   });
 
-  central.setPollResponse({ messages: [{ id: MESSAGE_ID, content: forbiddenContent }] });
+  central.setPollResponse({
+    messages: [{ id: MESSAGE_ID, content: "valid content", token: forbiddenContent }],
+  });
   assert.equal(
     await Promise.race([
       gateway.waitForExit(),
@@ -530,7 +529,7 @@ test("the CLI completes the flow through development central URLs", async (t) =>
   central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
   const wake = await webhook.waitForWake();
   const wakeSignature = assertWakeAuthentication(wake, MESSAGE_ID);
-  await waitFor(() => central.messageState(MESSAGE_ID).notificationAcknowledged);
+  assert.equal(central.messageState(MESSAGE_ID).delivered, true);
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, MESSAGE_ID);
   await client.callTool("ack_message", { message_id: MESSAGE_ID });
