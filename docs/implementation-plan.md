@@ -39,9 +39,9 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 | T3 | Local MCP | Test loopback bind, bearer authentication, `Host` and `Origin`, MCP lifecycle, limits, deadlines, cancellation, and safe errors | T1 | Fails because no MCP listener exists |
 | T4 | Enrollment | Test bootstrap-only catalog, registration forwarding, verification JWT interception, token-free result, tool-list change, persistence failure, restart recovery, and identity replacement rejection | T3 | Fails because enrollment does not exist |
 | T5 | Proxy | Test local schemas without `token`, exact transient upstream `token` injection, caller selector rejection, no automatic side-effect retry, and authentication failure behavior | T4 | Fails because proxying does not exist |
-| T6 | Relay | Test dormant polling before enrollment, ID-only poll validation, commit-before-`ack_notification`, bearer and generic HMAC V2 webhook authentication, no `agentId`, retries, separate content acknowledgement, and restart | T1, T4 | Fails on legacy controller and binding relay |
+| T6 | Relay | Test dormant polling before enrollment, consuming full-message validation, memory-only bodies, ID-only durable state, bearer and generic HMAC V2 webhook authentication, no `agentId`, ID-less delivery, retries, content acknowledgement, and restart-loss handling | T1, T4 | Fails on legacy controller and binding relay |
 | T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | Approved ADR 0020 | Fixture contract passes independently |
-| T8 | End to end | Start gateway, register, verify, prove JWT absence, poll an ID, wake fake webhook, retrieve content through MCP, and acknowledge | T2-T7 | Fails on missing gateway behavior |
+| T8 | End to end | Start gateway, register, verify, prove JWT absence, consume and buffer a message, wake the fake webhook, retrieve content through local MCP, and acknowledge centrally | T2-T7 | Fails on missing gateway behavior |
 | C1 | CI | Run unit tests on Linux, macOS, and Windows; build and run Docker E2E on Ubuntu | T1-T8 | Red feature PR with classified failures |
 | V1 | Review | Confirm every failure is missing product behavior rather than a fixture defect | C1 | Written failure inventory |
 | G1 | User | Review the red suite, fixture contract, proposed MCP SDK, and credential storage | V1 | Approval to implement production behavior |
@@ -98,8 +98,8 @@ The container provides:
 
 - Streamable HTTP MCP at `/mcp`;
 - registration, verification, resend, message polling, acknowledgement, permission, and action tools;
-- `GET /api/poll_messages?timeout=<seconds>&view=ids` for non-consuming ID notifications;
-- idempotent `POST /api/ack_notification` for relay persistence without consuming MCP content;
+- `GET /api/poll_messages?timeout=<seconds>` returning and consuming full queued messages;
+- no notification acknowledgement endpoint separate from `ack_message`;
 - authenticated test-only endpoints to read a verification code by JSON body, inject a message, reset state, and inspect IDs/status flags; and
 - health and readiness endpoints.
 
@@ -117,7 +117,7 @@ CI pins the Python base image by digest and Python packages by version and hash.
 ## External blockers
 
 - The production central MCP and API URLs are not stable package constants yet.
-- The production central API lacks the non-consuming ID view and separate idempotent notification acknowledgement required by this protocol.
+- The production central API cannot redeliver or retrieve delivered but unacknowledged messages after a gateway restart, so development compatibility uses a bounded in-memory inbox with an explicit crash-loss limitation.
 - The current central MCP wrapper returns Python string representations. ADR 0021 permits bounded, non-executing normalization as a temporary compatibility measure; native structured results remain preferred.
 - The central service has no token reissue path. A crash after remote verification succeeds but before local credential persistence would strand the identity.
 - Docker is available in GitHub's Ubuntu runner and on the local acceptance-test host.

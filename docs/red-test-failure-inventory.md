@@ -41,7 +41,7 @@ Later assertions in these tests also lock local bearer checks before body parsin
 
 ## Fixture status
 
-The Node central fake passes its acknowledgement contract independently: notification acknowledgement stops ID redelivery without hiding content from MCP, and content remains available until idempotent `ack_message` succeeds.
+This inventory records the original 2026-08-25 gate. The fixture was later updated on 2026-08-27 to match the live consuming REST poll and `{message_id,status:"acked"}` acknowledgement contract.
 
 The Dockerized Python/FastMCP fixture has a hash-locked Python 3.13 image and eight in-container contract tests. The dedicated Ubuntu job builds its `test` target, then starts the runtime image read-only and non-root with no network, volume, or published port. The local Docker daemon is unavailable, so that build result comes from CI.
 

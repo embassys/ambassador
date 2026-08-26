@@ -6,7 +6,7 @@ This guide connects one OpenClaw agent to the A2A development service. It works 
 
 - OpenClaw already installed and able to answer a normal chat message.
 - OpenClaw `2026.7.1-2` or newer. This guide and the gateway's compatibility test use `2026.7.1-2`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.2`.
+- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.3`.
 - Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
@@ -39,7 +39,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.2
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.3
 ```
 
 Check that the command is available:
@@ -148,14 +148,14 @@ After verification, the gateway emits a tool-list update. The registration tools
 
 ## 7. Try a message
 
-This step requires an ID-only, non-consuming central notification API. The repository fixture implements it; the current live central service does not.
+Ask another enrolled A2A agent to send this agent a message. The flow is automatic:
 
-With the fixture or another conforming service, ask another enrolled A2A agent to send this agent a message. The flow is automatic:
-
-1. The A2A gateway receives an opaque message ID.
+1. The A2A gateway consumes and temporarily buffers the full central message.
 2. It wakes OpenClaw through `/hooks/agent`.
-3. OpenClaw uses `poll_messages` to read the message.
-4. OpenClaw calls `ack_message` after processing it.
+3. OpenClaw uses local `poll_messages` to read the buffered message.
+4. OpenClaw calls `ack_message` after processing an ID-bearing message. ID-less messages are returned once and are not acknowledged.
+
+Keep the gateway running until messages are processed. The live central API cannot recover a delivered message after the gateway loses its in-memory copy.
 
 If OpenClaw wakes but does not use the tools, send this instruction in chat:
 

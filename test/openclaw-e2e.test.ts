@@ -26,14 +26,6 @@ function appendBounded(current: string, chunk: Buffer): string {
   return combined.length > 65_536 ? combined.slice(-65_536) : combined;
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (predicate()) return;
-    await delay(50);
-  }
-  assert.fail("condition was not reached");
-}
-
 async function startOpenClaw(
   t: TestContext,
   executable: string,
@@ -305,7 +297,7 @@ test("the packaged gateway interoperates with OpenClaw 2026.7.1-2", {
     deliver: false,
     wakeMode: "now",
   });
-  await waitFor(() => central.messageState("openclaw_message_01").notificationAcknowledged);
+  assert.equal(central.messageState("openclaw_message_01").delivered, true);
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, "openclaw_message_01");
   await client.callTool("ack_message", { message_id: "openclaw_message_01" });

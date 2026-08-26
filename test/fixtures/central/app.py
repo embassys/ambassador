@@ -99,9 +99,7 @@ class MessageRecord(StrictModel):
     sender_agent_id: str
     kind: Literal["message", "permission", "action"]
     content: Content
-    notification_acknowledged: bool = False
-    content_delivered: bool = False
-    content_acknowledged: bool = False
+    status: Literal["queued", "delivered", "acked"] = "queued"
 
 
 class PermissionRecord(StrictModel):
@@ -144,17 +142,9 @@ class MessageIdResponse(StrictModel):
     id: MessageId
 
 
-class NotificationId(StrictModel):
-    id: MessageId
-
-
-class NotificationPollResponse(StrictModel):
-    messages: list[NotificationId]
-
-
 class AcknowledgementResponse(StrictModel):
     message_id: MessageId
-    acknowledged: Literal[True] = True
+    status: Literal["acked"] = "acked"
 
 
 class ContentMessage(StrictModel):
@@ -194,7 +184,7 @@ class ActionResponse(StrictModel):
     status: Literal["queued"] = "queued"
 
 
-class AckNotificationRequest(StrictModel):
+class AckMessageRequest(StrictModel):
     message_id: MessageId
 
 
@@ -230,9 +220,7 @@ class AgentInspection(StrictModel):
 class MessageInspection(StrictModel):
     id: MessageId
     recipient_agent_id: AgentId
-    notification_acknowledged: bool
-    content_delivered: bool
-    content_acknowledged: bool
+    status: Literal["queued", "delivered", "acked"]
 
 
 class PermissionInspection(StrictModel):
@@ -317,31 +305,26 @@ class FixtureState:
             raise RecordNotFound("agent not found")
         return self.agents[agent_id]
 
-    def _pending_notification_ids(self, agent_id: str) -> list[NotificationId]:
+    def _queued_messages(self, agent_id: str) -> list[MessageRecord]:
         return [
-            NotificationId(id=message.id)
+            message
             for message in self.messages.values()
             if message.recipient_agent_id == agent_id
-            and not message.notification_acknowledged
-            and not message.content_acknowledged
+            and message.status == "queued"
         ]
 
-    def _pending_content(self, agent_id: str) -> list[ContentMessage]:
+    def _deliver_queued_messages(self, agent_id: str) -> list[ContentMessage]:
         messages: list[ContentMessage] = []
-        for message in self.messages.values():
-            if (
-                message.recipient_agent_id == agent_id
-                and not message.content_acknowledged
-            ):
-                message.content_delivered = True
-                messages.append(
-                    ContentMessage(
-                        id=message.id,
-                        sender_agent_id=message.sender_agent_id,
-                        kind=message.kind,
-                        content=message.content,
-                    )
+        for message in self._queued_messages(agent_id):
+            message.status = "delivered"
+            messages.append(
+                ContentMessage(
+                    id=message.id,
+                    sender_agent_id=message.sender_agent_id,
+                    kind=message.kind,
+                    content=message.content,
                 )
+            )
         return messages
 
     async def reset(self) -> None:
@@ -443,52 +426,18 @@ class FixtureState:
             self.changed.notify_all()
             return MessageIdResponse(id=message_id)
 
-    async def poll_notification_ids(
-        self, token: str, timeout: int
-    ) -> NotificationPollResponse:
-        async with self.changed:
-            agent = self._agent_for_token(token)
-            messages = self._pending_notification_ids(agent.agent_id)
-            if messages or timeout == 0:
-                return NotificationPollResponse(messages=messages)
-            try:
-                await asyncio.wait_for(
-                    self.changed.wait_for(
-                        lambda: bool(self._pending_notification_ids(agent.agent_id))
-                        or token not in self.agent_ids_by_token
-                    ),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                return NotificationPollResponse(messages=[])
-            agent = self._agent_for_token(token)
-            return NotificationPollResponse(
-                messages=self._pending_notification_ids(agent.agent_id)
-            )
-
-    async def ack_notification(
-        self, token: str, message_id: str
-    ) -> AcknowledgementResponse:
-        async with self.changed:
-            agent = self._agent_for_token(token)
-            message = self.messages.get(message_id)
-            if message is None or message.recipient_agent_id != agent.agent_id:
-                raise RecordNotFound("message not found")
-            message.notification_acknowledged = True
-            return AcknowledgementResponse(message_id=message_id)
-
-    async def poll_content(self, token: str, timeout: int) -> ContentPollResponse:
+    async def poll_messages(self, token: str, timeout: int) -> ContentPollResponse:
         async with self.changed:
             agent = self._agent_for_token(token)
             if timeout < 0 or timeout > 30:
                 raise RecordConflict("timeout must be between 0 and 30")
-            messages = self._pending_content(agent.agent_id)
+            messages = self._deliver_queued_messages(agent.agent_id)
             if messages or timeout == 0:
                 return ContentPollResponse(messages=messages)
             try:
                 await asyncio.wait_for(
                     self.changed.wait_for(
-                        lambda: bool(self._pending_content(agent.agent_id))
+                        lambda: bool(self._queued_messages(agent.agent_id))
                         or token not in self.agent_ids_by_token
                     ),
                     timeout=timeout,
@@ -496,17 +445,23 @@ class FixtureState:
             except asyncio.TimeoutError:
                 return ContentPollResponse(messages=[])
             agent = self._agent_for_token(token)
-            return ContentPollResponse(messages=self._pending_content(agent.agent_id))
+            return ContentPollResponse(
+                messages=self._deliver_queued_messages(agent.agent_id)
+            )
 
-    async def ack_content(
+    async def ack_message(
         self, token: str, message_id: str
     ) -> AcknowledgementResponse:
         async with self.changed:
             agent = self._agent_for_token(token)
             message = self.messages.get(message_id)
-            if message is None or message.recipient_agent_id != agent.agent_id:
+            if (
+                message is None
+                or message.recipient_agent_id != agent.agent_id
+                or message.status != "delivered"
+            ):
                 raise RecordNotFound("message not found")
-            message.content_acknowledged = True
+            message.status = "acked"
             self.changed.notify_all()
             return AcknowledgementResponse(message_id=message_id)
 
@@ -659,9 +614,7 @@ class FixtureState:
                 MessageInspection(
                     id=message.id,
                     recipient_agent_id=message.recipient_agent_id,
-                    notification_acknowledged=message.notification_acknowledged,
-                    content_delivered=message.content_delivered,
-                    content_acknowledged=message.content_acknowledged,
+                    status=message.status,
                 )
                 for message in self.messages.values()
                 if (request.agent_id is None or message.recipient_agent_id == request.agent_id)
@@ -774,8 +727,8 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
 
     @mcp.tool
     async def poll_messages(token: str, timeout: int = 30) -> ContentPollResponse:
-        """Return full unacknowledged messages without changing notification state."""
-        return await for_mcp(state.poll_content(token, timeout))
+        """Return queued messages and atomically mark them delivered."""
+        return await for_mcp(state.poll_messages(token, timeout))
 
     @mcp.tool
     async def get_my_permissions(
@@ -786,8 +739,8 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
 
     @mcp.tool
     async def ack_message(token: str, message_id: str) -> AcknowledgementResponse:
-        """Idempotently acknowledge processing of a content message."""
-        return await for_mcp(state.ack_content(token, message_id))
+        """Acknowledge a delivered message."""
+        return await for_mcp(state.ack_message(token, message_id))
 
     @mcp.tool
     async def health_check() -> StatusResponse:
@@ -835,24 +788,23 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
     async def readiness() -> StatusResponse:
         return StatusResponse()
 
-    @api.get("/api/poll_messages", response_model=NotificationPollResponse)
-    async def poll_notification_ids(
+    @api.get("/api/poll_messages", response_model=ContentPollResponse)
+    async def poll_messages(
         timeout: Annotated[int, Query(ge=0, le=30)],
-        view: Annotated[Literal["ids"], Query()],
         token: str = Depends(central_token),
-    ) -> NotificationPollResponse:
+    ) -> ContentPollResponse:
         try:
-            return await state.poll_notification_ids(token, timeout)
+            return await state.poll_messages(token, timeout)
         except FixtureStateError as error:
             raise as_http_error(error) from None
 
-    @api.post("/api/ack_notification", response_model=AcknowledgementResponse)
-    async def ack_notification(
-        request: AckNotificationRequest,
+    @api.post("/api/ack_message", response_model=AcknowledgementResponse)
+    async def ack_message(
+        request: AckMessageRequest,
         token: str = Depends(central_token),
     ) -> AcknowledgementResponse:
         try:
-            return await state.ack_notification(token, request.message_id)
+            return await state.ack_message(token, request.message_id)
         except FixtureStateError as error:
             raise as_http_error(error) from None
 

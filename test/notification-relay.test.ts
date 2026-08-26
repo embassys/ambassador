@@ -12,8 +12,9 @@ import {
   NotificationRelayError,
 } from "../src/notification-relay.js";
 
-const NOW_MS = Date.parse("2026-08-25T12:00:00Z");
+const NOW_MS = Date.parse("2026-08-27T12:00:00Z");
 const MESSAGE_ID = "0f56d6f4-6073-4f75-9f31-72d7d760271a";
+const MESSAGE_CONTENT = "private task body";
 const CENTRAL_URL = "https://central.invalid/base";
 const WEBHOOK_URL = "http://127.0.0.1:18789/hooks/agent";
 const CENTRAL_TOKEN = "central-secret-token";
@@ -63,91 +64,115 @@ function relayOptions(journal: NotificationJournal, request: NotificationFetch) 
   };
 }
 
-test("persists before independently sending exact notification ack and OpenClaw wake", async (t) => {
+function fullMessage(id: string = MESSAGE_ID): Record<string, unknown> {
+  return {
+    id,
+    sender_agent_id: "agent_sender",
+    action_type_id: "action_calendar",
+    payload: { content: MESSAGE_CONTENT },
+    created_at: "2026-08-27T12:00:00Z",
+  };
+}
+
+test("buffers the consuming REST response before waking and serves it until ack_message", async (t) => {
   const journal = temporaryJournal(t);
   const controller = new AbortController();
-  let pollCount = 0;
-  let wakeCount = 0;
-  let releaseAcknowledgement: (() => void) | undefined;
-  const trace: string[] = [];
-
+  let polls = 0;
+  let wakes = 0;
+  const message = fullMessage();
   const request: NotificationFetch = async (url, init) => {
     const headers = new Headers(init.headers);
     if (url.pathname === "/api/poll_messages") {
-      pollCount += 1;
-      assert.equal(url.toString(), "https://central.invalid/api/poll_messages?timeout=30&view=ids");
+      polls += 1;
+      assert.equal(url.toString(), "https://central.invalid/api/poll_messages?timeout=30");
       assert.equal(init.method, "GET");
       assert.equal(init.redirect, "manual");
       assert.equal(headers.get("authorization"), `Bearer ${CENTRAL_TOKEN}`);
-      if (pollCount === 1) {
-        return new Response(JSON.stringify({ messages: [{ id: MESSAGE_ID }, { id: MESSAGE_ID }] }));
-      }
+      if (polls === 1) return new Response(JSON.stringify({ messages: [message] }));
       return pendingResponse(init.signal);
     }
 
-    const persisted = journal.get(MESSAGE_ID);
-    assert.ok(persisted);
-    trace.push(url.pathname === "/api/ack_notification" ? "ack-after-commit" : "wake-after-commit");
-
-    if (url.pathname === "/api/ack_notification") {
-      assert.equal(init.method, "POST");
-      assert.equal(init.redirect, "manual");
-      assert.equal(headers.get("authorization"), `Bearer ${CENTRAL_TOKEN}`);
-      assert.equal(headers.get("content-type"), "application/json");
-      assert.equal(init.body, `{"message_id":"${MESSAGE_ID}"}`);
-      await new Promise<void>((resolve) => {
-        releaseAcknowledgement = resolve;
-      });
-      return new Response(null, { status: 204 });
-    }
-
     assert.equal(url.toString(), WEBHOOK_URL);
-    assert.equal(init.method, "POST");
-    assert.equal(init.redirect, "manual");
-    assert.equal(headers.get("authorization"), `Bearer ${WEBHOOK_TOKEN}`);
-    assert.equal(headers.get("idempotency-key"), MESSAGE_ID);
-    assert.equal(headers.get("content-type"), "application/json");
-    assert.equal(headers.get("x-request-id"), MESSAGE_ID);
+    assert.ok(journal.get(MESSAGE_ID));
+    assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
+      messages: [message],
+    });
     const body = String(init.body);
     const timestamp = String(Math.floor(NOW_MS / 1_000));
+    assert.equal(headers.get("authorization"), `Bearer ${WEBHOOK_TOKEN}`);
+    assert.equal(headers.get("idempotency-key"), MESSAGE_ID);
+    assert.equal(headers.get("x-request-id"), MESSAGE_ID);
     assert.equal(headers.get("x-webhook-timestamp"), timestamp);
     assert.equal(
       headers.get("x-webhook-signature-v2"),
       createHmac("sha256", WEBHOOK_TOKEN).update(timestamp).update(".").update(body).digest("hex"),
     );
-    assert.deepEqual(JSON.parse(String(init.body)), {
-      message: `A2A message ${MESSAGE_ID} is ready. Use the A2A MCP tools to retrieve and process it.`,
-      name: "A2A Gateway",
-      deliver: false,
-      wakeMode: "now",
-    });
-    assert.equal(String(init.body).includes("agentId"), false);
-    wakeCount += 1;
+    wakes += 1;
     return new Response(null, { status: 202 });
   };
 
   const relay = new NotificationRelay(relayOptions(journal, request));
   const running = relay.run(controller.signal);
-  await waitFor(() => wakeCount === 1);
-  assert.equal(journal.get(MESSAGE_ID)?.notificationAcknowledgementState, "in_flight");
-  assert.equal(journal.get(MESSAGE_ID)?.wakeState, "accepted_wait");
-  releaseAcknowledgement?.();
-  await waitFor(() => journal.get(MESSAGE_ID)?.notificationAcknowledgementState === "confirmed");
-
-  assert.deepEqual(trace.sort(), ["ack-after-commit", "wake-after-commit"]);
-  assert.equal(journal.get(MESSAGE_ID)?.wakeAttemptCount, 1);
+  await waitFor(() => wakes === 1);
+  assert.equal(polls, 1, "the consuming poll continued before the inbox drained");
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
+    messages: [message],
+  });
+  assert.equal(relay.confirmContentAcknowledgement(MESSAGE_ID), true);
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), { messages: [] });
+  await waitFor(() => polls === 2);
   controller.abort();
   await running;
 });
 
-test("rejects unknown or content fields without storing any part of the poll", async (t) => {
+test("treats ID-less messages as distinct volatile one-shot deliveries", async (t) => {
   const journal = temporaryJournal(t);
-  const leakedContent = "private task body";
+  const controller = new AbortController();
+  let polls = 0;
+  const wakeKeys: string[] = [];
+  const message = { payload: { content: MESSAGE_CONTENT } };
+  const request: NotificationFetch = async (url, init) => {
+    if (url.pathname === "/api/poll_messages") {
+      polls += 1;
+      if (polls === 1) return new Response(JSON.stringify({ messages: [message, message] }));
+      return pendingResponse(init.signal);
+    }
+    const headers = new Headers(init.headers);
+    const key = headers.get("idempotency-key");
+    assert.ok(key);
+    assert.equal(headers.get("x-request-id"), key);
+    assert.match(key, /^[A-Za-z0-9._~-]+$/u);
+    assert.deepEqual(JSON.parse(String(init.body)), {
+      message: "An A2A message is ready. Use the A2A MCP tools to retrieve and process it.",
+      name: "A2A Gateway",
+      deliver: false,
+      wakeMode: "now",
+    });
+    wakeKeys.push(key);
+    return new Response(null, { status: 202 });
+  };
+  const relay = new NotificationRelay(relayOptions(journal, request));
+  const running = relay.run(controller.signal);
+
+  await waitFor(() => wakeKeys.length === 2);
+  assert.notEqual(wakeKeys[0], wakeKeys[1]);
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
+    messages: [message, message],
+  });
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), { messages: [] });
+  await waitFor(() => polls === 2);
+  for (const key of wakeKeys) assert.equal(journal.get(key), undefined);
+  controller.abort();
+  await running;
+});
+
+test("validates the complete full-message response before changing durable state", async (t) => {
+  const journal = temporaryJournal(t);
   const request: NotificationFetch = async (url, init) => {
     if (url.pathname !== "/api/poll_messages") return pendingResponse(init.signal);
     return new Response(
       JSON.stringify({
-        messages: [{ id: MESSAGE_ID }, { id: "message-2", content: leakedContent }],
+        messages: [fullMessage(), { ...fullMessage("message-2"), token: CENTRAL_TOKEN }],
       }),
     );
   };
@@ -156,13 +181,38 @@ test("rejects unknown or content fields without storing any part of the poll", a
   await assert.rejects(relay.run(new AbortController().signal), (error: unknown) => {
     assert.ok(error instanceof NotificationRelayError);
     assert.equal(error.code, "invalid_notification_response");
-    assert.equal(error.message.includes(leakedContent), false);
+    assert.equal(error.message.includes(MESSAGE_CONTENT), false);
     assert.equal(error.message.includes(CENTRAL_URL), false);
     assert.equal(error.message.includes(CENTRAL_TOKEN), false);
     return true;
   });
   assert.equal(journal.get(MESSAGE_ID), undefined);
   assert.equal(journal.get("message-2"), undefined);
+});
+
+test("rejects conflicting duplicate IDs before buffering or waking", async (t) => {
+  const journal = temporaryJournal(t);
+  let wakeAttempted = false;
+  const request: NotificationFetch = async (url) => {
+    if (url.pathname !== "/api/poll_messages") {
+      wakeAttempted = true;
+      return new Response(null, { status: 202 });
+    }
+    return new Response(
+      JSON.stringify({
+        messages: [fullMessage(), { ...fullMessage(), payload: { content: "changed" } }],
+      }),
+    );
+  };
+  const relay = new NotificationRelay(relayOptions(journal, request));
+
+  await assert.rejects(
+    relay.run(new AbortController().signal),
+    (error: unknown) =>
+      error instanceof NotificationRelayError && error.code === "invalid_notification_response",
+  );
+  assert.equal(journal.get(MESSAGE_ID), undefined);
+  assert.equal(wakeAttempted, false);
 });
 
 test("accepts a response at 4 MiB and rejects one byte above it", async (t) => {
@@ -209,10 +259,9 @@ for (const scenario of [
     const request: NotificationFetch = async (url, init) => {
       if (url.pathname === "/api/poll_messages") {
         polls += 1;
-        if (polls === 1) return new Response(JSON.stringify({ messages: [{ id: MESSAGE_ID }] }));
+        if (polls === 1) return new Response(JSON.stringify({ messages: [fullMessage()] }));
         return pendingResponse(init.signal);
       }
-      if (url.pathname === "/api/ack_notification") return new Response(null, { status: 204 });
       return scenario.response();
     };
     const relay = new NotificationRelay(relayOptions(journal, request));
@@ -228,17 +277,16 @@ for (const scenario of [
   });
 }
 
-test("redrives an accepted wake until confirmed content acknowledgement", async (t) => {
+test("redrives an accepted ID-bearing wake until confirmed content acknowledgement", async (t) => {
   const journal = temporaryJournal(t);
   let polls = 0;
   let wakes = 0;
   const request: NotificationFetch = async (url, init) => {
     if (url.pathname === "/api/poll_messages") {
       polls += 1;
-      if (polls === 1) return new Response(JSON.stringify({ messages: [{ id: MESSAGE_ID }] }));
+      if (polls === 1) return new Response(JSON.stringify({ messages: [fullMessage()] }));
       return pendingResponse(init.signal);
     }
-    if (url.pathname === "/api/ack_notification") return new Response(null, { status: 204 });
     wakes += 1;
     return new Response(null, { status: 202 });
   };
@@ -256,18 +304,16 @@ test("redrives an accepted wake until confirmed content acknowledgement", async 
   const wakeCountAtAcknowledgement = wakes;
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(wakes, wakeCountAtAcknowledgement);
-
   await relay.shutdown();
   await running;
 });
 
-test("recovers a wake that was in flight when the prior process stopped", async (t) => {
+test("discards durable wakes whose consuming message body was lost on restart", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "a2a-notification-restart-test-"));
   const path = join(directory, "notifications.sqlite");
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   let journal = new NotificationJournal(path);
   journal.ingest([MESSAGE_ID], Date.now());
-  journal.claimDueWake(Date.now());
   journal.close();
 
   journal = new NotificationJournal(path);
@@ -275,22 +321,18 @@ test("recovers a wake that was in flight when the prior process stopped", async 
   let wakes = 0;
   const request: NotificationFetch = async (url, init) => {
     if (url.pathname === "/api/poll_messages") return pendingResponse(init.signal);
-    if (url.pathname === "/api/ack_notification") return new Response(null, { status: 204 });
     wakes += 1;
     return new Response(null, { status: 202 });
   };
   const relay = new NotificationRelay({
     ...relayOptions(journal, request),
     now: Date.now,
-    retryBaseMs: 4,
-    retryCapMs: 4,
     idleIntervalMs: 1,
   });
   const running = relay.run(new AbortController().signal);
-
-  await waitFor(() => wakes === 1);
-  assert.equal(journal.get(MESSAGE_ID)?.wakeAttemptCount, 2);
-  assert.equal(journal.get(MESSAGE_ID)?.wakeMayHaveReachedWebhook, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(wakes, 0);
+  assert.equal(journal.get(MESSAGE_ID), undefined);
   await relay.shutdown();
   await running;
 });
