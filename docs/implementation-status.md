@@ -37,6 +37,8 @@ Version `0.2.2` projects the live central bootstrap schemas, accepts the central
 
 Version `0.2.3` matches the live consuming REST interface. It buffers one validated full-message response in memory, serves that inbox through local `poll_messages`, forwards the live `{message_id,status:"acked"}` acknowledgement contract, removes `ack_notification`, and handles ID-less messages as unique one-shot deliveries without durable deduplication or acknowledgement.
 
+Version `0.2.4` caps normalized tool results at 512 KiB, notification batches at 256 messages, JSON structure at 16,384 tokens, and nesting at 100 levels before parsing. Local `poll_messages` no longer needs a central MCP catalog request. ID-less wake retries survive an early local poll, and failed, uncertain, or mismatched acknowledgements retain the buffered body.
+
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
@@ -53,7 +55,7 @@ The user approved the red failures and authorized production implementation on 2
 
 Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
 
-The inspected central implementation returns message content and marks it delivered during REST polling. Version `0.2.3` matches that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
+The inspected central implementation returns message content and marks it delivered during REST polling. Versions `0.2.3` and `0.2.4` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
 
 ## Test work
 

@@ -3,10 +3,11 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { type LocalMcpRouter, LocalMcpServer } from "../src/local-mcp.js";
-import { TestMcpClient } from "./support/mcp-client.js";
+import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
 
 const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 
 function router(): LocalMcpRouter & { calls: Array<Record<string, unknown>> } {
   const calls: Array<Record<string, unknown>> = [];
@@ -114,4 +115,23 @@ test("rejects host, origin, bearer, and body violations before dispatch", async 
   assert.equal(oversized.status, 413);
   assert.ok(!oversized.body.includes(marker));
   assert.equal(backend.calls.length, 0);
+});
+
+test("returns a 512 KiB tool result and rejects one byte above it before transport", async (t) => {
+  const backend = router();
+  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  await server.listen();
+  t.after(() => server.close());
+  const client = new TestMcpClient(server.endpoint, TOKEN);
+  await client.initialize();
+
+  const emptyResultBytes = Buffer.byteLength(JSON.stringify({ echoed: "" }));
+  const boundary = "x".repeat(MAX_TOOL_RESULT_BYTES - emptyResultBytes);
+  assert.equal(Buffer.byteLength(JSON.stringify({ echoed: boundary })), MAX_TOOL_RESULT_BYTES);
+  assert.deepEqual(await client.callTool("echo", { value: boundary }), { echoed: boundary });
+
+  await assert.rejects(
+    client.callTool("echo", { value: `${boundary}x` }),
+    (error: unknown) => error instanceof McpCallError,
+  );
 });
