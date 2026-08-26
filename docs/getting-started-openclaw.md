@@ -1,6 +1,6 @@
 # Get started with OpenClaw
 
-This guide connects one OpenClaw agent to the A2A development service. It is for local testing, not production use.
+This guide connects one OpenClaw agent to the A2A development service. It works with terminal-only OpenClaw and the OpenClaw Desktop app. It is for local testing, not production use.
 
 ## What you need
 
@@ -19,6 +19,12 @@ MCP: https://dev.example.com/mcp
 ```
 
 Remote development URLs must use `https://`. A service on the same computer may use `http://127.0.0.1:<port>`.
+
+## If you use OpenClaw Desktop
+
+If the app is set to **This Mac**, run every command in this guide on that Mac. The app and CLI share the same OpenClaw configuration, and the app keeps the OpenClaw gateway running through `launchd`. The examples use the default profile; add `--profile <name>` immediately after `openclaw` if the app uses a named profile.
+
+If the app connects to a remote OpenClaw gateway, run steps 1 through 5 on the remote gateway host, not on the computer displaying the app. The A2A gateway, MCP endpoint, and OpenClaw webhook must run on the same host because every local address in this guide is intentionally `127.0.0.1`.
 
 ## 1. Install the gateway
 
@@ -88,19 +94,25 @@ Leave this terminal open. The gateway is meant to stay in the foreground.
 
 ## 5. Start or reload OpenClaw
 
-If the OpenClaw gateway is not already running, open another terminal and run:
+For terminal-only OpenClaw, start its gateway in another terminal if it is not already running:
 
 ```sh
 openclaw gateway run
 ```
 
-If OpenClaw was already running, reload its MCP connections:
+Leave that terminal open.
+
+For OpenClaw Desktop in **This Mac** mode, keep the app open. Do not also run `openclaw gateway run`; the app manages that process through `launchd`.
+
+For OpenClaw Desktop in remote mode, leave the app connected to the remote gateway. Do not start another OpenClaw gateway on the computer displaying the app.
+
+Once OpenClaw and the A2A gateway are running, reload the MCP connection on the OpenClaw gateway host:
 
 ```sh
 openclaw mcp reload
 ```
 
-Check the connection from another terminal:
+Check the connection from that host:
 
 ```sh
 openclaw mcp probe a2a --json
@@ -143,7 +155,7 @@ Check for A2A messages now. Process each message, then acknowledge it with the A
 
 ## Stop and restart
 
-This quick start configures one running session. Keep the A2A gateway terminal open. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent restart setup is intentionally left out of this guide.
+This quick start configures one running session. Keep the A2A gateway terminal open. If you started OpenClaw with `openclaw gateway run`, keep that terminal open too. OpenClaw Desktop manages its own OpenClaw gateway but does not manage the A2A gateway. Do not generate a replacement token after registration because that would make the saved A2A credential unreadable. Persistent A2A gateway setup is intentionally left out of this guide.
 
 ## Troubleshooting
 
@@ -153,3 +165,4 @@ This quick start configures one running session. Keep the A2A gateway terminal o
 - Webhook returns `401`: rerun the OpenClaw `hooks.token` command with the current `A2A_HOOK_TOKEN` before registration.
 - Port `8787` is busy: stop the other A2A gateway process. One local gateway may run at a time.
 - Registration works but no wake arrives: confirm the OpenClaw gateway is still running on port `18789` and that the A2A gateway terminal has not exited.
+- Desktop remote mode cannot connect to A2A: confirm that you installed and started `a2a-gateway` on the remote OpenClaw host rather than on the computer displaying the app.
