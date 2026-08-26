@@ -7,6 +7,7 @@ export interface WebhookWake {
   path: string;
   contentType: string | undefined;
   headers: IncomingHttpHeaders;
+  rawBody: Buffer;
   body: Record<string, unknown>;
 }
 
@@ -43,8 +44,9 @@ export async function startFakeWebhook(
       }
 
       let parsed: unknown;
+      const rawBody = Buffer.concat(chunks);
       try {
-        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+        parsed = JSON.parse(rawBody.toString("utf8")) as unknown;
       } catch {
         response.writeHead(400, { "content-type": "application/json" });
         response.end('{"ok":false}');
@@ -61,6 +63,7 @@ export async function startFakeWebhook(
         path: request.url,
         contentType: request.headers["content-type"],
         headers: request.headers,
+        rawBody,
         body: parsed as Record<string, unknown>,
       };
       const waiter = waiters.shift();

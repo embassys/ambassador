@@ -150,6 +150,8 @@ jobs:
           )
           printf '%s\n' "$test_output"
           grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
+          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+            node --test .test-dist/test/hermes-e2e.test.js
           A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
             node --test .test-dist/test/hermes-webhook-bridge.test.js
       - name: Verify OpenClaw interoperability
@@ -216,6 +218,8 @@ jobs:
           )
           printf '%s\n' "$test_output"
           grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
+          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+            node --test .test-dist/test/hermes-e2e.test.js
           A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
             node --test .test-dist/test/hermes-webhook-bridge.test.js
           echo "tarball=$RUNNER_TEMP/$tarball" >> "$GITHUB_OUTPUT"

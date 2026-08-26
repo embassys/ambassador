@@ -1,6 +1,6 @@
 {
   "name": "@a2adev/gateway",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Content-blind gateway for waking local AI agent runtimes",
   "license": "MIT",
   "repository": {

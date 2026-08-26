@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,6 +107,14 @@ test("persists before independently sending exact notification ack and OpenClaw 
     assert.equal(headers.get("authorization"), `Bearer ${WEBHOOK_TOKEN}`);
     assert.equal(headers.get("idempotency-key"), MESSAGE_ID);
     assert.equal(headers.get("content-type"), "application/json");
+    assert.equal(headers.get("x-request-id"), MESSAGE_ID);
+    const body = String(init.body);
+    const timestamp = String(Math.floor(NOW_MS / 1_000));
+    assert.equal(headers.get("x-webhook-timestamp"), timestamp);
+    assert.equal(
+      headers.get("x-webhook-signature-v2"),
+      createHmac("sha256", WEBHOOK_TOKEN).update(timestamp).update(".").update(body).digest("hex"),
+    );
     assert.deepEqual(JSON.parse(String(init.body)), {
       message: `A2A message ${MESSAGE_ID} is ready. Use the A2A MCP tools to retrieve and process it.`,
       name: "A2A Gateway",

@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-25
 
-Updated: 2026-08-25 for the temporary development endpoint override
+Updated: 2026-08-26 for runtime-agnostic dual webhook authentication
 
 ## Problem
 
@@ -53,9 +53,11 @@ An upstream authentication failure stops polling and authenticated tools without
 
 The gateway polls an ID-only central notification view after enrollment. The central MCP `poll_messages` tool remains the content-bearing path used by the agent. The notification view must not consume or hide the message from that tool.
 
-For an OpenClaw webhook URL, the fixed wake body omits `agentId`, so OpenClaw routes it to its default agent. The only variable content is the opaque message ID. The request uses the configured bearer token and `Idempotency-Key: <message-id>`.
+The fixed wake body omits `agentId`, so a webhook owner chooses its default target. The only variable content is the opaque message ID. Every request carries the configured bearer token and a generic HMAC V2 signature over the exact body, using the same token as its key and a current Unix timestamp. `Idempotency-Key` and `X-Request-ID` both carry the message ID. The gateway sends all of these headers for every target; it does not select a runtime or authentication mode.
 
 The gateway stores only message IDs and relay state. It never stores MCP bodies, task data, permissions, results, email addresses, verification codes, or plaintext central JWTs in SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
+
+The `0.2.1` package retains the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 
