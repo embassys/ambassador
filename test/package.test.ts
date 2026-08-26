@@ -9,7 +9,7 @@ test("package metadata exposes the approved public gateway", async () => {
   ) as Record<string, unknown>;
 
   assert.equal(packageJson.name, "@a2adev/gateway");
-  assert.equal(packageJson.version, "0.2.1");
+  assert.equal(packageJson.version, "0.2.2");
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, "MIT");
   assert.equal(
@@ -22,6 +22,7 @@ test("package metadata exposes the approved public gateway", async () => {
     "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
+    "docs/live-e2e-openclaw-hermes.md",
   ]);
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
   assert.deepEqual(packageJson.repository, {

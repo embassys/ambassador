@@ -102,7 +102,7 @@ export interface FakeCentral {
   calls: ToolCallRecord[];
   setPollResponse: (response: unknown) => void;
   setToolDescription: (name: string, description: string | undefined) => void;
-  setVerificationResult: (result: Record<string, unknown> | undefined) => void;
+  setVerificationResult: (result: Record<string, unknown> | string | undefined) => void;
   injectMessage: (id: string, content: string) => void;
   messageState: (id: string) => MessageRecord;
 }
@@ -113,7 +113,7 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   let pollCount = 0;
   let pollResponse: unknown;
   const toolDescriptions = new Map<string, string>();
-  let verificationResult: Record<string, unknown> | undefined;
+  let verificationResult: Record<string, unknown> | string | undefined;
 
   const server = createServer(async (request, response) => {
     try {
@@ -247,18 +247,29 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
               });
               return;
             }
+            const result =
+              verificationResult ??
+              ({
+                agent_id: "agent_fixture",
+                username: "fixture-agent",
+                token: CENTRAL_JWT,
+                message: "Email verified successfully.",
+              } satisfies Record<string, unknown>);
             json(
               response,
               200,
-              toolResult(
-                id,
-                verificationResult ?? {
-                  agent_id: "agent_fixture",
-                  username: "fixture-agent",
-                  token: CENTRAL_JWT,
-                  message: "Email verified successfully.",
-                },
-              ),
+              typeof result === "string"
+                ? {
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                      _meta: {},
+                      content: [{ type: "text", text: result }],
+                      structuredContent: { result },
+                      isError: false,
+                    },
+                  }
+                : toolResult(id, result),
             );
             return;
           }

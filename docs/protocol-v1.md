@@ -1,6 +1,6 @@
 # Gateway protocol v1
 
-Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication accepted on 2026-08-26
+Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication and bounded central-result normalization accepted on 2026-08-26
 
 ## Startup contract
 
@@ -12,7 +12,7 @@ a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 
 Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
-The `0.2.1` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
+The `0.2.2` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
 
 `--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must contain exactly 192 random bits in `[0-9a-f]{48}` format.
 
@@ -50,6 +50,8 @@ Before enrollment, expose only:
 
 These tools are exempt from central JWT injection, not from local bearer authentication. Their arguments and results pass through memory only.
 
+For each selected tool, use the description and input schema advertised by the central MCP server. Keep only the allowlisted tool fields and remove forbidden credential and identity selectors before exposing the definition locally.
+
 After enrollment, remove the bootstrap tools and expose this allowlist when the upstream server advertises each tool:
 
 - `list_action_types`
@@ -67,18 +69,33 @@ Before returning any upstream result, reject it if any nested field is named `to
 
 Do not automatically retry a tool call after it may have reached the central service. Return a safe uncertain-outcome error for side-effecting calls.
 
+### Central result normalization
+
+The development central MCP wrapper may return one exact mirrored string result: `structuredContent` contains only `result: string`, and `content` contains one text item with the same string. Normalize that string when it is either valid JSON or the bounded Python-literal subset defined below:
+
+- dictionaries with unique string keys;
+- lists;
+- quoted strings with explicit escapes;
+- finite JSON-compatible numbers; and
+- `True`, `False`, and `None`.
+
+The parser is data-only. It selects one grammar for the complete value and rejects mixed JSON and Python syntax. It does not evaluate code and does not accept names, calls, attributes, bytes, sets, tuples, comprehensions, comments, or duplicate keys. The existing 4 MiB response limit and 100-level nesting limit apply before nested values are allocated. A normalized top-level object replaces the wrapper. A normalized array or scalar remains under `{result: value}` so local MCP `structuredContent` stays object-shaped. Failed parses containing collection delimiters, call syntax, a comment prefix, or a quoted-literal prefix fail closed; other plain strings remain ordinary `{result: string}` results and therefore fail any stricter tool-specific contract. Every normalized result still passes the existing credential and tool-specific checks. The gateway validates result and mirrored-content `_meta` as plain objects and rejects forbidden credential names, stored credential bytes, and newly issued verification credential bytes before discarding the metadata.
+
 ## Verification and JWT custody
 
-A successful upstream `verify_email` result must be this strict structured object:
+A successful upstream `verify_email` result, after the bounded normalization above, must contain these fields:
 
 ```json
 {
   "agent_id": "agent_123",
   "username": "nik-agent",
   "token": "central-jwt",
-  "message": "Email verified successfully."
+  "message": "Email verified successfully.",
+  "note": "The gateway owns the issued credential."
 }
 ```
+
+`note` illustrates an optional extension. The gateway accepts and discards additional fields after recursively rejecting credential field names and any value containing the issued token. It still requires the four fields it uses and exactly one parsed `token` key.
 
 The local result is:
 
