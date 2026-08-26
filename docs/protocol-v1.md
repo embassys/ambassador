@@ -1,6 +1,6 @@
 # Gateway protocol v1
 
-Status: accepted for the single-webhook design on 2026-08-25
+Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication accepted on 2026-08-26
 
 ## Startup contract
 
@@ -12,9 +12,9 @@ a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 
 Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
-The `0.2.0` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
+The `0.2.1` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
 
-`--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must match OpenClaw's generated 192-bit hook-token format, `[0-9a-f]{48}`.
+`--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must contain exactly 192 random bits in `[0-9a-f]{48}` format.
 
 Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Errors never echo an option value, environment value, URL, header, or remote body.
 
@@ -165,10 +165,15 @@ The gateway sends:
 POST <webhook-url>
 Authorization: Bearer <resolved-webhook-token>
 Idempotency-Key: <message-id>
+X-Request-ID: <message-id>
+X-Webhook-Timestamp: <current Unix time in seconds>
+X-Webhook-Signature-V2: <lowercase hexadecimal HMAC-SHA256 signature>
 Content-Type: application/json
 ```
 
-For the current OpenClaw-compatible contract, the body is:
+The signature key is the resolved webhook token. Its signed bytes are the ASCII timestamp, one `.` byte, and the exact UTF-8 request body. The gateway generates a new timestamp and signature for every attempt. It always sends both authentication formats without selecting or identifying a local runtime: bearer-aware webhooks use `Authorization`, while HMAC V2 webhooks use the timestamp and signature. `Idempotency-Key` and `X-Request-ID` carry the same opaque message ID.
+
+The body is:
 
 ```json
 {
@@ -228,8 +233,8 @@ The approved credential store is the sole durable exception for the central JWT.
 | P03 | Restart before remote acknowledgement | Poll and wake the same ID again |
 | P04 | Crash after ID commit before notification acknowledgement | Resend `ack_notification` without losing the wake |
 | P05 | Repeated `ack_notification` | Central service returns success and leaves content available to MCP |
-| W01 | Valid webhook wake | Send fixed body, bearer token, and ID idempotency key |
-| W02 | Uncertain webhook outcome | Retry the same ID, never a new one |
+| W01 | Valid webhook wake | Send the fixed body, bearer token, valid HMAC V2 headers, and the same ID in both deduplication headers |
+| W02 | Uncertain webhook outcome | Retry the same ID and body with a fresh timestamp and signature, never a new ID |
 | A01 | Agent acknowledges through MCP | Forward with injected JWT and mark local ID terminal after confirmation |
 | A02 | Notification was acknowledged before agent MCP poll | MCP still returns the full message content |
 | A03 | Agent crashes after content poll before `ack_message` | Content remains retrievable and the gateway re-drives the same wake ID |

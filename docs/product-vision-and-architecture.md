@@ -43,7 +43,7 @@ Central ID notification API
   |  authenticated poll after enrollment
   v
 Gateway ID-only relay
-  |  bearer webhook wake
+  |  bearer and HMAC webhook wake
   v
 Configured local webhook
 ```
@@ -51,7 +51,7 @@ Configured local webhook
 ### Startup
 
 1. Acquire the singleton lock before resolving tokens, opening credentials, binding MCP, polling, or sending a webhook.
-2. Resolve and validate the OpenClaw-generated 48-character hexadecimal webhook token from the named environment variable.
+2. Resolve and validate the 48-character lowercase hexadecimal webhook token from the named environment variable.
 3. Bind the authenticated MCP endpoint to `127.0.0.1:8787`.
 4. Load an existing central JWT from the approved credential store, if present.
 5. Start ID-only notification polling only when a central JWT is available.
@@ -74,7 +74,7 @@ If persistence fails, verification does not report local success. A second verif
 2. The central service returns opaque message IDs without consuming the content-bearing MCP message.
 3. The gateway stores each new ID, then independently queues the idempotent `ack_notification` persistence acknowledgement and webhook wake.
 4. Notification acknowledgement stops ID redelivery but leaves the content available through MCP; acknowledgement retries do not block the wake.
-5. The webhook receives a fixed instruction and an idempotency header.
+5. The webhook receives a fixed instruction, bearer and timestamped HMAC authentication, and ID-based deduplication headers.
 6. The agent calls the gateway's MCP `poll_messages` tool to retrieve content from the central MCP server.
 7. The agent processes the message and calls the separate `ack_message` content acknowledgement through the gateway. Content remains retrievable and the same wake ID remains eligible for redrive until this succeeds.
 
@@ -89,7 +89,7 @@ If persistence fails, verification does not report local success. A second verif
 
 ## Current release boundary
 
-Version `0.2.0` packages the single-webhook replacement for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
+Version `0.2.1` packages the single-webhook replacement for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
 The replacement keeps Node 24, npm distribution, SQLite for ID-only relay state, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central contract and recovery work listed below.
 
