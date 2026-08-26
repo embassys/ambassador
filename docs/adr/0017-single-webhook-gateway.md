@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-25
 
-Updated: 2026-08-25 for the temporary development endpoint override
+Updated: 2026-08-26 for runtime-agnostic dual webhook authentication
 
 ## Problem
 
@@ -28,7 +28,7 @@ The CLI accepts only the `--name=value` form for these options. The token option
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
-The webhook URL must use the literal loopback address `127.0.0.1`. The webhook token must use OpenClaw's generated 48-character lowercase hexadecimal format. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
+The webhook URL must use the literal loopback address `127.0.0.1`. The webhook token must contain 192 random bits as 48 lowercase hexadecimal characters. The MCP listener binds only to `127.0.0.1`. It requires `Authorization: Bearer <webhook-token>` on every request. Reusing the webhook token avoids a second local credential without disclosing the local MCP bearer to a remote webhook recipient. Compromise of that token still grants both webhook wake and local MCP access; this tradeoff is accepted for the single-user local design.
 
 The central API and MCP URLs are product constants, not user-facing CLI options. Until those constants are available, the `0.2.0` development release accepts `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` as a paired environment override. A development flow sets both. Remote values require HTTPS, while loopback development servers may use HTTP. The override does not change the two-option CLI or add general configuration.
 
@@ -53,9 +53,11 @@ An upstream authentication failure stops polling and authenticated tools without
 
 The gateway polls an ID-only central notification view after enrollment. The central MCP `poll_messages` tool remains the content-bearing path used by the agent. The notification view must not consume or hide the message from that tool.
 
-For an OpenClaw webhook URL, the fixed wake body omits `agentId`, so OpenClaw routes it to its default agent. The only variable content is the opaque message ID. The request uses the configured bearer token and `Idempotency-Key: <message-id>`.
+The fixed wake body omits `agentId`, so a webhook owner chooses its default target. The only variable content is the opaque message ID. Every request carries the configured bearer token and a generic HMAC V2 signature over the exact body, using the same token as its key and a current Unix timestamp. `Idempotency-Key` and `X-Request-ID` both carry the message ID. The gateway sends all of these headers for every target; it does not select a runtime or authentication mode.
 
 The gateway stores only message IDs and relay state. It never stores MCP bodies, task data, permissions, results, email addresses, verification codes, or plaintext central JWTs in SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
+
+The `0.2.1` package retains the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 
@@ -69,4 +71,4 @@ The replacement uses new `a2a-gateway` state paths and ignores legacy `a2a-sidec
 
 ## Approval
 
-The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history.
+The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history. On 2026-08-26, the user approved runtime-agnostic bearer and HMAC V2 webhook authentication and the `0.2.1` patch release.

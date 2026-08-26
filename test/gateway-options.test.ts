@@ -86,7 +86,7 @@ test("requires a literal loopback URL with an explicit valid port", () => {
   }
 });
 
-test("resolves only an OpenClaw-generated 192-bit hook token", () => {
+test("resolves only a 192-bit lowercase hexadecimal hook token", () => {
   assert.equal(resolveWebhookToken({ OPENCLAW_HOOK_TOKEN: TOKEN }, "OPENCLAW_HOOK_TOKEN"), TOKEN);
 
   for (const value of [

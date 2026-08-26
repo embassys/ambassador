@@ -39,7 +39,7 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 | T3 | Local MCP | Test loopback bind, bearer authentication, `Host` and `Origin`, MCP lifecycle, limits, deadlines, cancellation, and safe errors | T1 | Fails because no MCP listener exists |
 | T4 | Enrollment | Test bootstrap-only catalog, registration forwarding, verification JWT interception, token-free result, tool-list change, persistence failure, restart recovery, and identity replacement rejection | T3 | Fails because enrollment does not exist |
 | T5 | Proxy | Test local schemas without `token`, exact transient upstream `token` injection, caller selector rejection, no automatic side-effect retry, and authentication failure behavior | T4 | Fails because proxying does not exist |
-| T6 | Relay | Test dormant polling before enrollment, ID-only poll validation, commit-before-`ack_notification`, bearer webhook, no `agentId`, retries, separate content acknowledgement, and restart | T1, T4 | Fails on legacy controller and binding relay |
+| T6 | Relay | Test dormant polling before enrollment, ID-only poll validation, commit-before-`ack_notification`, bearer and generic HMAC V2 webhook authentication, no `agentId`, retries, separate content acknowledgement, and restart | T1, T4 | Fails on legacy controller and binding relay |
 | T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | Approved ADR 0020 | Fixture contract passes independently |
 | T8 | End to end | Start gateway, register, verify, prove JWT absence, poll an ID, wake fake webhook, retrieve content through MCP, and acknowledge | T2-T7 | Fails on missing gateway behavior |
 | C1 | CI | Run unit tests on Linux, macOS, and Windows; build and run Docker E2E on Ubuntu | T1-T8 | Red feature PR with classified failures |
@@ -51,7 +51,7 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 - Accept only `start --webhook-url=<url> --webhook-token-env=<name>`.
 - Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
 - Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
-- Require the resolved webhook token to match OpenClaw's generated `[0-9a-f]{48}` format.
+- Require the resolved webhook token to contain exactly 192 random bits in `[0-9a-f]{48}` format.
 - Acquire the singleton lock before resolving the token or touching credentials.
 - Print the endpoint only after successful bind and keep running until cancellation.
 - Never print either token or a credential-bearing MCP URL.
@@ -83,7 +83,7 @@ Tests scan stdout, stderr, errors, every credential-store artifact, SQLite, WAL,
 | I2 | MCP | Add the approved SDK, authenticated loopback server, central MCP client, limits, and safe errors | G1, approved ADR 0018 | T3 and T5 transport cases pass |
 | I3 | Credentials | Implement the approved atomic central JWT store and restart loading | G1, approved ADR 0019 | Abstract credential-store cases pass |
 | I4 | Enrollment | Add bootstrap catalog, structured verification interception, sanitization, and identity state | I2, I3 | T4 passes |
-| I5 | Relay | Replace binding protocol with one ID stream and one bearer webhook target | I1, I3 | T6 passes |
+| I5 | Relay | Replace binding protocol with one ID stream and one runtime-agnostic authenticated webhook target | I1, I3 | T6 passes |
 | I6 | Assembly | Start MCP immediately, gate polling on identity, coordinate shutdown, and stream startup output | I1-I5 | T8 passes |
 | I7 | Cleanup | Delete configuration, runtime presets, adapter factory, service manager, obsolete commands, schemas, and tests | I6 | No dead compatibility code remains |
 | C2 | CI | Run all checks, audit production dependencies, and run Docker E2E | I7 | Green matrix and E2E |

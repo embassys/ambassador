@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 import { requestTimeout, withDeadline } from "./http.js";
 import { type NotificationJournal, validateNotificationId } from "./notification-journal.js";
 
@@ -211,6 +213,7 @@ export class NotificationRelay {
   private readonly centralAcknowledgementUrl: URL;
   private readonly centralAuthorization: string;
   private readonly webhookUrl: URL;
+  private readonly webhookToken: string;
   private readonly webhookAuthorization: string;
   private readonly request: NotificationFetch;
   private readonly now: () => number;
@@ -236,7 +239,8 @@ export class NotificationRelay {
     this.centralAcknowledgementUrl = new URL("/api/ack_notification", centralApiUrl);
     this.centralAuthorization = `Bearer ${safeToken(options.centralToken)}`;
     this.webhookUrl = safeUrl(options.webhookUrl);
-    this.webhookAuthorization = `Bearer ${safeToken(options.webhookToken)}`;
+    this.webhookToken = safeToken(options.webhookToken);
+    this.webhookAuthorization = `Bearer ${this.webhookToken}`;
     this.request = options.fetch ?? fetch;
     this.now = options.now ?? Date.now;
     this.random = options.random ?? Math.random;
@@ -486,6 +490,18 @@ export class NotificationRelay {
 
       let response: Response;
       try {
+        const body = JSON.stringify({
+          message: `A2A message ${claim.messageId} is ready. Use the A2A MCP tools to retrieve and process it.`,
+          name: "A2A Gateway",
+          deliver: false,
+          wakeMode: "now",
+        });
+        const timestamp = String(Math.floor(this.currentTime() / 1_000));
+        const signature = createHmac("sha256", this.webhookToken)
+          .update(timestamp)
+          .update(".")
+          .update(body)
+          .digest("hex");
         response = await this.fetchResponse(
           this.webhookUrl,
           {
@@ -494,13 +510,11 @@ export class NotificationRelay {
               Authorization: this.webhookAuthorization,
               "Idempotency-Key": claim.messageId,
               "Content-Type": "application/json",
+              "X-Request-ID": claim.messageId,
+              "X-Webhook-Timestamp": timestamp,
+              "X-Webhook-Signature-V2": signature,
             },
-            body: JSON.stringify({
-              message: `A2A message ${claim.messageId} is ready. Use the A2A MCP tools to retrieve and process it.`,
-              name: "A2A Gateway",
-              deliver: false,
-              wakeMode: "now",
-            }),
+            body,
           },
           this.webhookDeadlineMs,
           signal,

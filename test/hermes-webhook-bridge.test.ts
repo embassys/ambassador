@@ -17,7 +17,7 @@ const BODY = JSON.stringify({
   wakeMode: "now",
 });
 
-test("the Hermes bridge authenticates the gateway and signs the unchanged wake", async (t) => {
+test("the legacy Hermes bridge authenticates and signs the unchanged wake", async (t) => {
   let forwardCount = 0;
   let resolveForwarded:
     | ((forwarded: { headers: IncomingHttpHeaders; body: Buffer }) => void)
