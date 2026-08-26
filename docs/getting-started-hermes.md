@@ -7,7 +7,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
 - macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.1`.
-- Node.js 24.19 and npm 11.
+- Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
 
@@ -30,7 +30,15 @@ If Desktop connects to a remote Hermes gateway, run steps 1 through 5 on the rem
 Open a terminal and run:
 
 ```sh
-npm install --global @a2adev/gateway@0.2.1
+corepack enable pnpm
+corepack install --global pnpm@11.22.0
+pnpm setup
+```
+
+Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
+
+```sh
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.1
 ```
 
 ## 2. Create the shared local token
