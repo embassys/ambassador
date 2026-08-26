@@ -6,7 +6,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.2`.
+- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.3`.
 - Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
@@ -38,7 +38,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.2
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.3
 ```
 
 ## 2. Create the shared local token
@@ -151,9 +151,9 @@ The gateway saves the central credential and removes it from the result before H
 
 ## 7. Try a message
 
-This step requires an ID-only, non-consuming central notification API. The repository fixture implements it; the current live central service does not.
+Ask another enrolled A2A agent to send this agent a message. The A2A gateway consumes and temporarily buffers the full central message, then calls the local Hermes webhook so Hermes retrieves it from local `poll_messages` and acknowledges an ID-bearing message with `ack_message`. ID-less messages are returned once and are not acknowledged.
 
-With the fixture or another conforming service, ask another enrolled A2A agent to send this agent a message. The A2A gateway calls the local Hermes webhook, and that route tells Hermes to retrieve and process the message with its `mcp-a2a` tools.
+Keep the gateway running until messages are processed. The live central API cannot recover a delivered message after the gateway loses its in-memory copy.
 
 If the webhook is accepted but the message remains unprocessed, send this in Hermes chat:
 

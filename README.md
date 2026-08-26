@@ -2,13 +2,13 @@
 
 The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
-Version `0.2.2` supports the complete flow against a conforming A2A development service, including the repository's FastMCP fixture. The current live central service supports enrollment and authenticated MCP operations, but its notification API does not yet support the required delivery contract. This is not a production release.
+Version `0.2.3` matches the live central service's consuming notification API and authenticated MCP operations. This is not a production release because central cannot recover delivered messages after a gateway restart.
 
 ## Target usage
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.2`
+- macOS or Linux; Windows remains unqualified for `0.2.3`
 - Node.js 24.19.x
 - pnpm 11.22.0 through Corepack
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
@@ -25,7 +25,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.2
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.3
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -99,15 +99,15 @@ The gateway then starts notification polling. Later local MCP calls have no `tok
 
 ## Delivery
 
-This flow requires the ID-only, non-consuming notification API implemented by the repository fixture. The current live central service does not provide that API yet.
+The gateway matches the live central API. `GET /api/poll_messages?timeout=30` returns full messages and marks them delivered. The gateway validates and retains one response only in memory, stores only present IDs in SQLite, and sends the webhook wake. Local `poll_messages` reads that in-memory inbox; `ack_message` is forwarded centrally and removes an ID-bearing message after central confirms it.
 
-The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed webhook wake with bearer and timestamped HMAC authentication. The same opaque ID is used for `Idempotency-Key` and `X-Request-ID`. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`. Until that acknowledgement succeeds, content remains retrievable and the gateway periodically re-drives the same wake ID.
+ID-less messages are treated as unique one-shot deliveries. They are not journaled, deduplicated, or acknowledged. Because central cannot re-fetch delivered messages, stopping or crashing the gateway before processing loses the in-memory body; production still requires central redelivery or delivered-message retrieval.
 
 SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
 ## Current implementation
 
-The source tree and `0.2.2` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper. Production use remains blocked on stable central API and MCP URLs, the ID-only notification view, and central JWT reissue.
+The source tree and `0.2.3` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a bounded memory-only inbox for the consuming REST API. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
 
 ## Development
 

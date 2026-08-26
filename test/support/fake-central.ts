@@ -9,7 +9,7 @@ const VERIFICATION_CODE = "246810";
 interface MessageRecord {
   id: string;
   content: string;
-  notificationAcknowledged: boolean;
+  delivered: boolean;
   contentAcknowledged: boolean;
 }
 
@@ -120,51 +120,25 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/poll_messages") {
         pollCount += 1;
-        const query = [...url.searchParams.entries()];
         if (request.headers.authorization !== `Bearer ${CENTRAL_JWT}`) {
           json(response, 401, { detail: "unauthorized" });
           return;
         }
-        if (
-          url.searchParams.get("view") !== "ids" ||
-          url.searchParams.get("timeout") !== "30" ||
-          query.length !== 2
-        ) {
+        if (url.searchParams.get("timeout") !== "30") {
           json(response, 422, { detail: "invalid query" });
           return;
         }
+        const queued = [...messages.values()].filter(
+          (message) => !message.delivered && !message.contentAcknowledged,
+        );
+        for (const message of queued) message.delivered = true;
         json(
           response,
           200,
           pollResponse ?? {
-            messages: [...messages.values()]
-              .filter((message) => !message.notificationAcknowledged)
-              .map((message) => ({ id: message.id })),
+            messages: queued.map((message) => ({ id: message.id, content: message.content })),
           },
         );
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/ack_notification") {
-        if (
-          request.headers.authorization !== `Bearer ${CENTRAL_JWT}` ||
-          request.headers["content-type"] !== "application/json"
-        ) {
-          json(response, 401, { detail: "unauthorized" });
-          return;
-        }
-        const body = await readObject(request);
-        if (!hasExactKeys(body, ["message_id"])) {
-          json(response, 422, { detail: "invalid request" });
-          return;
-        }
-        const message = messages.get(String(body.message_id));
-        if (message === undefined) {
-          json(response, 404, { detail: "not found" });
-          return;
-        }
-        message.notificationAcknowledged = true;
-        json(response, 200, { acknowledged: true, message_id: message.id });
         return;
       }
 
@@ -312,20 +286,22 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
             return;
           }
           if (name === "poll_messages") {
+            const queued = [...messages.values()].filter(
+              (item) => !item.delivered && !item.contentAcknowledged,
+            );
+            for (const item of queued) item.delivered = true;
             json(
               response,
               200,
               toolResult(id, {
-                messages: [...messages.values()]
-                  .filter((item) => !item.contentAcknowledged)
-                  .map((item) => ({ id: item.id, content: item.content })),
+                messages: queued.map((item) => ({ id: item.id, content: item.content })),
               }),
             );
             return;
           }
           if (name === "ack_message") {
             const item = messages.get(String(args.message_id));
-            if (item === undefined) {
+            if (item === undefined || !item.delivered || item.contentAcknowledged) {
               json(response, 200, {
                 jsonrpc: "2.0",
                 id,
@@ -334,7 +310,7 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
               return;
             }
             item.contentAcknowledged = true;
-            json(response, 200, toolResult(id, { acknowledged: true, message_id: item.id }));
+            json(response, 200, toolResult(id, { message_id: item.id, status: "acked" }));
             return;
           }
         }
@@ -377,7 +353,7 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
       messages.set(id, {
         id,
         content,
-        notificationAcknowledged: false,
+        delivered: false,
         contentAcknowledged: false,
       });
     },

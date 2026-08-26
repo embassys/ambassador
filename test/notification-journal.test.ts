@@ -160,6 +160,17 @@ test("recovers in-flight work after restart without resetting attempts", (t) => 
   assert.equal(journal.get("message-1")?.wakeAttemptCount, 2);
 });
 
+test("discards nonterminal IDs when their consuming REST bodies cannot be recovered", (t) => {
+  const journal = journalFixture(t).open();
+  journal.ingest(["pending-message", "acked-message"], NOW_MS);
+  assert.equal(journal.confirmContentAcknowledgement("acked-message"), true);
+
+  assert.equal(journal.discardUnrecoverable(), 1);
+  assert.equal(journal.get("pending-message"), undefined);
+  assert.equal(journal.get("acked-message")?.wakeState, "content_acknowledged");
+  assert.equal(journal.discardUnrecoverable(), 0);
+});
+
 test("rejects an unrelated version-one schema instead of treating it as relay state", (t) => {
   const fixture = journalFixture(t);
   const database = new Database(fixture.path);
