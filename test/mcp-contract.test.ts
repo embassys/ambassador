@@ -65,6 +65,78 @@ test("removes the upstream token from local schemas and required fields", () => 
   });
 });
 
+test("rejects credential selectors anywhere in projected schemas", () => {
+  const schemas = [
+    {
+      type: "object",
+      properties: {},
+      required: ["jwt"],
+    },
+    {
+      type: "object",
+      properties: {},
+      $defs: {
+        auth: {
+          type: "object",
+          properties: { token: { type: "string" } },
+        },
+      },
+    },
+    {
+      type: "object",
+      properties: {},
+      allOf: [
+        {
+          type: "object",
+          properties: { agent_id: { type: "string" } },
+        },
+      ],
+    },
+    {
+      type: "object",
+      properties: {},
+      allOf: [{ type: "object", required: ["jwt"] }],
+    },
+    {
+      type: "object",
+      properties: {},
+      additionalProperties: {
+        type: "object",
+        properties: { credential: { type: "string" } },
+      },
+    },
+    {
+      type: "object",
+      properties: {},
+      items: [{ type: "string" }],
+      additionalItems: { type: "object", required: ["jwt"] },
+    },
+  ];
+
+  for (const inputSchema of schemas) {
+    assert.throws(() => localToolDefinition({ name: "unsafe", inputSchema }), McpContractError);
+  }
+});
+
+test("allows required as an ordinary argument name", () => {
+  const tool = localToolDefinition({
+    name: "safe",
+    inputSchema: {
+      type: "object",
+      properties: {
+        required: {
+          type: "object",
+          properties: { enabled: { type: "boolean" } },
+          default: { required: "example data" },
+        },
+      },
+      required: ["required"],
+    },
+  });
+
+  assert.deepEqual(tool.inputSchema.required, ["required"]);
+});
+
 test("injects the central token exactly once only when the upstream schema requires it", () => {
   const [poll, health] = selectCentralTools(catalog, true);
   assert.ok(poll !== undefined && health !== undefined);
@@ -98,7 +170,7 @@ test("fails closed on credential-bearing nested results or stored JWT bytes", ()
   );
 });
 
-test("parses exactly one strict verification credential into a token-free local result", () => {
+test("extracts one verification credential and discards safe response extensions", () => {
   const parsed = parseVerificationSuccess({
     agent_id: "agent_123",
     username: "fixture-agent",
@@ -114,6 +186,27 @@ test("parses exactly one strict verification credential into a token-free local 
   });
   assert.ok(!JSON.stringify(parsed.localResult).includes(JWT));
 
+  const withNote = parseVerificationSuccess({
+    agent_id: "agent_123",
+    username: "fixture-agent",
+    token: JWT,
+    message: "Email verified successfully.",
+    note: "The gateway owns the issued credential.",
+  });
+  assert.deepEqual(withNote.localResult, parsed.localResult);
+  assert.equal(Object.hasOwn(withNote.localResult, "note"), false);
+
+  const withExtensions = parseVerificationSuccess({
+    agent_id: "agent_123",
+    username: "fixture-agent",
+    token: JWT,
+    message: "Email verified successfully.",
+    note: "The gateway owns the issued credential.",
+    central_version: 2,
+    delivery: { status: "complete" },
+  });
+  assert.deepEqual(withExtensions.localResult, parsed.localResult);
+
   for (const invalid of [
     { agent_id: "agent_123", username: "fixture-agent", message: "missing token" },
     {
@@ -127,6 +220,20 @@ test("parses exactly one strict verification credential into a token-free local 
     { agent_id: JWT, username: "fixture-agent", token: JWT, message: "unsafe identity" },
     { agent_id: "agent_123", username: `prefix-${JWT}`, token: JWT, message: "unsafe user" },
     { agent_id: "agent_123", username: "fixture-agent", token: JWT, message: JWT },
+    {
+      agent_id: "agent_123",
+      username: "fixture-agent",
+      token: JWT,
+      message: "Email verified successfully.",
+      note: `credential: ${JWT}`,
+    },
+    {
+      agent_id: "agent_123",
+      username: "fixture-agent",
+      token: JWT,
+      message: "Email verified successfully.",
+      extra: { access_token: "second-token" },
+    },
   ]) {
     assert.throws(() => parseVerificationSuccess(invalid), McpContractError);
   }

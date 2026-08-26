@@ -2,13 +2,13 @@
 
 The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
-Version `0.2.1` supports the complete flow against an A2A development service supplied through environment variables. It is not a production release: the production central contract and stable endpoint constants are still pending.
+Version `0.2.2` supports the complete flow against a conforming A2A development service, including the repository's FastMCP fixture. The current live central service supports enrollment and authenticated MCP operations, but its notification API does not yet support the required delivery contract. This is not a production release.
 
 ## Target usage
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.1`
+- macOS or Linux; Windows remains unqualified for `0.2.2`
 - Node.js 24.19.x
 - pnpm 11.22.0 through Corepack
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
@@ -25,7 +25,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.1
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.2
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -67,10 +67,10 @@ Beginner walkthroughs:
 In another terminal, add the printed endpoint to OpenClaw:
 
 ```sh
-openclaw mcp set a2a \
+openclaw mcp set a2adev_gateway \
   '{"url":"http://127.0.0.1:8787/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${OPENCLAW_HOOK_TOKEN}"}}'
 
-openclaw mcp probe a2a --json
+openclaw mcp probe a2adev_gateway --json
 ```
 
 The same token authenticates calls in both directions. The gateway uses it to call the webhook, and OpenClaw uses it to call the gateway's MCP endpoint. The central JWT never belongs in OpenClaw configuration or an MCP tool argument.
@@ -80,7 +80,7 @@ The same token authenticates calls in both directions. The gateway uses it to ca
 Tell the local agent:
 
 ```text
-Register this agent with A2A.
+Register my agent in A2A.dev using the a2adev_gateway MCP server.
 ```
 
 The agent asks for username, display name, and email, then calls `register_agent`. After the user provides the emailed code, the agent calls `verify_email`.
@@ -99,13 +99,15 @@ The gateway then starts notification polling. Later local MCP calls have no `tok
 
 ## Delivery
 
+This flow requires the ID-only, non-consuming notification API implemented by the repository fixture. The current live central service does not provide that API yet.
+
 The central notification API returns opaque IDs without consuming the MCP message. The gateway commits an ID to SQLite, confirms that persistence through `ack_notification`, then sends a fixed webhook wake with bearer and timestamped HMAC authentication. The same opaque ID is used for `Idempotency-Key` and `X-Request-ID`. The agent retrieves content through the local MCP `poll_messages` tool and separately confirms processing through `ack_message`. Until that acknowledgement succeeds, content remains retrievable and the gateway periodically re-drives the same wake ID.
 
 SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
 ## Current implementation
 
-The source tree and `0.2.1` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. Production use remains blocked on stable central API and MCP URLs, the ID-only notification view, structured verification results, and central JWT reissue.
+The source tree and `0.2.2` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper. Production use remains blocked on stable central API and MCP URLs, the ID-only notification view, and central JWT reissue.
 
 ## Development
 
@@ -126,6 +128,8 @@ pnpm audit signatures
 ```
 
 The suite uses Node's test runner, temporary SQLite files, loopback HTTP fixtures, and a Dockerized Python/FastMCP central fixture with in-memory verification. Docker E2E runs on Ubuntu CI; the local Docker daemon must be running for local container tests.
+
+For periodic model-driven acceptance, follow [Live E2E with OpenClaw and Hermes](docs/live-e2e-openclaw-hermes.md).
 
 ## Design records
 

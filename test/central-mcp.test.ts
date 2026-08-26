@@ -286,11 +286,175 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
         });
         return;
       }
-      if (name === "unexpected_metadata") {
+      if (name === "standard_metadata") {
+        writeResult(response, id, {
+          structuredContent: { ok: true },
+          content: [{ type: "text", text: '{"ok":true}' }],
+          _meta: { source: "fixture" },
+        });
+        return;
+      }
+      if (name === "string_wrapped_object") {
+        const text = JSON.stringify({ ok: true });
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+          _meta: { source: "fixture" },
+        });
+        return;
+      }
+      if (name === "string_wrapped_text") {
+        writeResult(response, id, {
+          structuredContent: { result: "accepted" },
+          content: [{ type: "text", text: "accepted" }],
+        });
+        return;
+      }
+      if (name === "python_wrapped_object") {
+        const text =
+          "{'ok': True, 'items': [{'id': 'one', 'missing': None}], 'count': 1, 'ratio': -1.5e+2}";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_wrapped_array") {
+        const text = "[{'name': 'send', 'enabled': True}, None]";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "json_wrapped_array") {
+        const text = '[{"name":"send","enabled":true},null]';
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_wrapped_escapes") {
+        const text = String.raw`{'message': "Agent's ready", 'escaped': 'line\nnext', 'unicode': '\u0041'}`;
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_unsupported_expression") {
+        const text = "{'ok': __import__('os').system('false')}";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_json_keyword") {
+        const text = "{'ok': true}";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "mixed_literal_keywords") {
+        const text = "[None, null]";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_json_escape") {
+        const text = String.raw`{'value': 'a\/b'}`;
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_prefixed_comment") {
+        const text = "# unsupported\n{'token': 'hidden'}";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_wrapped_tuple") {
+        const text = "({'token': 'hidden'},)";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_duplicate_key") {
+        const text = "{'ok': True, 'ok': False}";
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "json_duplicate_key") {
+        const text = '{"ok":true,"ok":false}';
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "python_depth_100" || name === "python_depth_101") {
+        const depth = name === "python_depth_100" ? 100 : 101;
+        const text = `${"{'value': ".repeat(depth)}'ok'${"}".repeat(depth)}`;
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+        });
+        return;
+      }
+      if (name === "credential_metadata") {
         writeResult(response, id, {
           structuredContent: { ok: true },
           content: [{ type: "text", text: '{"ok":true}' }],
           _meta: { token: UPSTREAM_SECRET },
+        });
+        return;
+      }
+      if (name === "issued_credential_metadata") {
+        const text = `{'agent_id': 'agent_fixture', 'username': 'fixture', 'token': '${UPSTREAM_SECRET}', 'message': 'verified'}`;
+        writeResult(response, id, {
+          structuredContent: { result: text },
+          content: [{ type: "text", text }],
+          _meta: { trace: UPSTREAM_SECRET },
+        });
+        return;
+      }
+      if (name === "stored_credential_metadata") {
+        writeResult(response, id, {
+          structuredContent: { ok: true },
+          content: [{ type: "text", text: '{"ok":true}' }],
+          _meta: { trace: UPSTREAM_SECRET },
+        });
+        return;
+      }
+      if (name === "content_credential_metadata") {
+        writeResult(response, id, {
+          structuredContent: { ok: true },
+          content: [
+            { type: "text", text: '{"ok":true}', _meta: { authorization: UPSTREAM_SECRET } },
+          ],
+        });
+        return;
+      }
+      if (name === "unexpected_metadata") {
+        writeResult(response, id, {
+          structuredContent: { ok: true },
+          content: [{ type: "text", text: '{"ok":true}' }],
+          metadata: { token: UPSTREAM_SECRET },
         });
         return;
       }
@@ -315,6 +479,69 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
   await assert.rejects(client.callTool("duplicate_content", {}), (error: unknown) =>
     assertSafeError(error, "central_mcp_response_invalid"),
   );
+  assert.deepEqual(await client.callTool("standard_metadata", {}), { ok: true });
+  assert.deepEqual(await client.callTool("string_wrapped_object", {}), { ok: true });
+  assert.deepEqual(await client.callTool("string_wrapped_text", {}), { result: "accepted" });
+  assert.deepEqual(await client.callTool("python_wrapped_object", {}), {
+    ok: true,
+    items: [{ id: "one", missing: null }],
+    count: 1,
+    ratio: -150,
+  });
+  assert.deepEqual(await client.callTool("python_wrapped_array", {}), {
+    result: [{ name: "send", enabled: true }, null],
+  });
+  assert.deepEqual(await client.callTool("json_wrapped_array", {}), {
+    result: [{ name: "send", enabled: true }, null],
+  });
+  assert.deepEqual(await client.callTool("python_wrapped_escapes", {}), {
+    message: "Agent's ready",
+    escaped: "line\nnext",
+    unicode: "A",
+  });
+  await assert.rejects(client.callTool("python_unsupported_expression", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("python_json_keyword", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("mixed_literal_keywords", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("python_json_escape", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("python_prefixed_comment", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("python_wrapped_tuple", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("python_duplicate_key", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("json_duplicate_key", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  let depth100: unknown = "ok";
+  for (let depth = 0; depth < 100; depth += 1) depth100 = { value: depth100 };
+  assert.deepEqual(await client.callTool("python_depth_100", {}), depth100);
+  await assert.rejects(client.callTool("python_depth_101", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("credential_metadata", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("issued_credential_metadata", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(
+    client.callTool("stored_credential_metadata", {}, undefined, UPSTREAM_SECRET),
+    (error: unknown) => assertSafeError(error, "central_mcp_response_invalid"),
+  );
+  await assert.rejects(client.callTool("content_credential_metadata", {}), (error: unknown) =>
+    assertSafeError(error, "central_mcp_response_invalid"),
+  );
   await assert.rejects(client.callTool("unexpected_metadata", {}), (error: unknown) =>
     assertSafeError(error, "central_mcp_response_invalid"),
   );
@@ -326,6 +553,27 @@ test("turns tool, protocol, and noncanonical result failures into fixed safe err
     "protocol_failure",
     "authentication_failure",
     "duplicate_content",
+    "standard_metadata",
+    "string_wrapped_object",
+    "string_wrapped_text",
+    "python_wrapped_object",
+    "python_wrapped_array",
+    "json_wrapped_array",
+    "python_wrapped_escapes",
+    "python_unsupported_expression",
+    "python_json_keyword",
+    "mixed_literal_keywords",
+    "python_json_escape",
+    "python_prefixed_comment",
+    "python_wrapped_tuple",
+    "python_duplicate_key",
+    "json_duplicate_key",
+    "python_depth_100",
+    "python_depth_101",
+    "credential_metadata",
+    "issued_credential_metadata",
+    "stored_credential_metadata",
+    "content_credential_metadata",
     "unexpected_metadata",
     "mismatched_content",
   ]);
