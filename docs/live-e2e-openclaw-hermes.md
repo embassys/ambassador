@@ -316,7 +316,7 @@ Use live central only after the fixture lane passes. Run the cleanup below first
 
 Start the live-central smoke test outside Docker on a dedicated OS test account or host with empty approved `a2a-gateway` state. From a fresh checkout at the candidate commit, repeat the release checks and `pnpm pack`, then install that tarball with `pnpm --allow-build=better-sqlite3 add --global <candidate-tarball>`. Do not use a previously published or pre-existing global gateway.
 
-Generate a new private token with `openssl rand -hex 24`, set the two HTTPS development endpoints, use a fresh mailbox, and follow the natural registration and code-only verification flow. Never use the deterministic fixture token with live central.
+Generate a new private token with `openssl rand -hex 24`, source the checked-in public development endpoints with `source live-central.env`, use a fresh mailbox, and follow the natural registration and code-only verification flow. Never add tokens, email addresses, or verification codes to `live-central.env`, and never use the deterministic fixture token with live central.
 
 Check these items without recording MCP bodies:
 
