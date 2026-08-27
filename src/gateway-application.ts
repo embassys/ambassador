@@ -1,5 +1,6 @@
 import { CentralMcpClient, CentralMcpError } from "./central-mcp.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
+import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
 import { type LocalMcpRouter, LocalMcpServer } from "./local-mcp.js";
 import {
@@ -24,6 +25,7 @@ export interface GatewayApplicationOptions {
   centralApiUrl?: string;
   centralMcpUrl?: string;
   credentialStore?: CredentialStore;
+  verboseTranscript?: DevelopmentVerboseTranscript;
 }
 
 export interface RunningGatewayApplication {
@@ -130,7 +132,12 @@ export async function openGatewayApplication(
   const central =
     options.centralMcpUrl === undefined
       ? undefined
-      : new CentralMcpClient({ centralMcpUrl: options.centralMcpUrl });
+      : new CentralMcpClient({
+          centralMcpUrl: options.centralMcpUrl,
+          ...(options.verboseTranscript === undefined
+            ? {}
+            : { verboseTranscript: options.verboseTranscript }),
+        });
   const controller = new AbortController();
   let identity: GatewayIdentity | undefined;
   let relay: NotificationRelay | undefined;
@@ -179,12 +186,16 @@ export async function openGatewayApplication(
   const startRelay = (centralToken: string): void => {
     if (relay !== undefined) return;
     if (options.centralApiUrl === undefined) throw safeFailure();
+    options.verboseTranscript?.addSecret(centralToken);
     const nextRelay = new NotificationRelay({
       journal,
       centralApiUrl: options.centralApiUrl,
       centralToken,
       webhookUrl: options.webhookUrl,
       webhookToken: options.webhookToken,
+      ...(options.verboseTranscript === undefined
+        ? {}
+        : { verboseTranscript: options.verboseTranscript }),
       pollMessagesThroughMcp: async (signal) => {
         try {
           const result = await requireCentral().callTool(
@@ -273,6 +284,17 @@ export async function openGatewayApplication(
         }
         return result;
       } catch (error) {
+        options.verboseTranscript?.record({
+          boundary: "gateway",
+          direction: "error",
+          body: {
+            tool: name,
+            error:
+              error instanceof Error
+                ? { name: error.name, message: error.message }
+                : { value: String(error) },
+          },
+        });
         if (
           error instanceof CentralMcpError &&
           error.code === "central_mcp_authentication_failed"
@@ -291,7 +313,11 @@ export async function openGatewayApplication(
     },
   };
 
-  local = new LocalMcpServer(options.webhookToken, router);
+  local = new LocalMcpServer(options.webhookToken, router, {
+    ...(options.verboseTranscript === undefined
+      ? {}
+      : { verboseTranscript: options.verboseTranscript }),
+  });
   try {
     await local.listen();
     identity = await GatewayIdentity.open(credentialStore);

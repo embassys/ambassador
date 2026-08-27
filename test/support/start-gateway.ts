@@ -47,6 +47,7 @@ export async function startGateway(
     centralMcpUrl: string;
     artifactRoot?: string;
     credentialStore?: TestOverrides["credentialStore"];
+    verbose?: boolean;
   },
 ): Promise<RunningGateway> {
   const directory =
@@ -101,7 +102,12 @@ export async function startGateway(
   };
 
   const completion = runCli(
-    ["start", `--webhook-url=${options.webhookUrl}`, "--webhook-token-env=A2A_WEBHOOK_TOKEN"],
+    [
+      "start",
+      `--webhook-url=${options.webhookUrl}`,
+      "--webhook-token-env=A2A_WEBHOOK_TOKEN",
+      ...(options.verbose === true ? ["--verbose=true"] : []),
+    ],
     context,
   );
   let stopped: Promise<number> | undefined;

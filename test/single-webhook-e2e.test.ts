@@ -777,6 +777,57 @@ test("the CLI completes the flow through development central URLs", async (t) =>
   }
 });
 
+test("development verbose mode prints bodies to stderr and redacts credentials and codes", async (t) => {
+  const central = await startFakeCentral(t);
+  central.setApiPollAvailable(false);
+  central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
+  const webhook = await startFakeWebhook(t);
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    verbose: true,
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+  await client.callTool("register_agent", {
+    username: "verbose-fixture-agent",
+    email: EMAIL,
+    display_name: "Verbose Fixture Agent",
+  });
+  await client.callTool("verify_email", { email: EMAIL, code: CODE });
+  await webhook.waitForWake();
+  const polled = await client.callTool("poll_messages", { timeout: 0 });
+  assert.equal((polled.messages as Array<{ id: string }>)[0]?.id, MESSAGE_ID);
+  await client.callTool("ack_message", { message_id: MESSAGE_ID });
+  assert.equal(await gateway.stop(), 0);
+
+  const stderr = gateway.stderr();
+  for (const visible of [
+    EMAIL,
+    "Verbose Fixture Agent",
+    MESSAGE_CONTENT,
+    "register_agent",
+    "verify_email",
+    "poll_messages",
+    "ack_message",
+    "central_mcp",
+    "local_mcp",
+    "central_rest",
+    "webhook",
+  ]) {
+    assert.ok(stderr.includes(visible), `verbose transcript omitted ${visible}`);
+  }
+  for (const forbidden of [WEBHOOK_TOKEN, central.jwt, CODE]) {
+    assert.equal(stderr.includes(forbidden), false);
+  }
+  assert.match(stderr, /<redacted>/u);
+  await scanFiles(gateway.artifactRoot, [central.jwt, EMAIL, CODE, MESSAGE_CONTENT]);
+});
+
 test("the built CLI stays foreground, owns one instance, and stops on SIGTERM", async (t) => {
   const webhook = await startFakeWebhook(t);
   const token = "fedcba9876543210fedcba9876543210fedcba9876543210";
