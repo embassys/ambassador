@@ -70,15 +70,15 @@ If persistence fails, verification does not report local success. A second verif
 
 ### Delivery
 
-1. The gateway sends `GET /api/poll_messages?timeout=30` with the stored JWT.
-2. The central service returns full queued messages and atomically marks them delivered.
+1. The gateway sends `GET /api/poll_messages?timeout=30` with the stored JWT. An explicit `404` switches that process to the MCP `poll_messages` tool with a 20-second timeout; no other REST outcome triggers the fallback.
+2. The central service returns full queued messages through REST or MCP and atomically marks them delivered.
 3. The gateway checks JSON depth and structural limits before parsing, validates at most 256 messages and 512 KiB of normalized result JSON, keeps the bodies only in memory, and stores only present message IDs in SQLite.
 4. The webhook receives a fixed instruction, bearer and timestamped HMAC authentication, and ID-based deduplication headers. An ID-less message receives a process-local unique wake key but is not journaled.
 5. The agent calls the gateway's local MCP `poll_messages` tool. The gateway serves the in-memory inbox without requiring a central MCP catalog request.
 6. For an ID-bearing message, the agent calls `ack_message`; the gateway forwards it centrally and deletes the durable ID and in-memory body only after central confirms `status: "acked"`.
 7. An ID-less message is returned once, is treated as unique, and is neither deduplicated nor acknowledged.
 
-The central API has no delivered-message recovery operation. A gateway stop or crash after the consuming REST poll but before local processing therefore loses the in-memory body. The gateway discards every journal row on restart rather than waking an agent for unavailable content. Central redelivery or a delivered-message fetch API is required to close this recovery gap.
+The central service has no delivered-message recovery operation. A gateway stop or crash after a consuming REST or MCP poll but before local processing therefore loses the in-memory body. The gateway discards every journal row on restart rather than waking an agent for unavailable content. Central redelivery or a delivered-message fetch API is required to close this recovery gap.
 
 ## Ownership
 
@@ -86,12 +86,12 @@ The central API has no delivered-message recovery operation. A gateway stop or c
 | --- | --- |
 | Central service | Registration, email verification, agent JWT issuance, authorization, message content, permissions, and MCP tools |
 | Gateway MCP path | Local bearer authentication, bootstrap tools, JWT capture, token-free local results, in-memory message retrieval, transient upstream `token` injection, limits, and cancellation |
-| Gateway relay | Consuming full-message polling, bounded in-memory bodies, ID-only durable wake state, retries, and acknowledgement observation |
+| Gateway relay | Consuming REST polling with a 404-only MCP fallback, bounded in-memory bodies, ID-only durable wake state, retries, and acknowledgement observation |
 | Local runtime | User interaction, MCP tool use, model execution, and webhook handling |
 
 ## Current release boundary
 
-Version `0.2.4` packages the single-webhook replacement, compatibility with the live central REST and MCP interfaces, and strict relay amplification limits for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
+Version `0.2.5` packages the single-webhook replacement, compatibility with the live central REST and MCP interfaces, a 404-only MCP notification fallback, and strict relay amplification limits for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
 The replacement keeps Node 24, npm-registry distribution, pnpm project tooling, SQLite for ID-only relay state, bounded in-memory message handling, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central recovery work listed below.
 
