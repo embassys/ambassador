@@ -4,7 +4,7 @@ Status: proposed for review
 
 These requests are ordered by importance. They do not change the accepted v1 gateway protocol.
 
-`Now` describes the inspected central behavior reproduced by this repository's independent fixtures. The supplied live tunnel returns `404`, so these points are not a fresh observation of the hosted deployment.
+`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixtures reproduce that behavior. The supplied live tunnel returns `404`, so deployment of that revision was not checked.
 
 ## 1. Add a durable message cursor
 
@@ -129,6 +129,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   central -> mark message delivered
   gateway -> crash before agent processes it
   central -> no operation lists messages that still need processing
+  central -> delete the delivered row after 30 days
   ```
 
   There is no cursor today and no recovery operation for the lost body.
@@ -198,9 +199,15 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   ```text
   first ack_message(message_123)  -> {message_id: message_123, status: acked}
   second ack_message(message_123) -> {message_id: message_123, status: acked}
+  expired message                 -> {message_id: message_123, status: expired}
+  unknown message                 -> message_not_found
   ```
 
   Returning the same successful result for repeated calls is idempotent acknowledgement.
+
+  `acked`, `expired`, and `message_not_found` are distinct results. Do not collapse them into one `404` or one MCP error string.
+
+  The gateway may stop local wake retries for `acked` or `expired`. Only `acked` confirms that central recorded agent processing.
 
   Reading or watching a message never removes it. Only a successful `ack_message` makes its content unavailable.
 
