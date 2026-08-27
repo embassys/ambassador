@@ -2,13 +2,13 @@
 
 The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
-Version `0.2.5` matches the live central service's consuming notification API and authenticated MCP operations. If the public REST poll route returns `404`, it uses the central MCP `poll_messages` tool instead. This is not a production release because central cannot recover delivered messages after a gateway restart.
+Version `0.2.6` adds the temporary credential-redacted development transcript to the live central service integration. If the public REST poll route returns `404`, it uses the central MCP `poll_messages` tool instead. This is not a production release because central cannot recover delivered messages after a gateway restart.
 
 ## Target usage
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.5`
+- macOS or Linux; Windows remains unqualified for `0.2.6`
 - Node.js 24.19.x
 - pnpm 11.22.0 through Corepack
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
@@ -25,7 +25,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.5
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.6
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -48,6 +48,17 @@ a2a-gateway start \
 ```
 
 Only the `--name=value` form is accepted. The resolved webhook token must match `[0-9a-f]{48}`. The gateway does not accept a central JWT, configured local-runtime agent ID, binding ID, configuration path, or literal token option.
+
+For a temporary live-development transcript, add `--verbose=true`. It is accepted only when both development endpoint variables are set:
+
+```sh
+a2a-gateway start \
+  --webhook-url=http://127.0.0.1:18789/hooks/agent \
+  --webhook-token-env=OPENCLAW_HOOK_TOKEN \
+  --verbose=true
+```
+
+Verbose mode prints request and response bodies to stderr. It redacts tokens, credential headers, webhook signatures, cookies, and six-digit verification codes. Email, task, message, action, and permission data may appear in terminal history. ADR 0022 and `docs/development-todos.md` require removing this option after the hosted flow is stable.
 
 Successful startup prints:
 
@@ -103,11 +114,11 @@ The gateway first uses `GET /api/poll_messages?timeout=30`. If that route explic
 
 ID-less messages are treated as unique one-shot deliveries. They are not journaled, deduplicated, or acknowledged. Because central cannot re-fetch delivered messages, stopping or crashing the gateway before processing loses the in-memory body; production still requires central redelivery or delivered-message retrieval.
 
-SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+SQLite remains ID-only. Registration data, verification codes, central JWT plaintext, task content, permissions, tool arguments, and MCP responses never enter SQLite, configuration, normal logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles. The explicit development verbose mode is the temporary stderr-only exception described above.
 
 ## Current implementation
 
-The source tree and `0.2.5` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a memory-only inbox capped at 256 messages and 512 KiB of normalized result JSON. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
+The source tree and `0.2.6` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a memory-only inbox capped at 256 messages and 512 KiB of normalized result JSON. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
 
 ## Development
 

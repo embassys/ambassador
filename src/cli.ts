@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { CredentialStore } from "./credential-store.js";
+import { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { GatewayError } from "./errors.js";
 import { openGatewayApplication, type RunningGatewayApplication } from "./gateway-application.js";
 import {
@@ -96,11 +97,22 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     const webhookToken = resolveWebhookToken(context.env, parsed.webhookTokenEnv);
     const developmentCentralUrls =
       context.testOverrides === undefined ? resolveDevelopmentCentralUrls(context.env) : undefined;
+    if (
+      parsed.verbose &&
+      context.testOverrides === undefined &&
+      developmentCentralUrls === undefined
+    ) {
+      throw new GatewayOptionsError(2);
+    }
+    const verboseTranscript = parsed.verbose
+      ? new DevelopmentVerboseTranscript(context.io.stderr, [webhookToken])
+      : undefined;
     application = await openGatewayApplication({
       webhookUrl: parsed.webhookUrl,
       webhookToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
+      ...(verboseTranscript === undefined ? {} : { verboseTranscript }),
       ...(context.testOverrides === undefined
         ? developmentCentralUrls
         : {

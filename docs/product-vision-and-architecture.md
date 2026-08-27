@@ -17,13 +17,13 @@ The same bearer token authenticates calls from the local MCP client. The gateway
 ## Rules
 
 - One process owns one webhook target and one central identity.
-- The process runs in the foreground and accepts exactly two required named startup options in `--name=value` form.
+- The process runs in the foreground and accepts exactly two required named startup options in `--name=value` form. The temporary development-only `--verbose=true` option is allowed only with the paired development central endpoints.
 - The MCP listener binds only to `127.0.0.1:8787` and authenticates every request with the webhook bearer token.
 - Before enrollment, the local MCP catalog contains only the central-JWT-exempt registration and verification tools.
 - The gateway captures the central JWT from a successful verification response before returning a token-free result to the agent.
 - Future central MCP calls and notification polls receive the stored JWT from the gateway. Local tool schemas never contain a JWT argument; the proxy adds `token` only to the transient upstream tool call required by the current central MCP contract.
 - The consuming notification response and its message bodies remain in bounded process memory only. The durable notification journal contains opaque IDs and webhook relay state only.
-- MCP arguments and results, task content, permission data, registration email, verification codes, and plaintext JWTs never enter SQLite, configuration, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+- MCP arguments and results, task content, permission data, registration email, verification codes, and plaintext JWTs never enter SQLite, configuration, normal logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles. ADR 0022 temporarily permits an explicit development transcript on stderr. It redacts credentials and verification codes but may print other request and response content.
 - The gateway does not run a model or hold model-provider credentials.
 - No listener binds beyond loopback.
 
@@ -91,7 +91,7 @@ The central service has no delivered-message recovery operation. A gateway stop 
 
 ## Current release boundary
 
-Version `0.2.5` packages the single-webhook replacement, compatibility with the live central REST and MCP interfaces, a 404-only MCP notification fallback, and strict relay amplification limits for development use. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
+Version `0.2.6` packages the single-webhook replacement, compatibility with the live central REST and MCP interfaces, a 404-only MCP notification fallback, strict relay amplification limits, and the temporary credential-redacted development transcript. A working development flow supplies both `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`; they are temporary environment overrides, not CLI options or production constants.
 
 The replacement keeps Node 24, npm-registry distribution, pnpm project tooling, SQLite for ID-only relay state, bounded in-memory message handling, bounded HTTP operations, and singleton locking. It removes general JSON configuration, runtime presets, agent management, and native service installation. Production use remains blocked on the central recovery work listed below.
 

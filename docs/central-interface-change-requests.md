@@ -295,7 +295,7 @@ The current v1 gateway remains memory-only with an ID-only journal. This documen
   A2A_DEV_CENTRAL_MCP_URL=<temporary URL>
   ```
 
-  Gateway `0.2.5` depends on the consuming v1 behavior. It starts with REST and uses MCP only after an explicit REST `404`.
+  Gateway `0.2.5` and `0.2.6` depend on the consuming v1 behavior. They start with REST and use MCP only after an explicit REST `404`.
 
 - **Want**
 

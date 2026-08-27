@@ -173,7 +173,8 @@ docker run --detach \
   a2a-gateway-e2e \
   start \
   --webhook-url=http://127.0.0.1:18789/hooks/agent \
-  --webhook-token-env=A2A_HOOK_TOKEN >/dev/null
+  --webhook-token-env=A2A_HOOK_TOKEN \
+  --verbose=true
 
 for _ in $(seq 1 60); do
   if docker logs a2a-e2e-gateway 2>&1 | grep --fixed-strings --line-regexp \
@@ -277,7 +278,8 @@ Pass criteria:
 - OpenClaw calls `poll_messages` without a local credential argument.
 - OpenClaw calls `ack_message` with the returned opaque ID.
 - Fixture inspection reports the message status as `acked`.
-- Gateway state, logs, and output contain no synthetic content, email, code, webhook token, or plaintext central JWT.
+- Gateway durable state contains no synthetic content, email, code, webhook token, or plaintext central JWT.
+- With `--verbose=true`, stderr includes the expected synthetic content and email while redacting verification codes, webhook credentials, and central JWTs.
 
 Inspect status flags only:
 

@@ -11,6 +11,7 @@ export class GatewayOptionsError extends Error {
 export interface GatewayStartOptions {
   webhookUrl: string;
   webhookTokenEnv: string;
+  verbose: boolean;
 }
 
 export interface DevelopmentCentralUrls {
@@ -83,12 +84,14 @@ function parseDevelopmentCentralUrl(value: string | undefined): string {
 }
 
 export function parseGatewayStartOptions(args: string[]): GatewayStartOptions {
-  if (args.length !== 3 || args[0] !== "start") {
+  if ((args.length !== 3 && args.length !== 4) || args[0] !== "start") {
     throw new GatewayOptionsError(2);
   }
 
   let webhookUrl: string | undefined;
   let webhookTokenEnv: string | undefined;
+  let verbose = false;
+  let verboseSeen = false;
 
   for (const argument of args.slice(1)) {
     if (argument.startsWith("--webhook-url=")) {
@@ -111,6 +114,13 @@ export function parseGatewayStartOptions(args: string[]): GatewayStartOptions {
       continue;
     }
 
+    if (argument === "--verbose=true") {
+      if (verboseSeen) throw new GatewayOptionsError(2);
+      verbose = true;
+      verboseSeen = true;
+      continue;
+    }
+
     throw new GatewayOptionsError(2);
   }
 
@@ -118,7 +128,7 @@ export function parseGatewayStartOptions(args: string[]): GatewayStartOptions {
     throw new GatewayOptionsError(2);
   }
 
-  return { webhookUrl, webhookTokenEnv };
+  return { webhookUrl, webhookTokenEnv, verbose };
 }
 
 export function resolveWebhookToken(environment: NodeJS.ProcessEnv, variableName: string): string {

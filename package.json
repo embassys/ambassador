@@ -1,6 +1,6 @@
 {
   "name": "@a2adev/gateway",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Local A2A gateway for waking AI agent runtimes",
   "license": "MIT",
   "repository": {
