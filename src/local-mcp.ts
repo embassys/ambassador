@@ -14,6 +14,7 @@ import {
   type Tool,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
+import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { serializeLocalToolResult } from "./local-tool-result.js";
 import type { CentralToolDefinition } from "./mcp-contract.js";
 
@@ -37,6 +38,7 @@ export interface LocalMcpRouter {
 export interface LocalMcpServerOptions {
   port?: number;
   requestTimeoutMs?: number;
+  verboseTranscript?: DevelopmentVerboseTranscript;
 }
 
 interface McpSession {
@@ -205,6 +207,7 @@ export class LocalMcpServer {
   readonly #expectedAuthorizationDigest: Buffer;
   readonly #requestTimeoutMs: number;
   readonly #port: number;
+  readonly #verboseTranscript: DevelopmentVerboseTranscript | undefined;
   readonly #sessions = new Map<string, McpSession>();
   readonly #sessionRecords = new Set<McpSession>();
   #activeToolCalls = 0;
@@ -218,6 +221,7 @@ export class LocalMcpServer {
   ) {
     this.#port = options.port ?? 8787;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? LOCAL_REQUEST_TIMEOUT_MS;
+    this.#verboseTranscript = options.verboseTranscript;
     if (!Number.isInteger(this.#port) || this.#port < 0 || this.#port > 65_535) {
       throw new Error("Invalid MCP listener port");
     }
@@ -397,6 +401,14 @@ export class LocalMcpServer {
     let transientSession = false;
     try {
       const parsedBody = request.method === "POST" ? await readJsonBody(request) : undefined;
+      this.#verboseTranscript?.record({
+        boundary: "local_mcp",
+        direction: "request",
+        method: request.method ?? "GET",
+        url: this.endpoint,
+        headers: request.headers as Record<string, unknown>,
+        body: parsedBody,
+      });
       if (Array.isArray(parsedBody)) {
         safeHttpError(response, 400);
         return;
@@ -428,7 +440,9 @@ export class LocalMcpServer {
         { signal: controller.signal },
       );
       const webResponse = await record.transport.handleRequest(webRequest, { parsedBody });
-      await writeWebResponse(request, response, webResponse);
+      const tracedResponse =
+        this.#verboseTranscript?.wrapHttpResponse("local_mcp", webResponse) ?? webResponse;
+      await writeWebResponse(request, response, tracedResponse);
       if (transientSession && record.id === undefined) await this.#closeSession(record);
     } catch (error) {
       if (transientSession && record !== undefined && record.id === undefined) {

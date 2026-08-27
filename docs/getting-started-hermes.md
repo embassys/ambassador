@@ -6,7 +6,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.5`.
+- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.6`.
 - Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
@@ -38,7 +38,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.5
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.6
 ```
 
 ## 2. Create the shared local token
@@ -92,7 +92,7 @@ a2a-gateway start \
 
 Remote development URLs must use `https://`. A service on the same computer may use `http://127.0.0.1:<port>`.
 
-Keep the exact endpoint pair used during enrollment. If the REST poll route returns `404`, gateway `0.2.5` automatically polls through the MCP URL instead; no endpoint change is needed.
+Keep the exact endpoint pair used during enrollment. If the REST poll route returns `404`, gateway `0.2.6` automatically polls through the MCP URL instead; no endpoint change is needed.
 
 Successful startup prints:
 

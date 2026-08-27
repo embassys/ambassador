@@ -204,6 +204,17 @@ test("invalid startup forms are rejected without reflecting secret-like values",
       env: { A2A_WEBHOOK_TOKEN: "secret-like-value\nsecond-line" },
       exitCode: 4,
     },
+    {
+      name: "verbose without development endpoints",
+      args: [
+        "start",
+        `--webhook-url=${validUrl}`,
+        "--webhook-token-env=A2A_WEBHOOK_TOKEN",
+        "--verbose=true",
+      ],
+      env: { A2A_WEBHOOK_TOKEN: "0123456789abcdef0123456789abcdef0123456789abcdef" },
+      exitCode: 2,
+    },
   ];
 
   for (const item of cases) {

@@ -18,3 +18,4 @@ None.
 - ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.
 - ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.
 - ADR 0021 permits bounded, non-executing normalization of the development central MCP server's mirrored JSON or Python-literal string results.
+- ADR 0022 temporarily permits `--verbose=true` with development endpoints so live MCP and polling failures can be diagnosed from a credential-redacted stderr transcript. A TODO requires its removal.

@@ -14,7 +14,7 @@ The earlier CLI and configuration model asked the gateway to discover or configu
 
 One gateway process owns one webhook target and, after enrollment, one central agent identity. It does not know the local runtime type or a configured local-runtime agent ID.
 
-The normal command has exactly two required named options:
+The normal command has exactly two required named options. ADR 0022 temporarily permits one additional `--verbose=true` option when the paired development endpoints are present:
 
 ```text
 a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
@@ -63,7 +63,7 @@ The fixed wake body omits `agentId`, so a webhook owner chooses its default targ
 
 The gateway stores only message IDs and relay state durably. It never stores message bodies, task data, permissions, results, email addresses, verification codes, or plaintext central JWTs in SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
 
-The `0.2.1` through `0.2.5` packages retain the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
+The `0.2.1` through `0.2.6` packages retain the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 

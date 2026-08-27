@@ -10,13 +10,15 @@ The public command is:
 a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 ```
 
-Both options are required exactly once. The CLI accepts only the `--name=value` form. It rejects positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
+The webhook URL and token environment options are required exactly once. The CLI accepts only the `--name=value` form. It also accepts `--verbose=true` once as a temporary development diagnostic when the paired development central endpoints are present. It rejects `--verbose`, other verbose values, positional values, literal-token options, unknown options, setup options, configured local-runtime agent IDs, binding IDs, and configuration paths.
 
-The `0.2.5` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
+The `0.2.6` development flow reads a paired endpoint override from `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL`. These values do not add CLI options. Set both for a working development flow. Remote values require HTTPS; plain HTTP is accepted only for `127.0.0.1`, `[::1]`, or `localhost`. URL credentials, queries, fragments, whitespace, and line breaks are rejected. Stable production endpoints remain product constants once chosen.
 
 `--webhook-url` requires `http://127.0.0.1:<port>/...` or `https://127.0.0.1:<port>/...`, without URL credentials or fragments. Hostnames, non-loopback IP addresses, and an omitted port are rejected. Restricting the destination to a literal loopback address prevents disclosure of the bearer that also authenticates local MCP. `--webhook-token-env` accepts an environment-variable name matching `[A-Za-z_][A-Za-z0-9_]*`; the resolved value must contain exactly 192 random bits in `[0-9a-f]{48}` format.
 
-Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Errors never echo an option value, environment value, URL, header, or remote body.
+Invalid command syntax or option values exit `2`. A missing, empty, or line-breaking resolved webhook token exits `4`. Singleton and local state failures exit `7`. Normal errors never echo an option value, environment value, URL, header, or remote body.
+
+With `--verbose=true`, the gateway writes request and response transcripts to stderr. It redacts bearer credentials, credential-named fields, cookie and webhook-signature headers, and verification codes. Other MCP arguments, results, emails, messages, actions, and permission data may appear. The gateway never creates a transcript file. This temporary exception applies only to the paired development endpoints and is tracked for removal in `docs/development-todos.md`.
 
 The process acquires its singleton lock before resolving durable credentials, binding MCP, polling, forwarding tools, or sending webhooks. It binds `127.0.0.1:8787` and prints this line only after the endpoint is ready:
 
@@ -229,7 +231,9 @@ Production limits must be positive constants, tested at and above their boundari
 
 ## Data boundary
 
-Never write task text, prompts, attachments, responses, results, permission details, grants, tool arguments, email addresses, verification codes, webhook tokens, plaintext central JWTs, or MCP request and response bodies to configuration, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles. The upstream MCP request may contain the injected JWT transiently in memory; no retry spool or body capture is allowed.
+Never write task text, prompts, attachments, responses, results, permission details, grants, tool arguments, email addresses, verification codes, webhook tokens, plaintext central JWTs, or MCP request and response bodies to configuration, SQLite, normal logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles. The upstream MCP request may contain the injected JWT transiently in memory; no retry spool or body capture is allowed.
+
+ADR 0022 temporarily permits `--verbose=true` to print development request and response transcripts to stderr. It may print the non-credential data listed above. It must redact webhook and central credentials, credential-named fields, cookie and webhook-signature headers, and verification codes. This exception does not permit transcript files or automatic body capture outside the foreground stderr stream.
 
 The approved credential store is the sole durable exception for the central JWT. Only authenticated ciphertext and the cryptographic metadata defined by ADR 0019 may be written.
 
@@ -241,6 +245,8 @@ The approved credential store is the sole durable exception for the central JWT.
 | C02 | Use split options, positionals, agent IDs, setup, or config flags | Reject with no listener or remote request |
 | C03 | Missing or invalid token environment | Reject without exposing the value |
 | C04 | Second process starts | Fail before credential access, MCP bind, poll, or webhook |
+| C05 | Start with `--verbose=true` and paired development endpoints | Print redacted request and response transcripts to stderr |
+| C06 | Use verbose mode without paired development endpoints or use another verbose form | Reject before binding or making a remote request |
 | M01 | Missing or wrong local bearer | Reject before parsing or forwarding MCP |
 | M02 | Unexpected `Host` or `Origin` | Reject before tool execution |
 | M03 | Bootstrap tool before enrollment | Forward without a central JWT argument |
@@ -271,3 +277,5 @@ The approved credential store is the sole durable exception for the central JWT.
 | A06 | `ack_message` fails, is uncertain, or returns a mismatched result | Keep the body locally retrievable and do not mark its wake terminal |
 | S01 | Inspect files, SQLite, output, logs, diagnostics, and errors | Find no forbidden plaintext or MCP body data |
 | S02 | Side-effecting upstream call times out | Do not retry automatically |
+| S03 | Run without `--verbose=true` | Preserve the normal content-blind stdout and stderr boundary |
+| S04 | Run with `--verbose=true` | Print non-credential bodies while redacting tokens, credential headers, and verification codes |

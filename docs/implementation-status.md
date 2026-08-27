@@ -4,7 +4,7 @@ Status as of August 27, 2026.
 
 ## Approved target
 
-- One foreground process starts with `--webhook-url=<url>` and `--webhook-token-env=<name>`.
+- One foreground process starts with `--webhook-url=<url>` and `--webhook-token-env=<name>`. ADR 0022 temporarily permits `--verbose=true` for live development diagnostics.
 - The CLI accepts only named `--name=value` options and has no setup, binding, runtime-discovery, configuration, or service-management flow.
 - The process binds an authenticated Streamable HTTP MCP endpoint at `http://127.0.0.1:8787/mcp` and prints that address after successful startup.
 - The webhook token authenticates both the outbound webhook and every local MCP request.
@@ -41,6 +41,8 @@ Version `0.2.4` caps normalized tool results at 512 KiB, rejects JSON-RPC batche
 
 Version `0.2.5` switches notification polling to the central MCP `poll_messages` tool only after the public REST route returns an explicit `404`. It keeps REST for every other failed or uncertain outcome, injects the central JWT only into the transient MCP call, and applies the existing message and result limits to both paths.
 
+Version `0.2.6` adds the temporary development-only `--verbose=true` transcript for the paired development endpoints. It records local MCP, central MCP, central REST, and webhook request and response details on stderr while redacting credentials, cookies, webhook signatures, and six-digit verification codes. The normal logging boundary and every durable artifact remain content-blind.
+
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
@@ -57,7 +59,7 @@ The user approved the red failures and authorized production implementation on 2
 
 Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
 
-The inspected central implementation returns message content and marks it delivered during REST or MCP polling. Versions `0.2.3` through `0.2.5` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
+The inspected central implementation returns message content and marks it delivered during REST or MCP polling. Versions `0.2.3` through `0.2.6` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
 
 ## Test work
 
