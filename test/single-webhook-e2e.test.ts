@@ -67,6 +67,14 @@ async function scanFiles(root: string, markers: string[]): Promise<void> {
   }
 }
 
+async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) assert.fail("condition was not reached");
+    await delay(1);
+  }
+}
+
 async function waitForWakeState(
   stateRoot: string,
   messageId: string,
@@ -399,6 +407,122 @@ test("an uncertain ack_message outcome keeps the consumed body locally retrievab
   await scanFiles(gateway.artifactRoot, [central.jwt, MESSAGE_CONTENT]);
 });
 
+test("uses MCP polling when the public REST poll route is unavailable", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  central.setApiPollAvailable(false);
+  central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    credentialStore: {
+      async load() {
+        return central.jwt;
+      },
+      async save() {
+        assert.fail("an enrolled gateway must not replace its credential");
+      },
+    },
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+
+  await webhook.waitForWake();
+  assert.equal(central.pollCount(), 1);
+  const pollCall = central.calls.find((call) => call.name === "poll_messages");
+  assert.deepEqual(pollCall, {
+    name: "poll_messages",
+    args: { token: central.jwt, timeout: 20 },
+  });
+  const polled = await client.callTool("poll_messages", { timeout: 0 });
+  assert.deepEqual(polled, {
+    messages: [{ id: MESSAGE_ID, content: MESSAGE_CONTENT }],
+  });
+  await client.callTool("ack_message", { message_id: MESSAGE_ID });
+  assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, true);
+  assert.equal(await gateway.stop(), 0);
+  await scanFiles(gateway.artifactRoot, [central.jwt, MESSAGE_CONTENT]);
+});
+
+test("stops MCP polling after central authentication fails", async (t) => {
+  const central = await startFakeCentral(t);
+  const webhook = await startFakeWebhook(t);
+  central.setApiPollAvailable(false);
+  central.setMcpPollMode("authentication_failure");
+  const gateway = await startGateway(t, {
+    webhookUrl: webhook.url,
+    webhookToken: WEBHOOK_TOKEN,
+    centralApiUrl: central.apiUrl,
+    centralMcpUrl: central.mcpUrl,
+    credentialStore: {
+      async load() {
+        return central.jwt;
+      },
+      async save() {
+        assert.fail("an enrolled gateway must not replace its credential");
+      },
+    },
+  });
+  const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
+    forbiddenResponseValues: [central.jwt],
+  });
+  await client.initialize();
+
+  await waitFor(() => central.calls.some((call) => call.name === "poll_messages"));
+  await delay(50);
+  assert.equal(central.calls.filter((call) => call.name === "poll_messages").length, 1);
+  await assert.rejects(
+    client.callTool("poll_messages", { timeout: 0 }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(await gateway.stop(), 0);
+});
+
+for (const scenario of [
+  { description: "an invalid", mode: "invalid_result" },
+  { description: "a credential-bearing", mode: "credential_result" },
+] as const) {
+  test(`stops after a consuming MCP poll returns ${scenario.description} result`, async (t) => {
+    const central = await startFakeCentral(t);
+    const webhook = await startFakeWebhook(t);
+    central.setApiPollAvailable(false);
+    central.setMcpPollMode(scenario.mode);
+    central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
+    const gateway = await startGateway(t, {
+      webhookUrl: webhook.url,
+      webhookToken: WEBHOOK_TOKEN,
+      centralApiUrl: central.apiUrl,
+      centralMcpUrl: central.mcpUrl,
+      credentialStore: {
+        async load() {
+          return central.jwt;
+        },
+        async save() {
+          assert.fail("an enrolled gateway must not replace its credential");
+        },
+      },
+    });
+
+    assert.equal(
+      await Promise.race([
+        gateway.waitForExit(),
+        delay(2_000).then(() => assert.fail("gateway did not stop after invalid MCP polling")),
+      ]),
+      7,
+    );
+    assert.equal(central.messageState(MESSAGE_ID).delivered, true);
+    assert.equal(central.calls.filter((call) => call.name === "poll_messages").length, 1);
+    for (const forbidden of [central.jwt, MESSAGE_CONTENT]) {
+      assert.ok(!gateway.stdout().includes(forbidden));
+      assert.ok(!gateway.stderr().includes(forbidden));
+    }
+  });
+}
+
 test("malformed verification output never activates polling or reaches the local result", async (t) => {
   const central = await startFakeCentral(t);
   const webhook = await startFakeWebhook(t);
@@ -599,6 +723,7 @@ test("a stored credential cannot move to different development central endpoints
 
 test("the CLI completes the flow through development central URLs", async (t) => {
   const central = await startFakeCentral(t);
+  central.setApiPollAvailable(false);
   const webhook = await startFakeWebhook(t);
   const gateway = await startGatewayProcess(t, {
     webhookUrl: webhook.url,

@@ -127,6 +127,93 @@ test("buffers the consuming REST response before waking and serves it until ack_
   await running;
 });
 
+test("falls back permanently to MCP polling after an explicit REST 404", async (t) => {
+  const journal = temporaryJournal(t);
+  const controller = new AbortController();
+  const message = fullMessage();
+  let restPolls = 0;
+  let mcpPolls = 0;
+  let wakes = 0;
+  const request: NotificationFetch = async (url) => {
+    if (url.pathname === "/api/poll_messages") {
+      restPolls += 1;
+      return new Response(null, { status: 404 });
+    }
+    wakes += 1;
+    return new Response(null, { status: 202 });
+  };
+  const relay = new NotificationRelay({
+    ...relayOptions(journal, request),
+    pollMessagesThroughMcp: async (signal) => {
+      assert.equal(signal.aborted, false);
+      mcpPolls += 1;
+      if (mcpPolls === 1) return { messages: [message] };
+      return await new Promise<Record<string, unknown>>((_, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+      });
+    },
+  });
+  const running = relay.run(controller.signal);
+
+  await waitFor(() => wakes === 1);
+  assert.equal(restPolls, 1);
+  assert.equal(mcpPolls, 1);
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
+    messages: [message],
+  });
+  assert.equal(relay.confirmContentAcknowledgement(MESSAGE_ID), true);
+  await waitFor(() => mcpPolls >= 2);
+  assert.equal(restPolls, 1);
+  controller.abort();
+  await running;
+});
+
+test("does not switch to MCP polling after a non-404 REST failure", async (t) => {
+  const journal = temporaryJournal(t);
+  const controller = new AbortController();
+  let restPolls = 0;
+  let mcpPolls = 0;
+  const request: NotificationFetch = async () => {
+    restPolls += 1;
+    if (restPolls === 2) controller.abort();
+    return new Response(null, { status: 503 });
+  };
+  const relay = new NotificationRelay({
+    ...relayOptions(journal, request),
+    pollMessagesThroughMcp: async () => {
+      mcpPolls += 1;
+      return { messages: [] };
+    },
+  });
+
+  await relay.run(controller.signal);
+  assert.equal(restPolls, 2);
+  assert.equal(mcpPolls, 0);
+});
+
+test("does not switch to MCP polling after an uncertain REST transport failure", async (t) => {
+  const journal = temporaryJournal(t);
+  const controller = new AbortController();
+  let restPolls = 0;
+  let mcpPolls = 0;
+  const request: NotificationFetch = async () => {
+    restPolls += 1;
+    if (restPolls === 2) controller.abort();
+    throw new Error("uncertain REST outcome");
+  };
+  const relay = new NotificationRelay({
+    ...relayOptions(journal, request),
+    pollMessagesThroughMcp: async () => {
+      mcpPolls += 1;
+      return { messages: [] };
+    },
+  });
+
+  await relay.run(controller.signal);
+  assert.equal(restPolls, 2);
+  assert.equal(mcpPolls, 0);
+});
+
 test("treats ID-less messages as distinct volatile one-shot deliveries", async (t) => {
   const journal = temporaryJournal(t);
   const controller = new AbortController();

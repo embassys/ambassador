@@ -14,6 +14,8 @@ import {
 import { NotificationJournal, validateNotificationId } from "./notification-journal.js";
 import { NotificationRelay, NotificationRelayError } from "./notification-relay.js";
 
+const MCP_NOTIFICATION_POLL_SECONDS = 20;
+
 export interface GatewayApplicationOptions {
   webhookUrl: string;
   webhookToken: string;
@@ -72,6 +74,46 @@ function pollTimeout(arguments_: Record<string, unknown>): number {
     throw new McpContractError();
   }
   return Math.min(arguments_.timeout, 30);
+}
+
+function rethrowMcpNotificationPollError(error: unknown): never {
+  if (error instanceof NotificationRelayError) throw error;
+  if (error instanceof McpContractError) {
+    throw new NotificationRelayError(
+      "invalid_notification_response",
+      "Central notification response is invalid",
+    );
+  }
+  if (error instanceof CentralMcpError) {
+    switch (error.code) {
+      case "central_mcp_authentication_failed":
+        throw new NotificationRelayError(
+          "central_authentication_failed",
+          "Central authentication failed",
+        );
+      case "central_mcp_redirect_rejected":
+        throw new NotificationRelayError(
+          "central_redirect_rejected",
+          "Central notification redirect was rejected",
+        );
+      case "central_mcp_response_invalid":
+        throw new NotificationRelayError(
+          "invalid_notification_response",
+          "Central notification response is invalid",
+        );
+      case "central_mcp_response_too_large":
+        throw new NotificationRelayError(
+          "notification_response_too_large",
+          "Central notification response exceeded its size limit",
+        );
+      case "central_mcp_closed":
+      case "invalid_configuration":
+        throw new NotificationRelayError("relay_failed", "Notification relay failed");
+      default:
+        break;
+    }
+  }
+  throw error;
 }
 
 export async function openGatewayApplication(
@@ -143,6 +185,20 @@ export async function openGatewayApplication(
       centralToken,
       webhookUrl: options.webhookUrl,
       webhookToken: options.webhookToken,
+      pollMessagesThroughMcp: async (signal) => {
+        try {
+          const result = await requireCentral().callTool(
+            "poll_messages",
+            { token: centralToken, timeout: MCP_NOTIFICATION_POLL_SECONDS },
+            signal,
+            centralToken,
+          );
+          assertSafeUpstreamResult(result, centralToken);
+          return result;
+        } catch (error) {
+          rethrowMcpNotificationPollError(error);
+        }
+      },
     });
     relay = nextRelay;
     relayRun = nextRelay.run(controller.signal).catch(async (error: unknown) => {
