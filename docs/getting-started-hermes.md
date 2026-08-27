@@ -7,7 +7,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
 - macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.6`.
-- Node.js 24.19 and pnpm 11.22.0.
+- Node.js 24.19 with npm and `npx`.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
 
@@ -25,21 +25,16 @@ If Desktop uses a local Hermes runtime, run every command in this guide on that 
 
 If Desktop connects to a remote Hermes gateway, run steps 1 through 5 on the remote Hermes host and use the same profile that Desktop connects to. Do not run them on the computer displaying the app. The A2A gateway, MCP endpoint, and Hermes webhook must share one host because every local address in this guide is intentionally `127.0.0.1`.
 
-## 1. Install the gateway
+## 1. Check Node.js
 
 Open a terminal and run:
 
 ```sh
-corepack enable pnpm
-corepack install --global pnpm@11.22.0
-pnpm setup
+node --version
+npx --version
 ```
 
-Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
-
-```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.6
-```
+Node should report version `24.19.x`, and `npx` should print its version. The start command in step 4 downloads and runs the qualified gateway version without a global installation.
 
 ## 2. Create the shared local token
 
@@ -85,7 +80,7 @@ In the same terminal, replace the two example development URLs, then run:
 export A2A_DEV_CENTRAL_API_URL='https://dev.example.com'
 export A2A_DEV_CENTRAL_MCP_URL='https://dev.example.com/mcp'
 
-a2a-gateway start \
+npx --yes @a2adev/gateway@0.2.6 start \
   --webhook-url=http://127.0.0.1:8644/webhooks/a2a \
   --webhook-token-env=A2A_GATEWAY_TOKEN
 ```
