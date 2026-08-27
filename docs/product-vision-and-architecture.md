@@ -75,10 +75,10 @@ If persistence fails, verification does not report local success. A second verif
 3. The gateway checks JSON depth and structural limits before parsing, validates at most 256 messages and 512 KiB of normalized result JSON, keeps the bodies only in memory, and stores only present message IDs in SQLite.
 4. The webhook receives a fixed instruction, bearer and timestamped HMAC authentication, and ID-based deduplication headers. An ID-less message receives a process-local unique wake key but is not journaled.
 5. The agent calls the gateway's local MCP `poll_messages` tool. The gateway serves the in-memory inbox without requiring a central MCP catalog request.
-6. For an ID-bearing message, the agent calls `ack_message`; the gateway forwards it centrally and removes the in-memory body only after central confirms `status: "acked"`.
+6. For an ID-bearing message, the agent calls `ack_message`; the gateway forwards it centrally and deletes the durable ID and in-memory body only after central confirms `status: "acked"`.
 7. An ID-less message is returned once, is treated as unique, and is neither deduplicated nor acknowledged.
 
-The central API has no delivered-message recovery operation. A gateway stop or crash after the consuming REST poll but before local processing therefore loses the in-memory body. The gateway discards the corresponding nonterminal wake state on restart rather than waking an agent for unavailable content. Central redelivery or a delivered-message fetch API is required to close this recovery gap.
+The central API has no delivered-message recovery operation. A gateway stop or crash after the consuming REST poll but before local processing therefore loses the in-memory body. The gateway discards every journal row on restart rather than waking an agent for unavailable content. Central redelivery or a delivered-message fetch API is required to close this recovery gap.
 
 ## Ownership
 

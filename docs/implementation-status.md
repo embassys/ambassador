@@ -37,7 +37,7 @@ Version `0.2.2` projects the live central bootstrap schemas, accepts the central
 
 Version `0.2.3` matches the live consuming REST interface. It buffers one validated full-message response in memory, serves that inbox through local `poll_messages`, forwards the live `{message_id,status:"acked"}` acknowledgement contract, removes `ack_notification`, and handles ID-less messages as unique one-shot deliveries without durable deduplication or acknowledgement.
 
-Version `0.2.4` caps normalized tool results at 512 KiB, notification batches at 256 messages, JSON structure at 16,384 tokens, and nesting at 100 levels before parsing. Local `poll_messages` no longer needs a central MCP catalog request. ID-less wake retries survive an early local poll, and failed, uncertain, or mismatched acknowledgements retain the buffered body.
+Version `0.2.4` caps normalized tool results at 512 KiB, rejects JSON-RPC batches before dispatch, limits notification polls to 256 messages and 16,384 JSON structural tokens, and checks 100 nesting levels before parsing. Local `poll_messages` no longer needs a central MCP catalog request. ID-less wake retries survive an early local poll, failed, uncertain, or mismatched acknowledgements retain the buffered body, and confirmed IDs are deleted from the journal.
 
 ## Production decisions
 

@@ -135,3 +135,31 @@ test("returns a 512 KiB tool result and rejects one byte above it before transpo
     (error: unknown) => error instanceof McpCallError,
   );
 });
+
+test("rejects JSON-RPC batches before dispatching any tool call", async (t) => {
+  const backend = router();
+  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  await server.listen();
+  t.after(() => server.close());
+  const client = new TestMcpClient(server.endpoint, TOKEN);
+  await client.initialize();
+
+  const response = await client.postBatch([
+    {
+      jsonrpc: "2.0",
+      id: 100,
+      method: "tools/call",
+      params: { name: "echo", arguments: { value: "first" } },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 101,
+      method: "tools/call",
+      params: { name: "echo", arguments: { value: "second" } },
+    },
+  ]);
+
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "Request rejected\n");
+  assert.deepEqual(backend.calls, []);
+});

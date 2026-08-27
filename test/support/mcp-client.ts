@@ -113,6 +113,22 @@ export class TestMcpClient {
     return parsed as Record<string, unknown>;
   }
 
+  async postBatch(messages: Record<string, unknown>[]): Promise<Response> {
+    assert.ok(this.#sessionId !== undefined, "MCP client is not initialized");
+    return await fetch(this.#endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        authorization: this.#authorization,
+        "content-type": "application/json",
+        "mcp-protocol-version": "2025-06-18",
+        "mcp-session-id": this.#sessionId,
+      },
+      body: JSON.stringify(messages),
+      redirect: "manual",
+    });
+  }
+
   async waitForNotification(method: string): Promise<void> {
     assert.ok(this.#sessionId !== undefined, "MCP client is not initialized");
     const response = await fetch(this.#endpoint, {

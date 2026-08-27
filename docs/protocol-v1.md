@@ -38,7 +38,7 @@ Missing, malformed, or incorrect authorization returns `401` before parsing or f
 
 The server requires `Host: 127.0.0.1:8787`; another value returns `421`. It accepts a missing `Origin` header; when `Origin` is present, it must be exactly `http://127.0.0.1:8787`, otherwise the request returns `403`. These checks and bearer authentication happen before body parsing.
 
-The listener permits at most 16 KiB of request headers, a 1 MiB request body, a 4 MiB local or upstream response body, 32 active MCP sessions, and 8 concurrent tool calls. Before the MCP SDK creates its structured result and escaped text mirror, the gateway limits the serialized tool result to 512 KiB. This leaves room for both copies and a maximum-size request ID under the 4 MiB transport cap. A limit violation rejects the request without reflecting its body. The listener rejects redirects and does not follow upstream-provided URLs.
+The listener permits at most 16 KiB of request headers, a 1 MiB request body, a 4 MiB local or upstream response body, 32 active MCP sessions, and 8 concurrent tool calls. It rejects JSON-RPC batches before dispatch because multiple side-effecting results cannot safely share the fixed response budget. Before the MCP SDK creates its structured result and escaped text mirror, the gateway limits the serialized tool result to 512 KiB. This leaves room for both copies and a maximum-size request ID under the 4 MiB transport cap. A limit violation rejects the request without reflecting its body. The listener rejects redirects and does not follow upstream-provided URLs.
 
 ## Tool catalog
 
@@ -161,8 +161,7 @@ SQLite stores only:
 - notification ID;
 - delivery state;
 - attempt count and next attempt time;
-- whether a wake may have reached the webhook; and
-- terminal acknowledgement observation.
+- whether a wake may have reached the webhook.
 
 SQLite contains no binding, cursor, webhook URL, webhook token, central JWT, MCP argument, MCP result, registration data, or task content.
 
@@ -172,7 +171,7 @@ An exact repeated ID with an identical body is coalesced while active. One wake 
 
 Each ID-less message is a separate volatile observation, including two structurally identical messages in one response. It receives a random process-local wake key for webhook retry headers but is not written to the journal. Its wake retries until accepted, including when a local poll returns the body before an in-flight wake finishes. The wake is not re-driven after acceptance, and the body is removed after the first local `poll_messages` result. It is never sent to `ack_message`.
 
-Because the central API cannot re-fetch delivered messages and bodies cannot be persisted, a gateway stop or crash with a nonempty inbox loses those bodies. At startup the gateway deletes nonterminal journal rows that no longer have recoverable in-memory bodies, preventing stale wakes. Central redelivery or delivered-message retrieval is required for durable recovery.
+Because the central API cannot re-fetch delivered messages and bodies cannot be persisted, a gateway stop or crash with a nonempty inbox loses those bodies. At startup the gateway deletes every journal row because none has a recoverable in-memory body, preventing stale wakes. Central redelivery or delivered-message retrieval is required for durable recovery.
 
 ## Webhook wake
 
@@ -209,7 +208,7 @@ For an ID-less message, the body uses the generic instruction `An A2A message is
 
 The local agent calls `poll_messages` through the gateway after waking. The gateway validates the local arguments and serves its in-memory inbox without contacting central MCP. A central MCP catalog outage therefore cannot hide content already consumed through REST. ID-bearing messages remain visible on repeated local polls until acknowledged. ID-less messages appear once and are then removed. A positive timeout waits for in-memory work for at most 30 seconds; zero returns immediately.
 
-The local agent calls `ack_message` after processing an ID-bearing message. The gateway forwards it once with the central JWT. A successful live response has exactly `{"message_id":"...","status":"acked"}`. Only then does the gateway mark the ID terminal, stop accepted-wake redelivery, and remove the in-memory body. An uncertain or failed acknowledgement leaves the body available locally; the gateway does not retry the side-effecting call automatically.
+The local agent calls `ack_message` after processing an ID-bearing message. The gateway forwards it once with the central JWT. A successful live response has exactly `{"message_id":"...","status":"acked"}`. Only then does the gateway delete the durable ID, stop accepted-wake redelivery, and remove the in-memory body. An uncertain or failed acknowledgement leaves the body available locally; the gateway does not retry the side-effecting call automatically.
 
 ## Deadlines and limits
 
