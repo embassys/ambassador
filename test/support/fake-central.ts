@@ -101,7 +101,9 @@ export interface FakeCentral {
   pollCount: () => number;
   calls: ToolCallRecord[];
   setApiPollAvailable: (available: boolean) => void;
-  setMcpPollMode: (mode: "normal" | "authentication_failure" | "invalid_result") => void;
+  setMcpPollMode: (
+    mode: "normal" | "authentication_failure" | "credential_result" | "invalid_result",
+  ) => void;
   setPollResponse: (response: unknown) => void;
   setMcpAvailable: (available: boolean) => void;
   setAcknowledgementMode: (mode: "normal" | "mismatch" | "failure" | "disconnect") => void;
@@ -117,7 +119,8 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   let pollCount = 0;
   let pollResponse: unknown;
   let apiPollAvailable = true;
-  let mcpPollMode: "normal" | "authentication_failure" | "invalid_result" = "normal";
+  let mcpPollMode: "normal" | "authentication_failure" | "credential_result" | "invalid_result" =
+    "normal";
   let mcpAvailable = true;
   let acknowledgementMode: "normal" | "mismatch" | "failure" | "disconnect" = "normal";
   const toolDescriptions = new Map<string, string>();
@@ -314,6 +317,17 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
               (item) => !item.delivered && !item.contentAcknowledged,
             );
             for (const item of queued) item.delivered = true;
+            if (mcpPollMode === "credential_result") {
+              json(
+                response,
+                200,
+                toolResult(id, {
+                  messages: queued.map((item) => ({ id: item.id, content: item.content })),
+                  token: CENTRAL_JWT,
+                }),
+              );
+              return;
+            }
             if (mcpPollMode === "invalid_result") {
               json(response, 200, toolResult(id, { unexpected: true }));
               return;
