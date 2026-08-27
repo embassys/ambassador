@@ -9,24 +9,11 @@ Version `0.2.6` adds the temporary credential-redacted development transcript to
 Requirements:
 
 - macOS or Linux; Windows remains unqualified for `0.2.6`
-- Node.js 24.19.x
-- pnpm 11.22.0 through Corepack
+- Node.js 24.19.x with npm and `npx`
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
 - The API and MCP URLs for an A2A development service
 
-Install the package:
-
-```sh
-corepack enable pnpm
-corepack install --global pnpm@11.22.0
-pnpm setup
-```
-
-Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
-
-```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.6
-```
+The commands below use `npx` to download and run the qualified gateway version. No global gateway or pnpm installation is required.
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
 
@@ -42,7 +29,7 @@ Start one foreground gateway:
 ```sh
 export OPENCLAW_HOOK_TOKEN='<OpenClaw-generated-48-hex-hook-token>'
 
-a2a-gateway start \
+npx --yes @a2adev/gateway@0.2.6 start \
   --webhook-url=http://127.0.0.1:18789/hooks/agent \
   --webhook-token-env=OPENCLAW_HOOK_TOKEN
 ```
@@ -52,7 +39,7 @@ Only the `--name=value` form is accepted. The resolved webhook token must match 
 For a temporary live-development transcript, add `--verbose=true`. It is accepted only when both development endpoint variables are set:
 
 ```sh
-a2a-gateway start \
+npx --yes @a2adev/gateway@0.2.6 start \
   --webhook-url=http://127.0.0.1:18789/hooks/agent \
   --webhook-token-env=OPENCLAW_HOOK_TOKEN \
   --verbose=true
