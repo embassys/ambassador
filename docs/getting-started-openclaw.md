@@ -6,7 +6,7 @@ This guide connects one OpenClaw agent to the A2A development service. It works 
 
 - OpenClaw already installed and able to answer a normal chat message.
 - OpenClaw `2026.7.1-2` or newer. This guide and the gateway's compatibility test use `2026.7.1-2`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.3`.
+- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.4`.
 - Node.js 24.19 and pnpm 11.22.0.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
@@ -39,7 +39,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.3
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.4
 ```
 
 Check that the command is available:

@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-25
 
-Updated: 2026-08-27 for the live consuming notification API
+Updated: 2026-08-27 for the live consuming notification API and relay bounds
 
 ## Problem
 
@@ -51,17 +51,17 @@ An upstream authentication failure stops polling and authenticated tools without
 
 ## Notification and wake behavior
 
-The gateway matches the live central API: `GET /api/poll_messages?timeout=30` returns full queued messages and marks them delivered. Because a later central MCP `poll_messages` call cannot retrieve those delivered messages, the gateway keeps the validated response in bounded process memory and serves it from its local `poll_messages` tool. It pauses central polling while that inbox is nonempty, so retained content is bounded by one 4 MiB response. Message bodies never enter SQLite, files, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+The gateway matches the live central API: `GET /api/poll_messages?timeout=30` returns full queued messages and marks them delivered. Because a later central MCP `poll_messages` call cannot retrieve those delivered messages, the gateway keeps the validated response in bounded process memory and serves it from its local `poll_messages` tool without another central MCP request. The 4 MiB transport cap is followed by pre-parse limits of 100 JSON levels and 16,384 structural tokens. A valid inbox contains at most 256 messages and 512 KiB of normalized local result JSON. Central polling pauses while a body or volatile wake remains from that response. Message bodies never enter SQLite, files, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
-Present message IDs are stored in the ID-only journal and drive webhook retry and accepted-wake redelivery until central `ack_message` confirms `{message_id, status: "acked"}`. ID-less messages are distinct observations: each receives a process-local wake key, is returned once through local `poll_messages`, and is neither durably deduplicated nor acknowledged.
+Present message IDs are stored in the ID-only journal and drive webhook retry and accepted-wake redelivery until central `ack_message` confirms `{message_id, status: "acked"}`. Confirmation deletes the journal row so acknowledged traffic cannot accumulate durable state. Failed, uncertain, and mismatched acknowledgements leave the body available. ID-less messages are distinct observations: each receives a process-local wake key, is returned once through local `poll_messages`, and is neither durably deduplicated nor acknowledged. An early local poll does not cancel its pending webhook retry.
 
-The live API has no operation that retrieves delivered but unacknowledged messages. A process stop or crash after the REST poll therefore loses the in-memory body. On restart the gateway discards nonterminal wake rows whose bodies cannot be recovered. This degraded recovery is accepted for the development release; production requires central redelivery or delivered-message retrieval.
+The live API has no operation that retrieves delivered but unacknowledged messages. A process stop or crash after the REST poll therefore loses the in-memory body. On restart the gateway discards every wake row because no body can be recovered. This degraded recovery is accepted for the development release; production requires central redelivery or delivered-message retrieval.
 
 The fixed wake body omits `agentId`, so a webhook owner chooses its default target. An ID-bearing wake varies only by its opaque message ID; an ID-less wake uses a generic fixed instruction and a process-local correlation key. Every request carries the configured bearer token and a generic HMAC V2 signature over the exact body, using the same token as its key and a current Unix timestamp. `Idempotency-Key` and `X-Request-ID` carry the message ID or volatile correlation key. The gateway sends all of these headers for every target; it does not select a runtime or authentication mode.
 
 The gateway stores only message IDs and relay state durably. It never stores message bodies, task data, permissions, results, email addresses, verification codes, or plaintext central JWTs in SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
 
-The `0.2.1` through `0.2.3` packages retain the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
+The `0.2.1` through `0.2.4` packages retain the `0.2.0` loopback Hermes bridge for existing installations that still target port `8645`, but current setup sends signed wakes directly to Hermes. The compatibility file does not change the gateway process or add runtime selection.
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 
@@ -75,4 +75,4 @@ The replacement uses new `a2a-gateway` state paths and ignores legacy `a2a-sidec
 
 ## Approval
 
-The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history. On 2026-08-26, the user approved runtime-agnostic bearer and HMAC V2 webhook authentication and the `0.2.1` patch release. On 2026-08-27, the user directed the gateway protocol to match the live consuming central API and requested a follow-up release.
+The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history. On 2026-08-26, the user approved runtime-agnostic bearer and HMAC V2 webhook authentication and the `0.2.1` patch release. On 2026-08-27, the user directed the gateway protocol to match the live consuming central API and requested a follow-up release, including any fixes required by review.

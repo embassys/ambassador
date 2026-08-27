@@ -20,6 +20,8 @@ const WEBHOOK_URL = "http://127.0.0.1:18789/hooks/agent";
 const CENTRAL_TOKEN = "central-secret-token";
 const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_BUFFERED_RESULT_BYTES = 512 * 1024;
+const MAX_MESSAGES_PER_POLL = 256;
 
 function temporaryJournal(t: TestContext): NotificationJournal {
   const directory = mkdtempSync(join(tmpdir(), "a2a-notification-relay-test-"));
@@ -244,6 +246,187 @@ test("accepts a response at 4 MiB and rejects one byte above it", async (t) => {
   );
 });
 
+test("accepts a 512 KiB normalized result and rejects one byte above it", async (t) => {
+  const emptyResultBytes = Buffer.byteLength(JSON.stringify({ messages: [{ content: "" }] }));
+  const boundaryContent = "x".repeat(MAX_BUFFERED_RESULT_BYTES - emptyResultBytes);
+  const boundaryResult = { messages: [{ content: boundaryContent }] };
+  assert.equal(Buffer.byteLength(JSON.stringify(boundaryResult)), MAX_BUFFERED_RESULT_BYTES);
+
+  const acceptedJournal = temporaryJournal(t);
+  const acceptedController = new AbortController();
+  let acceptedPolls = 0;
+  let wakes = 0;
+  const acceptedFetch: NotificationFetch = async (url, init) => {
+    if (url.pathname === "/api/poll_messages") {
+      acceptedPolls += 1;
+      if (acceptedPolls === 1) return new Response(JSON.stringify(boundaryResult));
+      return pendingResponse(init.signal);
+    }
+    wakes += 1;
+    return new Response(null, { status: 202 });
+  };
+  const acceptedRelay = new NotificationRelay(relayOptions(acceptedJournal, acceptedFetch));
+  const acceptedRun = acceptedRelay.run(acceptedController.signal);
+  await waitFor(() => wakes === 1);
+  assert.deepEqual(
+    await acceptedRelay.pollMessages(0, new AbortController().signal),
+    boundaryResult,
+  );
+  acceptedController.abort();
+  await acceptedRun;
+
+  const rejectedJournal = temporaryJournal(t);
+  const rejectedFetch: NotificationFetch = async () =>
+    new Response(JSON.stringify({ messages: [{ content: `${boundaryContent}x` }] }));
+  const rejectedRelay = new NotificationRelay(relayOptions(rejectedJournal, rejectedFetch));
+  await assert.rejects(
+    rejectedRelay.run(new AbortController().signal),
+    (error: unknown) =>
+      error instanceof NotificationRelayError && error.code === "notification_response_too_large",
+  );
+});
+
+test("accepts message and structural limits and rejects one above them", async (t) => {
+  const acceptedBatches = [
+    Array.from({ length: MAX_MESSAGES_PER_POLL }, () => ({})),
+    [{ payload: Array.from({ length: 16_373 }, () => 0) }],
+  ];
+  for (const messages of acceptedBatches) {
+    const journal = temporaryJournal(t);
+    const controller = new AbortController();
+    let polls = 0;
+    let wakeAttempted = false;
+    const request: NotificationFetch = async (url, init) => {
+      if (url.pathname === "/api/poll_messages") {
+        polls += 1;
+        if (polls === 1) return new Response(JSON.stringify({ messages }));
+        return pendingResponse(init.signal);
+      }
+      wakeAttempted = true;
+      return new Response(null, { status: 202 });
+    };
+    const relay = new NotificationRelay(relayOptions(journal, request));
+    const running = relay.run(controller.signal);
+    await waitFor(() => wakeAttempted);
+    controller.abort();
+    await running;
+  }
+
+  const rejectedBatches = [
+    Array.from({ length: MAX_MESSAGES_PER_POLL + 1 }, () => ({})),
+    [{ payload: Array.from({ length: 16_374 }, () => 0) }],
+  ];
+  for (const messages of rejectedBatches) {
+    const journal = temporaryJournal(t);
+    let wakeAttempted = false;
+    const request: NotificationFetch = async (url) => {
+      if (url.pathname === "/api/poll_messages") {
+        return new Response(JSON.stringify({ messages }));
+      }
+      wakeAttempted = true;
+      return new Response(null, { status: 202 });
+    };
+    const relay = new NotificationRelay(relayOptions(journal, request));
+    await assert.rejects(
+      relay.run(new AbortController().signal),
+      (error: unknown) =>
+        error instanceof NotificationRelayError && error.code === "invalid_notification_response",
+    );
+    assert.equal(wakeAttempted, false);
+  }
+});
+
+test("accepts 100 JSON levels and rejects level 101 before changing state", async (t) => {
+  const nestedResponse = (payloadLevels: number): string =>
+    `{"messages":[{"payload":${"[".repeat(payloadLevels)}null${"]".repeat(payloadLevels)}}]}`;
+
+  const acceptedJournal = temporaryJournal(t);
+  const acceptedController = new AbortController();
+  let acceptedPolls = 0;
+  let acceptedWake = false;
+  const acceptedFetch: NotificationFetch = async (url, init) => {
+    if (url.pathname === "/api/poll_messages") {
+      acceptedPolls += 1;
+      if (acceptedPolls === 1) return new Response(nestedResponse(97));
+      return pendingResponse(init.signal);
+    }
+    acceptedWake = true;
+    return new Response(null, { status: 202 });
+  };
+  const acceptedRelay = new NotificationRelay(relayOptions(acceptedJournal, acceptedFetch));
+  const acceptedRun = acceptedRelay.run(acceptedController.signal);
+  await waitFor(() => acceptedWake);
+  acceptedController.abort();
+  await acceptedRun;
+
+  const rejectedJournal = temporaryJournal(t);
+  const rejectedFetch: NotificationFetch = async () => new Response(nestedResponse(98));
+  const rejectedRelay = new NotificationRelay(relayOptions(rejectedJournal, rejectedFetch));
+  await assert.rejects(
+    rejectedRelay.run(new AbortController().signal),
+    (error: unknown) =>
+      error instanceof NotificationRelayError && error.code === "invalid_notification_response",
+  );
+});
+
+test("keeps retrying an ID-less wake when local polling wins the in-flight race", async (t) => {
+  const journal = temporaryJournal(t);
+  const controller = new AbortController();
+  let polls = 0;
+  let wakeAttempts = 0;
+  const wakeKeys: string[] = [];
+  let rejectFirstWake: ((reason: Error) => void) | undefined;
+  let resolveSecondWake: ((response: Response) => void) | undefined;
+  let resolveFirstWake: (() => void) | undefined;
+  const firstWakeStarted = new Promise<void>((resolve) => {
+    resolveFirstWake = resolve;
+  });
+  const request: NotificationFetch = async (url, init) => {
+    if (url.pathname === "/api/poll_messages") {
+      polls += 1;
+      if (polls === 1) {
+        return new Response(JSON.stringify({ messages: [{ content: MESSAGE_CONTENT }] }));
+      }
+      return pendingResponse(init.signal);
+    }
+    wakeAttempts += 1;
+    const wakeKey = new Headers(init.headers).get("idempotency-key");
+    assert.ok(wakeKey);
+    assert.equal(new Headers(init.headers).get("x-request-id"), wakeKey);
+    wakeKeys.push(wakeKey);
+    if (wakeAttempts === 1) {
+      resolveFirstWake?.();
+      return await new Promise<Response>((_, reject) => {
+        rejectFirstWake = reject;
+      });
+    }
+    return await new Promise<Response>((resolve) => {
+      resolveSecondWake = resolve;
+    });
+  };
+  const relay = new NotificationRelay({
+    ...relayOptions(journal, request),
+    now: Date.now,
+    retryBaseMs: 2,
+    retryCapMs: 2,
+    idleIntervalMs: 1,
+  });
+  const running = relay.run(controller.signal);
+
+  await firstWakeStarted;
+  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
+    messages: [{ content: MESSAGE_CONTENT }],
+  });
+  rejectFirstWake?.(new Error("uncertain wake"));
+  await waitFor(() => wakeAttempts === 2);
+  assert.deepEqual(wakeKeys, [wakeKeys[0], wakeKeys[0]]);
+  assert.equal(polls, 1, "central polling resumed before the volatile wake was accepted");
+  resolveSecondWake?.(new Response(null, { status: 202 }));
+  await waitFor(() => polls === 2);
+  controller.abort();
+  await running;
+});
+
 for (const scenario of [
   { name: "failed", response: () => new Response(null, { status: 503 }), uncertain: false },
   {
@@ -300,7 +483,7 @@ test("redrives an accepted ID-bearing wake until confirmed content acknowledgeme
 
   await waitFor(() => wakes >= 2);
   assert.equal(relay.confirmContentAcknowledgement(MESSAGE_ID), true);
-  await waitFor(() => journal.get(MESSAGE_ID)?.wakeState === "content_acknowledged");
+  await waitFor(() => journal.get(MESSAGE_ID) === undefined);
   const wakeCountAtAcknowledgement = wakes;
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(wakes, wakeCountAtAcknowledgement);

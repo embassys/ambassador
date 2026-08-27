@@ -14,7 +14,7 @@ import {
   type Tool,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
-
+import { serializeLocalToolResult } from "./local-tool-result.js";
 import type { CentralToolDefinition } from "./mcp-contract.js";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -306,9 +306,10 @@ export class LocalMcpServer {
           AbortSignal.timeout(this.#requestTimeoutMs),
         ]);
         const result = await this.router.callTool(request.params.name, arguments_ ?? {}, signal);
+        const serialized = serializeLocalToolResult(result);
         return sdk.projectCallToolResult(
           {
-            content: [{ type: "text", text: JSON.stringify(result) }],
+            content: [{ type: "text", text: serialized }],
             structuredContent: result,
           },
           undefined,
@@ -396,6 +397,10 @@ export class LocalMcpServer {
     let transientSession = false;
     try {
       const parsedBody = request.method === "POST" ? await readJsonBody(request) : undefined;
+      if (Array.isArray(parsedBody)) {
+        safeHttpError(response, 400);
+        return;
+      }
       const id = sessionId(request);
       if (id === undefined) {
         if (request.method !== "POST" || !isInitializeRequest(parsedBody)) {
