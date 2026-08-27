@@ -4,6 +4,8 @@ Status: proposed for review
 
 These requests are ordered by importance. They do not change the accepted v1 gateway protocol.
 
+`Now` describes the inspected central behavior reproduced by this repository's independent fixtures. The supplied live tunnel returns `404`, so these points are not a fresh observation of the hosted deployment.
+
 ## 1. Add a durable message cursor
 
 - **Now**
@@ -181,13 +183,11 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 - **Now**
 
   ```text
-  gateway -> ack_message(message_123)
-  central -> process the acknowledgement
-  network -> drop the success response
-  gateway -> cannot tell whether acknowledgement succeeded
+  first ack_message(message_123)  -> {message_id: message_123, status: acked}
+  second ack_message(message_123) -> message not found error
   ```
 
-  The current interface does not publish what a repeated call must return.
+  If central processes the first call but its response is lost, the gateway retains its local body. Retrying then receives `message not found`, so the gateway still cannot confirm acknowledgement.
 
 - **Want**
 
