@@ -8,11 +8,11 @@ None.
 
 ## Resolved
 
-- ADR 0006 fixes Node 24, pnpm 11.22.0 with supply-chain controls, TypeScript, node:test, Biome, Zod, Node HTTP, and GitHub Actions.
+- ADR 0006 fixes Node 24, pnpm 11.22.0 for repository work with supply-chain controls, TypeScript, node:test, Biome, Zod, Node HTTP, and GitHub Actions.
 - ADR 0007 fixes `better-sqlite3` with no ORM for the ID-only journal.
 - ADR 0012 fixes bounded, non-configurable HTTP deadlines, including a 40-second deadline around the 30-second central long poll.
 - ADR 0014 fixes a one-second SQLite singleton-lock handoff.
-- ADR 0015 fixes npm-registry distribution as `@a2adev/gateway` with the `a2a-gateway` binary.
+- ADR 0015 fixes npm-registry distribution as `@a2adev/gateway`, with end users running the pinned package through `npx`.
 - ADR 0017 fixes the two-option foreground CLI, one webhook and identity, shared local bearer, MCP enrollment, and removal of bindings and runtime discovery.
 - ADR 0018 fixes the official split MCP TypeScript SDK packages at version 2.0.0.
 - ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.

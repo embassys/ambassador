@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-23
 
-Updated: 2026-08-26 after user review and pnpm approval
+Updated: 2026-08-27 to clarify that pnpm is the repository toolchain
 
 ## Problem
 
@@ -15,7 +15,7 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 | Area | Choice |
 | --- | --- |
 | Runtime | Node.js 24.19 LTS |
-| Package manager | pnpm 11.22.0 through Corepack, with a committed lockfile and frozen installs |
+| Repository package manager | pnpm 11.22.0 through Corepack, with a committed lockfile and frozen installs |
 | Language | TypeScript 7.0.2 with strict checks |
 | Tests | `node:test` and `node:assert/strict` |
 | Lint and format | Biome 2.5.10 |
@@ -35,7 +35,7 @@ The HTTP wrapper owns deadlines, response-size limits, status mapping, and schem
 
 The normal logger accepts named events with typed safe fields. It does not accept arbitrary objects, raw errors, headers, URLs, or protocol bodies. ADR 0022 defines a separate temporary development transcript on stderr; it is not part of the normal logger.
 
-The final npm-registry upload continues to use the exact npm CLI qualified for trusted OIDC publishing. pnpm 11's native publisher does not yet support npm trusted publishing; using it would require a long-lived token and weaken the release boundary. All dependency resolution, scripts, tests, audits, packing, and packed-artifact installation use pnpm.
+The final npm-registry upload continues to use the exact npm CLI qualified for trusted OIDC publishing. pnpm 11's native publisher does not yet support npm trusted publishing; using it would require a long-lived token and weaken the release boundary. Repository dependency resolution, scripts, tests, audits, packing, and packed-artifact installation use pnpm. End users run the published package with `npx` as defined by ADR 0015.
 
 ## Alternatives
 
@@ -50,7 +50,7 @@ The final npm-registry upload continues to use the exact npm CLI qualified for t
 - Node.js and Zod use the MIT license.
 - TypeScript uses Apache-2.0.
 - Biome uses MIT or Apache-2.0.
-- pnpm uses MIT. npm uses Artistic-2.0 and remains only as the trusted registry publisher.
+- pnpm uses MIT. npm uses Artistic-2.0 and supplies `npx` for end-user execution as well as the trusted registry publisher.
 
 All selected projects are active as of this decision. Exact versions remain in `package.json` and `pnpm-lock.yaml`.
 
@@ -60,4 +60,4 @@ Biome and TypeScript are development tools. Zod is the only pure JavaScript runt
 
 ## Approval
 
-The user delegated the initial choice on 2026-08-23. On 2026-08-26, the user approved the existing tools, preferred pnpm over npm for its security controls, and approved immediate migration.
+The user delegated the initial choice on 2026-08-23. On 2026-08-26, the user approved the existing tools, preferred pnpm over npm for its repository security controls, and approved immediate migration. On 2026-08-27, the user clarified that pnpm is for repository development and release work only; end-user usage stays on `npx`.

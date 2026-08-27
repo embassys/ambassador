@@ -7,7 +7,7 @@ This guide connects one OpenClaw agent to the A2A development service. It works 
 - OpenClaw already installed and able to answer a normal chat message.
 - OpenClaw `2026.7.1-2` or newer. This guide and the gateway's compatibility test use `2026.7.1-2`.
 - macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.6`.
-- Node.js 24.19 and pnpm 11.22.0.
+- Node.js 24.19 with npm and `npx`.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.
 
@@ -26,29 +26,16 @@ If the app is set to **This Mac**, run every command in this guide on that Mac. 
 
 If the app connects to a remote OpenClaw gateway, run steps 1 through 5 on the remote gateway host, not on the computer displaying the app. The A2A gateway, MCP endpoint, and OpenClaw webhook must run on the same host because every local address in this guide is intentionally `127.0.0.1`.
 
-## 1. Install the gateway
+## 1. Check Node.js
 
 Open a terminal and run:
 
 ```sh
-corepack enable pnpm
-corepack install --global pnpm@11.22.0
-pnpm setup
+node --version
+npx --version
 ```
 
-Run the `source` command printed by `pnpm setup`, or open a new terminal. Then run:
-
-```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.6
-```
-
-Check that the command is available:
-
-```sh
-command -v a2a-gateway
-```
-
-The command should print a path.
+Node should report version `24.19.x`, and `npx` should print its version. The start command in step 4 downloads and runs the qualified gateway version without a global installation.
 
 ## 2. Create the shared local token
 
@@ -87,7 +74,7 @@ In the same terminal, replace the two example development URLs, then run:
 export A2A_DEV_CENTRAL_API_URL='https://dev.example.com'
 export A2A_DEV_CENTRAL_MCP_URL='https://dev.example.com/mcp'
 
-a2a-gateway start \
+npx --yes @a2adev/gateway@0.2.6 start \
   --webhook-url=http://127.0.0.1:18789/hooks/agent \
   --webhook-token-env=A2A_HOOK_TOKEN
 ```
@@ -179,4 +166,4 @@ This quick start configures one running session. Keep the A2A gateway terminal o
 - Webhook returns `401`: rerun the OpenClaw `hooks.token` command with the current `A2A_HOOK_TOKEN` before registration.
 - Port `8787` is busy: stop the other A2A gateway process. One local gateway may run at a time.
 - Registration works but no wake arrives: confirm the OpenClaw gateway is still running on port `18789` and that the A2A gateway terminal has not exited.
-- Desktop remote mode cannot connect to A2A: confirm that you installed and started `a2a-gateway` on the remote OpenClaw host rather than on the computer displaying the app.
+- Desktop remote mode cannot connect to A2A: confirm that you ran the `npx` gateway command on the remote OpenClaw host rather than on the computer displaying the app.
