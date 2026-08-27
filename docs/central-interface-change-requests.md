@@ -2,7 +2,7 @@
 
 Status: proposed for review
 
-These requests are ordered by importance. They define a v2 durable-handoff contract and do not change the published v1 gateway behavior.
+These requests are ordered by importance. Items 1 through 4 define a v2 durable-handoff contract. Later items are independent improvements and must not block that handoff. None of these requests changes the published v1 gateway behavior.
 
 `Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces that behavior. The supplied live tunnel returns `404`, so deployment of that revision was not checked.
 
@@ -84,13 +84,12 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
   ```text
   first ack_delivery(message_123)  -> {message_id: message_123, status: received}
   second ack_delivery(message_123) -> {message_id: message_123, status: received}
-  expired message                  -> {message_id: message_123, status: expired}
   unknown message                  -> message_not_found
   ```
 
   `received` means the gateway has durably stored the complete message and now owns delivery to the local agent. It does not mean the agent processed the message.
 
-  Central may delete the body after durably recording `received`, but must retain an ID-only receipt record for the message ID's lifetime so retries return the same result. `expired` and `message_not_found` remain distinct outcomes; neither can be treated as successful receipt.
+  In one durable transaction, central changes the message to `received` and creates its ID-only receipt record. Only then may central delete the body or return success. The receipt record is permanent, the message ID is never reused, and every later retry returns the same `received` result. `message_not_found` is not successful receipt.
 
   If central later needs processing status, add a separate operation. It must not delay or weaken the custody transfer.
 
@@ -163,13 +162,17 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
   after ack_delivery  -> body may be deleted; retain an ID-only receipt record
   ```
 
-  Central must not silently delete an unreceived message to enforce a quota. Apply documented per-identity count and byte limits before accepting more work, and return a machine-readable `mailbox_full` error to the sender.
-
-  If product policy adds explicit cancellation or expiry, keep an ID-only terminal record and return `expired`. Do not report it as `received`.
+  Central must not expire, cancel, or silently delete an accepted unreceived message. Apply documented per-identity count and byte limits before accepting more work, and return a machine-readable `mailbox_full` error to the sender.
 
 - **Why**
 
-  Reliable handoff requires one side to own the full body at every point. Quotas should reject new work rather than create an unreported gap in that ownership.
+  Reliable handoff requires one side to own the full body at every point. Quotas reject new work rather than create an unreported gap in that ownership.
+
+## Gateway dependency
+
+This server contract depends on a separate gateway-v2 storage decision. Before a gateway activates v2, its ADR and protocol must define encryption keys, owner-only access, fixed count and byte limits, crash recovery, local processing acknowledgement, and body deletion ordering. The gateway reserves room for the largest permitted receive result before polling, stops receiving while its local inbox is full, and calls `ack_delivery` only after the complete message is durable.
+
+The current v1 gateway remains memory-only with an ID-only journal. This document does not change its storage format.
 
 ## 5. Add central JWT recovery
 
@@ -313,7 +316,20 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
   }
   ```
 
-  Keep v1 unchanged until a released gateway uses v2.
+  Add an authenticated, idempotent `activate_delivery_v2` operation. Its single transaction:
+
+  ```text
+  queued v1 message    -> unreceived v2 message with its body
+  delivered v1 message -> unreceived v2 message with its body
+  acked v1 message      -> permanent received v2 tombstone
+  central identity      -> v2 delivery mode
+  ```
+
+  A gateway calls this only after its durable local inbox is ready. After activation, v1 polling for that identity returns `protocol_mismatch` instead of racing the v2 receiver.
+
+  Central must stop deleting delivered v1 rows before migration starts. An already-deleted body cannot be recovered by v2 and must not be represented as a successful receipt.
+
+  Keep v1 endpoints and behavior unchanged for identities that have not activated v2. Deprecation or retirement requires a separate decision after published v1 gateways have migrated.
 
 - **Why**
 
@@ -356,8 +372,8 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
 
   ```text
   message_not_found
-  message_expired
   mailbox_full
+  protocol_mismatch
   authentication_expired
   rate_limited
   result_too_large
@@ -367,7 +383,7 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
 
   The gateway can apply safe retry and backpressure rules without parsing remote prose. Server and client limits fail at documented boundaries.
 
-## 10. Retire the consuming v1 poll after migration
+## 10. Isolate the consuming v1 poll during migration
 
 - **Now**
 
@@ -397,11 +413,11 @@ These requests are ordered by importance. They define a v2 durable-handoff contr
   Authorization: Bearer <central-jwt>
   ```
 
-  REST and MCP must use the same non-consuming queue and acknowledgement state.
+  V2 REST and MCP must use the same non-consuming queue and acknowledgement state. V1 remains on its existing endpoints and can access only identities that have not activated v2.
 
 - **Why**
 
-  One canonical message state prevents REST and MCP from racing to consume the same message.
+  One canonical state per identity prevents REST, MCP, v1, and v2 from racing to consume the same message.
 
 ## Target flow
 
