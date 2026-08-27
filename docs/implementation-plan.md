@@ -6,7 +6,7 @@
 - Write tests, fixtures, and CI before production behavior.
 - Keep the first code PR red until the user reviews its failures.
 - Do not select or install any framework, library, runtime, package manager, database driver, or build tool before its ADR is explicitly approved.
-- Keep MCP bodies out of the relay, journal, logs, diagnostics, temporary files, crash artifacts, and support bundles.
+- Keep MCP bodies out of the relay, journal, normal logs, diagnostics, temporary files, crash artifacts, and support bundles. ADR 0022 permits a temporary development-only stderr transcript.
 - Do not preserve the obsolete setup, binding, adapter, configuration, or service interfaces as compatibility code.
 
 ## Approved target
@@ -48,7 +48,8 @@ Keep all new tests and fixtures on one feature PR. Do not merge it or start prod
 
 ### Required CLI cases
 
-- Accept only `start --webhook-url=<url> --webhook-token-env=<name>`.
+- Accept `start --webhook-url=<url> --webhook-token-env=<name>` and the temporary development form with `--verbose=true`.
+- Accept verbose mode only with the paired development central endpoints. Reject `--verbose`, false or arbitrary values, and duplicates.
 - Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
 - Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
 - Require the resolved webhook token to contain exactly 192 random bits in `[0-9a-f]{48}` format.
@@ -74,6 +75,8 @@ Tests scan stdout, stderr, errors, every credential-store artifact, SQLite, WAL,
 - email and verification code;
 - MCP arguments and results; and
 - message content and permission data.
+
+ADR 0022 changes the stderr assertion only for explicit verbose tests. Those tests require non-credential request and response content on stderr while still scanning for the webhook token, central JWT, credential headers, and verification code. Every durable artifact remains content-free.
 
 ## Production implementation after G1
 

@@ -11,14 +11,14 @@ import {
 const URL = "http://127.0.0.1:18789/hooks/agent";
 const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
-test("accepts exactly the two named start options in either order", () => {
+test("accepts the two required named start options in either order", () => {
   assert.deepEqual(
     parseGatewayStartOptions([
       "start",
       `--webhook-url=${URL}`,
       "--webhook-token-env=OPENCLAW_HOOK_TOKEN",
     ]),
-    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN" },
+    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN", verbose: false },
   );
   assert.equal(
     parseGatewayStartOptions([
@@ -34,7 +34,28 @@ test("accepts exactly the two named start options in either order", () => {
       "--webhook-token-env=OPENCLAW_HOOK_TOKEN",
       `--webhook-url=${URL}`,
     ]),
-    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN" },
+    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN", verbose: false },
+  );
+});
+
+test("accepts the temporary development verbose option in any position", () => {
+  assert.deepEqual(
+    parseGatewayStartOptions([
+      "start",
+      `--webhook-url=${URL}`,
+      "--verbose=true",
+      "--webhook-token-env=OPENCLAW_HOOK_TOKEN",
+    ]),
+    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN", verbose: true },
+  );
+  assert.deepEqual(
+    parseGatewayStartOptions([
+      "start",
+      "--verbose=true",
+      "--webhook-token-env=OPENCLAW_HOOK_TOKEN",
+      `--webhook-url=${URL}`,
+    ]),
+    { webhookUrl: URL, webhookTokenEnv: "OPENCLAW_HOOK_TOKEN", verbose: true },
   );
 });
 
@@ -50,6 +71,16 @@ test("rejects removed commands and invalid option forms without retaining their 
     ["start", `--webhook-url=${URL}`, `--webhook-url=${URL}`],
     ["start", `--webhook-url=${URL}`, "--webhook-token-env=TOKEN", "binding-id"],
     ["start", `--webhook-url=${URL}`, "--webhook-token=literal"],
+    ["start", `--webhook-url=${URL}`, "--webhook-token-env=TOKEN", "--verbose"],
+    ["start", `--webhook-url=${URL}`, "--webhook-token-env=TOKEN", "--verbose=false"],
+    ["start", `--webhook-url=${URL}`, "--webhook-token-env=TOKEN", "--verbose=1"],
+    [
+      "start",
+      `--webhook-url=${URL}`,
+      "--webhook-token-env=TOKEN",
+      "--verbose=true",
+      "--verbose=true",
+    ],
   ];
 
   for (const args of cases) {

@@ -1,5 +1,8 @@
 import { createHmac, randomUUID } from "node:crypto";
-
+import type {
+  DevelopmentVerboseBoundary,
+  DevelopmentVerboseTranscript,
+} from "./development-verbose.js";
 import { requestTimeout, withDeadline } from "./http.js";
 import { LocalToolResultTooLarge, serializeLocalToolResult } from "./local-tool-result.js";
 import { assertSafeUpstreamResult } from "./mcp-contract.js";
@@ -58,6 +61,7 @@ export interface NotificationRelayOptions {
   acceptedRedriveMs?: number;
   idleIntervalMs?: number;
   pollRetryMs?: number;
+  verboseTranscript?: DevelopmentVerboseTranscript;
 }
 
 interface ParsedMessage {
@@ -351,6 +355,7 @@ export class NotificationRelay {
   private readonly acceptedRedriveMs: number;
   private readonly idleIntervalMs: number;
   private readonly pollRetryMs: number;
+  private readonly verboseTranscript: DevelopmentVerboseTranscript | undefined;
   private readonly inbox: BufferedMessage[] = [];
   private readonly volatileWakes = new Map<string, VolatileWake>();
   private readonly waiters = new Set<() => void>();
@@ -396,6 +401,7 @@ export class NotificationRelay {
       "idleIntervalMs",
     );
     this.pollRetryMs = requestTimeout(options.pollRetryMs, POLL_RETRY_MS, "pollRetryMs");
+    this.verboseTranscript = options.verboseTranscript;
     if (this.retryCapMs < this.retryBaseMs) {
       throw new NotificationRelayError("invalid_configuration", "Relay configuration is invalid");
     }
@@ -521,6 +527,7 @@ export class NotificationRelay {
       return;
     }
     const response = await this.fetchResponse(
+      "central_rest",
       this.centralPollUrl,
       {
         method: "GET",
@@ -641,6 +648,7 @@ export class NotificationRelay {
           .update(body)
           .digest("hex");
         response = await this.fetchResponse(
+          "webhook",
           this.webhookUrl,
           {
             method: "POST",
@@ -762,19 +770,24 @@ export class NotificationRelay {
   }
 
   private async fetchResponse(
+    boundary: DevelopmentVerboseBoundary,
     url: URL,
     init: RequestInit,
     timeoutMs: number,
     signal: AbortSignal,
   ): Promise<Response> {
     const requestSignal = withDeadline(signal, timeoutMs);
+    const requestInit = {
+      ...init,
+      redirect: "manual" as const,
+      signal: requestSignal,
+    };
+    this.verboseTranscript?.recordHttpRequest(boundary, url, requestInit);
     try {
-      return await this.request(url, {
-        ...init,
-        redirect: "manual",
-        signal: requestSignal,
-      });
-    } catch {
+      const response = await this.request(url, requestInit);
+      return this.verboseTranscript?.wrapHttpResponse(boundary, response) ?? response;
+    } catch (error) {
+      this.verboseTranscript?.recordError(boundary, error);
       if (signal.aborted) throw new RequestCancelled();
       throw new RequestFailed();
     }

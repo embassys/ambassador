@@ -6,7 +6,7 @@ import {
   SdkHttpError,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-
+import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { assertSafeUpstreamResult, type CentralToolDefinition } from "./mcp-contract.js";
 
 const CONNECT_DEADLINE_MS = 5_000;
@@ -49,6 +49,7 @@ export class CentralMcpError extends Error {
 
 export interface CentralMcpClientOptions {
   centralMcpUrl: string | URL;
+  verboseTranscript?: DevelopmentVerboseTranscript;
 }
 
 interface ConnectingClient {
@@ -527,17 +528,26 @@ async function boundedFetch(
   lifetimeSignal: AbortSignal,
   connectSignal: AbortSignal | undefined,
   operationSignal: AbortSignal | undefined,
+  verboseTranscript?: DevelopmentVerboseTranscript,
 ): Promise<Response> {
   const signals = [lifetimeSignal];
   if (init?.signal !== undefined && init.signal !== null) signals.push(init.signal);
   if (connectSignal !== undefined) signals.push(connectSignal);
   if (operationSignal !== undefined) signals.push(operationSignal);
 
-  const response = await fetch(url, {
-    ...init,
-    redirect: "manual",
-    signal: signals.length === 1 ? lifetimeSignal : AbortSignal.any(signals),
-  });
+  verboseTranscript?.recordHttpRequest("central_mcp", url, init);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      redirect: "manual",
+      signal: signals.length === 1 ? lifetimeSignal : AbortSignal.any(signals),
+    });
+  } catch (error) {
+    verboseTranscript?.recordError("central_mcp", error);
+    throw error;
+  }
+  response = verboseTranscript?.wrapHttpResponse("central_mcp", response) ?? response;
   if (response.status >= 300 && response.status < 400) {
     await cancelBody(response);
     throw new RedirectRejected();
@@ -588,8 +598,10 @@ export class CentralMcpClient {
   private client: Client | undefined;
   private connecting: ConnectingClient | undefined;
   private closed = false;
+  private readonly verboseTranscript: DevelopmentVerboseTranscript | undefined;
 
   constructor(options: CentralMcpClientOptions) {
+    this.verboseTranscript = options.verboseTranscript;
     try {
       this.centralMcpUrl = safeUrl(options.centralMcpUrl);
     } catch {
@@ -613,6 +625,7 @@ export class CentralMcpClient {
       );
       return result.tools.map(parseTool);
     } catch (error) {
+      this.verboseTranscript?.recordError("central_mcp", error);
       throw this.safeError(error, "request", callerSignal);
     }
   }
@@ -645,6 +658,7 @@ export class CentralMcpClient {
       );
       return canonicalToolResult(result, storedCredential);
     } catch (error) {
+      this.verboseTranscript?.recordError("central_mcp", error);
       throw this.safeError(error, "request", callerSignal);
     }
   }
@@ -714,6 +728,7 @@ export class CentralMcpClient {
         this.lifetimeController.signal,
         connecting && init?.method !== "GET" ? connectSignal : undefined,
         this.operationSignals.getStore(),
+        this.verboseTranscript,
       );
     const transport = new StreamableHTTPClientTransport(this.centralMcpUrl, {
       fetch: request,
@@ -734,8 +749,8 @@ export class CentralMcpClient {
         versionNegotiation: { mode: "legacy" },
       },
     );
-    client.onerror = () => {
-      // SDK and upstream error details are intentionally discarded.
+    client.onerror = (error) => {
+      this.verboseTranscript?.recordError("central_mcp", error);
     };
     client.onclose = () => {
       if (this.client === client) this.client = undefined;
@@ -750,6 +765,7 @@ export class CentralMcpClient {
       this.client = client;
       return client;
     } catch (error) {
+      this.verboseTranscript?.recordError("central_mcp", error);
       await client.close().catch(() => undefined);
       throw this.safeError(error, "connect");
     } finally {
