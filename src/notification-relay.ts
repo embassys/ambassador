@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 
 import { requestTimeout, withDeadline } from "./http.js";
+import { LocalToolResultTooLarge, serializeLocalToolResult } from "./local-tool-result.js";
 import { assertSafeUpstreamResult } from "./mcp-contract.js";
 import { type NotificationJournal, validateNotificationId } from "./notification-journal.js";
 
@@ -13,6 +14,8 @@ const IDLE_INTERVAL_MS = 1_000;
 const POLL_RETRY_MS = 1_000;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_JSON_DEPTH = 100;
+const MAX_JSON_STRUCTURAL_TOKENS = 16_384;
+const MAX_MESSAGES_PER_POLL = 256;
 const MAX_LOCAL_POLL_SECONDS = 30;
 
 export type NotificationFetch = (url: URL, init: RequestInit) => Promise<Response>;
@@ -125,12 +128,60 @@ function invalidPollResponse(): never {
   );
 }
 
+function oversizedPollResponse(): never {
+  throw new NotificationRelayError(
+    "notification_response_too_large",
+    "Central notification response exceeded its size limit",
+  );
+}
+
+function scanJsonStructure(bytes: Uint8Array): void {
+  const containers: number[] = [];
+  let escaped = false;
+  let inString = false;
+  let structuralTokens = 0;
+
+  for (const byte of bytes) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (byte === 0x5c) {
+        escaped = true;
+      } else if (byte === 0x22) {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (byte === 0x22) {
+      inString = true;
+      structuralTokens += 1;
+    } else if (byte === 0x7b || byte === 0x5b) {
+      containers.push(byte);
+      structuralTokens += 1;
+      if (containers.length > MAX_JSON_DEPTH) invalidPollResponse();
+    } else if (byte === 0x7d || byte === 0x5d) {
+      const expected = byte === 0x7d ? 0x7b : 0x5b;
+      if (containers.pop() !== expected) invalidPollResponse();
+      structuralTokens += 1;
+    } else if (byte === 0x2c || byte === 0x3a) {
+      structuralTokens += 1;
+    }
+
+    if (structuralTokens > MAX_JSON_STRUCTURAL_TOKENS) invalidPollResponse();
+  }
+  if (inString || escaped || containers.length !== 0) invalidPollResponse();
+}
+
 function assertBoundedJsonDepth(value: unknown): void {
   const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) break;
     if (current.depth > MAX_JSON_DEPTH) invalidPollResponse();
+    if (typeof current.value === "number" && !Number.isFinite(current.value)) {
+      invalidPollResponse();
+    }
     if (Array.isArray(current.value)) {
       for (const nested of current.value) {
         pending.push({ value: nested, depth: current.depth + 1 });
@@ -144,6 +195,7 @@ function assertBoundedJsonDepth(value: unknown): void {
 }
 
 function parsePollResponse(bytes: Uint8Array, centralToken: string): PollResponse {
+  scanJsonStructure(bytes);
   let parsed: unknown;
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -162,6 +214,7 @@ function parsePollResponse(bytes: Uint8Array, centralToken: string): PollRespons
 
   const messages = (parsed as { messages?: unknown }).messages;
   if (!Array.isArray(messages)) invalidPollResponse();
+  if (messages.length > MAX_MESSAGES_PER_POLL) invalidPollResponse();
 
   const validated: ParsedMessage[] = [];
   const ids = new Map<string, string>();
@@ -195,6 +248,12 @@ function parsePollResponse(bytes: Uint8Array, centralToken: string): PollRespons
       ids.set(id, serialized);
     }
     validated.push({ message, serialized, ...(id === undefined ? {} : { id }) });
+  }
+  try {
+    serializeLocalToolResult({ messages: validated.map(({ message }) => message) });
+  } catch (error) {
+    if (error instanceof LocalToolResultTooLarge) oversizedPollResponse();
+    invalidPollResponse();
   }
   return { messages: validated };
 }
@@ -375,7 +434,6 @@ export class NotificationRelay {
     for (let index = this.inbox.length - 1; index >= 0; index -= 1) {
       const item = this.inbox[index];
       if (item?.id !== undefined) continue;
-      if (item !== undefined) this.volatileWakes.delete(item.wakeId);
       this.inbox.splice(index, 1);
       removed = true;
     }
@@ -430,7 +488,7 @@ export class NotificationRelay {
       const revision = this.revision;
       try {
         await this.pollOnce(signal);
-        while (this.inbox.length > 0 && !signal.aborted) {
+        while ((this.inbox.length > 0 || this.volatileWakes.size > 0) && !signal.aborted) {
           await this.wait(this.idleIntervalMs, signal, this.revision);
         }
       } catch (error) {
@@ -475,10 +533,7 @@ export class NotificationRelay {
       bytes = await readBoundedBody(response);
     } catch (error) {
       if (error instanceof ResponseTooLarge) {
-        throw new NotificationRelayError(
-          "notification_response_too_large",
-          "Central notification response exceeded its size limit",
-        );
+        oversizedPollResponse();
       }
       throw error;
     }
@@ -586,18 +641,24 @@ export class NotificationRelay {
   }
 
   private claimDueWake(nowMs: number): WakeClaim | undefined {
-    const volatile = [...this.volatileWakes.values()]
-      .filter(
-        (wake) =>
-          (wake.state === "pending" || wake.state === "retry_wait") &&
-          wake.nextAttemptAtMs !== undefined &&
-          wake.nextAttemptAtMs <= nowMs,
-      )
-      .sort(
-        (left, right) =>
-          (left.nextAttemptAtMs as number) - (right.nextAttemptAtMs as number) ||
-          left.wakeId.localeCompare(right.wakeId),
-      )[0];
+    let volatile: VolatileWake | undefined;
+    for (const candidate of this.volatileWakes.values()) {
+      if (
+        (candidate.state !== "pending" && candidate.state !== "retry_wait") ||
+        candidate.nextAttemptAtMs === undefined ||
+        candidate.nextAttemptAtMs > nowMs
+      ) {
+        continue;
+      }
+      if (
+        volatile === undefined ||
+        (volatile.nextAttemptAtMs as number) > candidate.nextAttemptAtMs ||
+        (volatile.nextAttemptAtMs === candidate.nextAttemptAtMs &&
+          volatile.wakeId.localeCompare(candidate.wakeId) > 0)
+      ) {
+        volatile = candidate;
+      }
+    }
     if (volatile !== undefined) {
       if (volatile.attemptCount === Number.MAX_SAFE_INTEGER) {
         throw new NotificationRelayError("relay_failed", "Notification relay failed");

@@ -591,7 +591,8 @@ export class NotificationJournal {
     database
       .transaction(() => {
         const row = getRow(database, id);
-        if (row === undefined) throw new Error("cannot record a wake for an unknown notification");
+        // A successful ack may delete the row while its final webhook attempt is in flight.
+        if (row === undefined) return;
         if (row.wake_state === "content_acknowledged") return;
         if (row.wake_state !== "in_flight") throw new Error("notification wake is not in flight");
         const previousMayHaveReached = booleanInteger(
@@ -614,28 +615,15 @@ export class NotificationJournal {
   /** Call only after the central ack_message operation has returned success. */
   confirmContentAcknowledgement(messageId: string): boolean {
     const id = validateNotificationId(messageId);
-    const { database } = resourcesFor(this);
-    return database
-      .transaction(() => {
-        if (getRow(database, id) === undefined) return false;
-        database
-          .prepare(`
-            UPDATE notification_relay
-            SET wake_state = 'content_acknowledged',
-                wake_next_attempt_at_ms = NULL
-            WHERE message_id = ? AND wake_state != 'content_acknowledged'
-          `)
-          .run(id);
-        return true;
-      })
-      .immediate();
+    const result = resourcesFor(this)
+      .database.prepare("DELETE FROM notification_relay WHERE message_id = ?")
+      .run(id);
+    return changes(result.changes, "content acknowledgement deletion") === 1;
   }
 
   /** Remove wakes whose message bodies were consumed by central but lost with the prior process. */
   discardUnrecoverable(): number {
-    const result = resourcesFor(this)
-      .database.prepare("DELETE FROM notification_relay WHERE wake_state != 'content_acknowledged'")
-      .run();
+    const result = resourcesFor(this).database.prepare("DELETE FROM notification_relay").run();
     return changes(result.changes, "unrecoverable notification discard");
   }
 

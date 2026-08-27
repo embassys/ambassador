@@ -121,7 +121,7 @@ test("claims notification acknowledgement and wake independently before each att
   assert.equal(journal.claimDueWake(NOW_MS + 60_000)?.attemptCount, 2);
   assert.equal(journal.confirmContentAcknowledgement("message-1"), true);
   journal.recordWakeRetry("message-1", NOW_MS + 61_000, true);
-  assert.equal(journal.get("message-1")?.wakeState, "content_acknowledged");
+  assert.equal(journal.get("message-1"), undefined);
   assert.equal(journal.nextWakeAtMs(), null);
   assert.equal(journal.confirmContentAcknowledgement("unknown-id"), false);
 });
@@ -160,14 +160,15 @@ test("recovers in-flight work after restart without resetting attempts", (t) => 
   assert.equal(journal.get("message-1")?.wakeAttemptCount, 2);
 });
 
-test("discards nonterminal IDs when their consuming REST bodies cannot be recovered", (t) => {
+test("deletes acknowledged IDs and discards all unrecoverable IDs on restart", (t) => {
   const journal = journalFixture(t).open();
   journal.ingest(["pending-message", "acked-message"], NOW_MS);
   assert.equal(journal.confirmContentAcknowledgement("acked-message"), true);
+  assert.equal(journal.get("acked-message"), undefined);
 
   assert.equal(journal.discardUnrecoverable(), 1);
   assert.equal(journal.get("pending-message"), undefined);
-  assert.equal(journal.get("acked-message")?.wakeState, "content_acknowledged");
+  assert.equal(journal.get("acked-message"), undefined);
   assert.equal(journal.discardUnrecoverable(), 0);
 });
 

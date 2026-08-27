@@ -197,13 +197,13 @@ export async function openGatewayApplication(
         }
 
         const centralToken = currentIdentity.authenticatedToken();
-        const tool = await remoteTool(name, true, signal);
         if (name === "poll_messages") {
           const localArguments = safeLocalToolArguments(arguments_);
           const result = await requireRelay().pollMessages(pollTimeout(localArguments), signal);
           assertSafeUpstreamResult(result, centralToken);
           return result;
         }
+        const tool = await remoteTool(name, true, signal);
         const upstreamArguments = upstreamToolArguments(tool, arguments_, centralToken);
         const result = await requireCentral().callTool(
           name,
