@@ -69,12 +69,19 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 - **Now**
 
   ```text
-  poll_messages -> full body -> body becomes unavailable centrally
+  gateway -> poll central before the agent is awake
+  central -> return full body and mark it delivered
+  gateway -> wake agent
+  agent   -> ask gateway for the message
+  gateway -> return the copy held in RAM
+  central -> cannot return the message again
   ```
 
-  The gateway must keep the body in memory until the local agent processes it.
+  The gateway cannot discard the body because the agent needs it after waking. It cannot write the body to disk under the gateway data rules. RAM is the only place left. A gateway restart loses that copy.
 
 - **Want**
+
+  The event log from item 1 cannot retain every old event forever. This is the fallback when central has already deleted the events after the gateway's saved cursor.
 
   ```text
   watch_messages -> IDs only
@@ -111,15 +118,18 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   The relay stays ID-only. The agent can retrieve content again after a disconnect or restart.
 
-## 3. Retain unacknowledged content and expose gap recovery
+## 3. Recover when a saved cursor is too old
 
 - **Now**
 
   ```text
-  delivered by poll -> unavailable from REST and MCP
+  gateway -> poll central and receive full body
+  central -> mark message delivered
+  gateway -> crash before agent processes it
+  central -> no operation lists messages that still need processing
   ```
 
-  There is no recovery operation for a delivered but unacknowledged message.
+  There is no cursor today and no recovery operation for the lost body.
 
 - **Want**
 
@@ -147,25 +157,37 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   }
   ```
 
-  Event cursors have a published retention period. Unacknowledged message content remains available until `ack_message`.
+  The event log and message content have different lifetimes:
+
+  ```text
+  event cursor -> retained for a published replay period
+  message body -> retained until ack_message succeeds
+  ```
+
+  If the gateway presents a cursor older than the event log, central returns `cursor_expired`. `list_unacknowledged` does not depend on that expired cursor.
 
 - **Why**
 
   ```text
-  cursor valid   -> replay events
-  cursor expired -> list unacknowledged IDs -> rebuild local journal
+  saved cursor still valid -> replay events after it
+  saved cursor too old     -> list every unacknowledged ID
+  gateway                  -> rebuild local journal and continue
   ```
 
-  Cursor expiry becomes a recoverable condition instead of silent message loss.
+  A long gateway outage does not silently skip messages.
 
-## 4. Make acknowledgement idempotent and terminal
+## 4. Let repeated acknowledgements succeed
 
 - **Now**
 
   ```text
-  ack_message succeeds for a message marked delivered
-  duplicate and uncertain-outcome behavior is not a published interface guarantee
+  gateway -> ack_message(message_123)
+  central -> process the acknowledgement
+  network -> drop the success response
+  gateway -> cannot tell whether acknowledgement succeeded
   ```
+
+  The current interface does not publish what a repeated call must return.
 
 - **Want**
 
@@ -173,27 +195,22 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   ack_message(message_id)
   ```
 
-  First call:
-
-  ```json
-  {"message_id":"message_123","status":"acked"}
+  ```text
+  first ack_message(message_123)  -> {message_id: message_123, status: acked}
+  second ack_message(message_123) -> {message_id: message_123, status: acked}
   ```
 
-  Repeated call:
+  Returning the same successful result for repeated calls is idempotent acknowledgement.
 
-  ```json
-  {"message_id":"message_123","status":"acked"}
-  ```
-
-  Only `ack_message` makes content unavailable.
+  Reading or watching a message never removes it. Only a successful `ack_message` makes its content unavailable.
 
 - **Why**
 
   ```text
-  request reached central + response lost -> repeat safely
+  acknowledgement reached central + response lost -> call again safely
   ```
 
-  The gateway can resolve uncertain outcomes without duplicate processing or permanent local retention.
+  The second call tells the gateway that processing is complete, regardless of what happened to the first response.
 
 ## 5. Require a stable ID on every message
 
@@ -439,7 +456,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   ```text
   MCP watch_messages -> durable ID events
   MCP get_message    -> non-consuming content
-  MCP ack_message    -> terminal acknowledgement
+  MCP ack_message    -> only operation that removes content
   ```
 
   If REST remains:
