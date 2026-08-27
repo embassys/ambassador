@@ -2,11 +2,11 @@
 
 Status: proposed for review
 
-These requests are ordered by importance. They do not change the accepted v1 gateway protocol.
+These requests are ordered by importance. They define a v2 durable-handoff contract and do not change the published v1 gateway behavior.
 
-`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixtures reproduce that behavior. The supplied live tunnel returns `404`, so deployment of that revision was not checked.
+`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces that behavior. The supplied live tunnel returns `404`, so deployment of that revision was not checked.
 
-## 1. Add a durable message cursor
+## 1. Redeliver full messages until receipt
 
 - **Now**
 
@@ -26,17 +26,16 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   }
   ```
 
-  Reading the response changes the message from queued to delivered. A restart cannot replay it.
+  Returning a message changes it from `queued` to `delivered`. Future polls select only `queued`, so a failed response or gateway crash can make the body unavailable.
 
 - **Want**
 
   ```text
-  watch_messages(after_cursor?, timeout_seconds, limit)
+  receive_messages(timeout_seconds, limit)
   ```
 
   ```json
   {
-    "after_cursor": "cursor_000041",
     "timeout_seconds": 30,
     "limit": 100
   }
@@ -44,182 +43,69 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   ```json
   {
-    "events": [
-      {
-        "cursor": "cursor_000042",
-        "message_id": "message_123"
-      }
-    ],
-    "next_cursor": "cursor_000042",
-    "retention_floor": "cursor_000001"
-  }
-  ```
-
-  `after_cursor` is exclusive. The cursor is opaque, ordered within one central identity, and safe to replay.
-
-- **Why**
-
-  ```text
-  watch -> persist cursor and IDs -> wake
-  crash -> watch from persisted cursor -> replay
-  ```
-
-  The gateway can recover after a crash without persisting message bodies.
-
-## 2. Separate wake events from message content
-
-- **Now**
-
-  ```text
-  gateway -> poll central before the agent is awake
-  central -> return full body and mark it delivered
-  gateway -> wake agent
-  agent   -> ask gateway for the message
-  gateway -> return the copy held in RAM
-  central -> cannot return the message again
-  ```
-
-  The gateway cannot discard the body because the agent needs it after waking. It cannot write the body to disk under the gateway data rules. RAM is the only place left. A gateway restart loses that copy.
-
-- **Want**
-
-  The event log from item 1 cannot retain every old event forever. This is the fallback when central has already deleted the events after the gateway's saved cursor.
-
-  ```text
-  watch_messages -> IDs only
-  get_message(message_id) -> full message
-  ```
-
-  ```json
-  {
-    "message_id": "message_123"
-  }
-  ```
-
-  ```json
-  {
-    "message": {
-      "id": "message_123",
-      "sender_agent_id": "agent_456",
-      "action_type_id": "action_789",
-      "payload": {"task": "..."},
-      "created_at": "2026-08-27T12:00:00Z"
-    }
-  }
-  ```
-
-  `watch_messages` and `get_message` do not change message state.
-
-- **Why**
-
-  ```text
-  relay path: cursor + message ID
-  agent path: message body
-  durable gateway state: cursor + message ID
-  ```
-
-  The relay stays ID-only. The agent can retrieve content again after a disconnect or restart.
-
-## 3. Recover when a saved cursor is too old
-
-- **Now**
-
-  ```text
-  gateway -> poll central and receive full body
-  central -> mark message delivered
-  gateway -> crash before agent processes it
-  central -> no operation lists messages that still need processing
-  central -> delete the delivered row after 30 days
-  ```
-
-  There is no cursor today and no recovery operation for the lost body.
-
-- **Want**
-
-  ```text
-  list_unacknowledged(page_token?, limit)
-  ```
-
-  ```json
-  {
     "messages": [
-      {"id": "message_123"},
-      {"id": "message_124"}
-    ],
-    "next_page_token": "page_000002"
+      {
+        "id": "message_123",
+        "sender_agent_id": "agent_456",
+        "action_type_id": "action_789",
+        "payload": {"task": "..."},
+        "created_at": "2026-08-27T12:00:00Z"
+      }
+    ]
   }
   ```
 
-  ```json
-  {
-    "error": {
-      "code": "cursor_expired",
-      "retention_floor": "cursor_000100",
-      "recovery": "list_unacknowledged"
-    }
-  }
-  ```
+  Reading does not change message state. Every message remains eligible for redelivery until `ack_delivery` succeeds. If messages are already waiting, the call returns immediately; otherwise it may long-poll for the requested timeout.
 
-  The event log and message content have different lifetimes:
-
-  ```text
-  event cursor -> retained for a published replay period
-  message body -> retained until ack_message succeeds
-  ```
-
-  If the gateway presents a cursor older than the event log, central returns `cursor_expired`. `list_unacknowledged` does not depend on that expired cursor.
+  A message is immutable. Every response containing the same `id` must contain the same message.
 
 - **Why**
 
   ```text
-  saved cursor still valid -> replay events after it
-  saved cursor too old     -> list every unacknowledged ID
-  gateway                  -> rebuild local journal and continue
+  central -> return full message
+  gateway -> crash before storing it
+  central -> return the same message again
   ```
 
-  A long gateway outage does not silently skip messages.
+  Central keeps custody until the gateway confirms a durable local write. No cursor, event log, or separate content lookup is needed.
 
-## 4. Let repeated acknowledgements succeed
+## 2. Acknowledge durable delivery
 
 - **Now**
 
-  ```text
-  first ack_message(message_123)  -> {message_id: message_123, status: acked}
-  second ack_message(message_123) -> message not found error
-  ```
-
-  If central processes the first call but its response is lost, the gateway retains its local body. Retrying then receives `message not found`, so the gateway still cannot confirm acknowledgement.
+  Polling marks a message delivered before the gateway confirms that it retained the body. `ack_message` later mixes central delivery state with agent processing state.
 
 - **Want**
 
   ```text
-  ack_message(message_id)
+  ack_delivery(message_id)
   ```
 
   ```text
-  first ack_message(message_123)  -> {message_id: message_123, status: acked}
-  second ack_message(message_123) -> {message_id: message_123, status: acked}
-  expired message                 -> {message_id: message_123, status: expired}
-  unknown message                 -> message_not_found
+  first ack_delivery(message_123)  -> {message_id: message_123, status: received}
+  second ack_delivery(message_123) -> {message_id: message_123, status: received}
+  expired message                  -> {message_id: message_123, status: expired}
+  unknown message                  -> message_not_found
   ```
 
-  Returning the same successful result for repeated calls is idempotent acknowledgement.
+  `received` means the gateway has durably stored the complete message and now owns delivery to the local agent. It does not mean the agent processed the message.
 
-  `acked`, `expired`, and `message_not_found` are distinct results. Do not collapse them into one `404` or one MCP error string.
+  Central may delete the body after durably recording `received`, but must retain an ID-only receipt record for the message ID's lifetime so retries return the same result. `expired` and `message_not_found` remain distinct outcomes; neither can be treated as successful receipt.
 
-  The gateway may stop local wake retries for `acked` or `expired`. Only `acked` confirms that central recorded agent processing.
-
-  Reading or watching a message never removes it. Only a successful `ack_message` makes its content unavailable.
+  If central later needs processing status, add a separate operation. It must not delay or weaken the custody transfer.
 
 - **Why**
 
   ```text
-  acknowledgement reached central + response lost -> call again safely
+  gateway -> commit full message locally
+  gateway -> ack_delivery
+  central -> record receipt, but response is lost
+  gateway -> repeat ack_delivery safely
   ```
 
-  The second call tells the gateway that processing is complete, regardless of what happened to the first response.
+  The write order is fixed: local durable commit first, central acknowledgement second.
 
-## 5. Require a stable ID on every message
+## 3. Require a stable immutable message ID
 
 - **Now**
 
@@ -250,13 +136,42 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   message ID: 1 to 128 URI-unreserved ASCII characters
   uniqueness: within one central identity
   lifetime: never reused
+  content: immutable for that ID
   ```
 
 - **Why**
 
-  The ID is required for cursor replay, webhook deduplication, retrieval, and acknowledgement.
+  ```text
+  gateway -> stores message_123
+  gateway -> ack response is lost
+  central -> redelivers message_123
+  gateway -> recognizes the retry instead of creating a second message
+  ```
 
-## 6. Add central JWT recovery
+  The ID is the deduplication and acknowledgement key. It is not a cursor.
+
+## 4. Define retention and mailbox pressure
+
+- **Now**
+
+  Delivered messages are deleted after 30 days even if the gateway never successfully processes them.
+
+- **Want**
+
+  ```text
+  before ack_delivery -> retain the full message for redelivery
+  after ack_delivery  -> body may be deleted; retain an ID-only receipt record
+  ```
+
+  Central must not silently delete an unreceived message to enforce a quota. Apply documented per-identity count and byte limits before accepting more work, and return a machine-readable `mailbox_full` error to the sender.
+
+  If product policy adds explicit cancellation or expiry, keep an ID-only terminal record and return `expired`. Do not report it as `received`.
+
+- **Why**
+
+  Reliable handoff requires one side to own the full body at every point. Quotas should reject new work rather than create an unreported gap in that ownership.
+
+## 5. Add central JWT recovery
 
 - **Now**
 
@@ -294,7 +209,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   Public use needs recovery, revocation, and intentional local reset.
 
-## 7. Return native structured MCP results
+## 6. Return native structured MCP results
 
 - **Now**
 
@@ -331,7 +246,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   The gateway can remove its Python-literal compatibility parser and its security-sensitive normalization path.
 
-## 8. Authenticate central MCP at the transport
+## 7. Authenticate central MCP at the transport
 
 - **Now**
 
@@ -355,7 +270,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   ```json
   {
-    "name": "ack_message",
+    "name": "ack_delivery",
     "arguments": {
       "message_id": "message_123"
     }
@@ -368,7 +283,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   Authentication belongs to the connection. Tool arguments remain business data and cannot accidentally expose the JWT through schemas or results.
 
-## 9. Version the new contract and publish stable endpoints
+## 8. Version the new contract and publish stable endpoints
 
 - **Now**
 
@@ -390,9 +305,9 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   {
     "protocol_version": "2",
     "capabilities": {
-      "durable_cursor": true,
-      "non_consuming_get": true,
-      "idempotent_ack": true,
+      "full_message_redelivery": true,
+      "durable_delivery_ack": true,
+      "idempotent_delivery_ack": true,
       "token_reissue": true
     }
   }
@@ -404,7 +319,7 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
   A silent semantic change to `/api/poll_messages` would break published gateways. Stable URLs can become package constants instead of user configuration.
 
-## 10. Define bounds, deadlines, and machine-readable errors
+## 9. Define bounds, deadlines, and machine-readable errors
 
 - **Now**
 
@@ -415,13 +330,18 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   ```json
   {
     "limits": {
-      "watch_timeout_seconds": 30,
-      "max_page_size": 100,
-      "max_result_bytes": 524288,
-      "max_json_depth": 100
+      "receive_timeout_seconds": 30,
+      "max_batch_size": 100,
+      "max_message_bytes": 524288,
+      "max_result_bytes": 4194304,
+      "max_json_depth": 100,
+      "mailbox_max_messages": 10000,
+      "mailbox_max_bytes": 1073741824
     }
   }
   ```
+
+  Values above are examples; central must publish the actual fixed limits used in production.
 
   ```json
   {
@@ -435,9 +355,9 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   Required error codes:
 
   ```text
-  invalid_cursor
-  cursor_expired
   message_not_found
+  message_expired
+  mailbox_full
   authentication_expired
   rate_limited
   result_too_large
@@ -445,9 +365,9 @@ These requests are ordered by importance. They do not change the accepted v1 gat
 
 - **Why**
 
-  The gateway can apply safe retry rules without parsing remote prose. Server and client limits fail at documented boundaries.
+  The gateway can apply safe retry and backpressure rules without parsing remote prose. Server and client limits fail at documented boundaries.
 
-## 11. Retire the consuming REST poll after MCP v2 migration
+## 10. Retire the consuming v1 poll after migration
 
 - **Now**
 
@@ -461,41 +381,50 @@ These requests are ordered by importance. They do not change the accepted v1 gat
   Preferred target:
 
   ```text
-  MCP watch_messages -> durable ID events
-  MCP get_message    -> non-consuming content
-  MCP ack_message    -> only operation that removes content
+  MCP receive_messages -> full messages without changing state
+  MCP ack_delivery      -> durable custody transfer
   ```
 
   If REST remains:
 
   ```http
-  GET /api/v2/messages/watch?after=<cursor>&timeout=30&limit=100
+  GET /api/v2/messages/receive?timeout=30&limit=100
   Authorization: Bearer <central-jwt>
   ```
 
-  REST and MCP read the same non-destructive event log and use the same cursor rules.
+  ```http
+  POST /api/v2/messages/message_123/ack-delivery
+  Authorization: Bearer <central-jwt>
+  ```
+
+  REST and MCP must use the same non-consuming queue and acknowledgement state.
 
 - **Why**
 
-  One canonical message state prevents REST and MCP from racing to consume the same message. The gateway needs only the MCP endpoint once `watch_messages` exists.
+  One canonical message state prevents REST and MCP from racing to consume the same message.
 
 ## Target flow
 
 ```text
-gateway -> watch_messages(after_cursor)
-central -> [{cursor, message_id}]
-gateway -> atomically persist cursor and IDs
+gateway -> receive_messages()
+central -> full immutable messages
+gateway -> atomically persist IDs and encrypted bodies
+gateway -> sync the durable write
+gateway -> ack_delivery(message_id)
+central -> record receipt and release its body
 gateway -> wake local webhook with message_id
-agent   -> get_message(message_id)
-central -> full message, still unacknowledged
-agent   -> ack_message(message_id)
-central -> {message_id, status: "acked"}
+agent   -> read the message from the local gateway
+agent   -> acknowledge local processing
+gateway -> delete the local body
 
-gateway crash
-gateway -> watch_messages(last_persisted_cursor)
-central -> replay events within retention
+gateway crashes before local commit
+central -> redeliver the full message
 
-cursor expired
-gateway -> list_unacknowledged()
-central -> IDs needed to rebuild the local journal
+gateway crashes after local commit but before ack_delivery
+central -> redeliver the same ID
+gateway -> deduplicate and repeat ack_delivery
+
+ack_delivery response is lost
+gateway -> repeat ack_delivery
+central -> return the same received result
 ```
