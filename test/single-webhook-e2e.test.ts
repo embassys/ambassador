@@ -70,7 +70,7 @@ async function scanFiles(root: string, markers: string[]): Promise<void> {
 async function waitForWakeState(
   stateRoot: string,
   messageId: string,
-  expected: "accepted_wait" | "content_acknowledged",
+  expected: "accepted_wait",
 ): Promise<void> {
   const database = new Database(join(stateRoot, "notifications.sqlite"), { readonly: true });
   try {
@@ -82,6 +82,22 @@ async function waitForWakeState(
       await delay(10);
     }
     assert.fail(`wake did not reach ${expected}`);
+  } finally {
+    database.close();
+  }
+}
+
+async function waitForWakeDeletion(stateRoot: string, messageId: string): Promise<void> {
+  const database = new Database(join(stateRoot, "notifications.sqlite"), { readonly: true });
+  try {
+    const statement = database.prepare<[string], { present: number }>(
+      "SELECT EXISTS (SELECT 1 FROM notification_relay WHERE message_id = ?) AS present",
+    );
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (statement.get(messageId)?.present === 0) return;
+      await delay(10);
+    }
+    assert.fail("acknowledged wake was not deleted");
   } finally {
     database.close();
   }
@@ -286,7 +302,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
   central.setAcknowledgementMode("normal");
   await client.callTool("ack_message", { message_id: MESSAGE_ID });
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, true);
-  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "content_acknowledged");
+  await waitForWakeDeletion(gateway.stateRoot, MESSAGE_ID);
 
   const callsBeforeReplacement = central.calls.length;
   await assert.rejects(

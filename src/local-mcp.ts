@@ -397,6 +397,10 @@ export class LocalMcpServer {
     let transientSession = false;
     try {
       const parsedBody = request.method === "POST" ? await readJsonBody(request) : undefined;
+      if (Array.isArray(parsedBody)) {
+        safeHttpError(response, 400);
+        return;
+      }
       const id = sessionId(request);
       if (id === undefined) {
         if (request.method !== "POST" || !isInitializeRequest(parsedBody)) {

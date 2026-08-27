@@ -483,7 +483,7 @@ test("redrives an accepted ID-bearing wake until confirmed content acknowledgeme
 
   await waitFor(() => wakes >= 2);
   assert.equal(relay.confirmContentAcknowledgement(MESSAGE_ID), true);
-  await waitFor(() => journal.get(MESSAGE_ID)?.wakeState === "content_acknowledged");
+  await waitFor(() => journal.get(MESSAGE_ID) === undefined);
   const wakeCountAtAcknowledgement = wakes;
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(wakes, wakeCountAtAcknowledgement);
