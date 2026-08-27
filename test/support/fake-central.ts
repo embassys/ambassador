@@ -102,7 +102,7 @@ export interface FakeCentral {
   calls: ToolCallRecord[];
   setPollResponse: (response: unknown) => void;
   setMcpAvailable: (available: boolean) => void;
-  setAcknowledgementMode: (mode: "normal" | "mismatch" | "disconnect") => void;
+  setAcknowledgementMode: (mode: "normal" | "mismatch" | "failure" | "disconnect") => void;
   setToolDescription: (name: string, description: string | undefined) => void;
   setVerificationResult: (result: Record<string, unknown> | string | undefined) => void;
   injectMessage: (id: string, content: string) => void;
@@ -115,7 +115,7 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   let pollCount = 0;
   let pollResponse: unknown;
   let mcpAvailable = true;
-  let acknowledgementMode: "normal" | "mismatch" | "disconnect" = "normal";
+  let acknowledgementMode: "normal" | "mismatch" | "failure" | "disconnect" = "normal";
   const toolDescriptions = new Map<string, string>();
   let verificationResult: Record<string, unknown> | string | undefined;
 
@@ -318,6 +318,14 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
                 200,
                 toolResult(id, { message_id: "different-message", status: "acked" }),
               );
+              return;
+            }
+            if (acknowledgementMode === "failure") {
+              json(response, 200, {
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32_002, message: "acknowledgement failed" },
+              });
               return;
             }
             const item = messages.get(String(args.message_id));

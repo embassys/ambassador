@@ -6,6 +6,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+import Database from "better-sqlite3";
+
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook, type WebhookWake } from "./support/fake-webhook.js";
 import { runSecondGateway, startGatewayProcess } from "./support/gateway-process.js";
@@ -62,6 +64,26 @@ async function scanFiles(root: string, markers: string[]): Promise<void> {
     for (const marker of markers) {
       assert.ok(!bytes.includes(Buffer.from(marker)), `${entry.name} contains forbidden plaintext`);
     }
+  }
+}
+
+async function waitForWakeState(
+  stateRoot: string,
+  messageId: string,
+  expected: "accepted_wait" | "content_acknowledged",
+): Promise<void> {
+  const database = new Database(join(stateRoot, "notifications.sqlite"), { readonly: true });
+  try {
+    const statement = database.prepare<[string], { wake_state: string }>(
+      "SELECT wake_state FROM notification_relay WHERE message_id = ?",
+    );
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (statement.get(messageId)?.wake_state === expected) return;
+      await delay(10);
+    }
+    assert.fail(`wake did not reach ${expected}`);
+  } finally {
+    database.close();
   }
 }
 
@@ -205,6 +227,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
   assert.ok(!serializedWake.includes(WEBHOOK_TOKEN));
   assert.equal(central.messageState(MESSAGE_ID).delivered, true);
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "accepted_wait");
 
   central.setToolDescription("poll_messages", `unsafe ${central.jwt}`);
   await assert.rejects(client.listTools(), (error: unknown) => error instanceof McpCallError);
@@ -251,9 +274,19 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
   );
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
   assert.deepEqual(await client.callTool("poll_messages", { timeout: 0 }), polled);
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "accepted_wait");
+  central.setAcknowledgementMode("failure");
+  await assert.rejects(
+    client.callTool("ack_message", { message_id: MESSAGE_ID }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
+  assert.deepEqual(await client.callTool("poll_messages", { timeout: 0 }), polled);
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "accepted_wait");
   central.setAcknowledgementMode("normal");
   await client.callTool("ack_message", { message_id: MESSAGE_ID });
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, true);
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "content_acknowledged");
 
   const callsBeforeReplacement = central.calls.length;
   await assert.rejects(
@@ -265,7 +298,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
   const authenticatedCalls = central.calls.filter((call) =>
     ["poll_messages", "ack_message"].includes(call.name),
   );
-  assert.equal(authenticatedCalls.length, 2);
+  assert.equal(authenticatedCalls.length, 3);
   for (const call of authenticatedCalls) {
     assert.ok(call.args.token === central.jwt);
     assert.equal(call.name, "ack_message");
@@ -334,6 +367,7 @@ test("an uncertain ack_message outcome keeps the consumed body locally retrievab
   await client.initialize();
   await client.listTools();
   await webhook.waitForWake();
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "accepted_wait");
 
   const polled = await client.callTool("poll_messages", { timeout: 0 });
   central.setAcknowledgementMode("disconnect");
@@ -343,6 +377,7 @@ test("an uncertain ack_message outcome keeps the consumed body locally retrievab
   );
   assert.equal(central.messageState(MESSAGE_ID).contentAcknowledged, false);
   assert.deepEqual(await client.callTool("poll_messages", { timeout: 0 }), polled);
+  await waitForWakeState(gateway.stateRoot, MESSAGE_ID, "accepted_wait");
 
   assert.equal(await gateway.stop(), 0);
   await scanFiles(gateway.artifactRoot, [central.jwt, MESSAGE_CONTENT]);

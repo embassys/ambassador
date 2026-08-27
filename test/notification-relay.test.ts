@@ -374,7 +374,9 @@ test("keeps retrying an ID-less wake when local polling wins the in-flight race"
   const controller = new AbortController();
   let polls = 0;
   let wakeAttempts = 0;
+  const wakeKeys: string[] = [];
   let rejectFirstWake: ((reason: Error) => void) | undefined;
+  let resolveSecondWake: ((response: Response) => void) | undefined;
   let resolveFirstWake: (() => void) | undefined;
   const firstWakeStarted = new Promise<void>((resolve) => {
     resolveFirstWake = resolve;
@@ -388,13 +390,19 @@ test("keeps retrying an ID-less wake when local polling wins the in-flight race"
       return pendingResponse(init.signal);
     }
     wakeAttempts += 1;
+    const wakeKey = new Headers(init.headers).get("idempotency-key");
+    assert.ok(wakeKey);
+    assert.equal(new Headers(init.headers).get("x-request-id"), wakeKey);
+    wakeKeys.push(wakeKey);
     if (wakeAttempts === 1) {
       resolveFirstWake?.();
       return await new Promise<Response>((_, reject) => {
         rejectFirstWake = reject;
       });
     }
-    return new Response(null, { status: 202 });
+    return await new Promise<Response>((resolve) => {
+      resolveSecondWake = resolve;
+    });
   };
   const relay = new NotificationRelay({
     ...relayOptions(journal, request),
@@ -411,6 +419,10 @@ test("keeps retrying an ID-less wake when local polling wins the in-flight race"
   });
   rejectFirstWake?.(new Error("uncertain wake"));
   await waitFor(() => wakeAttempts === 2);
+  assert.deepEqual(wakeKeys, [wakeKeys[0], wakeKeys[0]]);
+  assert.equal(polls, 1, "central polling resumed before the volatile wake was accepted");
+  resolveSecondWake?.(new Response(null, { status: 202 }));
+  await waitFor(() => polls === 2);
   controller.abort();
   await running;
 });
