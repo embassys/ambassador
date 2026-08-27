@@ -39,6 +39,8 @@ Version `0.2.3` matches the live consuming REST interface. It buffers one valida
 
 Version `0.2.4` caps normalized tool results at 512 KiB, rejects JSON-RPC batches before dispatch, limits notification polls to 256 messages and 16,384 JSON structural tokens, and checks 100 nesting levels before parsing. Local `poll_messages` no longer needs a central MCP catalog request. ID-less wake retries survive an early local poll, failed, uncertain, or mismatched acknowledgements retain the buffered body, and confirmed IDs are deleted from the journal.
 
+Version `0.2.5` switches notification polling to the central MCP `poll_messages` tool only after the public REST route returns an explicit `404`. It keeps REST for every other failed or uncertain outcome, injects the central JWT only into the transient MCP call, and applies the existing message and result limits to both paths.
+
 ## Production decisions
 
 - ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
@@ -55,7 +57,7 @@ The user approved the red failures and authorized production implementation on 2
 
 Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
 
-The inspected central implementation returns message content and marks it delivered during REST polling. Versions `0.2.3` and `0.2.4` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
+The inspected central implementation returns message content and marks it delivered during REST or MCP polling. Versions `0.2.3` through `0.2.5` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
 
 ## Test work
 

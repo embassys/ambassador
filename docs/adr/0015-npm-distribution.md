@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-24
 
-Updated: 2026-08-27 for the `0.2.4` relay-bounds release
+Updated: 2026-08-27 for the `0.2.5` MCP polling fallback release
 
 ## Problem
 
@@ -25,7 +25,7 @@ Initialize pnpm's user-owned global binary directory once with `pnpm setup`. Glo
 
 Publish production releases from the `main` branch only after Linux, macOS, and Windows checks pass. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
 
-The user approved `0.2.0` through `0.2.4` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. Windows packaging and credential permissions remain unqualified, so their documentation excludes Windows and does not present these versions as production releases.
+The user approved `0.2.0` through `0.2.5` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. Windows packaging and credential permissions remain unqualified, so their documentation excludes Windows and does not present these versions as production releases.
 
 Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
 
@@ -43,4 +43,4 @@ The current private GitHub repository can use trusted publishing, but npm cannot
 
 ## Approval
 
-The user reviewed and approved npm-registry distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows remains unqualified. On 2026-08-26, the user approved the `0.2.1` dual-authentication patch, pnpm for installation and project tooling, and the `0.2.2` central compatibility release under the same qualification boundary. On 2026-08-27, the user requested the `0.2.3` live central API compatibility release and any review fixes needed for a follow-up release. npm remains solely the trusted OIDC uploader.
+The user reviewed and approved npm-registry distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows remains unqualified. On 2026-08-26, the user approved the `0.2.1` dual-authentication patch, pnpm for installation and project tooling, and the `0.2.2` central compatibility release under the same qualification boundary. On 2026-08-27, the user requested the live central compatibility releases through `0.2.5`, including a temporary MCP polling fallback while the public REST route is unavailable. npm remains solely the trusted OIDC uploader.

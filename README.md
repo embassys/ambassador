@@ -2,13 +2,13 @@
 
 The A2A gateway runs a local MCP endpoint, enrolls one central agent identity, polls that identity's notifications, and wakes one loopback webhook. It does not discover runtimes or manage agent bindings.
 
-Version `0.2.4` matches the live central service's consuming notification API and authenticated MCP operations. It also bounds normalized message results and message counts before buffering. This is not a production release because central cannot recover delivered messages after a gateway restart.
+Version `0.2.5` matches the live central service's consuming notification API and authenticated MCP operations. If the public REST poll route returns `404`, it uses the central MCP `poll_messages` tool instead. This is not a production release because central cannot recover delivered messages after a gateway restart.
 
 ## Target usage
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.4`
+- macOS or Linux; Windows remains unqualified for `0.2.5`
 - Node.js 24.19.x
 - pnpm 11.22.0 through Corepack
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
@@ -25,7 +25,7 @@ pnpm setup
 Run the `source` command printed by `pnpm setup`, or open a new terminal. Then install the gateway:
 
 ```sh
-pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.4
+pnpm --allow-build=better-sqlite3 add --global @a2adev/gateway@0.2.5
 ```
 
 Set both development endpoints. Remote endpoints require HTTPS; plain HTTP is accepted only on loopback:
@@ -99,7 +99,7 @@ The gateway then starts notification polling. Later local MCP calls have no `tok
 
 ## Delivery
 
-The gateway matches the live central API. `GET /api/poll_messages?timeout=30` returns full messages and marks them delivered. The gateway validates and retains one bounded response only in memory, stores only present IDs in SQLite, and sends the webhook wake. Local `poll_messages` reads that in-memory inbox even if central MCP is temporarily unavailable. `ack_message` is forwarded centrally and removes an ID-bearing message only after central confirms it.
+The gateway first uses `GET /api/poll_messages?timeout=30`. If that route explicitly returns `404`, the process switches to the central MCP `poll_messages` tool with a 20-second long poll. It does not switch after a timeout, connection failure, redirect, or any other HTTP status because the REST poll might already have consumed a message. Both successful paths receive the same full messages and apply the same limits. The gateway retains one bounded response only in memory, stores only present IDs in SQLite, and sends the webhook wake. Local `poll_messages` reads that in-memory inbox without another central request. `ack_message` is forwarded centrally and removes an ID-bearing message only after central confirms it.
 
 ID-less messages are treated as unique one-shot deliveries. They are not journaled, deduplicated, or acknowledged. Because central cannot re-fetch delivered messages, stopping or crashing the gateway before processing loses the in-memory body; production still requires central redelivery or delivered-message retrieval.
 
@@ -107,7 +107,7 @@ SQLite remains ID-only. Registration data, verification codes, central JWT plain
 
 ## Current implementation
 
-The source tree and `0.2.4` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a memory-only inbox capped at 256 messages and 512 KiB of normalized result JSON. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
+The source tree and `0.2.5` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a memory-only inbox capped at 256 messages and 512 KiB of normalized result JSON. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
 
 ## Development
 

@@ -19,6 +19,7 @@ const MAX_MESSAGES_PER_POLL = 256;
 const MAX_LOCAL_POLL_SECONDS = 30;
 
 export type NotificationFetch = (url: URL, init: RequestInit) => Promise<Response>;
+export type McpNotificationPoll = (signal: AbortSignal) => Promise<Record<string, unknown>>;
 
 export type NotificationRelayErrorCode =
   | "already_running"
@@ -47,6 +48,7 @@ export interface NotificationRelayOptions {
   webhookUrl: string | URL;
   webhookToken: string;
   fetch?: NotificationFetch;
+  pollMessagesThroughMcp?: McpNotificationPoll;
   now?: () => number;
   random?: () => number;
   pollDeadlineMs?: number;
@@ -258,6 +260,17 @@ function parsePollResponse(bytes: Uint8Array, centralToken: string): PollRespons
   return { messages: validated };
 }
 
+function parseMcpPollResponse(value: Record<string, unknown>, centralToken: string): PollResponse {
+  let bytes: Uint8Array;
+  try {
+    bytes = new TextEncoder().encode(JSON.stringify(value));
+  } catch {
+    invalidPollResponse();
+  }
+  if (bytes.byteLength > MAX_RESPONSE_BYTES) oversizedPollResponse();
+  return parsePollResponse(bytes, centralToken);
+}
+
 async function cancelBody(response: Response): Promise<void> {
   try {
     await response.body?.cancel();
@@ -328,6 +341,7 @@ export class NotificationRelay {
   private readonly webhookToken: string;
   private readonly webhookAuthorization: string;
   private readonly request: NotificationFetch;
+  private readonly pollMessagesThroughMcp: McpNotificationPoll | undefined;
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly pollDeadlineMs: number;
@@ -344,6 +358,7 @@ export class NotificationRelay {
   private runController: AbortController | undefined;
   private running: Promise<void> | undefined;
   private shutdownRequested = false;
+  private useMcpPolling = false;
 
   constructor(options: NotificationRelayOptions) {
     this.journal = options.journal;
@@ -355,6 +370,7 @@ export class NotificationRelay {
     this.webhookToken = safeToken(options.webhookToken);
     this.webhookAuthorization = `Bearer ${this.webhookToken}`;
     this.request = options.fetch ?? fetch;
+    this.pollMessagesThroughMcp = options.pollMessagesThroughMcp;
     this.now = options.now ?? Date.now;
     this.random = options.random ?? Math.random;
     this.pollDeadlineMs = requestTimeout(
@@ -500,6 +516,10 @@ export class NotificationRelay {
   }
 
   private async pollOnce(signal: AbortSignal): Promise<void> {
+    if (this.useMcpPolling) {
+      await this.pollOnceThroughMcp(signal);
+      return;
+    }
     const response = await this.fetchResponse(
       this.centralPollUrl,
       {
@@ -523,6 +543,12 @@ export class NotificationRelay {
         "Central notification redirect was rejected",
       );
     }
+    if (response.status === 404 && this.pollMessagesThroughMcp !== undefined) {
+      await cancelBody(response);
+      this.useMcpPolling = true;
+      await this.pollOnceThroughMcp(signal);
+      return;
+    }
     if (!response.ok) {
       await cancelBody(response);
       throw new RequestFailed();
@@ -538,6 +564,19 @@ export class NotificationRelay {
       throw error;
     }
     const poll = parsePollResponse(bytes, this.centralToken);
+    this.ingestPoll(poll);
+  }
+
+  private async pollOnceThroughMcp(signal: AbortSignal): Promise<void> {
+    const pollMessages = this.pollMessagesThroughMcp;
+    if (pollMessages === undefined) {
+      throw new NotificationRelayError("relay_failed", "Notification relay failed");
+    }
+    const result = await pollMessages(signal);
+    this.ingestPoll(parseMcpPollResponse(result, this.centralToken));
+  }
+
+  private ingestPoll(poll: PollResponse): void {
     for (const item of poll.messages) {
       if (item.id === undefined) continue;
       const buffered = this.inbox.find((candidate) => candidate.id === item.id);
