@@ -100,6 +100,8 @@ export interface FakeCentral {
   jwt: string;
   pollCount: () => number;
   calls: ToolCallRecord[];
+  setApiPollAvailable: (available: boolean) => void;
+  setMcpPollMode: (mode: "normal" | "authentication_failure" | "invalid_result") => void;
   setPollResponse: (response: unknown) => void;
   setMcpAvailable: (available: boolean) => void;
   setAcknowledgementMode: (mode: "normal" | "mismatch" | "failure" | "disconnect") => void;
@@ -114,6 +116,8 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   const calls: ToolCallRecord[] = [];
   let pollCount = 0;
   let pollResponse: unknown;
+  let apiPollAvailable = true;
+  let mcpPollMode: "normal" | "authentication_failure" | "invalid_result" = "normal";
   let mcpAvailable = true;
   let acknowledgementMode: "normal" | "mismatch" | "failure" | "disconnect" = "normal";
   const toolDescriptions = new Map<string, string>();
@@ -124,6 +128,10 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
       const url = new URL(request.url ?? "/", "http://127.0.0.1");
       if (request.method === "GET" && url.pathname === "/api/poll_messages") {
         pollCount += 1;
+        if (!apiPollAvailable) {
+          json(response, 404, { detail: "not found" });
+          return;
+        }
         if (request.headers.authorization !== `Bearer ${CENTRAL_JWT}`) {
           json(response, 401, { detail: "unauthorized" });
           return;
@@ -294,10 +302,22 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
             return;
           }
           if (name === "poll_messages") {
+            if (mcpPollMode === "authentication_failure") {
+              json(response, 200, {
+                jsonrpc: "2.0",
+                id,
+                error: { code: -32_001, message: "authentication failed" },
+              });
+              return;
+            }
             const queued = [...messages.values()].filter(
               (item) => !item.delivered && !item.contentAcknowledged,
             );
             for (const item of queued) item.delivered = true;
+            if (mcpPollMode === "invalid_result") {
+              json(response, 200, toolResult(id, { unexpected: true }));
+              return;
+            }
             json(
               response,
               200,
@@ -367,6 +387,12 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
     jwt: CENTRAL_JWT,
     pollCount: () => pollCount,
     calls,
+    setApiPollAvailable(available) {
+      apiPollAvailable = available;
+    },
+    setMcpPollMode(mode) {
+      mcpPollMode = mode;
+    },
     setPollResponse(response) {
       pollResponse = response;
     },
