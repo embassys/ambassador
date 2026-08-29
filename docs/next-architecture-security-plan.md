@@ -1,17 +1,26 @@
 # Next architecture and security plan
 
-Status: planning only
+Status: accepted gateway architecture, implementation not started
 
 Date: 2026-08-29
 
-This document collects proposed work for a later implementation agent. It does
-not amend the accepted product or protocol. Each architecture choice still
-requires user approval through its ADR. Tests and fixtures come before
-production changes, following the gates in `docs/implementation-plan.md`.
+This document collects the accepted REST enrollment, conversation, recovery,
+and DPoP work for later implementation agents. The user accepted ADRs 0023,
+0025, and 0026 on 2026-08-29. ADR 0024 and every connector, provider,
+dependency, CLI, packaging, installation, and publishing choice remain
+pending. The current product and protocol continue to describe shipped
+version 1 behavior until implementation lands. Tests and fixtures come before
+production changes under `docs/implementation-plan.md`.
 
-`docs/architecture-pr-backlog.md` groups this work into proposed pull requests,
+`docs/architecture-pr-backlog.md` groups this work into pull requests,
 cross-repository dependencies, red-test gates, and end-to-end qualification
 lanes.
+
+Production central URLs, signing systems, database guarantees, capacity,
+trusted proxies, email delivery, and rollout dates are not available. Tests
+use `docs/v2-fixture-profile.md` as a deterministic stand-in. That profile is
+test-only and does not prove that the real central service implements any
+transaction or security guarantee.
 
 ## N1: adopt the central REST enrollment contract
 
@@ -19,12 +28,11 @@ lanes.
 
 Keep the gateway's local MCP enrollment experience, but send registration,
 verification, and verification-resend requests to the central REST API. Capture
-the verification credential inside the gateway. If ADR 0026 is approved, this
-includes its DPoP key and token binding. Do not expose any part to the local MCP
-client.
+the verification credential, DPoP key, and token binding inside the gateway.
+Do not expose any part to the local MCP client.
 
-ADR 0023 contains the proposed architecture, observed schemas, security rules,
-and unresolved central contract questions.
+ADR 0023 contains the accepted architecture, schemas, security rules, and the
+production facts that still need central-owner confirmation.
 
 ### Scope
 
@@ -53,27 +61,27 @@ and unresolved central contract questions.
   reset.
 - Installing another HTTP, validation, or parsing dependency.
 
-### Required answers
+### Accepted choices and unresolved production facts
 
-| ID | Question | Why it blocks implementation |
+| ID | State | Contract |
 | --- | --- | --- |
-| N1-Q1 | Is the registration route `/api/register` or `/api/register_agent`? | The supplied command and live OpenAPI schema disagree. |
-| N1-Q2 | What HTTPS base URL is stable for the gateway? | Remote HTTP would expose the code and JWT. |
-| N1-Q3 | What are the exact non-200 statuses and JSON error shapes? | Retry and safe local error behavior depend on them. |
-| N1-Q4 | Is `message` always returned by registration and verification? | OpenAPI marks it optional, while the current local result requires it. |
-| N1-Q5 | Can a verification code contain non-decimal characters? | OpenAPI fixes only its length, and transcript redaction must cover the real format. |
-| N1-Q6 | What happens when verification succeeds remotely but the response is lost? | The gateway must not retry a one-time token issuance blindly. |
-| N1-Q7 | Does REST polling retain the current consuming semantics and message shape? | A silent change could duplicate or lose messages. |
-| N1-Q8 | Will verification issue and every protected route enforce the DPoP-bound token in ADR 0026? | The answer changes the verification headers, success response, stored credential, polling header, and central MCP transport. |
+| N1-Q1 | Accepted | Use `/api/register` only. Do not probe `/api/register_agent` or fall back to MCP. |
+| N1-Q2 | Production fact unresolved | The gateway needs a stable HTTPS base. Fixtures use only the test value in `docs/v2-fixture-profile.md`. |
+| N1-Q3 | Accepted | ADR 0023 fixes the status and safe error pairs. Central must implement them. |
+| N1-Q4 | Accepted | Remote `message` is optional; the gateway supplies the fixed local message when absent. |
+| N1-Q5 | Accepted | Verification codes contain exactly six ASCII alphanumeric characters and are always redacted. |
+| N1-Q6 | Accepted | Do not retry uncertain verification. Request a fresh recovery code and issue a new bound credential. |
+| N1-Q7 | Accepted | Version 1 polling keeps its shipped semantics during migration. Version 2 uses ADR 0025's leased receive operation. |
+| N1-Q8 | Accepted target, external implementation | Verification and every protected route enforce ADR 0026 DPoP with no bearer fallback. |
 
 ### Work order and gates
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| N1-D1 | Documentation | Resolve N1-Q1 through N1-Q8 and update ADR 0023 with the final contract | Central owner | No open contract ambiguity remains |
-| N1-G1 | User | Review and accept or reject ADR 0023, including the fixed deadline and byte limit | N1-D1 | ADR status and approval section updated |
+| N1-D1 | Documentation | Freeze N1-Q1 through N1-Q8 in ADR 0023 | Complete | Accepted contract and external production facts are separated |
+| N1-G1 | User | Review ADR 0023, including the fixed deadline and byte limit | Complete on 2026-08-29 | ADR status and approval section updated |
 | N1-T1 | Test support | Add REST bootstrap behavior and fault controls to the Node fake central service | N1-G1 | Support tests pass without production changes |
-| N1-T2 | Central fixture | Add the same REST bootstrap contract to the independent Python fixture | N1-G1 | Fixture contract passes independently |
+| N1-T2 | Central fixture | Add the same REST bootstrap contract to the independent Python fixture | N1-G1, D06 | Fixture contract passes independently; this does not prove production central behavior |
 | N1-T3 | REST client | Add red tests for request projection, bounded parsing, statuses, deadlines, cancellation, redirects, duplicate keys, and safe errors | N1-T1 | Failures are only missing production behavior |
 | N1-T4 | Enrollment | Add red tests for credential interception, persistence ordering, tool-list change, identity replacement, and uncertain verification | N1-T1, N1-T3 | Existing credential and data scans still pass |
 | N1-T5 | End to end | Add red local and Docker flows for REST registration, verification, restart loading, polling, and acknowledgement | N1-T2, N1-T4 | Full failure inventory written |
@@ -106,7 +114,7 @@ Production implementation must not begin before N1-G2.
 | N1-A13 | Remote central URL uses plain HTTP | Reject before opening credentials, connecting, or sending user data |
 | N1-A14 | Run the normal artifact scan | Find no email, code, request body, response body, or plaintext JWT in durable or normal diagnostic output |
 | N1-A15 | Run verbose development mode | Redact every code value and JWT while retaining the approved non-credential transcript content |
-| N1-A16 | Poll after REST enrollment | Use the approved central authentication scheme and preserve the existing bounded in-memory delivery behavior. If ADR 0026 is approved, require `Authorization: DPoP`, a fresh proof, and no bearer fallback |
+| N1-A16 | Poll after REST enrollment | Require `Authorization: DPoP`, a fresh proof, and no bearer fallback while preserving the accepted bounded in-memory delivery behavior |
 
 ### Likely file ownership
 
@@ -118,16 +126,16 @@ editing. Expected files are:
 - `src/identity.ts` and `src/mcp-contract.ts` for verification and local schema
   contracts;
 - `src/development-verbose.ts` for complete code redaction;
-- `src/central-mcp.ts` and `src/mcp-contract.ts` if ADR 0026 replaces
-  tool-argument token injection with transport authentication;
+- `src/central-mcp.ts` and `src/mcp-contract.ts` to replace tool-argument token
+  injection with transport authentication;
 - `test/support/fake-central.ts` and `test/fixtures/central/` for independent
   contract fixtures;
 - enrollment, CLI, MCP, and end-to-end tests; and
 - product, protocol, setup, status, and ADR documents after implementation.
 
 Do not change `src/notification-relay.ts` merely to complete REST enrollment.
-The poll request already uses the supplied bearer and timeout form. Change it
-only if N1-Q7 proves that the response or delivery semantics changed.
+ADR 0026 changes protected authentication, and ADR 0025 separately replaces
+version 1 consumption with the version 2 leased receive operation.
 
 ## N2: add a central conversation and reply contract
 
@@ -137,7 +145,7 @@ Give every multi-turn exchange a stable central `conversation_id`, make
 delivered but unacknowledged messages recoverable, and add an authenticated,
 idempotent reply operation tied to the original inbound message.
 
-ADR 0025 contains the proposed wire contract and unresolved questions. The
+ADR 0025 contains the accepted wire contract and unresolved production facts. The
 live OpenAPI document checked on 2026-08-29 has no generic reply route, leaves
 poll message items unspecified, and defines `call_action` without conversation
 or reply correlation. Connector implementation cannot work around those gaps
@@ -167,12 +175,12 @@ locally.
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| N2-D1 | Central contract | Resolve C-R1 through C-R8 in ADR 0025 and publish exact OpenAPI and MCP schemas | Central owner | No unspecified item, error, idempotency, or recovery behavior remains |
-| N2-D2 | Documentation | Reconcile ADR 0025 with protocol v1's delivery, acknowledgement, limits, and data boundary | N2-D1 | Proposed protocol diff is complete |
-| N2-G1 | User | Accept or reject ADR 0025 | N2-D2 | ADR status and approval section updated |
+| N2-D1 | Central contract | Freeze the target conversation and message contract in ADR 0025 | Complete | The accepted client contract fixes messages, errors, idempotency, recovery, and activation; central OpenAPI remains external work |
+| N2-D2 | Documentation | Reconcile the target with protocol v1's shipped delivery, acknowledgement, limits, and data boundary | Complete | The transition and version 1 boundary are explicit |
+| N2-G1 | User | Review ADR 0025 | Complete on 2026-08-29 | ADR status and approval section updated |
 | N2-T0 | Central tests | Add red server tests for conversation IDs, recovery, acknowledgement, idempotent replies, conflicts, authorization, bounds, and crash transactions | N2-G1 | Failures are only missing central production behavior |
 | N2-T1 | Test support | Add conversation IDs, recoverable delivery, idempotent replies, conflicts, and fault controls to the Node fake central service | N2-G1 | Support tests pass without gateway production changes |
-| N2-T2 | Central fixture | Add the same behavior to the independent Python fixture | N2-G1 | Fixture contract passes independently |
+| N2-T2 | Central fixture | Add the same behavior to the independent Python fixture | N2-G1, D06 | Fixture contract passes independently; this does not prove central database transactions |
 | N2-T3 | Local MCP | Add red tests for the token-free `reply_message` schema, buffered-message lookup, authenticated upstream dispatch, bounds, and safe errors | N2-T1 | Failures are only missing gateway behavior |
 | N2-T4 | Relay | Add red crash tests for lease redelivery after an interrupted receive | N2-T1 | Gateway restart recovers content only through central after lease expiry |
 | N2-T5 | End to end | Prove receive, reply, crash-window replay, duplicate suppression, and acknowledgement | N2-T2 through N2-T4 | Full failure inventory written |
@@ -415,7 +423,7 @@ verification issues an RFC 9449 DPoP-bound JWT, every protected REST and MCP
 HTTP request carries a fresh proof, and every central resource endpoint rejects
 missing, replayed, mismatched, or bearer use of that token.
 
-ADR 0026 defines the proposed proof profile, verification response, protected
+ADR 0026 defines the accepted proof profile, verification response, protected
 request headers, MCP transport change, nonce and replay behavior, credential
 version 2, migration risks, and server interface.
 
@@ -477,29 +485,29 @@ before reading or dispatching an application body. Reverse proxies must derive
 the same external HTTPS URI as the gateway and trust forwarding headers only
 from configured proxies.
 
-### Decisions required before tests or code
+### Accepted choices and unresolved production facts
 
-| ID | Decision | Why it blocks work |
+| ID | State | Contract |
 | --- | --- | --- |
-| N6-D1 | Accept ES256 with P-256 or select another asymmetric profile | Proof fixtures, key serialization, metadata, and server policy must match. |
-| N6-D2 | Fix the proof lifetime, allowed clock skew, nonce bound, header bound, and replay window | Both sides need identical validation and deterministic tests. |
-| N6-D3 | Fix every externally visible canonical HTTPS URL | `htu` validation fails if gateway and proxy see different routes. |
-| N6-D4 | Approve the verification success and error schemas | The gateway must fail closed before credential persistence. |
-| N6-D5 | Approve cross-replica nonce and replay guarantees | Process-local replay checks are insufficient behind ordinary load balancing. |
-| N6-D6 | Approve credential version 2 and its encrypted PKCS#8 private-key record | Production key persistence is gated by an ADR. |
-| N6-D7 | Select re-verification or independently protected token reissue | Existing bearer JWTs cannot become key-bound locally. |
-| N6-D8 | Fix expiry, revocation, key rotation, key loss, and lost-response recovery | The gateway otherwise cannot recover without unsafe bearer fallback. |
-| N6-D9 | Fix the legacy bearer migration and removal dates | Central must distinguish legacy tokens without accepting a bound token as bearer. |
-| N6-D10 | Decide whether this remains a service-specific RFC 9449 profile or moves to an OAuth token endpoint | The current email-verification route is not a complete OAuth authorization server. |
+| N6-D1 | Accepted | Use ES256 with P-256 and no runtime algorithm negotiation. |
+| N6-D2 | Accepted | ADR 0026 fixes proof age, skew, nonce, header, replay, and capacity bounds. |
+| N6-D3 | Production fact unresolved | Central must supply every canonical external HTTPS identifier. Fixtures use `docs/v2-fixture-profile.md`. |
+| N6-D4 | Accepted | ADR 0026 fixes verification success, challenge, proof, and token error schemas. |
+| N6-D5 | Accepted requirement, external implementation | Central must provide shared cross-replica nonce keys and atomic replay rejection. A fixture cannot prove the production mechanism. |
+| N6-D6 | Accepted | Credential version 2 stores the DPoP token and encrypted PKCS#8 P-256 private key atomically. |
+| N6-D7 | Accepted | Use same-key authenticated reissue for renewal and email-control verification for key replacement and migration. |
+| N6-D8 | Accepted | ADR 0026 fixes expiry, revocation, rotation, key-loss, and lost-response behavior. |
+| N6-D9 | Production fact unresolved | Central must supply the migration and legacy-bearer removal dates. |
+| N6-D10 | Accepted | Use the service-specific RFC 9449 profile. A later standard OAuth and MCP authorization migration needs another ADR. |
 
 ### Work order and gates
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| N6-C1 | Central contract | Resolve N6-D1 through N6-D10 and publish exact OpenAPI, JWT, MCP transport, proxy, and migration contracts | Central owner | No ambiguous proof, error, token, URI, or migration behavior remains |
-| N6-G1 | User | Accept or reject ADR 0026 and its amendment to ADR 0019 | N6-C1 | ADR status and approval section updated |
+| N6-C1 | Central contract | Freeze N6-D1 through N6-D10 in the gateway target contract | Complete for the gateway; central publication remains external | Accepted proof, error, token, URI, storage, and migration rules are explicit |
+| N6-G1 | User | Review ADR 0026 and its amendment to ADR 0019 | Complete on 2026-08-29 | ADR status and approval section updated |
 | N6-T1 | Cryptography tests | Add independent vectors for ES256 proofs, RFC 7638 thumbprints, `ath`, URI projection, clocks, and malformed JOSE | N6-G1 | Red failures identify only missing gateway behavior |
-| N6-T2 | Central fixtures | Add token issuance, `cnf.jkt`, proof validation, nonce, replay, DPoP errors, and token-free MCP schemas to both fixtures | N6-G1 | Fixture contract passes independently, including a two-replica replay test |
+| N6-T2 | Central fixtures | Add token issuance, `cnf.jkt`, proof validation, nonce, replay, DPoP errors, and token-free MCP schemas to both fixtures | N6-G1, D06 | Fixture contract passes independently. Simulated replicas test the contract but do not prove production shared replay state |
 | N6-T3 | Credential tests | Add red tests for credential version 2, atomic token and key persistence, restart, corruption, mismatch, legacy records, and artifact scans | N6-G1 | No test expects plaintext or content persistence |
 | N6-T4 | REST tests | Add red verification and polling tests for fresh proofs, nonce retry, unsafe retry rejection, headers, limits, cancellation, and safe errors | N6-T1, N6-T2 | Failure inventory contains no server ambiguity |
 | N6-T5 | MCP tests | Add red tests for a fresh proof on every HTTP method, removal of token arguments, nonce handling before dispatch, reconnect, cancellation, and uncertain calls | N6-T1, N6-T2 | Existing local credential filters remain green |
@@ -549,7 +557,7 @@ development environment.
 - a new project-owned DPoP module for key, JWK, thumbprint, proof, nonce, and
   time handling;
 - `src/identity.ts` for credential version 2 and binding validation;
-- the proposed central REST client and `src/notification-relay.ts` for DPoP
+- the new central REST client and `src/notification-relay.ts` for DPoP
   verification and polling;
 - `src/central-mcp.ts` for a fresh proof on every transport request;
 - `src/mcp-contract.ts` and `src/gateway-application.ts` for removal of upstream
@@ -579,10 +587,10 @@ N2 central conversation/reply contract + N6 protected transport
         -> N5 setup, qualification, and distribution review
 ```
 
-N1, N2, and N6 can be designed in parallel. N1 cannot freeze verification or
-poll authentication before ADR 0026 is accepted or rejected. If ADR 0026 is
-accepted, N2 server operations must use the same protected transport. Their
-gateway changes overlap in the MCP catalog, central clients, credential store,
-fixtures, application assembly, and product documentation. One implementation
-agent must serialize those shared edits or split ownership explicitly in a
-revised `docs/implementation-plan.md` after the ADRs are approved.
+N1, N2, and N6 contracts are accepted. Their fixture and red-test work follows
+the D06 dependency and red-suite gates in `docs/implementation-plan.md`. N2
+server operations use N6 protected transport. Gateway changes overlap in the
+MCP catalog, central clients, credential store, fixtures, application
+assembly, and product documentation, so G01 through G04 are serialized. N3
+through N5 remain blocked on ADR 0024 and the connector, provider, CLI,
+dependency, packaging, installation, and publishing decisions.

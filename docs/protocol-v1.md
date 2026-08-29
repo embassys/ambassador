@@ -1,6 +1,12 @@
-# Gateway protocol v1
+# Gateway protocol v1 and accepted v2 target
 
-Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication and bounded central-result normalization accepted on 2026-08-26; live consuming notification compatibility, relay amplification limits, and a 404-only MCP polling fallback accepted on 2026-08-27
+Status: accepted for the single-webhook design on 2026-08-25; dual webhook authentication and bounded central-result normalization accepted on 2026-08-26; live consuming notification compatibility, relay amplification limits, and a 404-only MCP polling fallback accepted on 2026-08-27; REST bootstrap, DPoP transport, version 2 credentials, lease redelivery, and the REST v2 message lifecycle accepted as the next contract on 2026-08-29
+
+This document records two implementation states. Sections labeled `0.2.6`
+describe the shipped compatibility behavior. The accepted next contract below
+supersedes that behavior as the implementation target. It does not claim that
+the production central service already implements the target or that stable
+production endpoint values are known.
 
 ## Startup contract
 
@@ -42,7 +48,7 @@ The server requires `Host: 127.0.0.1:8787`; another value returns `421`. It acce
 
 The listener permits at most 16 KiB of request headers, a 1 MiB request body, a 4 MiB local or upstream response body, 32 active MCP sessions, and 8 concurrent tool calls. It rejects JSON-RPC batches before dispatch because multiple side-effecting results cannot safely share the fixed response budget. Before the MCP SDK creates its structured result and escaped text mirror, the gateway limits the serialized tool result to 512 KiB. This leaves room for both copies and a maximum-size request ID under the 4 MiB transport cap. A limit violation rejects the request without reflecting its body. The listener rejects redirects and does not follow upstream-provided URLs.
 
-## Tool catalog
+## `0.2.6` tool catalog and central dispatch
 
 Before enrollment, expose only:
 
@@ -83,7 +89,7 @@ The development central MCP wrapper may return one exact mirrored string result:
 
 The parser is data-only. It selects one grammar for the complete value and rejects mixed JSON and Python syntax. It does not evaluate code and does not accept names, calls, attributes, bytes, sets, tuples, comprehensions, comments, or duplicate keys. The existing 4 MiB response limit and 100-level nesting limit apply before nested values are allocated. A normalized top-level object replaces the wrapper. A normalized array or scalar remains under `{result: value}` so local MCP `structuredContent` stays object-shaped. Failed parses containing collection delimiters, call syntax, a comment prefix, or a quoted-literal prefix fail closed; other plain strings remain ordinary `{result: string}` results and therefore fail any stricter tool-specific contract. Every normalized result still passes the existing credential and tool-specific checks. The gateway validates result and mirrored-content `_meta` as plain objects and rejects forbidden credential names, stored credential bytes, and newly issued verification credential bytes before discarding the metadata.
 
-## Verification and JWT custody
+## `0.2.6` verification and JWT custody
 
 A successful upstream `verify_email` result, after the bounded normalization above, must contain these fields:
 
@@ -124,7 +130,7 @@ One stored JWT owns the process identity. Concurrent verification attempts seria
 
 An upstream `401` stops notification polling and rejects authenticated tools with `central_authentication_failed`. The gateway keeps the encrypted credential for diagnosis and never attempts silent registration, token refresh, replacement, or deletion.
 
-## Notification API
+## `0.2.6` notification API
 
 After enrollment, the gateway sends the live central API's JWT-authenticated long poll:
 
@@ -159,7 +165,7 @@ The gateway reads at most 4 MiB. Before `JSON.parse`, it rejects more than 100 c
 
 The validated messages remain in process memory only. The gateway pauses central polling while the inbox is nonempty or an ID-less wake still needs webhook acceptance. This bounds the inbox and volatile wake state to one response. It stores only present IDs and wake state in SQLite. It never writes message bodies to SQLite, files, output, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
-## Durable relay
+## `0.2.6` durable relay
 
 SQLite stores only:
 
@@ -210,34 +216,168 @@ The body omits `agentId`, so the webhook owner chooses its default target. The m
 
 For an ID-less message, the body uses the generic instruction `An A2A message is ready. Use the A2A MCP tools to retrieve and process it.` The random wake key appears only in `Idempotency-Key` and `X-Request-ID`; it is not added to the central message or passed to `ack_message`.
 
-## MCP message retrieval and acknowledgement
+## `0.2.6` MCP message retrieval and acknowledgement
 
 The local agent calls `poll_messages` through the gateway after waking. The gateway validates the local arguments and serves its in-memory inbox without another central request. A later central outage therefore cannot hide content already buffered by the gateway. ID-bearing messages remain visible on repeated local polls until acknowledged. ID-less messages appear once and are then removed. A positive timeout waits for in-memory work for at most 30 seconds; zero returns immediately.
 
 The local agent calls `ack_message` after processing an ID-bearing message. The gateway forwards it once with the central JWT. A successful live response has exactly `{"message_id":"...","status":"acked"}`. Only then does the gateway delete the durable ID, stop accepted-wake redelivery, and remove the in-memory body. An uncertain or failed acknowledgement leaves the body available locally; the gateway does not retry the side-effecting call automatically.
 
+## Accepted next contract
+
+ADRs 0023, 0025, and 0026 replace the following `0.2.6` rules:
+
+- Bootstrap no longer uses central MCP. The gateway owns the local bootstrap
+  schemas and sends fixed REST requests to `/api/register`,
+  `/api/verify_email`, and `/api/resend_verification`.
+- Verification is no longer the only possible token response. It creates the
+  first credential, scheduled `/api/v2/token/reissue` may return a same-key
+  replacement, and email-control verification may return a same-identity
+  replacement bound to a new key after central revokes the old tokens.
+- Protected central MCP no longer carries a `token` tool argument. Every
+  protected central REST and MCP HTTP request carries `Authorization: DPoP`
+  and a fresh proof.
+- Consuming poll and its crash-loss behavior are no longer the delivery target.
+  The gateway uses the fixed REST v2 lifecycle, and central redelivers the same
+  immutable unacknowledged message after a 60-second lease expires.
+
+These changes ship as one coordinated contract. The gateway must not generate
+proofs for a service that still accepts the same DPoP-bound token through a
+bearer path.
+
+### REST bootstrap
+
+The local catalog before enrollment contains exactly `register_agent`,
+`verify_email`, and `resend_verification`. Every call still requires local MCP
+authentication before body parsing. The gateway projects the accepted local
+schema and sends one bounded request:
+
+| Local tool | Central request | Central access token |
+| --- | --- | --- |
+| `register_agent` | `POST /api/register` | None |
+| `verify_email` | `POST /api/verify_email` | None; request carries a DPoP issuance proof |
+| `resend_verification` | `POST /api/resend_verification` | None |
+
+The gateway uses one fixed central API base. It does not probe
+`/api/register_agent`, fall back to central MCP, follow a redirect, or retry an
+uncertain outcome. One valid nonce challenge may repeat verification once with
+the same attempt key and a fresh proof. ADR 0023 fixes the request and response
+projection, safe errors, parsing limits, and token-free local results.
+
+### DPoP credential and protected transport
+
+Immediately before verification, the gateway creates one P-256 key pair. A
+successful response must contain `token_type: "DPoP"`, `expires_in: 86400`, and
+a JWT whose `cnf.jkt` matches that key. The gateway intercepts the token before
+generic result handling and persists this exact plaintext record inside the
+ADR 0019 encrypted envelope:
+
+```json
+{
+  "credential_version": 2,
+  "token_type": "DPoP",
+  "access_token": "<central-jwt>",
+  "dpop_alg": "ES256",
+  "dpop_private_key_pkcs8": "<base64url-pkcs8-der>"
+}
+```
+
+The gateway enables no protected work until it has validated and durably
+published the complete record. Every protected central REST and Streamable
+HTTP MCP request then sends:
+
+```text
+Authorization: DPoP <central-jwt>
+DPoP: <fresh-proof>
+```
+
+The proof follows ADR 0026 and binds the request method, normalized external
+URI, access-token hash, time, nonce, and one-use ID to the stored P-256 key.
+Central MCP tool schemas and arguments contain no token. A session ID does not
+authenticate a later MCP HTTP request.
+
+The 24-hour token enters scheduled same-key reissue with 12 hours remaining.
+Reissue may replace the encrypted record only when the issuer, subject,
+ordered audience, signing algorithm, key binding, proof algorithm, endpoint
+pair, and lifetime pass the ADR 0026 comparison. The gateway may repeat that
+one operation with its existing idempotency key after an uncertain outcome.
+
+Key loss, expiry, revocation, version 1 migration, and deliberate key rotation
+require fresh email-control verification and a new P-256 key. A `401`, invalid
+token, proof failure, key failure, or ordinary tool error never triggers token
+refresh, reissue, recovery, registration, deletion, or bearer fallback. An
+unreadable record remains untouched until the project approves an explicit
+local reset interface.
+
+### REST v2 message lifecycle
+
+After a version 2 credential is durable, the gateway calls the monotonic
+`POST /api/v2/delivery/activate` operation. It starts no receive loop until it
+has observed the exact `active` result. The release selects this contract at
+build and review time. The gateway does not discover capabilities, infer a
+version, probe another route, or fall back to central MCP.
+
+The gateway uses these fixed central REST operations:
+
+| Purpose | Request |
+| --- | --- |
+| Start a conversation | `POST /api/v2/conversations` |
+| Resolve an uncertain start | `GET /api/v2/conversation-starts/{request_id}` |
+| Receive leased messages | `GET /api/v2/messages/receive?timeout=30&limit=100` |
+| Reply | `POST /api/v2/messages/{message_id}/reply` |
+| Record a no-reply outcome | `POST /api/v2/messages/{message_id}/complete` |
+| Inspect the outcome | `GET /api/v2/messages/{message_id}/outcome` |
+| Acknowledge | `POST /api/v2/messages/{message_id}/ack` |
+
+Version 2 supports strict text-only `conversation_turn` messages in one linear
+conversation. Central generates message and conversation IDs. It derives reply
+routing from the authenticated recipient and immutable inbound message, not
+from caller-supplied identity or routing fields. Starts, replies, completions,
+and acknowledgements use the idempotency rules in ADR 0025.
+
+Receive leases the oldest bounded batch for 60 seconds. Central retains each
+immutable body until the recipient records a terminal reply or completion and
+acknowledges it. Lease expiry makes an unacknowledged message eligible again.
+The gateway keeps bodies only in bounded memory and persists only opaque IDs
+and relay state. On restart it clears stale wake rows and waits for central
+redelivery.
+
+The local `poll_messages` tool serves only the current in-memory inbox. A
+caller must record a reply or terminal no-reply outcome before acknowledgement.
+The gateway removes the body and journal row only after the exact `acked`
+result. It never replays a provider prompt to resolve an uncertain side effect.
+
+### Deployment status
+
+The accepted test-only [version 2 fixture profile](v2-fixture-profile.md)
+supplies deterministic defaults for fixtures and red tests. It does not supply
+production hostnames, signing keys, proxy trust, capacity, or evidence of
+central deployment. Development endpoint overrides and fixture values remain
+non-production inputs. A release cannot claim central interoperability until
+the deployment owners provide and stage those facts.
+
 ## Deadlines and limits
 
 | Operation | Deadline |
 | --- | --- |
-| Central REST consuming message long poll | 40 seconds for a 30-second poll |
-| Central MCP consuming message long poll | 30 seconds for a 20-second poll |
+| `0.2.6` central REST consuming message poll | 40 seconds for a 30-second poll |
+| Accepted v2 central REST leased receive | 40 seconds for a 30-second receive |
+| `0.2.6` central MCP consuming message fallback | 30 seconds for a 20-second poll |
 | Remote MCP connect | 5 seconds |
 | Remote MCP tool call | 30 seconds unless the approved tool contract is shorter |
 | Webhook wake | 10 seconds |
 | Local MCP request | 35 seconds |
 
-Production limits must be positive constants, tested at and above their boundaries, and not user-configurable in v1.
+Production limits must be positive constants, tested at and above their boundaries, and not user-configurable in either accepted contract.
 
 ## Data boundary
 
-Never write task text, prompts, attachments, responses, results, permission details, grants, tool arguments, email addresses, verification codes, webhook tokens, plaintext central JWTs, or MCP request and response bodies to configuration, SQLite, normal logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles. The upstream MCP request may contain the injected JWT transiently in memory; no retry spool or body capture is allowed.
+Never write task text, prompts, attachments, responses, results, permission details, grants, tool arguments, email addresses, verification codes, webhook tokens, plaintext central JWTs, DPoP private keys, proofs, nonces, or MCP request and response bodies to configuration, SQLite, normal logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles. In `0.2.6`, an upstream MCP request may contain the injected JWT transiently in memory. The accepted next contract removes that exception. A DPoP-bound token may appear transiently only in a gateway-to-central `Authorization: DPoP` header or while calculating `ath`; no retry spool or body capture is allowed.
 
 ADR 0022 temporarily permits `--verbose=true` to print development request and response transcripts to stderr. It may print the non-credential data listed above. It must redact webhook and central credentials, credential-named fields, cookie and webhook-signature headers, and verification codes. This exception does not permit transcript files or automatic body capture outside the foreground stderr stream.
 
-The approved credential store is the sole durable exception for the central JWT. Only authenticated ciphertext and the cryptographic metadata defined by ADR 0019 may be written.
+The approved credential store is the sole durable exception for the central token and DPoP private key. Only authenticated ciphertext and the cryptographic metadata defined by ADRs 0019 and 0026 may be written.
 
-## Acceptance cases
+## `0.2.6` acceptance cases
 
 | ID | Case | Expected result |
 | --- | --- | --- |
