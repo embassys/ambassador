@@ -146,7 +146,7 @@ locally.
 ### Scope
 
 - Specify exact inbound message fields, message types, bounds, and lifecycle.
-- Specify central redelivery or retrieval of delivered but unacknowledged
+- Specify lease-based central redelivery of delivered but unacknowledged
   content without changing the gateway's content-free durable boundary.
 - Add an idempotent reply route and matching MCP tool that route from the
   original inbound message instead of a caller-supplied username.
@@ -174,7 +174,7 @@ locally.
 | N2-T1 | Test support | Add conversation IDs, recoverable delivery, idempotent replies, conflicts, and fault controls to the Node fake central service | N2-G1 | Support tests pass without gateway production changes |
 | N2-T2 | Central fixture | Add the same behavior to the independent Python fixture | N2-G1 | Fixture contract passes independently |
 | N2-T3 | Local MCP | Add red tests for the token-free `reply_message` schema, buffered-message lookup, authenticated upstream dispatch, bounds, and safe errors | N2-T1 | Failures are only missing gateway behavior |
-| N2-T4 | Relay | Add red crash tests for redelivery or retrieval after a consuming poll | N2-T1 | Gateway restart recovers content only through central |
+| N2-T4 | Relay | Add red crash tests for lease redelivery after an interrupted receive | N2-T1 | Gateway restart recovers content only through central after lease expiry |
 | N2-T5 | End to end | Prove receive, reply, crash-window replay, duplicate suppression, and acknowledgement | N2-T2 through N2-T4 | Full failure inventory written |
 | N2-G2 | User | Review the central and gateway red suites and failure inventories | N2-T0 through N2-T5 | Approval to write production behavior |
 | N2-C1 | Central service | Ship the approved conversation, recovery, and reply contract in a development environment | N2-G2, N2-T0 | Contract probes match the approved schemas over HTTPS or loopback HTTP |
@@ -198,7 +198,7 @@ same final central endpoint and credential-binding rules selected for N1.
 | N2-A05 | Reuse the idempotency key with a different payload | Reject with the fixed conflict result |
 | N2-A06 | Supply a target, sender, conversation, token, or provider session selector locally | Reject before any upstream call |
 | N2-A07 | Reply to a message not in the current inbox | Reject locally without exposing whether another identity owns it |
-| N2-A08 | Crash after central poll and before local processing | Recover the original message through the approved central mechanism |
+| N2-A08 | Crash after central receive and before local processing | Redeliver the same logical message after the 60-second lease expires |
 | N2-A09 | Crash after reply acceptance and before acknowledgement | Repeat reply safely, then acknowledge once |
 | N2-A10 | Receive a malformed, oversized, credential-bearing, or conflicting message | Fail before journal, inbox, wake, or connector changes |
 | N2-A11 | Reply operation has an uncertain first outcome | Do not invent success or issue an unsafe automatic retry |
