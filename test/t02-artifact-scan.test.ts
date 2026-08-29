@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import test, { type TestContext } from "node:test";
+import { pathToFileURL } from "node:url";
 
 interface ScanResult {
   code: number | null;
@@ -60,6 +61,25 @@ async function runScanner(manifest: ScanManifest): Promise<ScanResult> {
   });
   return { code, stdout, stderr };
 }
+
+test("treats Windows paths on different drives as disjoint", async () => {
+  const scannerModule = (await import(pathToFileURL(SCANNER).href)) as {
+    isWithinPath: (
+      candidate: string,
+      parent: string,
+      pathApi: Pick<typeof win32, "isAbsolute" | "relative" | "sep">,
+    ) => boolean;
+  };
+  const artifactRoot = String.raw`C:\Users\runneradmin\AppData\Local\Temp\a2a-artifacts`;
+  const repositoryRoot = String.raw`D:\a\a2a\a2a`;
+
+  assert.equal(scannerModule.isWithinPath(artifactRoot, repositoryRoot, win32), false);
+  assert.equal(scannerModule.isWithinPath(repositoryRoot, artifactRoot, win32), false);
+  assert.equal(
+    scannerModule.isWithinPath(String.raw`D:\a\a2a\a2a\state`, repositoryRoot, win32),
+    true,
+  );
+});
 
 test("scans bounded process files and in-memory transcript captures without exposing markers", async (t) => {
   const root = await artifactRoot(t);
