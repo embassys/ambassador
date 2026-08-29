@@ -6,6 +6,9 @@ Date: 2026-08-29
 
 Approved: 2026-08-29
 
+Version 1 mailbox and delivery-mode migration requirements are superseded by
+accepted ADR 0027. Future activation is fresh-install-only.
+
 Updated: 2026-08-29 to choose lease redelivery, define the v2 message lifecycle,
 and close authorization, idempotency-recovery, and activation gaps
 

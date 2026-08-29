@@ -105,9 +105,9 @@ Configured local webhook
 2. Resolve and validate the 48-character lowercase hexadecimal webhook token
    from the named environment variable.
 3. Bind the authenticated MCP endpoint to `127.0.0.1:8787`.
-4. Load an existing credential, if present. A readable version 1 record enters
-   migration state without bearer use. A version 2 record must pass its token,
-   key, endpoint, and storage checks.
+4. Load an existing version 2 credential, if present, and require it to pass
+   its token, key, endpoint, and storage checks. The future release is a fresh
+   install and does not read or convert a version 1 credential.
 5. Start version 2 receive only after a valid DPoP credential is available and
    central activation has completed.
 6. Print the MCP endpoint and wait until interrupted.
@@ -129,10 +129,9 @@ Configured local webhook
 
 The token lasts 24 hours. Scheduled same-key reissue begins with 12 hours
 remaining and atomically replaces only the same identity and key. Key loss,
-expiry, revocation, version 1 migration, and deliberate key rotation require a
-fresh email-control verification. A `401`, invalid token, proof failure, key
-failure, or ordinary tool failure never triggers renewal, registration, or
-credential replacement.
+expiry, revocation, and deliberate key rotation require a fresh email-control
+verification. A `401`, invalid token, proof failure, key failure, or ordinary
+tool failure never triggers renewal, registration, or credential replacement.
 
 An unreadable credential cannot prove its identity. The gateway must not
 overwrite it until the project approves an explicit local reset interface.

@@ -6,6 +6,9 @@ Date: 2026-08-29
 
 Approved: 2026-08-29
 
+Migration and in-place-upgrade requirements are superseded by accepted ADR
+0027. The future gateway is fresh-install-only.
+
 ## Problem
 
 The accepted gateway forwards `register_agent`, `verify_email`, and
