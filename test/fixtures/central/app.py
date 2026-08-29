@@ -17,6 +17,7 @@ from typing import Annotated, Literal, TypeVar
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 from uuid import uuid4
 
+import httpx
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -113,6 +114,8 @@ ActionType = Annotated[
 FIXTURE_ISSUER = "urn:a2a:fixture:issuer:v2"
 FIXTURE_API_AUDIENCE = "urn:a2a:fixture:resource:api:v2"
 FIXTURE_MCP_AUDIENCE = "urn:a2a:fixture:resource:mcp:v2"
+FIXTURE_PROXY_AUTHORIZATION = "X-A2A-Fixture-Proxy-Authorization"
+FIXTURE_PROXY_REQUEST_LIMIT = 1_048_576
 FIXTURE_CLOCK_START = 1_788_000_000
 FIXTURE_V2_CODE = "123456"
 UUID_V4_PATTERN = re.compile(
@@ -238,7 +241,23 @@ def normalize_htu(value: str) -> str:
     return urlunsplit((scheme, authority, path, "", ""))
 
 
-def request_external_htu(request: Request) -> str:
+def _one_ascii_header(request: Request, name: str) -> str:
+    values = [
+        value
+        for header_name, value in request.scope.get("headers", [])
+        if header_name.lower() == name.lower().encode("ascii")
+    ]
+    if len(values) != 1:
+        raise ValueError(f"one {name} header is required")
+    try:
+        return values[0].decode("ascii", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{name} must be ASCII") from error
+
+
+def request_external_htu(
+    request: Request, trusted_proxy_secret: str | None = None
+) -> str:
     raw_path = request.scope.get("raw_path")
     if not isinstance(raw_path, bytes):
         raise ValueError("raw request path is unavailable")
@@ -246,9 +265,228 @@ def request_external_htu(request: Request) -> str:
         encoded_path = raw_path.decode("ascii", errors="strict")
     except UnicodeDecodeError as error:
         raise ValueError("raw request path is not ASCII") from error
-    base = urlsplit(str(request.base_url))
-    origin = urlunsplit((base.scheme, base.netloc, "", "", ""))
+    proxy_authorizations = [
+        value
+        for name, value in request.scope.get("headers", [])
+        if name.lower() == FIXTURE_PROXY_AUTHORIZATION.lower().encode("ascii")
+    ]
+    trusted_proxy = False
+    if trusted_proxy_secret is not None and len(proxy_authorizations) == 1:
+        try:
+            supplied_secret = proxy_authorizations[0].decode(
+                "ascii", errors="strict"
+            )
+        except UnicodeDecodeError:
+            supplied_secret = ""
+        trusted_proxy = secrets.compare_digest(
+            supplied_secret, trusted_proxy_secret
+        )
+    if trusted_proxy:
+        scheme = _one_ascii_header(request, "X-Forwarded-Proto")
+        host = _one_ascii_header(request, "X-Forwarded-Host")
+        port_text = _one_ascii_header(request, "X-Forwarded-Port")
+        if scheme not in ("http", "https"):
+            raise ValueError("invalid forwarded scheme")
+        if (
+            not host
+            or any(character.isspace() for character in host)
+            or any(character in host for character in "/@?#")
+        ):
+            raise ValueError("invalid forwarded host")
+        try:
+            port = int(port_text)
+        except ValueError as error:
+            raise ValueError("invalid forwarded port") from error
+        if str(port) != port_text or port < 1 or port > 65_535:
+            raise ValueError("invalid forwarded port")
+        if ":" in host and not (host.startswith("[") and host.endswith("]")):
+            raise ValueError("invalid forwarded host")
+        origin = f"{scheme}://{host}:{port}"
+    else:
+        base = urlsplit(str(request.base_url))
+        origin = urlunsplit((base.scheme, base.netloc, "", "", ""))
     return normalize_htu(f"{origin}{encoded_path}")
+
+
+class TrustedFixtureProxy:
+    """Test-only reverse proxy with one fixed external and internal origin."""
+
+    def __init__(
+        self, internal_origin: str, external_origin: str, proxy_secret: str
+    ) -> None:
+        internal = urlsplit(internal_origin)
+        external = urlsplit(external_origin)
+        for parsed in (internal, external):
+            if (
+                parsed.scheme != "http"
+                or parsed.hostname != "127.0.0.1"
+                or parsed.port is None
+                or parsed.path not in ("", "/")
+                or parsed.query
+                or parsed.fragment
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise ValueError("fixture proxy origins must be loopback HTTP origins")
+        try:
+            proxy_secret.encode("ascii", errors="strict")
+        except UnicodeEncodeError as error:
+            raise ValueError("fixture proxy secret must be ASCII") from error
+        if len(proxy_secret) < 32:
+            raise ValueError("fixture proxy secret is too short")
+        self.internal_origin = internal_origin.rstrip("/")
+        self.internal_authority = internal.netloc
+        self.external_scheme = external.scheme
+        self.external_host = external.hostname
+        self.external_port = external.port
+        self.proxy_secret = proxy_secret
+        self.client: httpx.AsyncClient | None = None
+
+    async def __call__(self, scope: dict, receive: object, send: object) -> None:
+        if scope.get("type") == "lifespan":
+            while True:
+                message = await receive()  # type: ignore[operator]
+                if message["type"] == "lifespan.startup":
+                    self.client = httpx.AsyncClient(
+                        follow_redirects=False,
+                        timeout=httpx.Timeout(45.0),
+                        trust_env=False,
+                    )
+                    await send({"type": "lifespan.startup.complete"})  # type: ignore[operator]
+                elif message["type"] == "lifespan.shutdown":
+                    if self.client is not None:
+                        await self.client.aclose()
+                        self.client = None
+                    await send({"type": "lifespan.shutdown.complete"})  # type: ignore[operator]
+                    return
+            return
+        if scope.get("type") != "http" or self.client is None:
+            response = JSONResponse(
+                status_code=503,
+                content={"error": "temporarily_unavailable"},
+                headers={"Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)  # type: ignore[arg-type]
+            return
+
+        body = bytearray()
+        while True:
+            message = await receive()  # type: ignore[operator]
+            if message.get("type") != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if not isinstance(chunk, bytes):
+                chunk = bytes(chunk)
+            if len(body) + len(chunk) > FIXTURE_PROXY_REQUEST_LIMIT:
+                response = JSONResponse(
+                    status_code=413,
+                    content={"error": "request_too_large"},
+                    headers={"Cache-Control": "no-store"},
+                )
+                await response(scope, receive, send)  # type: ignore[arg-type]
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        stripped_headers = {
+            b"connection",
+            b"content-length",
+            b"forwarded",
+            b"host",
+            b"keep-alive",
+            b"proxy-connection",
+            b"te",
+            b"trailer",
+            b"transfer-encoding",
+            b"upgrade",
+            b"x-original-host",
+            b"x-original-url",
+            b"x-real-ip",
+            b"x-rewrite-url",
+            FIXTURE_PROXY_AUTHORIZATION.lower().encode("ascii"),
+            b"x-a2a-test-proxy",
+        }
+        forwarded_headers: list[tuple[bytes, bytes]] = []
+        for name, value in scope.get("headers", []):
+            lower_name = name.lower()
+            if lower_name in stripped_headers or lower_name.startswith(b"x-forwarded-"):
+                continue
+            forwarded_headers.append((name, value))
+        forwarded_headers.extend(
+            [
+                (b"host", self.internal_authority.encode("ascii")),
+                (b"x-forwarded-proto", self.external_scheme.encode("ascii")),
+                (b"x-forwarded-host", self.external_host.encode("ascii")),
+                (b"x-forwarded-port", str(self.external_port).encode("ascii")),
+                (
+                    FIXTURE_PROXY_AUTHORIZATION.lower().encode("ascii"),
+                    self.proxy_secret.encode("ascii"),
+                ),
+            ]
+        )
+        raw_path = scope.get("raw_path")
+        query_string = scope.get("query_string", b"")
+        if not isinstance(raw_path, bytes) or not isinstance(query_string, bytes):
+            response = JSONResponse(
+                status_code=400,
+                content={"error": "invalid_request"},
+                headers={"Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)  # type: ignore[arg-type]
+            return
+        try:
+            target = f"{self.internal_origin}{raw_path.decode('ascii', errors='strict')}"
+            if query_string:
+                target += f"?{query_string.decode('ascii', errors='strict')}"
+            upstream = await self.client.request(
+                str(scope.get("method", "GET")),
+                target,
+                headers=forwarded_headers,
+                content=bytes(body),
+            )
+        except (UnicodeDecodeError, httpx.HTTPError):
+            response = JSONResponse(
+                status_code=503,
+                content={"error": "temporarily_unavailable"},
+                headers={"Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)  # type: ignore[arg-type]
+            return
+
+        response_headers = [
+            (name, value)
+            for name, value in upstream.headers.raw
+            if name.lower()
+            not in {
+                b"connection",
+                b"content-length",
+                b"keep-alive",
+                b"proxy-connection",
+                b"transfer-encoding",
+                b"upgrade",
+                FIXTURE_PROXY_AUTHORIZATION.lower().encode("ascii"),
+            }
+        ]
+        response_headers.append(
+            (b"content-length", str(len(upstream.content)).encode("ascii"))
+        )
+        await send(  # type: ignore[operator]
+            {
+                "type": "http.response.start",
+                "status": upstream.status_code,
+                "headers": response_headers,
+            }
+        )
+        await send(  # type: ignore[operator]
+            {"type": "http.response.body", "body": upstream.content}
+        )
+
+
+def create_trusted_proxy(
+    internal_origin: str, external_origin: str, proxy_secret: str
+) -> TrustedFixtureProxy:
+    return TrustedFixtureProxy(internal_origin, external_origin, proxy_secret)
 
 
 def fixture_timestamp(numeric_date: int) -> str:
@@ -2695,7 +2933,9 @@ def as_http_error(error: FixtureStateError) -> HTTPException:
     return HTTPException(status_code=code, detail=str(error))
 
 
-def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
+def create_fixture(
+    *, trusted_proxy_secret: str | None = None
+) -> tuple[FixtureState, FastMCP, FastAPI]:
     state = FixtureState()
     mcp = FastMCP("A2A central test fixture")
 
@@ -3109,7 +3349,7 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
                         )
                     )
                 try:
-                    htu = request_external_htu(request)
+                    htu = request_external_htu(request, trusted_proxy_secret)
                     jkt, replacement_nonce = state.authenticate_issuance(
                         request.headers.get("dpop"),
                         method=request.method,
@@ -3136,7 +3376,7 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
                 authorization = request.headers.get("authorization")
                 proof = request.headers.get("dpop")
                 try:
-                    htu = request_external_htu(request)
+                    htu = request_external_htu(request, trusted_proxy_secret)
                     agent, replacement_nonce = state.authenticate_resource(
                         authorization=authorization,
                         proof=proof,
@@ -3299,7 +3539,7 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
             return authenticated
         authorization = request.headers.get("authorization")
         proof = request.headers.get("dpop")
-        htu = request_external_htu(request)
+        htu = request_external_htu(request, trusted_proxy_secret)
         agent, replacement_nonce = state.authenticate_resource(
             authorization=authorization,
             proof=proof,
@@ -3668,7 +3908,9 @@ def create_fixture() -> tuple[FixtureState, FastMCP, FastAPI]:
                                     authorization=authorization_value,
                                     proof=proof_value,
                                     method=str(scope.get("method", "")),
-                                    htu=request_external_htu(request),
+                                    htu=request_external_htu(
+                                        request, trusted_proxy_secret
+                                    ),
                                     security_domain="mcp",
                                     operation="mcp",
                                 )
