@@ -1,50 +1,166 @@
 # In-memory central test fixture
 
-This fixture independently implements the central boundaries used by gateway end-to-end tests. It does not contain source from the inspected central service. All agents, codes, tokens, permissions, actions, messages, and delivery state disappear when the process stops or `POST /__test/reset` runs.
+This Docker fixture implements the central HTTP and MCP contracts needed by
+gateway tests. It contains no source from the central service. Process exit or
+`POST /__test/reset` clears all state.
 
-## Container contract
+The fixture is not a production server. Its issuer, audiences, keys, accounts,
+codes, clock, and control routes are test values from
+`docs/v2-fixture-profile.md`.
 
-- Streamable HTTP MCP: `http://127.0.0.1:8000/mcp`
-- Health: `GET /healthz`
-- Readiness: `GET /readyz`
-- Message poll: `GET /api/poll_messages?timeout=30`
-- Message acknowledgement: `POST /api/ack_message`
-- Test-control header: `X-A2A-Test-Key: central-fixture-control`
+## Version boundary
 
-`/api` requests use the central token as a bearer token. The MCP catalog matches the inspected central service:
+Version 1 remains available for shipped `0.2.6` compatibility:
 
-- Bootstrap: `register_agent`, `verify_email`, and `resend_verification`
-- Authenticated: `list_action_types`, `request_permission`, `respond_to_permission`, `call_action`, `poll_messages`, `get_my_permissions`, and `ack_message`
-- Token-free health check: `health_check`
+- Headerless Streamable HTTP requests to `/mcp` use the v1 tool catalog.
+- V1 authenticated MCP tools accept a `token` argument.
+- `GET /api/poll_messages?timeout=<0..30>` consumes queued messages with a
+  bearer token.
+- `POST /api/ack_message` acknowledges a delivered v1 message with a bearer
+  token.
 
-`register_agent` requires a 3-50 character `username` and `email`; `display_name` is optional. Every authenticated tool requires `token`. `health_check` and the bootstrap tools do not accept it.
+Requests to `/mcp` that contain `Authorization` or `DPoP` select the v2 MCP
+catalog. The fixture authenticates every such HTTP request with the MCP DPoP
+security domain before JSON-RPC dispatch. The v2 tools are
+`list_action_types`, `request_permission`, `respond_to_permission`,
+`call_action`, `get_my_permissions`, `start_conversation`,
+`get_conversation_start`, `receive_messages`, `reply_message`,
+`complete_message`, `get_message_outcome`, `ack_message`, and `health_check`.
+Their schemas have no token argument. Protected business tools derive the
+caller from DPoP transport authentication and use the same permission and
+action state machine as the v1 tools.
 
-The protected test endpoints are:
+## Version 2 HTTP contract
 
-- `POST /__test/reset` with no body
-- `POST /__test/verification-code` with `{"email":"agent@example.test"}`
-- `POST /__test/messages` with a verified `recipient_agent_id`, `content`, and optional `message_id`, `sender_agent_id`, and `kind`
-- `POST /__test/inspect` with optional `agent_id` and `message_id` filters
+Bootstrap routes use fixed REST requests:
 
-The verification code is always `246810`. The code lookup endpoint is the only test endpoint that returns it. Inspection returns IDs and each message's `queued`, `delivered`, or `acked` status. It never returns registration fields, tokens, permission details, action details, or message content.
+- `POST /api/register`
+- `POST /api/resend_verification`
+- `POST /api/verify_email`
 
-REST and MCP `poll_messages` consume the same queue. A poll returns each full queued message once and atomically marks it delivered, so the other interface cannot poll it again. REST and MCP `ack_message` accept only delivered messages and return `{"message_id":"...","status":"acked"}`. A second acknowledgement fails.
+Verification requires an ES256 issuance proof. Its first valid proof without a
+nonce receives the accepted `400 use_dpop_nonce` challenge. A successful
+verification returns a 24-hour DPoP-bound token and `Cache-Control: no-store`.
+Verification codes are invalid at their exact expiry instant.
+Registration and resend reject both credential headers. Verification rejects
+`Authorization` and requires exactly one `DPoP` header. The fixture validates
+the issuance proof and nonce before it reads or parses the verification body.
 
-## Local container tests
+All protected routes require `Authorization: DPoP <token>` and a fresh proof:
 
-`requirements.lock` contains CPython 3.13 manylinux x86_64 wheel hashes. Build and test the fixture as `linux/amd64`; the lock does not claim cross-architecture support.
+- `POST /api/v2/delivery/activate`
+- `POST /api/v2/conversations`
+- `GET /api/v2/conversation-starts/{request_id}`
+- `GET /api/v2/messages/receive?timeout=<0..30>&limit=<1..100>`
+- `POST /api/v2/messages/{message_id}/reply`
+- `POST /api/v2/messages/{message_id}/complete`
+- `GET /api/v2/messages/{message_id}/outcome`
+- `POST /api/v2/messages/{message_id}/ack`
+- `POST /api/v2/token/reissue`
+- `POST /api/v2/token/revoke`
+
+The fixture rejects bearer use of a DPoP-bound token. It verifies the proof
+signature, public-key binding, method, normalized external URI, token hash,
+clock, nonce, and one-use proof ID before application dispatch. Message receive
+uses a 60-second lease. Clock controls let tests check redelivery without
+sleeping.
+
+URI validation uses the raw encoded request path, excludes the query, preserves
+consecutive and trailing slashes, normalizes percent-encoding case, removes dot
+segments, lowercases the scheme and host, and removes default ports. Bootstrap,
+v2 REST, and MCP routes are exact; their trailing-slash variants return `404`
+and never redirect.
+
+Protected REST and MCP requests require exactly one `Authorization` header.
+Missing, repeated, or malformed authorization returns `invalid_token`. With one
+valid authorization header, missing or repeated `DPoP` returns
+`invalid_dpop_proof`. Same-key reissue is rejected at the credential's issuance
+instant. Once the deterministic clock advances, a successful reissue has a
+later expiry and a new exact 24-hour lifetime.
+
+An accepted conversation start remains exactly retryable after its sender
+grant is revoked, while changed input conflicts. Start IDs are scoped by
+authenticated subject within `start.v1`. Reissue IDs are global across
+subjects, and reuse between `start.v1` and `reissue.v1` conflicts.
+
+T01 serves the direct fixture only. It ignores caller-supplied forwarding and
+`X-A2A-Test-Proxy` headers, so they cannot change the URI used for DPoP proof
+validation. T02 owns the separate trusted-peer proxy harness that will strip
+caller forwarding fields and add fixture-controlled forwarding metadata.
+
+Bootstrap request bodies are limited to 2 KiB. Protected REST request bodies
+are limited to 512 KiB, and DPoP authentication happens before a protected body
+is read. The fixture enforces both limits incrementally for streamed requests
+without consuming the unread tail after the limit is crossed.
+
+The deterministic v2 clock starts at `1788000000`. Enrollment and recovery use
+code `123456`. Reset restores these seeded identities:
+
+| Username | Email | Delivery state |
+| --- | --- | --- |
+| `fixture_sender` | `fixture_sender@fixture.invalid` | v2 active |
+| `fixture_recipient` | `fixture_recipient@fixture.invalid` | v2 active, permits starts from `fixture_sender` |
+| `fixture_denied` | `fixture_denied@fixture.invalid` | v2 active, no sender grant |
+| `fixture_legacy` | `fixture_legacy@fixture.invalid` | v1 with a blocking legacy row and a seeded v1 verification record |
+
+The four v2 identity records are verified but have no exposed credential.
+Tests request a recovery code through `resend_verification`, read it through
+the protected control route, and run normal DPoP verification with their own
+P-256 key. The `fixture_legacy` v1 companion starts unverified at the same
+email. Tests can obtain its bearer through the normal v1 verification flow.
+That bearer is an ES256 JWT with the fixture issuer, identity subject, ordered
+v2 audiences, and no DPoP confirmation claim. Recovery preserves its issuer,
+subject, and audience identity while adding the new key binding.
+Completing v2 email recovery invalidates that bearer and every older DPoP
+credential for the central identity; its blocking legacy row still prevents v2
+delivery activation.
+
+## Test controls
+
+Every control request requires
+`X-A2A-Test-Key: central-fixture-control`. Inspection and profile responses are
+content-free. They do not return email addresses, codes, tokens, private keys,
+proofs, nonces, or message text.
+
+Version 2 controls are:
+
+| Route | Body or result |
+| --- | --- |
+| `POST /__test/v2/verification-code` | `{"email":"agent@fixture.invalid"}` |
+| `POST /__test/v2/clock` | `{"seconds":60}` advances the clock by 0 through 604800 seconds |
+| `POST /__test/v2/grants` | `{"sender_username":"...","recipient_username":"...","active":true}` |
+| `POST /__test/v2/messages` | Sender username, recipient username, text, and optional conversation or predecessor ID |
+| `POST /__test/v2/faults` | `{"operation":"receive","mode":"drop_after_commit"}` |
+| `POST /__test/v2/inspect` | Optional `agent_id` and `message_id` filters |
+| `GET /__test/v2/profile` | Fixture issuer, audiences, public issuer JWK, and seeded agent IDs |
+| `POST /__test/v2/nonce-key/rotate` | No body |
+
+Fault operations are `register`, `verify`, `resend`, `activate`, `start`,
+`receive`, `reply`, `complete`, `ack`, `reissue`, and `revoke`. Modes are
+`none`, `unavailable_before`, `drop_after_commit`, `nonce_once`, and
+`invalid_success`. A drop-after-commit fault returns a safe `503` after the
+in-memory transaction commits. Inspection can then confirm the content-free
+state change.
+
+The original v1 controls remain available at `POST /__test/verification-code`,
+`POST /__test/messages`, and `POST /__test/inspect`. `POST /__test/reset`
+resets both versions.
+
+## Container tests
+
+`requirements.lock` contains CPython 3.13 manylinux x86-64 wheel hashes. Build
+and test on `linux/amd64`:
 
 ```sh
 docker build --platform=linux/amd64 --target test --tag a2a-central-fixture-test .
 ```
 
-The `test` target copies `test_app.py` and runs `python -m unittest -v test_app.py` during the build. It needs no bind mount or volume.
-
-Build and run the default runtime image with:
+Run the fixture locally with:
 
 ```sh
 docker build --platform=linux/amd64 --tag a2a-central-fixture .
 docker run --rm --platform=linux/amd64 -p 127.0.0.1:8000:8000 a2a-central-fixture
 ```
 
-The default image runs one non-root Uvicorn worker with access logging disabled.
+The runtime image uses one non-root Uvicorn worker, disables access logging,
+and mounts no volume.
