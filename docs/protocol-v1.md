@@ -301,12 +301,13 @@ ordered audience, signing algorithm, key binding, proof algorithm, endpoint
 pair, and lifetime pass the ADR 0026 comparison. The gateway may repeat that
 one operation with its existing idempotency key after an uncertain outcome.
 
-Key loss, expiry, revocation, version 1 migration, and deliberate key rotation
-require fresh email-control verification and a new P-256 key. A `401`, invalid
-token, proof failure, key failure, or ordinary tool error never triggers token
-refresh, reissue, recovery, registration, deletion, or bearer fallback. An
-unreadable record remains untouched until the project approves an explicit
-local reset interface.
+Key loss, expiry, revocation, and deliberate key rotation require fresh
+email-control verification and a new P-256 key. The future version 2 release
+is a fresh-install cutover and does not convert a version 1 credential. A
+`401`, invalid token, proof failure, key failure, or ordinary tool error never
+triggers token refresh, reissue, recovery, registration, deletion, or bearer
+fallback. An unreadable record remains untouched until the project approves
+an explicit local reset interface.
 
 ### REST v2 message lifecycle
 

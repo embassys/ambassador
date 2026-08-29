@@ -7,8 +7,8 @@ Updated: 2026-08-29
 - ADR 0023 accepts REST bootstrap enrollment through `POST /api/register`,
   `POST /api/verify_email`, and `POST /api/resend_verification`. The gateway
   owns bounded local MCP projections, never probes the older route or MCP as a
-  fallback, and uses email-control recovery for lost issuance, migration, key
-  loss, or rotation.
+  fallback, and uses email-control recovery for lost issuance, key loss, or
+  rotation.
 - ADR 0025 accepts version 2 linear, text-only conversations, 60-second central
   delivery leases, immutable unacknowledged content, idempotent starts and
   replies, explicit terminal outcomes, separate acknowledgement, and an atomic
@@ -17,6 +17,10 @@ Updated: 2026-08-29
   transport authentication for protected REST and central MCP, 24-hour bound
   tokens, same-key reissue, credential version 2, email-control recovery,
   revocation, and no bearer fallback.
+- ADR 0027 accepts a fresh-install version 2 cutover. The shipped current API
+  remains a regression baseline, while the future API has no version 1
+  credential conversion, mailbox migration, mixed-version runtime mode,
+  discovery, probe, or fallback.
 - D01, D02, D03, and the D04 contract gate are complete. These decisions
   approve the target contract and its test specifications. They do not assert
   that the central service has implemented or deployed it.
@@ -31,7 +35,7 @@ The user authorized reasonable stand-ins for production facts that are not yet
 available. `docs/v2-fixture-profile.md` supplies those values to fixtures and
 tests only. It does not supply production constants, approve a central
 deployment, or prove real email, database, proxy, token-signing, replay,
-revocation, lease, quota, or migration behavior.
+revocation, lease, or quota behavior.
 
 A test or implementation PR must label every value taken from the fixture
 profile. Production code must not compile those values in as central product
@@ -76,8 +80,7 @@ provides these facts:
   values;
 - non-enumerating email enrollment and recovery behavior, delivery controls,
   and the atomic revoke-and-issue transaction;
-- development enforcement, migration, legacy-bearer retirement, staging, and
-  production rollout dates; and
+- development enforcement, staging, and production rollout dates; and
 - access to the production central repository or its owners for S01 through
   S07 in `docs/implementation-plan.md`.
 

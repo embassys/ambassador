@@ -29,16 +29,17 @@ Updated: 2026-08-29
 
 ## Accepted contract gate
 
-The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. They fix the target
-REST enrollment, version 2 conversation and recovery, and DPoP contracts. The
-current product and protocol documents continue to describe shipped version 1
-behavior until the implementation and release documentation land.
+The user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29. They fix the
+target REST enrollment, version 2 conversation and recovery, DPoP contracts,
+and fresh-install cutover. The current product and protocol documents continue
+to describe shipped version 1 behavior until the implementation and release
+documentation land.
 
 | ID | State | Result |
 | --- | --- | --- |
 | D01 | Complete | ADR 0023 fixes REST registration, verification, resend, bounds, safe errors, and recovery behavior |
 | D02 | Complete | ADR 0025 fixes leased delivery, conversations, replies, terminal outcomes, acknowledgement, and activation |
-| D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, revocation, and migration |
+| D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, and revocation; ADR 0027 removes in-place migration from scope |
 | D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
 | D05 | Pending | ADR 0024 and separate connector CLI, state, policy, dependency, packaging, installation, and publishing decisions still need approval |
 | D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
@@ -92,7 +93,7 @@ suites remain unmerged until their review gates pass.
 | T03 | Gateway | Add the red REST enrollment, DPoP, credential version 2, token lifecycle, and transport suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
 | T04 | Gateway | Add the red conversation, leased recovery, reply, completion, acknowledgement, and activation suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
 | C01 | Gateway | Run unit and Node integration tests on Linux, macOS, and Windows; run packaged Docker E2E on Ubuntu | T01-T04 | CI publishes a classified red failure inventory |
-| S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, migration, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
+| S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
 | GATE-A | User and central owner | Review T03, T04, and S01 failure inventories | C01, S01 | Written approval that failures represent the accepted contracts |
 
 D06 is complete. T01 may use the approved `cryptography==50.0.0` wheel for
@@ -112,8 +113,8 @@ server-owned rollout control until staging passes.
 | S03 | Issue and enforce DPoP-bound tokens on protected REST and MCP transport | S02 | Bearer use, wrong-key proofs, replay across two replicas, and proxy URI mismatches fail before dispatch |
 | S04 | Add leased delivery and idempotent acknowledgement | S03 | A lost receive or gateway crash redelivers the same immutable message; repeated acknowledgement has one result |
 | S05 | Add idempotent replies, outcome lookup, and terminal completion | S04 | A lost reply response creates one outbound message and returns the original result |
-| S06 | Add same-key reissue, revocation, email-control recovery, and legacy migration | S03 | A stolen bearer token cannot bind a replacement key; lost issuance and key loss recover through the accepted email-control flow |
-| S07 | Run the production-like staging and migration gate through the real HTTPS proxy and shared state | S02-S06 | Dedicated identities pass black-box contract tests without credential-bearing logs |
+| S06 | Add same-key reissue, revocation, and email-control recovery | S03 | A stolen token cannot bind a replacement key; lost issuance and key loss recover through the accepted email-control flow |
+| S07 | Run the production-like staging gate through the real HTTPS proxy and shared state | S02-S06 | Dedicated fresh-install identities pass black-box contract tests without credential-bearing logs |
 
 The gateway repository cannot complete S01 through S07. Its fixtures prove
 client and protocol behavior only. Production URLs, issuer and audience
@@ -128,7 +129,7 @@ bearer use of the same bound tokens.
 
 | ID | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- |
-| G01 | Implement P-256 DPoP proofs, nonce handling, encrypted credential version 2, and same-key replacement | GATE-A, S03 development deployment | T03 cryptographic, restart, corruption, migration, and artifact-scan cases pass |
+| G01 | Implement P-256 DPoP proofs, nonce handling, encrypted credential version 2, and same-key replacement | GATE-A, S03 development deployment | T03 cryptographic, restart, corruption, and artifact-scan cases pass |
 | G02 | Move local bootstrap tools to bounded central REST enrollment | G01, S02 | Registration, verification, resend, lost response, persistence ordering, and token-free local results pass |
 | G03 | Authenticate all protected central REST and MCP requests with DPoP and remove MCP token arguments | G02, S03 | Fresh-proof, nonce, cancellation, reconnect, bearer-rejection, and safe-error cases pass |
 | G04 | Implement version 2 activation, leased receive, conversations, replies, outcomes, completion, and acknowledgement | G03, S04, S05, T04 approval | T04 passes without durable gateway message or reply bodies |
@@ -144,7 +145,7 @@ this order.
 | --- | --- | --- | --- |
 | E01 | Qualify REST enrollment, DPoP, reissue, recovery, and bearer rejection | G01-G03, S07 | Node, Docker, packed-install, and staging checks pass |
 | E02 | Qualify lease, reply, completion, acknowledgement, and every crash barrier | G04, S07 | One logical message, provider turn, reply, and terminal acknowledgement survive each tested interruption |
-| E03 | Run bounded soak, outage, quota, migration, shutdown, and complete artifact scans | E01, E02 | No credential, proof, nonce, code, message, reply, or tool content crosses its approved boundary |
+| E03 | Run bounded soak, outage, quota, shutdown, and complete artifact scans | E01, E02 | No credential, proof, nonce, code, message, reply, or tool content crosses its approved boundary |
 | W01 | Qualify credential replacement and packed installation on Windows | G01 | DACL, atomic replacement, native SQLite, restart, and end-to-end tests pass |
 | G05 | Remove Python-literal MCP result normalization | S02 stable, E01, E02 | Native structured results pass fixtures and staging before compatibility code is deleted |
 | G06 | Remove the version 1 404-only MCP polling fallback | S04 stable, E02 | The canonical leased receive path passes outage and recovery tests |
@@ -194,7 +195,7 @@ artifact tests.
 - Production issuer, API resource, MCP resource, API base, and MCP endpoint
   values are unresolved. The fixture profile supplies test-only values.
 - Central must confirm its signing, shared replay, nonce, revocation,
-  idempotency, lease, quota, proxy, email, migration, and rollout design before
+  idempotency, lease, quota, proxy, email, and rollout design before
   staging or release.
 - The local user-authorized reset interface for an unreadable credential or
   uncertain revocation remains unresolved.
