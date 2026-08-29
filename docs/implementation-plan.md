@@ -41,7 +41,7 @@ behavior until the implementation and release documentation land.
 | D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, revocation, and migration |
 | D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
 | D05 | Pending | ADR 0024 and separate connector CLI, state, policy, dependency, packaging, installation, and publishing decisions still need approval |
-| D06 | Blocked on approval | Select and approve the independent Python fixture's DPoP signature-verification dependency, exact version, hashes, license, image impact, and update policy |
+| D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
 
 The accepted contracts contain fixed values for development and test work.
 Facts that only the central deployment owner can supply remain unresolved,
@@ -54,16 +54,14 @@ the real service implements the contract.
 ## Dependency order
 
 ```text
-D01 + D02 + D03 + D04 complete
+D01 + D02 + D03 + D04 + D06 complete
               |
-              +--> D06 fixture dependency approval
-              |       |
-              |       +--> T01 central fixtures
-              |               |
-              +-------------->+--> T02 process and artifact-scan harness
-                                      |
-                                      +--> T03 red REST and DPoP gateway suite
-                                      +--> T04 red conversation and recovery suite
+              +--> T01 central fixtures
+                      |
+                      +--> T02 process and artifact-scan harness
+                              |
+                              +--> T03 red REST and DPoP gateway suite
+                              +--> T04 red conversation and recovery suite
 
 external central S01 red suite --> central-owner review --> S02-S07 implementation
 
@@ -97,10 +95,10 @@ suites remain unmerged until their review gates pass.
 | S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, migration, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
 | GATE-A | User and central owner | Review T03, T04, and S01 failure inventories | C01, S01 | Written approval that failures represent the accepted contracts |
 
-T01 must not begin its Python DPoP implementation until D06 is approved. Node
-test support may prepare contract data and non-cryptographic cases, but it may
-not work around D06 by sharing production gateway verification code with the
-independent fixture.
+D06 is complete. T01 may use the approved `cryptography==50.0.0` wheel for
+independent fixture key and signature operations. The fixture must not share
+the gateway's production verifier, and no other cryptographic, JWT, JOSE, or
+OAuth dependency is approved by D06.
 
 ## Phase 2: central implementation, external repository
 
@@ -191,8 +189,6 @@ artifact tests.
 
 ## Current blockers and pending decisions
 
-- D06 needs explicit approval for the Python fixture's DPoP verification
-  dependency before T01.
 - The central implementation repository and owners must complete S01 through
   S07. This gateway workspace does not contain that production service.
 - Production issuer, API resource, MCP resource, API base, and MCP endpoint

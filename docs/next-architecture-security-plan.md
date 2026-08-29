@@ -6,11 +6,12 @@ Date: 2026-08-29
 
 This document collects the accepted REST enrollment, conversation, recovery,
 and DPoP work for later implementation agents. The user accepted ADRs 0023,
-0025, and 0026 on 2026-08-29. ADR 0024 and every connector, provider,
-dependency, CLI, packaging, installation, and publishing choice remain
-pending. The current product and protocol continue to describe shipped
-version 1 behavior until implementation lands. Tests and fixtures come before
-production changes under `docs/implementation-plan.md`.
+0025, and 0026 on 2026-08-29. D06 also approves the exact test-only Python
+fixture dependency recorded in ADR 0020. ADR 0024 and every connector,
+provider, CLI, packaging, installation, publishing, and further dependency
+choice remain pending. The current product and protocol continue to describe
+shipped version 1 behavior until implementation lands. Tests and fixtures come
+before production changes under `docs/implementation-plan.md`.
 
 `docs/architecture-pr-backlog.md` groups this work into pull requests,
 cross-repository dependencies, red-test gates, and end-to-end qualification
@@ -587,9 +588,10 @@ N2 central conversation/reply contract + N6 protected transport
         -> N5 setup, qualification, and distribution review
 ```
 
-N1, N2, and N6 contracts are accepted. Their fixture and red-test work follows
-the D06 dependency and red-suite gates in `docs/implementation-plan.md`. N2
-server operations use N6 protected transport. Gateway changes overlap in the
+N1, N2, and N6 contracts are accepted, and D06 is complete. Their fixture and
+red-test work now starts at T01 under the remaining red-suite gates in
+`docs/implementation-plan.md`. N2 server operations use N6 protected
+transport. Gateway changes overlap in the
 MCP catalog, central clients, credential store, fixtures, application
 assembly, and product documentation, so G01 through G04 are serialized. N3
 through N5 remain blocked on ADR 0024 and the connector, provider, CLI,
