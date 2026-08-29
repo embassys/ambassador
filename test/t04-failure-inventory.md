@@ -8,6 +8,20 @@ observable gateway gap, not evidence about the production central service.
 The target assumes a fresh install. It contains no credential, mailbox, or
 delivery-mode migration case.
 
+Run the suite serially because the public gateway owns one fixed loopback
+port:
+
+```text
+pnpm run test:build
+node --test --test-concurrency=1 --test-reporter=spec \
+  .test-dist/test/t04-*.test.js
+```
+
+Final `0.2.6` observation on 2026-08-29: 41 behavior checks, of which 40 are
+red and the response-observer support check is green. Unlike T03, T04 has no
+parameterized parent nodes, so Node also reports 41 test nodes: 40 failed and
+one passed.
+
 | Test | Expected current failure | Owner after review |
 | --- | --- | --- |
 | T04-P01 | Gateway forwards enrollment through central MCP, stores a version 1 bearer credential, and starts the consuming version 1 poll. This is the shared G01 through G03 prerequisite. | G01, G02, G03, then G04 activation |
