@@ -10,10 +10,11 @@ pull requests. It covers central REST enrollment, DPoP,
 recoverable conversations and replies, provider connectors, provider adapters,
 end-to-end tests, compatibility cleanup, and release qualification.
 
-The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. This backlog does
-not approve ADR 0024, a dependency, connector CLI, package layout, provider
-interface, installation, or publishing change. The red-suite review and
-release gates remain mandatory.
+The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. The user also
+completed D06 by approving the exact test-only fixture dependency in ADR 0020.
+This backlog does not approve ADR 0024, another dependency, a connector CLI,
+package layout, provider interface, installation, or publishing change. The
+red-suite review and release gates remain mandatory.
 
 Unknown production deployment facts do not reopen the accepted client
 contract. Fixtures use the deterministic stand-ins in
@@ -87,11 +88,9 @@ work.
 D01 REST contract ---------\
 D02 message contract -------+--> D04 accepted plan, complete
 D03 DPoP contract ---------/          |
-                                       +--> D06 fixture dependency approval
-                                       |       |
-                                       +-------+--> T01/T02 fixtures and E2E harness
-                                       +----------> T03/T04 red gateway specifications
-                                       +----------> S01 red central specification
+D06 fixture dependency, complete -----+--> T01/T02 fixtures and E2E harness
+                                       +--> T03/T04 red gateway specifications
+                                       +--> S01 red central specification
 
 S01 -> S02 REST/native results -> S03 DPoP enforcement
 S03 -> S04 recovery and acknowledgement
@@ -113,10 +112,10 @@ all requested adapters qualified -> Q03 combined release review
 
 ## Wave 0: contract gate and pending decisions
 
-D01 through D04 are complete. The user approved the three target contracts on
-2026-08-29. Canonical production URLs and other deployment facts remain
-central-owner inputs. Tests substitute the fixture profile; production code
-must not do so.
+D01 through D04 and D06 are complete. The user approved the three target
+contracts and the fixture-only cryptography dependency on 2026-08-29.
+Canonical production URLs and other deployment facts remain central-owner
+inputs. Tests substitute the fixture profile; production code must not do so.
 
 | ID | State | Repository | PR title or task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -125,7 +124,7 @@ must not do so.
 | D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and legacy migration |
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
 | D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and proposed ADR 0024 | Separate ADRs fix the connector command, working directory input, state format, access control, deletion, runtime, dependencies, concurrency, timeouts, approvals, terminal outcomes, installation, and publishing gates |
-| D06 | Blocked on explicit dependency approval | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 records an exact, hash-locked Python cryptography dependency or another reviewed independent implementation for ES256, with license, image, build, and runtime impact |
+| D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
 
 The gateway uses the fixed accepted route split and never adds runtime
 capability discovery or general endpoint configuration. Accepted lease
@@ -424,7 +423,7 @@ expose a crash barrier.
 
 These groups may run in parallel after their dependencies are green:
 
-- D05 and D06 decision work;
+- D05 decision work and T01 fixture work;
 - T02 and the external S01 work after T01 is green;
 - T03 and T04 after T01 and T02;
 - S04 and S06 after S03;

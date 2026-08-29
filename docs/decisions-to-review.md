@@ -20,6 +20,10 @@ Updated: 2026-08-29
 - D01, D02, D03, and the D04 contract gate are complete. These decisions
   approve the target contract and its test specifications. They do not assert
   that the central service has implemented or deployed it.
+- D06 approves direct test-only use of the already locked
+  `cryptography==50.0.0` manylinux x86-64 wheel for independent P-256 and
+  ECDSA operations in the Python fixture. ADR 0020 records its exact hash,
+  license, scope, image effect, and update policy. T01 may now begin.
 
 ## Test-only stand-ins
 
@@ -39,11 +43,6 @@ central owner and returns a material contract difference for review.
 - ADR 0024 remains proposed. It keeps Codex, Claude Code, and Gemini provider
   connectors outside the gateway, but the connector product boundary still
   needs approval.
-- D06 needs explicit user approval for an independently implemented Python
-  DPoP verification dependency. The decision must pin its exact version and
-  hashes and record its license, maintenance, container, build, and runtime
-  impact. Fixture work must not share the gateway's production DPoP verifier
-  to avoid compatible client and server mistakes.
 - The connector executable and CLI or configuration interface, working
   directory, security policy, state format, access controls, migration,
   deletion, runtime, dependencies, limits, concurrency, timeouts, and approval
@@ -106,7 +105,10 @@ protocol agree. It is not evidence that the production central service does.
   plaintext to credential version 2 and permits only its exact same-key reissue
   and email-control replacement paths.
 - ADR 0020 fixes the test-only Python, FastAPI, FastMCP, Pydantic, and Uvicorn
-  container stack. D06 must approve the extra DPoP verification dependency.
+  container stack. Its 2026-08-29 amendment approves direct fixture-only use
+  of the existing hash-locked `cryptography==50.0.0` wheel for P-256 and ECDSA
+  operations. It does not add a gateway dependency or approve another JWT,
+  JOSE, or OAuth package.
 - ADR 0021 permits bounded, non-executing normalization of the development
   central MCP server's mirrored JSON or Python-literal results until native
   structured results are stable.
