@@ -259,9 +259,16 @@ async function readBoundedFile(path, maximum, remainingTotalBytes) {
   return { bytes: Buffer.concat(chunks, size), size };
 }
 
+export function isWithinPath(candidate, parent, pathApi = { isAbsolute, relative, sep }) {
+  const path = pathApi.relative(parent, candidate);
+  return (
+    path === "" ||
+    (!pathApi.isAbsolute(path) && !path.startsWith(`..${pathApi.sep}`) && path !== "..")
+  );
+}
+
 function isWithin(candidate, parent) {
-  const path = relative(parent, candidate);
-  return path === "" || (!path.startsWith(`..${sep}`) && path !== "..");
+  return isWithinPath(candidate, parent);
 }
 
 function overlaps(left, right) {

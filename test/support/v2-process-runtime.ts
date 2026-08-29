@@ -151,7 +151,12 @@ function posixProcessGroupExists(groupId: number): boolean {
     process.kill(-groupId, 0);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH") return false;
+    // A null signal can return EPERM for an existing group that currently has
+    // no signalable member, including while macOS is reaping a killed child.
+    // Keep waiting so a persistent inaccessible descendant fails the bound.
+    if (code === "EPERM") return true;
     throw error;
   }
 }
