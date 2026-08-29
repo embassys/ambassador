@@ -6,6 +6,9 @@ Date: 2026-08-29
 
 Approved: 2026-08-29
 
+Version 1 credential migration and in-place-upgrade requirements are
+superseded by accepted ADR 0027. The future gateway is fresh-install-only.
+
 ## Problem
 
 The gateway currently receives a central JWT from `verify_email`, stores it in
