@@ -1,8 +1,10 @@
 # 0023 REST enrollment API
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-29
+
+Approved: 2026-08-29
 
 ## Problem
 
@@ -14,7 +16,7 @@ temporary Python-literal result parser.
 
 The supplied example uses `POST /api/register`. A read-only OpenAPI snapshot
 checked on 2026-08-29 advertised `POST /api/register_agent` instead. This
-proposal gives the newer, explicit user contract precedence and selects
+decision gives the newer, explicit user contract precedence and selects
 `/api/register`. The gateway must not probe, fall back to the older path, or
 fall back to MCP when the selected route returns `404`.
 
@@ -58,7 +60,7 @@ Where those observations conflict with the newer supplied flow, the supplied
 flow wins. Where the supplied flow is silent, this ADR uses the observed shape
 as a compatibility input and records the remaining server facts for review.
 
-## Proposed decision
+## Decision
 
 Keep the local MCP bootstrap tool names and replace their central MCP dispatch
 with a project-owned REST client. The client uses fixed product paths under one
@@ -67,7 +69,7 @@ approved central API base URL:
 | Local MCP tool | Central request | Authentication |
 | --- | --- | --- |
 | `register_agent` | `POST /api/register` | No central access token |
-| `verify_email` | `POST /api/verify_email` | No central access token. ADR 0026 adds an issuance proof if accepted |
+| `verify_email` | `POST /api/verify_email` | No central access token. ADR 0026 requires an issuance proof |
 | `resend_verification` | `POST /api/resend_verification` | No central access token |
 
 The route set is intentionally unversioned because that matches the supplied
@@ -114,7 +116,7 @@ Optional `display_name` may be present. The gateway rejects `null`, empty
 values, leading or trailing whitespace, ASCII control characters, and unknown
 properties. It applies these bounds before serialization:
 
-| Field | Proposed bound |
+| Field | Bound |
 | --- | --- |
 | `email` | 3 to 254 characters and at most 254 UTF-8 bytes; must match `^[^\s@]+@[^\s@]+\.[^\s@]+$` |
 | `username` | 3 to 50 characters and at most 200 UTF-8 bytes |
@@ -209,7 +211,7 @@ does not send cookies, a central bearer token, a local webhook token, or user
 supplied headers. It rejects redirects and never follows an upstream-provided
 URL.
 
-If ADR 0026 is accepted, each verification attempt generates one P-256 key and
+Each verification attempt generates one P-256 key and
 sends `DPoP: <issuance-proof>`. The request has no `Authorization` header and
 the proof has no `ath`. Registration and resend carry neither `Authorization`
 nor `DPoP`. One valid nonce challenge reuses the verification attempt's key but
@@ -256,10 +258,9 @@ Registration requires this shape:
 }
 ```
 
-`message` is optional on the wire. Until ADR 0026 is accepted, verification
-must contain exactly one top-level `token`. If ADR 0026 is accepted,
-verification instead requires every credential field in this projection;
-`message` remains optional:
+`message` is optional on the wire. Verification requires every credential
+field in this projection and exactly one top-level `token`; `message` remains
+optional:
 
 ```json
 {
@@ -298,8 +299,8 @@ The known success fields have these bounds:
 | `username` | Same bounds as the request |
 | `email` | Same bounds as the request |
 | `token` | 1 to 4,096 ASCII bytes with no whitespace or control characters |
-| `token_type` | Exact string `DPoP` when ADR 0026 applies |
-| `expires_in` | Exact integer `86400` when ADR 0026 applies |
+| `token_type` | Exact string `DPoP` |
+| `expires_in` | Exact integer `86400` |
 | `message` | 1 to 1,024 UTF-8 bytes |
 
 The gateway accepts a success extension only after recursively checking the
@@ -308,8 +309,8 @@ Registration and resend reject `token`, `jwt`, `access_token`, `authorization`,
 `private_key`, `dpop_proof`, and `nonce` at any depth. Verification permits
 `token` only once at the top level and rejects every other listed name at any
 depth. Every accepted extension is discarded. The gateway also rejects any
-non-token value that contains the issued token bytes. ADR 0026 adds the exact
-allowed DPoP response fields if accepted.
+non-token value that contains the issued token bytes. ADR 0026 defines the
+exact allowed DPoP response fields.
 
 Central must send `Cache-Control: no-store` on every verification response,
 including errors and nonce challenges. A successful verification response
@@ -320,8 +321,7 @@ or persist a credential from that response.
 
 ## Error contract
 
-Without ADR 0026, the proposed server error body is one exact object with no
-remote prose:
+The server application-error body is one exact object with no remote prose:
 
 ```json
 {
@@ -342,7 +342,7 @@ The server uses these statuses and codes:
 | Any bootstrap route | `500` | `internal_error` | Do not include request data in the body |
 | Any bootstrap route | `503` | `temporarily_unavailable` | Do not include request data in the body |
 
-If ADR 0026 is accepted, its flat `{"error":"use_dpop_nonce"}` and
+ADR 0026's flat `{"error":"use_dpop_nonce"}` and
 `{"error":"invalid_dpop_proof"}` verification errors augment this table. A
 valid nonce challenge has all of these properties:
 
@@ -375,7 +375,7 @@ the newest code for that purpose remains valid.
 After successful verification, central consumes the code and never returns the
 issued token for the same code again. Repeated verification returns the generic
 `verification_failed` response. The gateway cannot solve a lost verification
-response by retrying that code. If ADR 0026 applies, the user requests a new
+response by retrying that code. The user requests a new
 recovery code and repeats email-control verification with a new key. Central
 revokes the token from the lost response when the later recovery transaction
 succeeds.
@@ -422,7 +422,7 @@ not repeat a verification code after an uncertain outcome because the first
 call may have consumed it and issued a token. They may request a fresh recovery
 code and begin a new verification attempt with a new key.
 
-If ADR 0026 is accepted, one server nonce challenge is the only automatic
+One server nonce challenge is the only automatic
 exception. The gateway may retry verification once with the supplied nonce and
 a fresh proof because central must validate the proof before consuming the
 code. A transport timeout or any other uncertain outcome still receives no
@@ -460,12 +460,11 @@ Verification follows this custody order:
    entered `recovery_authorized` state. Reject it in normal `enrolled` state
    before generating a key or sending a central request.
 2. Serialize concurrent verification attempts.
-3. If ADR 0026 applies, generate one new P-256 key for this attempt and use it
+3. Generate one new P-256 key for this attempt and use it
    for the initial proof and one permitted nonce retry.
 4. Validate the complete bounded response and required safety headers.
 5. Extract the top-level token before any local result or transcript is built.
-6. Validate the DPoP token type, lifetime, subject, and public-key binding when
-   ADR 0026 applies.
+6. Validate the DPoP token type, lifetime, subject, and public-key binding.
 7. For migration or recovery, require the new JWT's byte-exact `iss` and `sub`
    strings and exact ordered `aud` array to match the readable prior token.
    Also validate the returned `agent_id` against the intended identity under
@@ -539,7 +538,7 @@ to MCP polling. No bootstrap route uses that switch. Once central confirms and
 staging proves that `/api/poll_messages` is stable, a separate cleanup removes
 the fallback.
 
-If ADR 0026 is accepted, polling changes to `Authorization: DPoP <token>` plus
+Polling uses `Authorization: DPoP <token>` plus
 a fresh `DPoP` proof. There is no bearer fallback for a DPoP-bound token.
 
 ## Security and data boundary
@@ -569,23 +568,23 @@ a fresh `DPoP` proof. There is no bearer fallback for a DPoP-bound token.
 
 ## DPoP dependency
 
-ADR 0026 changes the verification request, successful response, stored
+ADR 0026 defines the verification request, successful response, stored
 credential, polling authentication, and authenticated central MCP transport.
-If accepted, this REST work must ship with the DPoP issuer and resource-server
+This REST work must ship with the DPoP issuer and resource-server
 enforcement. It must not ship an intermediate mode that sends proofs while the
 server still accepts the issued token as a bearer token.
 
-Until ADR 0026 is accepted or rejected, this ADR cannot freeze the verification
-success schema or protected polling headers. The bootstrap path, local
-projection, bounds, error handling, and no-retry rules can still be reviewed
-independently.
+The verification schema and protected polling headers are frozen jointly by
+this ADR and ADR 0026.
 
-## Proposed defaults and decisions for later review
+## Accepted defaults and production confirmations
 
-The following choices are proposed defaults based on the supplied flow, the
-earlier OpenAPI snapshot, and the accepted gateway safety rules:
+The following choices are accepted based on the supplied flow, the earlier
+OpenAPI snapshot, and the accepted gateway safety rules. The fixture profile
+in `docs/v2-fixture-profile.md` supplies deterministic test values where
+production facts are not available.
 
-| Item | Proposed default | Review needed |
+| Item | Accepted contract | Production confirmation |
 | --- | --- | --- |
 | Registration route | `/api/register` only | Central owner must confirm deployment and retire or redirect `/api/register_agent` outside the gateway contract |
 | Route versioning | Keep the supplied unversioned paths | Central owner must commit to compatibility or propose coordinated versioned paths |
@@ -600,17 +599,18 @@ earlier OpenAPI snapshot, and the accepted gateway safety rules:
 | Same-key reissue | Only renew a working DPoP token with its matching key | It cannot recover initial issuance, version 1, key loss, expiry, revocation, or an unreadable record |
 | Recovery replacement | Permit only in `migration_required` or explicit `recovery_authorized`, and require the same central identity | Central owner must confirm the identity binding and atomic revoke-and-issue transaction |
 | Local reset | Do not overwrite an unreadable or identity-mismatched record | User review must select the recovery and reset interface, confirmation steps, and uncertain-revocation behavior |
-| Deadline | 30 seconds total per bootstrap call | User review required before production tests and code |
-| Response limit | 16 KiB headers, 64 KiB body, 16 JSON levels | User review required before production tests and code |
+| Deadline | 30 seconds total per bootstrap call | Central owner must support the accepted client limit |
+| Response limit | 16 KiB headers, 64 KiB body, 16 JSON levels | Central owner must support the accepted client limit |
 | Rate limits | Observe `429` and `Retry-After`; never enforce or sleep in the gateway | Central owner must confirm registration, resend, and verification policies |
 | Poll delivery | Full-message consuming long poll as documented in protocol v1 | Central owner must confirm before the MCP fallback can be removed |
 
-Production implementation stays blocked until the canonical HTTPS endpoints,
-server response and error contract, DPoP decision, token recovery behavior, and
-poll delivery semantics are confirmed. The user-authorized local recovery and
-reset interface must also be approved before an unreadable credential can be
-replaced. Tests and fixtures must land before the gateway implementation, as
-required by the active implementation plan.
+Production activation stays blocked until central supplies the canonical HTTPS
+endpoints and implements the accepted response, error, DPoP, recovery, and poll
+contracts. The user-authorized local recovery and reset interface must also be
+approved before an unreadable credential can be replaced. Tests may use the
+fixture-only profile while those production facts remain open. Tests and
+fixtures must land before the gateway implementation, as required by the active
+implementation plan.
 
 ## Compatibility and migration
 
@@ -626,14 +626,15 @@ Changing the canonical endpoint pair makes an existing encrypted credential
 unreadable by design. Same-key reissue cannot help because the gateway cannot
 load the credential needed to authenticate it. A deployment must migrate and
 rewrite the credential while the old endpoint binding is still usable, or use
-the approved user-authorized reset and email-control recovery flow.
+the future user-authorized reset and email-control recovery flow after its
+local interface is approved.
 
-If ADR 0026 is accepted, an existing JWT-only credential cannot be upgraded by
+An existing JWT-only credential cannot be upgraded by
 the gateway. Central must issue a new key-bound token through the reviewed
 email-control verification flow before the gateway writes credential version
 2. Same-key reissue does not accept a version 1 bearer token.
 
-Once this ADR is accepted and implemented, ADR 0017 and protocol v1 need an
+When this ADR is implemented, ADR 0017 and protocol v1 need an
 update because they currently describe bootstrap forwarding through central
 MCP. ADR 0021 remains applicable to authenticated MCP results until a separate
 cleanup removes the temporary parser.
@@ -689,9 +690,8 @@ cleanup removes the temporary parser.
 
 ## Approval
 
-Not approved. The user asked for the new REST request and response contract to
-be planned on 2026-08-29. This revision uses `/api/register` and records
-implementation defaults, but the canonical HTTPS endpoints, server facts,
-DPoP dependency, token recovery behavior, local recovery and reset interface,
-and polling semantics still require review before tests or production work
-freeze the contract.
+The user approved this REST enrollment contract together with ADRs 0025 and
+0026 on 2026-08-29. The approval freezes the gateway and fixture contract. It
+does not invent production endpoints or confirm a central deployment. Central
+must implement and publish those facts before production activation. The local
+recovery and reset interface remains blocked on a separate user decision.

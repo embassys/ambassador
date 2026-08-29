@@ -4,11 +4,11 @@ Status: accepted
 
 Date: 2026-08-25
 
-Updated: 2026-08-27 for the live consuming notification API, relay bounds, and 404-only MCP polling fallback
+Updated: 2026-08-29 for the accepted REST, DPoP, and lease-based next contract
 
 ## Problem
 
-The earlier CLI and configuration model asked the gateway to discover or configure runtimes, manage bindings, and receive a central JWT before startup. The intended user flow is smaller. A user already has a local webhook URL and token. Central registration happens later through MCP.
+The earlier CLI and configuration model asked the gateway to discover or configure runtimes, manage bindings, and receive a central JWT before startup. The intended user flow is smaller. A user already has a local webhook URL and token. Central registration happens later through the gateway's local MCP interface.
 
 ## Decision
 
@@ -32,7 +32,7 @@ The webhook URL must use the literal loopback address `127.0.0.1`. The webhook t
 
 The central API and MCP URLs are product constants, not user-facing CLI options. Until those constants are available, the `0.2.0` development release accepts `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` as a paired environment override. A development flow sets both. Remote values require HTTPS, while loopback development servers may use HTTP. The override does not change the two-option CLI or add general configuration.
 
-## Enrollment
+## Shipped `0.2.6` enrollment
 
 Before enrollment, the local MCP server exposes only the central-JWT-exempt bootstrap tools `register_agent`, `verify_email`, and `resend_verification`. The local bearer check still applies.
 
@@ -49,7 +49,7 @@ A first successful verification owns the gateway identity. A later verification 
 
 An upstream authentication failure stops polling and authenticated tools without deleting or replacing the stored credential.
 
-## Notification and wake behavior
+## Shipped `0.2.6` notification and wake behavior
 
 The gateway starts with the live central API: `GET /api/poll_messages?timeout=30` returns full queued messages and marks them delivered. The gateway treats an explicit HTTP `404` as an absent public route and switches for that process lifetime to the central MCP `poll_messages` tool with a 20-second timeout and transient JWT injection. No uncertain transport outcome, redirect, or other HTTP status triggers the fallback because REST may already have consumed a message. Both paths use the same bounded validation. Because a later poll cannot retrieve a delivered message, the gateway keeps the validated response in bounded process memory and serves it from its local `poll_messages` tool without another central request. The 4 MiB transport cap is followed by pre-parse limits of 100 JSON levels and 16,384 structural tokens. A valid inbox contains at most 256 messages and 512 KiB of normalized local result JSON. Central polling pauses while a body or volatile wake remains from that response. Message bodies never enter SQLite, files, logs, diagnostics, metrics, temporary files, crash artifacts, or support bundles.
 
@@ -67,6 +67,49 @@ The `0.2.1` through `0.2.6` packages retain the `0.2.0` loopback Hermes bridge f
 
 The MCP endpoint requires its exact loopback `Host`, permits a missing `Origin` for non-browser clients, rejects any other supplied `Origin`, limits request and response sizes, applies deadlines, rejects redirects, and rechecks the bearer token on every request. MCP session IDs never act as authentication.
 
+## Accepted next contract
+
+The one-process, one-webhook, one-identity decision and exact public command do
+not change. ADRs 0023, 0025, and 0026 supersede the shipped central enrollment,
+authentication, credential, and delivery details as the implementation target.
+
+Bootstrap remains available through the gateway's local authenticated MCP
+interface, but the gateway owns those schemas and sends bounded central REST
+requests to `/api/register`, `/api/verify_email`, and
+`/api/resend_verification`. It does not forward bootstrap calls through central
+MCP, probe an alternate registration route, or fall back after a failure.
+
+Verification creates a P-256 key and uses a DPoP issuance proof. The gateway
+intercepts the returned token and persists the token and key as the atomic
+version 2 credential in ADRs 0019 and 0026. Every protected central REST and
+MCP HTTP request uses `Authorization: DPoP` and a fresh proof. Central MCP tool
+schemas and arguments contain no token.
+
+Verification is the first credential source, not the only permitted token
+response. Scheduled same-key reissue may replace a working credential under
+the exact identity and key checks in ADR 0026. Email-control verification may
+replace it with the same central identity and a new key after central revokes
+the old tokens. A `401`, invalid token, proof failure, key failure, or ordinary
+tool failure never triggers refresh or replacement.
+
+The message target uses the fixed REST v2 lifecycle in ADR 0025. Central leases
+the oldest bounded message batch for 60 seconds and retains each immutable body
+until terminal outcome and acknowledgement. An expired unacknowledged lease
+makes the same body eligible again. A restart clears stale local wake rows and
+waits for central redelivery, so the shipped consuming-poll crash loss is no
+longer the recovery target.
+
+The gateway still keeps message bodies only in bounded memory and persists only
+opaque IDs and relay state. It does not add runtime discovery, capability
+negotiation, route probing, bindings, general configuration, service
+management, or provider credentials.
+
+This amendment accepts the client and server contract. It does not claim that
+the production central service implements it. The test-only
+[version 2 fixture profile](../v2-fixture-profile.md) supplies explicit
+stand-ins for missing deployment facts; it does not define production URLs,
+keys, proxy trust, or capacity.
+
 ## Removed behavior
 
 The active design has no `setup`, `agent add`, `agent list`, `agent remove`, `agent test`, `stop`, `restart`, `status`, `doctor`, or `run` command. It has no binding IDs, runtime adapters, runtime presets, JSON configuration file, or native service definitions.
@@ -77,4 +120,4 @@ The replacement uses new `a2a-gateway` state paths and ignores legacy `a2a-sidec
 
 ## Approval
 
-The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history. On 2026-08-26, the user approved runtime-agnostic bearer and HMAC V2 webhook authentication and the `0.2.1` patch release. On 2026-08-27, the user directed the gateway protocol to match the live consuming central API and requested follow-up releases, including a temporary MCP polling path while the public REST route is unavailable.
+The user approved the two-option, agent-agnostic startup and MCP enrollment flow on 2026-08-25. The same-day development release request approved the paired environment endpoint override without adding CLI options. The user also directed the project to delete obsolete ADRs instead of retaining them as superseded history. On 2026-08-26, the user approved runtime-agnostic bearer and HMAC V2 webhook authentication and the `0.2.1` patch release. On 2026-08-27, the user directed the gateway protocol to match the live consuming central API and requested follow-up releases, including a temporary MCP polling path while the public REST route is unavailable. On 2026-08-29, the user approved ADRs 0023, 0025, and 0026 as the next contract and allowed missing central deployment facts to be represented in test fixtures until central confirms them.
