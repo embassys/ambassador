@@ -110,12 +110,13 @@ The direct and proxied paths must produce the same normalized target for the
 same public URI. This simulation does not choose a production proxy product,
 network range, forwarding-header policy, or TLS termination design.
 
-## Gates that remain closed
+## Dependency scope and remaining gates
 
-This profile selects no Python cryptographic or JWT dependency. Independent
-DPoP verification in the Docker fixture stays blocked until a separate ADR
-approves the dependency and pinned package set. The Docker fixture must not
-import gateway proof code as a shortcut.
+ADR 0020 approves direct test-only use of the existing hash-locked
+`cryptography==50.0.0` wheel for independent P-256 and ECDSA operations in the
+Docker fixture. It does not approve another JWT, JOSE, OAuth, HTTP, or
+validation dependency. The fixture owns strict DPoP parsing and validation and
+must not import gateway proof code as a shortcut.
 
 Fixture server reset is a test-control operation. It does not authorize a
 gateway command, MCP tool, file deletion, or production identity reset. The
@@ -126,4 +127,6 @@ intentional identity reset remains blocked on user review.
 
 The user approved ADRs 0023, 0025, and 0026 on 2026-08-29 and authorized
 fixture-only stand-ins for unavailable production facts. Those stand-ins may
-drive fixtures and red tests. They must never become production defaults.
+drive fixtures and red tests. They must never become production defaults. The
+user also approved ADR 0020's exact fixture-only cryptography amendment on
+2026-08-29, completing D06.
