@@ -1,117 +1,115 @@
 # Decisions to review
 
-The user approved the single-webhook startup and enrollment architecture on August 25, 2026. ADRs 0001 through 0003 and every later record made irrelevant by that design were removed at the user's direction.
+Updated: 2026-08-29
 
-## Active provisional decisions
+## Accepted on 2026-08-29
 
-- ADR 0023 proposes replacing central MCP bootstrap forwarding with bounded REST
-  calls for registration, verification, and resend. It remains blocked on the
-  canonical registration path, an HTTPS endpoint, complete response and error
-  semantics, and user approval. The supplied `/api/register` path conflicts with
-  the live OpenAPI document's `/api/register_agent` path.
-- ADR 0024 proposes separate loopback provider connectors for persistent Codex,
-  Claude Code, and Gemini CLI sessions. The gateway remains provider-neutral
-  and stores no provider session mapping. Connector state, startup,
-  dependencies, security policy, installation, and publishing still need
-  separate approval.
-- ADR 0025 proposes stable central conversation IDs, recoverable unacknowledged
-  delivery, and an idempotent reply operation tied to the original inbound
-  message. The live OpenAPI document does not advertise those contracts, so
-  central definitions and user approval block connector implementation.
-- ADR 0026 proposes binding newly issued central JWTs to a gateway-held P-256
-  key with RFC 9449 DPoP. It requires issuer and resource-server enforcement,
-  transport-level DPoP on REST and central MCP, removal of MCP `token`
-  arguments, a version 2 encrypted credential, replay and nonce state, and a
-  reviewed migration path for existing bearer JWTs.
+- ADR 0023 accepts REST bootstrap enrollment through `POST /api/register`,
+  `POST /api/verify_email`, and `POST /api/resend_verification`. The gateway
+  owns bounded local MCP projections, never probes the older route or MCP as a
+  fallback, and uses email-control recovery for lost issuance, migration, key
+  loss, or rotation.
+- ADR 0025 accepts version 2 linear, text-only conversations, 60-second central
+  delivery leases, immutable unacknowledged content, idempotent starts and
+  replies, explicit terminal outcomes, separate acknowledgement, and an atomic
+  per-identity activation step. Gateway durability remains ID-only.
+- ADR 0026 accepts the P-256 and ES256 DPoP profile, proof and nonce bounds,
+  transport authentication for protected REST and central MCP, 24-hour bound
+  tokens, same-key reissue, credential version 2, email-control recovery,
+  revocation, and no bearer fallback.
+- D01, D02, D03, and the D04 contract gate are complete. These decisions
+  approve the target contract and its test specifications. They do not assert
+  that the central service has implemented or deployed it.
 
-## Proposed defaults awaiting review
+## Test-only stand-ins
 
-These are working decisions, not accepted architecture. They give contract and
-red-test work one deterministic target while leaving production implementation
-blocked on review.
+The user authorized reasonable stand-ins for production facts that are not yet
+available. `docs/v2-fixture-profile.md` supplies those values to fixtures and
+tests only. It does not supply production constants, approve a central
+deployment, or prove real email, database, proxy, token-signing, replay,
+revocation, lease, quota, or migration behavior.
 
-### Enrollment and recovery
+A test or implementation PR must label every value taken from the fixture
+profile. Production code must not compile those values in as central product
+constants. Staging work replaces each stand-in with a value confirmed by the
+central owner and returns a material contract difference for review.
 
-- Prefer the newest supplied `POST /api/register` contract. Do not probe
-  `/api/register_agent`, retry on a second path, or fall back to MCP.
-- Keep the three bootstrap routes unversioned, use a fixed product HTTPS origin,
-  and allow plain HTTP only for an explicit loopback fixture.
-- Apply a 30-second total deadline, 16 KiB response-header limit, 64 KiB
-  response-body limit, strict JSON parsing, fixed safe errors, and no automatic
-  retry after an uncertain enrollment outcome.
-- Make resend non-enumerating. If DPoP is accepted, a separately authorized
-  recovery state may use a fresh email-control code for an already-verified
-  identity; normal enrollment still cannot replace an identity.
-- Same-key token reissue is routine renewal only. A lost initial issuance,
-  missing private key, version 1 credential, or deliberate key rotation requires
-  email-control recovery and same-identity validation.
+## Active architecture and dependency decisions
 
-### Messages and conversations
+- ADR 0024 remains proposed. It keeps Codex, Claude Code, and Gemini provider
+  connectors outside the gateway, but the connector product boundary still
+  needs approval.
+- D06 needs explicit user approval for an independently implemented Python
+  DPoP verification dependency. The decision must pin its exact version and
+  hashes and record its license, maintenance, container, build, and runtime
+  impact. Fixture work must not share the gateway's production DPoP verifier
+  to avoid compatible client and server mistakes.
+- The connector executable and CLI or configuration interface, working
+  directory, security policy, state format, access controls, migration,
+  deletion, runtime, dependencies, limits, concurrency, timeouts, and approval
+  behavior remain undecided.
+- Each Codex, Claude Code, and Gemini adapter still needs its own exact
+  executable or SDK version, protocol schema, dependency decision, sandbox and
+  approval policy, history behavior, supported platforms, and update policy.
+- Connector installation, packaging, publishing, and distribution remain
+  unapproved. The gateway CLI stays unchanged.
+- The local user-authorized interface for intentional identity reset,
+  unreadable credentials, and uncertain revocation remains undecided. Ordinary
+  authentication or key failure must not enter recovery or overwrite a
+  credential automatically.
 
-- Use central database leases, initially 60 seconds, to redeliver immutable
-  unacknowledged messages. Gateway and connector durable state stays
-  content-free.
-- Use a strict, text-only, linear conversation model with server-generated
-  conversation IDs and at most one reply to each turn.
-- Use REST as the gateway's fixed version 2 message-lifecycle interface. Do not
-  probe or fall back to central MCP. Keep the authenticated MCP endpoint stable
-  at `/mcp`; version 2 is selected by a coordinated release and atomic
-  per-identity activation, not runtime discovery.
-- Derive reply routing and idempotency from the authenticated recipient and
-  inbound message ID. Keep terminal completion separate from idempotent
-  acknowledgement, and retain content-free tombstones.
-- Require central recipient authorization or consent plus per-sender abuse
-  controls before starting a conversation. Unknown and unauthorized targets
-  must not become an identity oracle.
-- Select receive batches by both count and serialized byte budget. Provide a
-  content-free outcome lookup for uncertain conversation creation and notify or
-  otherwise make senders poll when a turn ends without a reply.
+## Production facts still required
 
-### DPoP and credential lifecycle
+The accepted client contract uses fixture stand-ins until the central owner
+provides these facts:
 
-- Pin ES256 with P-256, exact JOSE and JWK shapes, a 60-second maximum proof
-  age, 5 seconds of future skew, shared replay rejection, and mandatory bounded
-  server nonces. Do not negotiate algorithms at runtime.
-- Issue 24-hour DPoP-bound JWTs, begin same-key reissue with 12 hours remaining,
-  and never accept a DPoP-bound token through a bearer path.
-- Authenticate every protected REST and central MCP HTTP request with
-  `Authorization: DPoP` and a fresh proof. Remove credentials from MCP tool
-  arguments and results.
-- Store the access token and P-256 private key together in the version 2
-  encrypted credential. Replacement must be atomic and must preserve the exact
-  issuer, subject, audiences, key binding, algorithm, and lifetime contract.
-- Use email-control re-verification for recovery, key rotation, and legacy
-  bearer migration. Never permit bearer-only key rebinding.
-- Treat transport DPoP on central MCP as a project-specific profile. A future
-  move to the standard MCP OAuth authorization model is a separate decision.
+- canonical HTTPS issuer, API base and resource, MCP resource, and stable
+  `/mcp` endpoint;
+- exact deployed OpenAPI and MCP schemas and the registration uniqueness and
+  comparison rule;
+- production JWT signing and authorization claims within the accepted token
+  bound;
+- shared atomic implementations for proof replay, revocation, nonce key
+  rotation, token counts, recovery limits, idempotency, delivery leases,
+  replies, acknowledgements, and version activation across replicas;
+- trusted reverse-proxy peers and external URI reconstruction for DPoP;
+- production mailbox, sender, pair, request-rate, retention, and capacity
+  values;
+- non-enumerating email enrollment and recovery behavior, delivery controls,
+  and the atomic revoke-and-issue transaction;
+- development enforcement, migration, legacy-bearer retirement, staging, and
+  production rollout dates; and
+- access to the production central repository or its owners for S01 through
+  S07 in `docs/implementation-plan.md`.
 
-## Facts required before approval
+These facts block staging and release, not fixture construction. A fixture
+passing the accepted stand-in contract is evidence that the gateway and test
+protocol agree. It is not evidence that the production central service does.
 
-- Central must publish the canonical HTTPS issuer, API, and stable MCP URLs and
-  confirm the deployed registration, verification, resend, recovery, revocation,
-  message, success, and error schemas.
-- Central must confirm verification-code syntax, token signing and authorization
-  claims, rate limits, mailbox quotas, retention, recipient-consent policy, and
-  the shared database transactions used for leases, idempotency, replay, nonce,
-  revocation, and recovery state across replicas.
-- Deployment owners must confirm trusted proxy peers and external URI
-  reconstruction for DPoP, plus migration and legacy-bearer retirement dates.
-- The gateway still needs a reviewed local interface for intentional identity
-  reset and unreadable-credential recovery.
-- ADR 0024 still needs provider command, event, sandbox, approval, retention,
-  dependency, installation, publishing, and supported-platform decisions for
-  Codex, Claude Code, and Gemini CLI.
+## Existing accepted decisions
 
-## Resolved
-
-- ADR 0006 fixes Node 24, pnpm 11.22.0 for repository work with supply-chain controls, TypeScript, node:test, Biome, Zod, Node HTTP, and GitHub Actions.
+- ADR 0006 fixes Node 24, pnpm 11.22.0 for repository work with supply-chain
+  controls, TypeScript, node:test, Biome, Zod, Node HTTP, and GitHub Actions.
 - ADR 0007 fixes `better-sqlite3` with no ORM for the ID-only journal.
-- ADR 0012 fixes bounded, non-configurable HTTP deadlines, including a 40-second deadline around the 30-second central long poll.
+- ADR 0012 fixes bounded, non-configurable HTTP deadlines, including a
+  40-second deadline around the 30-second central long poll.
 - ADR 0014 fixes a one-second SQLite singleton-lock handoff.
-- ADR 0015 fixes npm-registry distribution as `@a2adev/gateway`, with end users running the pinned package through `npx`.
-- ADR 0017 fixes the two-option foreground CLI, one webhook and identity, shared local bearer, MCP enrollment, and removal of bindings and runtime discovery.
-- ADR 0018 fixes the official split MCP TypeScript SDK packages at version 2.0.0.
-- ADR 0019 fixes the first encrypted central-JWT file, strong webhook-token format, access controls, and durability rules; OS vault storage and DPoP remain future improvements.
-- ADR 0020 fixes the exact test-only Python/FastMCP container stack and in-memory central contract.
-- ADR 0021 permits bounded, non-executing normalization of the development central MCP server's mirrored JSON or Python-literal string results.
-- ADR 0022 temporarily permits `--verbose=true` with development endpoints so live MCP and polling failures can be diagnosed from a credential-redacted stderr transcript. A TODO requires its removal.
+- ADR 0015 fixes npm-registry distribution as `@a2adev/gateway`, with end users
+  running the pinned package through `npx`.
+- ADR 0017 fixes the two-option foreground CLI, one webhook and identity,
+  shared local bearer, and removal of bindings and runtime discovery. ADRs
+  0023, 0025, and 0026 amend its central enrollment, delivery, and credential
+  target without changing the gateway CLI.
+- ADR 0018 fixes the official split MCP TypeScript SDK packages at version
+  2.0.0.
+- ADR 0019 fixes encrypted credential storage. ADR 0026 amends the stored
+  plaintext to credential version 2 and permits only its exact same-key reissue
+  and email-control replacement paths.
+- ADR 0020 fixes the test-only Python, FastAPI, FastMCP, Pydantic, and Uvicorn
+  container stack. D06 must approve the extra DPoP verification dependency.
+- ADR 0021 permits bounded, non-executing normalization of the development
+  central MCP server's mirrored JSON or Python-literal results until native
+  structured results are stable.
+- ADR 0022 temporarily permits `--verbose=true` with development endpoints for
+  a credential-redacted stderr transcript. Stable machine-readable central
+  errors and qualified version 2 behavior are prerequisites for its removal.

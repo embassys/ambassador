@@ -1,8 +1,10 @@
 # 0025 Conversation and reply contract
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-29
+
+Approved: 2026-08-29
 
 Updated: 2026-08-29 to choose lease redelivery, define the v2 message lifecycle,
 and close authorization, idempotency-recovery, and activation gaps
@@ -23,7 +25,7 @@ depend on a caller-supplied target, sender, or conversation ID. A lost reply
 response must not create a second outbound message when the gateway or
 connector recovers.
 
-## Proposed decision
+## Decision
 
 Add a versioned conversation API in which central keeps every full inbound
 message until the recipient records a terminal outcome and acknowledges it.
@@ -44,7 +46,7 @@ Version 2 supports one connector-eligible message type:
 `conversation_turn`. A conversation is a linear sequence. Each turn has at
 most one reply, and every reply points to the turn immediately before it.
 Branching, attachments, structured actions, and group conversations remain
-outside this proposal.
+outside this decision.
 
 Central creates a conversation and its first turn through:
 
@@ -475,7 +477,7 @@ and `DPoP` headers. Central MCP tool schemas contain no token arguments.
 
 ## Bounds and pressure
 
-Version 2 uses these proposed fixed limits:
+Version 2 uses these fixed limits:
 
 | Value | Limit |
 | --- | --- |
@@ -496,12 +498,12 @@ Version 2 uses these proposed fixed limits:
 | Conversation starts per sender | 60 per rolling 60 seconds |
 
 Central never silently expires or cancels an accepted, unacknowledged message.
-It rejects new work before exceeding either mailbox limit. Exact quotas are
-server policy and require central-owner capacity review before this ADR can be
-accepted. A reply that would exceed the original sender's mailbox quota
-returns `mailbox_full` and records no reply or terminal outcome. The connector
-keeps the inbound message open and retries only with the same recovered
-provider result.
+It rejects new work before exceeding either mailbox limit. Central owners must
+validate the accepted quotas against production capacity before activation. A
+reply that would exceed the original sender's mailbox quota returns
+`mailbox_full` and records no reply or terminal outcome. The connector keeps
+the inbound message open and retries only with the same recovered provider
+result.
 
 Start-specific count and byte limits are charged to the authenticated sender,
 not to a caller-supplied identity. Central enforces sender-wide, recipient
@@ -517,8 +519,8 @@ in a rolling 60-second window. It applies the limit across replicas. Receive
 uses the one-active-request rule instead. A rate-limit response gives the
 remaining delay in milliseconds and a matching `Retry-After` header. The
 start-specific rate limits are subsets of this global limit, not extra request
-allowances. These proposed values need the same central capacity review as the
-mailbox quotas.
+allowances. Central owners must validate these accepted values against
+production capacity before activation.
 
 The gateway keeps the accepted 40-second deadline around a 30-second long
 poll. Other central MCP and REST calls use the accepted 30-second tool-call
@@ -741,10 +743,10 @@ traffic last.
 - Retry a provider prompt after uncertainty. The prompt may have already
   changed files or called an external tool.
 
-## Review record
+## Accepted choices and production confirmations
 
-The following choices use local architectural judgment and need user and
-central-owner review:
+The user accepted these architectural choices on 2026-08-29. Central owners
+must implement them and confirm the production deployment facts below:
 
 - lease redelivery instead of retrieval by message ID;
 - a 60-second lease with no renewal in the one-gateway model;
@@ -767,7 +769,8 @@ central-owner review:
 - keyed content fingerprints instead of durable plain content digests; and
 - the concrete mailbox, sender, pair, and request-rate limits above.
 
-Central owners must confirm these deployment facts before approval:
+Central owners must confirm these deployment facts before production
+activation:
 
 1. The canonical API base, canonical MCP `/mcp` endpoint, and exact version 2
    REST route names, without changing the ADR 0019 authenticated endpoint pair.
@@ -783,7 +786,7 @@ Central owners must confirm these deployment facts before approval:
    retained fingerprint without exposing likely message text to offline tests.
 6. Replica clocks and database time can enforce the 60-second lease, 48-hour
    start window, and rolling request limits without process-local timing.
-7. The proposed mailbox, sender, pair, byte, and request-rate limits and
+7. The accepted mailbox, sender, pair, byte, and request-rate limits and
    indefinite unacknowledged retention fit production capacity.
 8. Migration can identify every version 1 row whose body has already been
    deleted and can keep an identity blocked until central resolves it.
@@ -793,7 +796,7 @@ Central owners must confirm these deployment facts before approval:
 ## Packaging and dependency impact
 
 The gateway can implement this contract with its approved HTTP, MCP,
-validation, SQLite, and cryptographic facilities. This proposal adds no
+validation, SQLite, and cryptographic facilities. This decision adds no
 gateway dependency and does not change the public gateway command. Central
 implementation choices remain central-owned. Any connector dependency,
 command, state format, installation path, or publishing plan needs separate
@@ -801,7 +804,7 @@ approval.
 
 ## Approval
 
-Not approved. The user requested planning for persistent Codex, Claude, and
-Gemini conversations on 2026-08-29. This update selects a proposed recovery
-and lifecycle model for review, but the central service does not yet advertise
-or enforce it.
+The user approved this conversation, reply, and recovery contract together
+with ADRs 0023 and 0026 on 2026-08-29. The approval freezes the gateway and
+fixture contract. The central service must implement the accepted API,
+transactions, limits, and DPoP enforcement before production activation.
