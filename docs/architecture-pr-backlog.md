@@ -1,16 +1,25 @@
 # Architecture PR backlog
 
-Status: planning only
+Status: active implementation backlog for the accepted version 2 architecture
 
 Date: 2026-08-29
 
-This document turns the proposed architecture in ADRs 0023 through 0026 into
-reviewable tasks and pull requests. It covers central REST enrollment, DPoP,
+This document turns the accepted architecture in ADRs 0023, 0025, and 0026,
+plus the proposed connector boundary in ADR 0024, into reviewable tasks and
+pull requests. It covers central REST enrollment, DPoP,
 recoverable conversations and replies, provider connectors, provider adapters,
 end-to-end tests, compatibility cleanup, and release qualification.
 
-Nothing here approves an ADR, dependency, CLI, package layout, server route, or
-publishing change. Contract and user gates remain mandatory.
+The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. This backlog does
+not approve ADR 0024, a dependency, connector CLI, package layout, provider
+interface, installation, or publishing change. The red-suite review and
+release gates remain mandatory.
+
+Unknown production deployment facts do not reopen the accepted client
+contract. Fixtures use the deterministic stand-ins in
+`docs/v2-fixture-profile.md`. Those values are test-only and do not prove a
+real central deployment, database transaction, shared replay guarantee,
+trusted proxy path, email flow, capacity, or rollout date.
 
 ## Planning rules
 
@@ -33,10 +42,8 @@ publishing change. Contract and user gates remain mandatory.
 ## Message-custody decision used by this backlog
 
 An older revision of `docs/central-interface-change-requests.md` proposed a v2
-custody transfer in which the gateway durably stored full message bodies. ADR
-0025 and the current change request now use lease redelivery instead. This
-remains a proposed decision for user and central-owner review, but it is the one
-deterministic target for the red tests in this backlog.
+custody transfer in which the gateway durably stored full message bodies. The
+accepted ADR 0025 and the current change request use lease redelivery instead.
 
 This backlog uses the ADR 0025 boundary:
 
@@ -47,10 +54,10 @@ central retains full unacknowledged message
   -> gateway acknowledges only at the reviewed terminal point
 ```
 
-The proposed D02 contract work has removed the conflicting durable-body text.
-D02 still needs central-owner confirmation and user approval before it is
-frozen. A future durable local inbox would need its own storage, encryption,
-quota, migration, and deletion ADR. It is not part of this backlog.
+D02 removed the conflicting durable-body text, and the user accepted that
+contract on 2026-08-29. Central owners still need to implement and qualify it.
+A future durable local inbox would need its own storage, encryption, quota,
+migration, and deletion ADR. It is not part of this backlog.
 
 ## Pull request workflow
 
@@ -78,11 +85,13 @@ work.
 
 ```text
 D01 REST contract ---------\
-D02 message contract -------+--> D04 accepted plan
+D02 message contract -------+--> D04 accepted plan, complete
 D03 DPoP contract ---------/          |
-                                       +--> T01/T02 fixtures and E2E harness
-                                       +--> T03/T04 red gateway specifications
-                                       +--> S01 red central specification
+                                       +--> D06 fixture dependency approval
+                                       |       |
+                                       +-------+--> T01/T02 fixtures and E2E harness
+                                       +----------> T03/T04 red gateway specifications
+                                       +----------> S01 red central specification
 
 S01 -> S02 REST/native results -> S03 DPoP enforcement
 S03 -> S04 recovery and acknowledgement
@@ -102,28 +111,26 @@ first qualified adapter -> Q02 setup and distribution review
 all requested adapters qualified -> Q03 combined release review
 ```
 
-## Wave 0: freeze contracts and decisions
+## Wave 0: contract gate and pending decisions
 
-These are documentation PRs. They can progress in parallel, but D04 cannot
-merge until all three have central-owner answers and user approval.
+D01 through D04 are complete. The user approved the three target contracts on
+2026-08-29. Canonical production URLs and other deployment facts remain
+central-owner inputs. Tests substitute the fixture profile; production code
+must not do so.
 
-| ID | Repository | Proposed PR title | Depends on | Completion evidence |
-| --- | --- | --- | --- | --- |
-| D01 | Gateway docs and central API docs | `docs: freeze REST enrollment and stable endpoint contract` | None | ADR 0023 has one registration path, canonical HTTPS API and MCP URLs, exact schemas, errors, limits, deadlines, lost-response behavior, and polling semantics |
-| D02 | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 resolves C-R1 through C-R8; the older durable-body proposal is updated or retired; message, recovery, reply, acknowledgement, idempotency, terminal status, and bounds are exact |
-| D03 | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 for canonical URLs | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, legacy migration, and enforcement dates |
-| D04 | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR statuses and approval sections are current; the implementation plan and decision log contain the approved future work; current product and protocol remain accurate until implementation ships; shared file ownership is assigned |
-| D05 | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | Accepted D02 and ADR 0024 | Separate ADRs fix the connector command, working directory input, state format, access control, deletion, runtime, dependencies, concurrency, timeouts, approvals, terminal outcomes, installation, and publishing gates |
-| D06 | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 records an exact, hash-locked Python cryptography dependency or another reviewed independent implementation for the approved algorithm, with license, image, build, and runtime impact |
+| ID | State | Repository | PR title or task | Depends on | Completion evidence |
+| --- | --- | --- | --- | --- | --- |
+| D01 | Complete | Gateway docs and central API docs | `docs: freeze REST enrollment and stable endpoint contract` | None | ADR 0023 fixes one registration path, bootstrap schemas, errors, limits, deadlines, recovery, and polling compatibility |
+| D02 | Complete | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 fixes messages, leased recovery, replies, acknowledgement, idempotency, terminal status, bounds, and activation |
+| D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and legacy migration |
+| D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
+| D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and proposed ADR 0024 | Separate ADRs fix the connector command, working directory input, state format, access control, deletion, runtime, dependencies, concurrency, timeouts, approvals, terminal outcomes, installation, and publishing gates |
+| D06 | Blocked on explicit dependency approval | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 records an exact, hash-locked Python cryptography dependency or another reviewed independent implementation for ES256, with license, image, build, and runtime impact |
 
-D01 must also decide whether the new server contract uses versioned routes.
-The gateway must use fixed approved product URLs. It must not add runtime
-capability discovery or general endpoint configuration.
-
-D02 provisionally selects lease-based redelivery of every delivered but
-unacknowledged message. Central keeps full content until terminal
-acknowledgement, and the gateway keeps only IDs in SQLite. That choice remains
-subject to the D04 review gate.
+The gateway uses the fixed accepted route split and never adds runtime
+capability discovery or general endpoint configuration. Accepted lease
+redelivery keeps full unacknowledged content at central and only IDs in gateway
+SQLite.
 
 ## Wave 1: build test infrastructure and red specifications
 
@@ -131,7 +138,7 @@ subject to the D04 review gate.
 
 | ID | Type | Proposed PR title | Depends on | Scope and completion evidence |
 | --- | --- | --- | --- | --- |
-| T01 | Green fixture PR | `test: add versioned central contract fixtures` | D04, D06 | Extend the Node fake central service and independent Python fixture with REST enrollment, DPoP issuance and protected requests, conversation IDs, chosen recovery, idempotent reply, terminal outcomes, native MCP results, and fault controls. Both fixtures pass their own contract tests without production gateway changes. |
+| T01 | Green fixture PR | `test: add versioned central contract fixtures` | D04, D06 | Extend the Node fake central service and independent Python fixture with REST enrollment, DPoP issuance and protected requests, conversation IDs, accepted lease recovery, idempotent reply, terminal outcomes, native MCP results, and fault controls. Both fixtures pass their own contract tests without production gateway changes. This proves fixture interoperability, not production central behavior. |
 | T02 | Green harness PR | `test: add full-process fault and artifact-scan harness` | T01 | Add process barriers, an independently implemented second test identity client, trusted-proxy simulation, deterministic clocks and keys where permitted, crash controls, readiness checks, cleanup, and scans of stdout, stderr, state directories, SQLite, WAL, SHM, temporary paths, provider argv, and provider environment. Use Node core and the accepted Docker fixture only. |
 | T03 | Draft red PR | `test: specify REST enrollment and DPoP gateway behavior` | T01, T02 | Add unit, integration, local process, Docker, restart, nonce, replay, transport, credential version 2, and migration cases from N1 and N6. Publish the exact failure inventory for user review. |
 | T04 | Draft red PR | `test: specify conversation recovery and reply behavior` | T01, T02 | Add message correlation, chosen recovery, idempotent reply, conflict, crash-window, acknowledgement, content-boundary, and Docker E2E cases from N2. Publish the exact failure inventory for user review. |
@@ -140,7 +147,11 @@ T03 and T04 should be separate draft branches because both are large and they
 test different failure domains. T03 owns credential and authentication
 failures. T04 owns custody, correlation, and message lifecycle failures.
 
-### Central repository
+### Central repository, external ownership
+
+The central production repository is not part of this workspace. Its owners
+must implement and review S01. The gateway's fixture suite cannot stand in for
+real database, proxy, email, shared-state, or deployment tests.
 
 | ID | Type | Proposed PR title | Depends on | Scope and completion evidence |
 | --- | --- | --- | --- | --- |
@@ -413,8 +424,9 @@ expose a crash barrier.
 
 These groups may run in parallel after their dependencies are green:
 
-- D01, D02, and the non-URL parts of D03;
-- T01, T02, and S01 after D04;
+- D05 and D06 decision work;
+- T02 and the external S01 work after T01 is green;
+- T03 and T04 after T01 and T02;
 - S04 and S06 after S03;
 - D05 while G01 through G04 proceed;
 - the Codex, Claude Code, and Gemini tracks after K03; and
@@ -422,7 +434,7 @@ These groups may run in parallel after their dependencies are green:
 
 Serialize these areas:
 
-- D04 because it changes accepted architecture and the active plan;
+- any later amendment that changes accepted architecture and the active plan;
 - G01 through G04 where they share identity, application, MCP, and relay code;
 - central schema and migration changes that touch the same token or message
   tables; and

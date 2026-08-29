@@ -1,126 +1,207 @@
 # Implementation plan
 
+Status: active for the accepted version 2 architecture
+
+Updated: 2026-08-29
+
 ## Rules
 
-- Read the product document, protocol, this plan, review list, and relevant accepted ADRs before work.
-- Write tests, fixtures, and CI before production behavior.
-- Keep the first code PR red until the user reviews its failures.
-- Do not select or install any framework, library, runtime, package manager, database driver, or build tool before its ADR is explicitly approved.
-- Keep MCP bodies out of the relay, journal, normal logs, diagnostics, temporary files, crash artifacts, and support bundles. ADR 0022 permits a temporary development-only stderr transcript.
-- Do not preserve the obsolete setup, binding, adapter, configuration, or service interfaces as compatibility code.
+- Read the product document, protocol, this plan, review list, and relevant
+  accepted ADRs before work.
+- Write fixtures, tests, and CI before production behavior.
+- Keep the first gateway behavior PR red until the user reviews its failure
+  inventory. Keep the first central behavior PR red until the central owner
+  reviews its failure inventory.
+- Do not select or install a framework, library, runtime, package manager,
+  database driver, build tool, provider executable, or SDK before its ADR is
+  explicitly approved.
+- Keep gateway and connector durable state content-free. MCP bodies, message
+  text, replies, prompts, tool data, email addresses, verification codes,
+  credentials, proofs, and nonces must not enter SQLite, normal logs,
+  diagnostics, temporary files, crash artifacts, or support bundles. ADR 0022
+  permits only its temporary development stderr exception.
+- Do not preserve obsolete enrollment, bearer, setup, binding, adapter,
+  configuration, polling-fallback, or service interfaces as unreviewed
+  compatibility code.
+- Do not describe a fixture result as proof of a production central
+  transaction, shared replay guarantee, proxy configuration, deployment, or
+  email path.
 
-## Approved target
+## Accepted contract gate
 
-ADR `0017-single-webhook-gateway.md` approves:
+The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. They fix the target
+REST enrollment, version 2 conversation and recovery, and DPoP contracts. The
+current product and protocol documents continue to describe shipped version 1
+behavior until the implementation and release documentation land.
+
+| ID | State | Result |
+| --- | --- | --- |
+| D01 | Complete | ADR 0023 fixes REST registration, verification, resend, bounds, safe errors, and recovery behavior |
+| D02 | Complete | ADR 0025 fixes leased delivery, conversations, replies, terminal outcomes, acknowledgement, and activation |
+| D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, revocation, and migration |
+| D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
+| D05 | Pending | ADR 0024 and separate connector CLI, state, policy, dependency, packaging, installation, and publishing decisions still need approval |
+| D06 | Blocked on approval | Select and approve the independent Python fixture's DPoP signature-verification dependency, exact version, hashes, license, image impact, and update policy |
+
+The accepted contracts contain fixed values for development and test work.
+Facts that only the central deployment owner can supply remain unresolved,
+including production URLs, signing infrastructure, database guarantees,
+capacity, proxy trust, and rollout dates. Tests use
+`docs/v2-fixture-profile.md` as a deterministic stand-in for those facts. That
+profile is test-only. It does not authorize production constants or claim that
+the real service implements the contract.
+
+## Dependency order
 
 ```text
-a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
+D01 + D02 + D03 + D04 complete
+              |
+              +--> D06 fixture dependency approval
+              |       |
+              |       +--> T01 central fixtures
+              |               |
+              +-------------->+--> T02 process and artifact-scan harness
+                                      |
+                                      +--> T03 red REST and DPoP gateway suite
+                                      +--> T04 red conversation and recovery suite
+
+external central S01 red suite --> central-owner review --> S02-S07 implementation
+
+T03/T04 user review + enforcing development central
+  -> G01 DPoP and credential v2
+  -> G02 REST enrollment
+  -> G03 protected REST and MCP transport
+  -> G04 conversation recovery and replies
+  -> E01/E02/E03 qualification
+  -> G05/G06/G07 compatibility cleanup
+  -> R01 gateway release review
+
+G04 contract + D05
+  -> K01-K04 connector foundation
+  -> separate Codex, Claude Code, and Gemini adapter tracks
+  -> connector distribution review
 ```
 
-One foreground process owns one webhook, one authenticated loopback MCP endpoint, one durable ID stream, and one enrolled central identity. The webhook token authenticates both webhook delivery and local MCP. Verification produces the central JWT; startup does not accept one.
+## Phase 1: fixtures, test support, and red specifications
 
-## Documentation
+Green support work may merge before production behavior. The red behavior
+suites remain unmerged until their review gates pass.
 
-| ID | Task | Result |
-| --- | --- | --- |
-| D1 | Replace multi-binding architecture and protocol | ADR 0017 and revised product/protocol docs |
-| D2 | Remove obsolete ADRs and active-review entries | Only current decisions remain |
-| D3 | Record MCP dependency and credential-storage choices | ADRs 0018 and 0019 accepted |
-| D4 | Record the independent in-memory central fixture | ADR 0020 |
-
-## Red test PR
-
-Keep all new tests and fixtures on one feature PR. Do not merge it or start production implementation before G1.
-
-| ID | Owner | Task | Depends on | Expected result before implementation |
+| ID | Repository | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Test support | Add loopback fake webhook, raw MCP client, fault controls, secret scanner, and process helpers | D1 | Support code passes |
-| T2 | CLI | Test exactly two required `--name=value` options, foreground lifetime, endpoint output, invalid inputs, and singleton ordering | T1 | Fails on legacy CLI |
-| T3 | Local MCP | Test loopback bind, bearer authentication, `Host` and `Origin`, MCP lifecycle, limits, deadlines, cancellation, and safe errors | T1 | Fails because no MCP listener exists |
-| T4 | Enrollment | Test bootstrap-only catalog, registration forwarding, verification JWT interception, token-free result, tool-list change, persistence failure, restart recovery, and identity replacement rejection | T3 | Fails because enrollment does not exist |
-| T5 | Proxy | Test local schemas without `token`, exact transient upstream `token` injection, caller selector rejection, no automatic side-effect retry, and authentication failure behavior | T4 | Fails because proxying does not exist |
-| T6 | Relay | Test dormant polling before enrollment, consuming full-message validation, pre-parse amplification limits, memory-only bodies, ID-only durable state, bearer and generic HMAC V2 webhook authentication, no `agentId`, ID-less delivery and races, retries, content acknowledgement, and restart-loss handling | T1, T4 | Fails on legacy controller and binding relay |
-| T7 | Central fixture | Build the Dockerized Python/FastMCP in-memory service with deterministic verification and message injection | Approved ADR 0020 | Fixture contract passes independently |
-| T8 | End to end | Start gateway, register, verify, prove JWT absence, consume and buffer a message, wake the fake webhook, retrieve content through local MCP, and acknowledge centrally | T2-T7 | Fails on missing gateway behavior |
-| C1 | CI | Run unit tests on Linux, macOS, and Windows; build and run Docker E2E on Ubuntu | T1-T8 | Red feature PR with classified failures |
-| V1 | Review | Confirm every failure is missing product behavior rather than a fixture defect | C1 | Written failure inventory |
-| G1 | User | Review the red suite, fixture contract, proposed MCP SDK, and credential storage | V1 | Approval to implement production behavior |
+| T01 | Gateway | Extend the Node fake central and independent Python container with the accepted version 2 contracts and fault controls | D06 | Both fixtures pass their own contract tests; the Python implementation computes DPoP independently |
+| T02 | Gateway | Add full-process barriers, deterministic clocks, a separate sender client, proxy simulation, teardown, and artifact scans | T01 | Support tests pass on their intended CI platforms without production gateway changes |
+| T03 | Gateway | Add the red REST enrollment, DPoP, credential version 2, token lifecycle, and transport suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
+| T04 | Gateway | Add the red conversation, leased recovery, reply, completion, acknowledgement, and activation suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
+| C01 | Gateway | Run unit and Node integration tests on Linux, macOS, and Windows; run packaged Docker E2E on Ubuntu | T01-T04 | CI publishes a classified red failure inventory |
+| S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, migration, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
+| GATE-A | User and central owner | Review T03, T04, and S01 failure inventories | C01, S01 | Written approval that failures represent the accepted contracts |
 
-### Required CLI cases
+T01 must not begin its Python DPoP implementation until D06 is approved. Node
+test support may prepare contract data and non-cryptographic cases, but it may
+not work around D06 by sharing production gateway verification code with the
+independent fixture.
 
-- Accept `start --webhook-url=<url> --webhook-token-env=<name>` and the temporary development form with `--verbose=true`.
-- Accept verbose mode only with the paired development central endpoints. Reject `--verbose`, false or arbitrary values, and duplicates.
-- Reject `--webhook-url <url>`, `--webhook-token-env <name>`, positionals, duplicates, unknown options, literal token options, `setup`, `agent`, `run`, configuration paths, and configured local-runtime agent IDs.
-- Exit 2 for invalid syntax or option values, 4 for webhook-token resolution failures, and 7 for singleton or local state failures.
-- Require the resolved webhook token to contain exactly 192 random bits in `[0-9a-f]{48}` format.
-- Acquire the singleton lock before resolving the token or touching credentials.
-- Print the endpoint only after successful bind and keep running until cancellation.
-- Never print either token or a credential-bearing MCP URL.
+## Phase 2: central implementation, external repository
 
-### Required enrollment cases
+Central work is required before the gateway can honestly claim DPoP or durable
+message recovery. It belongs in the central repository and stays behind a
+server-owned rollout control until staging passes.
 
-- Authenticate every local call before reading its body.
-- Expose only `register_agent`, `verify_email`, and `resend_verification` before enrollment.
-- Require structured verification data with exactly one `token` field.
-- Persist before returning token-free success or enabling polls.
-- Reject concurrent replacement, malformed results, oversized results, and token-bearing registration results.
-- After restart, load the JWT through the abstract credential store without exposing it locally.
+| ID | Task | Depends on | Completion evidence |
+| --- | --- | --- | --- |
+| S02 | Publish the exact REST enrollment routes and native MCP results | GATE-A | Central contract tests pass for schemas, limits, errors, and no-store responses |
+| S03 | Issue and enforce DPoP-bound tokens on protected REST and MCP transport | S02 | Bearer use, wrong-key proofs, replay across two replicas, and proxy URI mismatches fail before dispatch |
+| S04 | Add leased delivery and idempotent acknowledgement | S03 | A lost receive or gateway crash redelivers the same immutable message; repeated acknowledgement has one result |
+| S05 | Add idempotent replies, outcome lookup, and terminal completion | S04 | A lost reply response creates one outbound message and returns the original result |
+| S06 | Add same-key reissue, revocation, email-control recovery, and legacy migration | S03 | A stolen bearer token cannot bind a replacement key; lost issuance and key loss recover through the accepted email-control flow |
+| S07 | Run the production-like staging and migration gate through the real HTTPS proxy and shared state | S02-S06 | Dedicated identities pass black-box contract tests without credential-bearing logs |
 
-### Required data scan
+The gateway repository cannot complete S01 through S07. Its fixtures prove
+client and protocol behavior only. Production URLs, issuer and audience
+values, signing setup, shared replay and nonce state, database transactions,
+proxy peers, quotas, and rollout dates remain central-owner deliverables.
 
-Tests scan stdout, stderr, errors, every credential-store artifact, SQLite, WAL, SHM, temporary files, crash artifacts, logs, diagnostics, and support artifacts for known plaintext values:
+## Phase 3: gateway implementation
 
-- webhook token;
-- central JWT;
-- email and verification code;
-- MCP arguments and results; and
-- message content and permission data.
+Do not begin G01 through G04 before GATE-A. Do not enable a production DPoP
+path before S03 is deployed for dedicated development identities and rejects
+bearer use of the same bound tokens.
 
-ADR 0022 changes the stderr assertion only for explicit verbose tests. Those tests require non-credential request and response content on stderr while still scanning for the webhook token, central JWT, credential headers, and verification code. Every durable artifact remains content-free.
+| ID | Task | Depends on | Completion evidence |
+| --- | --- | --- | --- |
+| G01 | Implement P-256 DPoP proofs, nonce handling, encrypted credential version 2, and same-key replacement | GATE-A, S03 development deployment | T03 cryptographic, restart, corruption, migration, and artifact-scan cases pass |
+| G02 | Move local bootstrap tools to bounded central REST enrollment | G01, S02 | Registration, verification, resend, lost response, persistence ordering, and token-free local results pass |
+| G03 | Authenticate all protected central REST and MCP requests with DPoP and remove MCP token arguments | G02, S03 | Fresh-proof, nonce, cancellation, reconnect, bearer-rejection, and safe-error cases pass |
+| G04 | Implement version 2 activation, leased receive, conversations, replies, outcomes, completion, and acknowledgement | G03, S04, S05, T04 approval | T04 passes without durable gateway message or reply bodies |
 
-## Production implementation after G1
+Serialize G01 through G04. They overlap in identity, credential, application,
+MCP, relay, journal, fixture, and documentation files. An implementation agent
+may split non-overlapping modules, but one owner must integrate shared files in
+this order.
 
-| ID | Owner | Task | Depends on | Result |
-| --- | --- | --- | --- | --- |
-| I1 | CLI | Replace command dispatch with the strict two-option foreground `start` | G1 | T2 passes |
-| I2 | MCP | Add the approved SDK, authenticated loopback server, central MCP client, limits, and safe errors | G1, approved ADR 0018 | T3 and T5 transport cases pass |
-| I3 | Credentials | Implement the approved atomic central JWT store and restart loading | G1, approved ADR 0019 | Abstract credential-store cases pass |
-| I4 | Enrollment | Add bootstrap catalog, structured verification interception, sanitization, and identity state | I2, I3 | T4 passes |
-| I5 | Relay | Replace binding protocol with one ID stream and one runtime-agnostic authenticated webhook target | I1, I3 | T6 passes |
-| I6 | Assembly | Start MCP immediately, gate polling on identity, coordinate shutdown, and stream startup output | I1-I5 | T8 passes |
-| I7 | Cleanup | Delete configuration, runtime presets, adapter factory, service manager, obsolete commands, schemas, and tests | I6 | No dead compatibility code remains |
-| C2 | CI | Run all checks, audit production dependencies, and run Docker E2E | I7 | Green matrix and E2E |
+## Phase 4: qualification and cleanup
 
-Shared CLI, application, protocol, journal, and relay files change sequentially. MCP transport and central fixture work may run in parallel because they own separate directories and interfaces.
+| ID | Task | Depends on | Completion evidence |
+| --- | --- | --- | --- |
+| E01 | Qualify REST enrollment, DPoP, reissue, recovery, and bearer rejection | G01-G03, S07 | Node, Docker, packed-install, and staging checks pass |
+| E02 | Qualify lease, reply, completion, acknowledgement, and every crash barrier | G04, S07 | One logical message, provider turn, reply, and terminal acknowledgement survive each tested interruption |
+| E03 | Run bounded soak, outage, quota, migration, shutdown, and complete artifact scans | E01, E02 | No credential, proof, nonce, code, message, reply, or tool content crosses its approved boundary |
+| W01 | Qualify credential replacement and packed installation on Windows | G01 | DACL, atomic replacement, native SQLite, restart, and end-to-end tests pass |
+| G05 | Remove Python-literal MCP result normalization | S02 stable, E01, E02 | Native structured results pass fixtures and staging before compatibility code is deleted |
+| G06 | Remove the version 1 404-only MCP polling fallback | S04 stable, E02 | The canonical leased receive path passes outage and recovery tests |
+| G07 | Remove the development verbose transcript | Stable central machine-readable errors, E01, E02 | ADR 0022's option, tests, exception, and TODO are removed together |
+| R01 | Review the gateway release | E01-E03, W01, G05-G07 | Product, protocol, setup, security review, dependency audit, package, and platform evidence match shipped behavior |
 
-## Test service
+## Phase 5: connector and provider work
 
-The test service independently implements the remote contract; it does not copy the unlicensed private repository source. It keeps all state and verification delivery in memory.
+ADR 0024 remains proposed. No connector test or production code starts until
+D05 approves the separate product boundary and these choices:
 
-The container provides:
+- connector executable and CLI or configuration interface;
+- working-directory and local security policy inputs;
+- content-free correlation store, permissions, migration, and deletion;
+- runtime, dependencies, package layout, limits, concurrency, and timeout;
+- provider approval and uncertain-turn behavior; and
+- installation, packaging, publishing, and supported platforms.
 
-- Streamable HTTP MCP at `/mcp`;
-- registration, verification, resend, message polling, acknowledgement, permission, and action tools;
-- `GET /api/poll_messages?timeout=<seconds>` returning and consuming full queued messages;
-- no notification acknowledgement endpoint separate from `ack_message`;
-- authenticated test-only endpoints to read a verification code by JSON body, inject a message, reset state, and inspect IDs/status flags; and
-- health and readiness endpoints.
+After D05 and G04, implement the provider-neutral connector in the K01 through
+K04 order recorded in `docs/architecture-pr-backlog.md`: fixtures, red suite,
+review, implementation, then full fake-provider E2E. Only then start separate
+Codex, Claude Code, and Gemini tracks. Each provider needs its own protocol and
+dependency decision, fake adapter tests, red-suite review, implementation, and
+manual opt-in qualification with an existing authenticated installation.
 
-CI pins the Python base image by digest and Python packages by version and hash. The fixture uses one non-root worker, no volumes, no access log, and no published CI ports. Docker is required only for the Ubuntu E2E job. Unit and integration tests on macOS and Windows use Node loopback fixtures.
+Real provider credentials never enter repository CI. Connector publication or
+installation tooling still needs explicit user approval.
 
-## Release checks
+## Release gates
 
-| ID | Task | Result |
-| --- | --- | --- |
-| Q1 | Review local bearer reuse, encrypted credential access, redaction, DNS rebinding protection, and side-effect uncertainty | Findings resolved or accepted |
-| Q2 | Run crash, restart, disk-full, credential-corruption, poll-outage, and soak tests | Reliability report |
-| Q3 | Pack and install the npm-registry artifact on clean Linux, macOS, and Windows environments | Install qualification |
-| G2 | User reviews security findings, dependency audit, central compatibility, and release artifact | Release approval |
+| Gate | Required evidence |
+| --- | --- |
+| GATE-A | User and central owner accept the red gateway and central failure inventories |
+| GATE-B | Central development deployment enforces DPoP and the accepted version 2 contract for dedicated identities |
+| GATE-C | Gateway Node, Docker, packed-install, crash, security, and artifact-scan suites pass |
+| GATE-D | Central staging passes through the production proxy and shared state |
+| GATE-E | User reviews security findings, dependency audit, central compatibility, platform limits, and release artifact |
 
-## External blockers
+No green fixture, local mock, or Docker result can substitute for GATE-D. No
+staging result can substitute for the gateway's local credential, crash, and
+artifact tests.
 
-- The production central MCP and API URLs are not stable package constants yet.
-- The production central API cannot redeliver or retrieve delivered but unacknowledged messages after a gateway restart, so development compatibility uses a bounded in-memory inbox with an explicit crash-loss limitation.
-- The current central MCP wrapper returns Python string representations. ADR 0021 permits bounded, non-executing normalization as a temporary compatibility measure; native structured results remain preferred.
-- The central service has no token reissue path. A crash after remote verification succeeds but before local credential persistence would strand the identity.
-- Docker is available in GitHub's Ubuntu runner and on the local acceptance-test host.
+## Current blockers and pending decisions
+
+- D06 needs explicit approval for the Python fixture's DPoP verification
+  dependency before T01.
+- The central implementation repository and owners must complete S01 through
+  S07. This gateway workspace does not contain that production service.
+- Production issuer, API resource, MCP resource, API base, and MCP endpoint
+  values are unresolved. The fixture profile supplies test-only values.
+- Central must confirm its signing, shared replay, nonce, revocation,
+  idempotency, lease, quota, proxy, email, migration, and rollout design before
+  staging or release.
+- The local user-authorized reset interface for an unreadable credential or
+  uncertain revocation remains unresolved.
+- ADR 0024, connector state and CLI, provider interfaces and dependencies,
+  packaging, installation, publishing, and supported-platform decisions remain
+  pending.

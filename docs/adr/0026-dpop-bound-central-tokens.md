@@ -1,8 +1,10 @@
 # 0026 DPoP-bound central tokens
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-29
+
+Approved: 2026-08-29
 
 ## Problem
 
@@ -35,7 +37,7 @@ encrypted credential and its local decryption secret. The existing credential
 storage, endpoint binding, local MCP authentication, input validation, and data
 boundary remain necessary.
 
-## Proposed decision
+## Decision
 
 Adopt a narrow RFC 9449 profile for the current custom email-verification token
 flow. This is not a claim that the service implements a complete OAuth
@@ -134,7 +136,7 @@ case-sensitive HTTP method from the request, such as `GET`, `POST`, or
 
 ## Required server interface
 
-This profile freezes the route split already proposed by ADRs 0023 and 0025:
+This profile freezes the route split accepted by ADRs 0023 and 0025:
 
 | Purpose | Exact route |
 | --- | --- |
@@ -185,7 +187,7 @@ The server must validate the proof before consuming the verification code or
 marking the email verified. It then computes the RFC 7638 thumbprint of the
 proof key and binds the new JWT to it.
 
-The successful response extends the proposed REST enrollment response:
+The successful response extends the accepted REST enrollment response:
 
 ```json
 {
@@ -634,7 +636,7 @@ and idempotency keys must not enter logs, SQLite, diagnostics, metrics,
 temporary files, crash artifacts, or support bundles.
 
 This record format and its migration supersede the JWT-only payload portion of
-ADR 0019 if approved. A normal reissue may replace a valid version 2 record only
+ADR 0019. A normal reissue may replace a valid version 2 record only
 when all of these invariants pass before publication:
 
 1. The HTTPS response has the exact success shape, `Cache-Control: no-store`,
@@ -692,7 +694,7 @@ revokes all old tokens. Replacing an unreadable record is not a same-identity
 transaction and remains blocked on the separate user-authorized reset
 interface.
 
-If approved, this record also supersedes ADR 0019's permitted transient token
+A DPoP-bound token also supersedes ADR 0019's permitted transient token
 locations. A DPoP-bound JWT may appear only in the `Authorization: DPoP` header
 of a gateway-to-central REST or MCP request, and transiently while calculating
 `ath`. It must no longer appear in an MCP tool argument. Protocol v1 and ADR
@@ -700,7 +702,7 @@ of a gateway-to-central REST or MCP request, and transiently while calculating
 
 ## Required D04 supersession
 
-The D04 implementation package cannot rely on this proposed ADR alone. Before
+The D04 implementation package cannot rely on this ADR alone. Before
 its red tests or production changes merge, it must explicitly update
 `AGENTS.md`, the accepted product document, protocol v1, implementation plan,
 ADR 0017, and ADR 0019 where they currently say:
@@ -731,7 +733,7 @@ production DPoP implementation is blocked.
 
 An existing bearer JWT cannot be converted into a DPoP-bound token by the
 gateway. The issuer must sign a new token containing the new key thumbprint.
-This proposal uses email-control re-verification, not bearer-only rebinding.
+This decision uses email-control re-verification, not bearer-only rebinding.
 A bearer-only bind route would let anyone holding a stolen bearer token bind
 the account to an attacker-controlled key.
 
@@ -809,10 +811,10 @@ The gateway must not ship production DPoP mode before the issuer and every
 resource endpoint enforce it. Proof generation by itself is not a security
 milestone.
 
-## Decisions for later review
+## Accepted choices and production confirmations
 
-This proposed record uses the following base decisions so red tests and central
-API review have one target:
+The user accepted these base decisions on 2026-08-29 so red tests and central
+API implementation have one target:
 
 - `ES256` with P-256 and no algorithm negotiation;
 - exact public JWK and proof schemas with lowercase UUID v4 proof IDs;
@@ -835,8 +837,8 @@ API review have one target:
   legacy bearer migration; and
 - no bearer fallback for a DPoP-bound token.
 
-The user should review these choices before this ADR becomes accepted. The
-central owner must also supply or confirm these deployment facts:
+The central owner must supply or confirm these deployment facts before
+production activation:
 
 1. canonical external HTTPS issuer, API resource, MCP resource, bootstrap API
    origin, version 2 API origin, and `/mcp` endpoint identifiers;
@@ -858,8 +860,9 @@ central owner must also supply or confirm these deployment facts:
 9. whether central accepts this custom MCP DPoP profile or instead moves to a
    standards-compliant OAuth and MCP authorization design.
 
-Implementation remains blocked until those facts, the D01 canonical URLs, and
-this ADR are approved. A central deployment choice must not weaken the fixed
+Production activation remains blocked until those facts and the D01 canonical
+URLs are supplied. Tests may use `docs/v2-fixture-profile.md` while those facts
+remain open. A central deployment choice must not weaken the fixed
 client-visible contract without returning this ADR for review.
 
 ## Test requirements
@@ -963,6 +966,7 @@ services, and central deployment. It must be coordinated with ADRs 0023 and
 
 ## Approval
 
-Not approved. The user requested a DPoP implementation plan and the required
-central server interface on 2026-08-29. No production gateway or server work is
-authorized by this record.
+The user approved this DPoP contract together with ADRs 0023 and 0025 on
+2026-08-29. The approval freezes the gateway and fixture contract. Central must
+implement issuer and resource-server enforcement before production activation.
+The local identity-reset interface remains blocked on a separate user decision.

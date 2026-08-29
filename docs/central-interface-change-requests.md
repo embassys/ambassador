@@ -1,6 +1,16 @@
 # Central interface change requests
 
-Status: proposed for review
+Status: accepted target contract, not implemented or deployment-verified
+
+The user accepted the client-visible contracts in ADRs 0023, 0025, and 0026
+on 2026-08-29. This document is the handoff to the central service owners. It
+does not claim that the production service, database, shared security state,
+proxy, or email system implements them.
+
+Where production facts are unavailable, fixtures use the deterministic values
+in `docs/v2-fixture-profile.md`. Those values are test-only. Central owners
+must replace them with confirmed production values before staging. A material
+difference in the client-visible contract returns the affected ADR for review.
 
 The numbering groups interface topics; it is not implementation order. Central
 must implement and enforce item 7's DPoP transport and item 5's DPoP token
@@ -14,7 +24,7 @@ retains full message content until terminal acknowledgement. The gateway
 remains content-free on disk. None of these requests changes the published v1
 gateway behavior for an identity that has not activated version 2.
 
-`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces that behavior. The supplied live tunnel returns `404`, so deployment of that revision was not checked.
+`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces the inspected contract for gateway tests. It does not prove the behavior of a deployed service. The supplied live tunnel returned `404`, so deployment of that revision was not checked.
 
 ## 1. Redeliver full messages under a lease
 
@@ -113,8 +123,9 @@ gateway behavior for an identity that has not activated version 2.
   Central enforces, across replicas, at most 32 active unacknowledged starts or
   8 MiB per sender-recipient pair, 1,000 such starts or 256 MiB per sender, 10
   starts per pair per rolling 60 seconds, and 60 starts per sender per rolling
-  60 seconds. These values are proposed capacity inputs, not user-configurable
-  gateway settings.
+  60 seconds. These are accepted client-contract and fixture values, not
+  user-configurable gateway settings. Central must confirm that production can
+  enforce them before deployment.
 
   The caller's `request_id` and REST `Idempotency-Key` are the same lowercase
   UUID v4. Central scopes them to sender and operation. It provides
@@ -415,8 +426,9 @@ terminal acknowledgement.
   v2 message routes: https://central.example/api/v2/...
   ```
 
-  Those hostnames are placeholders until the central owner supplies the
-  approved constants. The gateway release selects v1 or v2 statically. It does
+  Those hostnames illustrate the shape only. The fixture profile supplies
+  test-only identifiers until the central owner supplies the production
+  constants. The gateway release selects v1 or v2 statically. It does
   not fetch capabilities, infer a version from verification, probe routes, or
   fall back. The MCP endpoint remains `/mcp`, so the credential endpoint pair
   does not change merely because v2 tools exist.
@@ -501,9 +513,10 @@ terminal acknowledgement.
   }
   ```
 
-  These are the proposed ADR 0025 values. Central must confirm them against
-  production capacity before approval and then publish the accepted fixed
-  values.
+  These are the accepted ADR 0025 client-contract and fixture values. Central
+  must confirm them against production capacity before staging and publish the
+  fixed deployed values. A required client-visible change returns ADR 0025 for
+  review.
 
   ```json
   {
