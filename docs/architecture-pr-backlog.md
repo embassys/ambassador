@@ -30,25 +30,26 @@ publishing change. Contract and user gates remain mandatory.
 - Do not add a dependency, connector command, state format, or publishing path
   before its ADR is approved.
 
-## One contract conflict to close first
+## Message-custody decision used by this backlog
 
-`docs/central-interface-change-requests.md` proposes a v2 custody transfer in
-which the gateway durably stores full message bodies before calling
-`ack_delivery`. That conflicts with the accepted ID-only journal rule and the
-newer ADR 0025 proposal, which keeps content at central and recovers it through
-redelivery or retrieval.
+An older revision of `docs/central-interface-change-requests.md` proposed a v2
+custody transfer in which the gateway durably stored full message bodies. ADR
+0025 and the current change request now use lease redelivery instead. This
+remains a proposed decision for user and central-owner review, but it is the one
+deterministic target for the red tests in this backlog.
 
 This backlog uses the ADR 0025 boundary:
 
 ```text
 central retains full unacknowledged message
-  -> gateway polls or retrieves into bounded memory
+  -> central leases and returns it into gateway bounded memory
   -> connector replies through an idempotent operation
   -> gateway acknowledges only at the reviewed terminal point
 ```
 
-PR D02 must update or retire the conflicting parts of the older change-request
-document. A future durable local inbox would need its own storage, encryption,
+The proposed D02 contract work has removed the conflicting durable-body text.
+D02 still needs central-owner confirmation and user approval before it is
+frozen. A future durable local inbox would need its own storage, encryption,
 quota, migration, and deletion ADR. It is not part of this backlog.
 
 ## Pull request workflow
@@ -119,12 +120,10 @@ D01 must also decide whether the new server contract uses versioned routes.
 The gateway must use fixed approved product URLs. It must not add runtime
 capability discovery or general endpoint configuration.
 
-D02 must choose one recovery model:
-
-- lease-based redelivery of every delivered but unacknowledged message; or
-- authenticated retrieval of a delivered message by opaque ID.
-
-Both models keep full content at central and leave only IDs in gateway SQLite.
+D02 provisionally selects lease-based redelivery of every delivered but
+unacknowledged message. Central keeps full content until terminal
+acknowledgement, and the gateway keeps only IDs in SQLite. That choice remains
+subject to the D04 review gate.
 
 ## Wave 1: build test infrastructure and red specifications
 
@@ -166,7 +165,7 @@ configuration and does not change the public gateway CLI.
 | --- | --- | --- | --- | --- |
 | S02 | `feat: publish exact REST enrollment and native MCP results` | Gate A, S01 | Canonical registration, verification, resend, stable routes, fixed errors and limits, native structured MCP results, and no-store verification responses | D01 cases pass; compatibility or migration behavior matches the approved D01 contract |
 | S03 | `security: issue and enforce DPoP-bound central tokens` | S02, S01 | Verify-time proof validation, `cnf.jkt`, `token_type: DPoP`, protected REST and MCP middleware, removal of MCP token arguments in the new contract, nonce challenges, replay protection, trusted-proxy URI reconstruction, and legacy token isolation | DPoP conformance passes, including bearer rejection and replay on two replicas |
-| S04 | `feat: add recoverable delivery and idempotent acknowledgement` | S03 | Stable immutable IDs, conversation fields, chosen recovery model, authorization, acknowledgement semantics, quotas, retention, and machine-readable errors | A crash after delivery can retrieve or receive the same logical message; repeated acknowledgement has one result |
+| S04 | `feat: add recoverable delivery and idempotent acknowledgement` | S03 | Stable immutable IDs, conversation fields, lease redelivery, authorization, acknowledgement semantics, quotas, retention, and machine-readable errors | A crash after delivery receives the same logical message after lease expiry; repeated acknowledgement has one result |
 | S05 | `feat: add idempotent replies and terminal outcome states` | S04 | Server-derived routing from the inbound message, identity-scoped idempotency, reply conflicts, same-conversation response, terminal no-reply states, and separate acknowledgement | Repeating a reply after a lost response creates one outbound message and returns the original result |
 | S06 | `security: add token reissue, revocation, rotation, and legacy migration` | S03 | Independently protected reissue or re-verification, atomic key rotation, revoked-token rejection, key-loss recovery, lost-response behavior, and legacy bearer retirement | An existing identity reaches credential version 2 without letting a stolen bearer token claim the replacement key |
 | S07 | `test: run the central staging contract and migration gate` | S02, S03, S04, S05, S06 | Deploy the disabled contract to staging, run black-box HTTPS tests through the real proxy and shared replay state, migrate dedicated test identities, then enable it only for those identities | Staging matches the approved OpenAPI, MCP, DPoP, recovery, reply, and migration contract with no credential-bearing logs |
@@ -331,7 +330,7 @@ fixture cannot prove cross-replica atomicity.
 | SYS-04 | Replay one proof through another replica | Shared central replay state rejects it inside the approved proof window | S01, S03, S07 |
 | SYS-05 | Challenge verification and a protected request with nonces | Gateway retries each explicit challenge once with a new proof and `jti`; a second challenge stops | T03, E01 |
 | SYS-06 | Drop the verification response after token issuance | Gateway reports uncertainty and does not retry; the approved reissue or re-verification flow recovers the identity | T03, S06, E01 |
-| SYS-07 | Crash after central delivery and before local retrieval | The chosen central recovery operation returns the same logical message; no gateway file contains the body | T04, E02 |
+| SYS-07 | Crash after central delivery and before local retrieval | Central redelivers the same logical message after lease expiry; no gateway file contains the body | T04, E02 |
 | SYS-08 | Reply, commit centrally, then drop the response | Repeating the same request and idempotency key returns the original reply ID and creates no second message | T04, E02 |
 | SYS-09 | Crash after reply acceptance and before acknowledgement | Restart repeats only the safe reply or acknowledgement step, then reaches one terminal state | T04, E02 |
 | SYS-10 | Deliver two messages in one conversation | Connector creates one provider session, serializes the turns, and resumes the same opaque session ID | K02, K04 |
