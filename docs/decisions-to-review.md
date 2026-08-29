@@ -4,7 +4,25 @@ The user approved the single-webhook startup and enrollment architecture on Augu
 
 ## Active provisional decisions
 
-None.
+- ADR 0023 proposes replacing central MCP bootstrap forwarding with bounded REST
+  calls for registration, verification, and resend. It remains blocked on the
+  canonical registration path, an HTTPS endpoint, complete response and error
+  semantics, and user approval. The supplied `/api/register` path conflicts with
+  the live OpenAPI document's `/api/register_agent` path.
+- ADR 0024 proposes separate loopback provider connectors for persistent Codex,
+  Claude Code, and Gemini CLI sessions. The gateway remains provider-neutral
+  and stores no provider session mapping. Connector state, startup,
+  dependencies, security policy, installation, and publishing still need
+  separate approval.
+- ADR 0025 proposes stable central conversation IDs, recoverable unacknowledged
+  delivery, and an idempotent reply operation tied to the original inbound
+  message. The live OpenAPI document does not advertise those contracts, so
+  central definitions and user approval block connector implementation.
+- ADR 0026 proposes binding newly issued central JWTs to a gateway-held P-256
+  key with RFC 9449 DPoP. It requires issuer and resource-server enforcement,
+  transport-level DPoP on REST and central MCP, removal of MCP `token`
+  arguments, a version 2 encrypted credential, replay and nonce state, and a
+  reviewed migration path for existing bearer JWTs.
 
 ## Resolved
 
