@@ -83,10 +83,28 @@ grant is revoked, while changed input conflicts. Start IDs are scoped by
 authenticated subject within `start.v1`. Reissue IDs are global across
 subjects, and reuse between `start.v1` and `reissue.v1` conflicts.
 
-T01 serves the direct fixture only. It ignores caller-supplied forwarding and
-`X-A2A-Test-Proxy` headers, so they cannot change the URI used for DPoP proof
-validation. T02 owns the separate trusted-peer proxy harness that will strip
-caller forwarding fields and add fixture-controlled forwarding metadata.
+T02 tests can run a separate public loopback proxy and internal fixture
+listener on runtime-assigned ports. The public listener fixes one external
+origin, removes `Forwarded`, every `X-Forwarded-*` field, caller `Host`, the
+old `X-A2A-Test-Proxy` marker, and the fixture-private proxy authorization
+field. It then sends its own scheme, host, and port fields to the internal
+listener. A random per-run credential authenticates that internal hop. The
+credential stays in the two test applications' process memory and is not
+returned by readiness, inspection, profile, error, or proxy responses.
+The internal HTTP client ignores `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and
+related process-environment settings so those values cannot reroute DPoP or
+the fixture-private credential. A hostile environment-proxy test covers this
+boundary with a protected request.
+
+The internal fixture reconstructs DPoP `htu` from those fields only when the
+private credential matches. Direct internal calls, an incorrect credential,
+and caller forwarding fields use the direct request origin instead. The
+network tests sign the same public URI for direct and proxied requests, cover
+reserved and unreserved percent encodings, exclude query strings, and verify
+that both listeners shut down without leaving the proxy HTTP client open.
+Uvicorn proxy-header handling is disabled in this harness so only the fixture's
+explicit trust rule can change the external URI. This is test support, not a
+production proxy or forwarding policy.
 
 Bootstrap request bodies are limited to 2 KiB. Protected REST request bodies
 are limited to 512 KiB, and DPoP authentication happens before a protected body
