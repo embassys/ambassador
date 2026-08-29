@@ -4,10 +4,13 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
+import secrets
 import socket
 import unittest
 import uuid
 import warnings
+from unittest.mock import patch
 
 import httpx
 import uvicorn
@@ -16,7 +19,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from fastmcp import Client
 
-from app import create_fixture, normalize_htu
+from app import create_fixture, create_trusted_proxy, normalize_htu
 
 
 CONTROL_HEADERS = {"X-A2A-Test-Key": "central-fixture-control"}
@@ -119,6 +122,91 @@ class BoundCredential:
                 htu=htu,
             ),
         }
+
+
+class RuntimeListener:
+    def __init__(
+        self,
+        origin: str,
+        listener: socket.socket,
+        server: uvicorn.Server,
+        task: asyncio.Task[None],
+    ) -> None:
+        self.origin = origin
+        self.listener = listener
+        self.server = server
+        self.task = task
+
+    @classmethod
+    async def start(cls, application_factory: object) -> RuntimeListener:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        origin = f"http://127.0.0.1:{port}"
+        application = application_factory(origin)  # type: ignore[operator]
+        server = uvicorn.Server(
+            uvicorn.Config(
+                application,
+                access_log=False,
+                lifespan="on",
+                log_level="critical",
+                proxy_headers=False,
+                server_header=False,
+            )
+        )
+        task = asyncio.create_task(server.serve(sockets=[listener]))
+        try:
+            for _ in range(500):
+                if server.started:
+                    return cls(origin, listener, server, task)
+                if task.done():
+                    await task
+                    raise RuntimeError("fixture listener stopped during startup")
+                await asyncio.sleep(0.01)
+            raise TimeoutError("fixture listener did not become ready")
+        except BaseException:
+            server.should_exit = True
+            if not task.done():
+                await asyncio.wait_for(task, timeout=5)
+            listener.close()
+            raise
+
+    async def close(self) -> None:
+        if not self.task.done():
+            self.server.should_exit = True
+        await asyncio.wait_for(asyncio.shield(self.task), timeout=5)
+        self.listener.close()
+
+
+class HostileEnvironmentProxy:
+    def __init__(self) -> None:
+        self.request_headers: list[list[tuple[bytes, bytes]]] = []
+
+    async def __call__(self, scope: dict, receive: object, send: object) -> None:
+        if scope.get("type") == "lifespan":
+            while True:
+                message = await receive()  # type: ignore[operator]
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})  # type: ignore[operator]
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})  # type: ignore[operator]
+                    return
+        elif scope.get("type") == "http":
+            self.request_headers.append(list(scope.get("headers", [])))
+            while True:
+                message = await receive()  # type: ignore[operator]
+                if not message.get("more_body", False):
+                    break
+            await send(  # type: ignore[operator]
+                {
+                    "type": "http.response.start",
+                    "status": 502,
+                    "headers": [(b"content-length", b"0")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})  # type: ignore[operator]
 
 
 class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
@@ -3133,6 +3221,371 @@ class CentralFixtureTests(unittest.IsolatedAsyncioTestCase):
             server.should_exit = True
             await asyncio.wait_for(server_task, timeout=5)
             listener.close()
+
+
+class TrustedProxyFixtureTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.proxy_secret = secrets.token_urlsafe(32)
+        self.state, self.mcp, self.app = create_fixture(
+            trusted_proxy_secret=self.proxy_secret
+        )
+        self.internal = await RuntimeListener.start(lambda _origin: self.app)
+        self.hostile_proxy_app = HostileEnvironmentProxy()
+        self.hostile_proxy = await RuntimeListener.start(
+            lambda _origin: self.hostile_proxy_app
+        )
+        hostile_environment = {
+            "ALL_PROXY": self.hostile_proxy.origin,
+            "HTTP_PROXY": self.hostile_proxy.origin,
+            "HTTPS_PROXY": self.hostile_proxy.origin,
+            "NO_PROXY": "",
+            "all_proxy": self.hostile_proxy.origin,
+            "http_proxy": self.hostile_proxy.origin,
+            "https_proxy": self.hostile_proxy.origin,
+            "no_proxy": "",
+        }
+        with patch.dict(os.environ, hostile_environment, clear=False):
+            self.public = await RuntimeListener.start(
+                lambda external_origin: create_trusted_proxy(
+                    self.internal.origin,
+                    external_origin,
+                    self.proxy_secret,
+                )
+            )
+        self.internal_http = httpx.AsyncClient(
+            base_url=self.internal.origin,
+            follow_redirects=False,
+            trust_env=False,
+        )
+        self.public_http = httpx.AsyncClient(
+            base_url=self.public.origin,
+            follow_redirects=False,
+            trust_env=False,
+        )
+        self.v2_now = FIXTURE_CLOCK
+
+    async def asyncTearDown(self) -> None:
+        await self.public_http.aclose()
+        await self.internal_http.aclose()
+        await self.public.close()
+        await self.internal.close()
+        await self.hostile_proxy.close()
+
+    async def issue_seed_credential(self, username: str) -> BoundCredential:
+        email = f"{username}@fixture.invalid"
+        resent = await self.public_http.post(
+            "/api/resend_verification", json={"email": email}
+        )
+        self.assertEqual(resent.status_code, 200, resent.text)
+        code = await self.public_http.post(
+            "/__test/v2/verification-code",
+            headers=CONTROL_HEADERS,
+            json={"email": email},
+        )
+        self.assertEqual(code.status_code, 200, code.text)
+        path = "/api/verify_email"
+        key = ProofKey()
+        body = {"email": email, "code": code.json()["code"]}
+        challenge = await self.public_http.post(
+            path,
+            headers={
+                "DPoP": key.proof(
+                    "POST",
+                    path,
+                    issued_at=self.v2_now,
+                    htu=f"{self.public.origin}{path}",
+                )
+            },
+            json=body,
+        )
+        self.assertEqual(challenge.status_code, 400, challenge.text)
+        self.assertEqual(challenge.json(), {"error": "use_dpop_nonce"})
+        nonce = challenge.headers["dpop-nonce"]
+        verified = await self.public_http.post(
+            path,
+            headers={
+                "DPoP": key.proof(
+                    "POST",
+                    path,
+                    nonce=nonce,
+                    issued_at=self.v2_now,
+                    htu=f"{self.public.origin}{path}",
+                )
+            },
+            json=body,
+        )
+        self.assertEqual(verified.status_code, 200, verified.text)
+        self.assertNotIn(self.proxy_secret, verified.text)
+        return BoundCredential(verified.json()["token"], key)
+
+    async def protected(
+        self,
+        client: httpx.AsyncClient,
+        credential: BoundCredential,
+        method: str,
+        path: str,
+        *,
+        htu: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        params: dict[str, object] | None = None,
+        content: bytes | None = None,
+    ) -> httpx.Response:
+        target_htu = htu or f"{self.public.origin}{path}"
+
+        def headers() -> dict[str, str]:
+            values = credential.headers(
+                method,
+                path,
+                issued_at=self.v2_now,
+                htu=target_htu,
+            )
+            if extra_headers is not None:
+                values.update(extra_headers)
+            return values
+
+        response = await client.request(
+            method,
+            path,
+            headers=headers(),
+            params=params,
+            content=content,
+        )
+        if (
+            response.status_code == 401
+            and 'error="use_dpop_nonce"'
+            in response.headers.get("www-authenticate", "")
+        ):
+            credential.nonce = response.headers["dpop-nonce"]
+            response = await client.request(
+                method,
+                path,
+                headers=headers(),
+                params=params,
+                content=content,
+            )
+        return response
+
+    async def test_public_and_internal_listeners_report_readiness(self) -> None:
+        internal = await self.internal_http.get("/readyz")
+        public = await self.public_http.get("/readyz")
+        self.assertEqual(internal.status_code, 200, internal.text)
+        self.assertEqual(public.status_code, 200, public.text)
+        self.assertEqual(internal.json(), {"status": "ok"})
+        self.assertEqual(public.json(), {"status": "ok"})
+        self.assertNotIn(self.proxy_secret, public.text)
+
+    async def test_internal_hop_ignores_hostile_environment_proxy(self) -> None:
+        credential = await self.issue_seed_credential("fixture_sender")
+        activated = await self.protected(
+            self.public_http,
+            credential,
+            "POST",
+            "/api/v2/delivery/activate",
+            content=b"",
+        )
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertEqual(self.hostile_proxy_app.request_headers, [])
+        self.assertNotIn(self.proxy_secret, activated.text)
+
+    async def test_direct_and_proxied_requests_use_the_same_public_htu(
+        self,
+    ) -> None:
+        credential = await self.issue_seed_credential("fixture_sender")
+        path = "/api/v2/delivery/activate"
+        proxied = await self.protected(
+            self.public_http, credential, "POST", path, content=b""
+        )
+        self.assertEqual(proxied.status_code, 200, proxied.text)
+
+        public_authority = self.public.origin.removeprefix("http://")
+        direct = await self.protected(
+            self.internal_http,
+            credential,
+            "POST",
+            path,
+            extra_headers={"Host": public_authority},
+            content=b"",
+        )
+        self.assertEqual(direct.status_code, 200, direct.text)
+        self.assertEqual(direct.json(), proxied.json())
+
+    async def test_proxy_strips_caller_forwarding_and_private_headers(
+        self,
+    ) -> None:
+        credential = await self.issue_seed_credential("fixture_sender")
+        path = "/api/v2/delivery/activate"
+        caller_headers = {
+            "Forwarded": "for=203.0.113.7;proto=https;host=attacker.invalid",
+            "Host": "attacker.invalid",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "attacker.invalid",
+            "X-Forwarded-Port": "443",
+            "X-Real-IP": "203.0.113.7",
+            "X-A2A-Fixture-Proxy-Authorization": self.proxy_secret,
+            "X-A2A-Test-Proxy": "trusted-fixture-proxy",
+        }
+        stripped = await self.protected(
+            self.public_http,
+            credential,
+            "POST",
+            path,
+            extra_headers=caller_headers,
+            content=b"",
+        )
+        self.assertEqual(stripped.status_code, 200, stripped.text)
+        self.assertNotIn(self.proxy_secret, stripped.text)
+
+        hostile_htu = await self.protected(
+            self.public_http,
+            credential,
+            "POST",
+            path,
+            htu=f"https://attacker.invalid{path}",
+            extra_headers=caller_headers,
+            content=b"",
+        )
+        self.assertEqual(hostile_htu.status_code, 401, hostile_htu.text)
+        self.assertEqual(hostile_htu.json(), {"error": "invalid_dpop_proof"})
+
+        public_authority = self.public.origin.removeprefix("http://")
+        direct_spoof = await self.protected(
+            self.internal_http,
+            credential,
+            "POST",
+            path,
+            extra_headers={
+                "Host": public_authority,
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "attacker.invalid",
+                "X-Forwarded-Port": "443",
+                "X-A2A-Fixture-Proxy-Authorization": "not-the-private-secret",
+            },
+            content=b"",
+        )
+        self.assertEqual(direct_spoof.status_code, 200, direct_spoof.text)
+
+        direct_hostile_htu = await self.protected(
+            self.internal_http,
+            credential,
+            "POST",
+            path,
+            htu=f"https://attacker.invalid{path}",
+            extra_headers={
+                "Host": public_authority,
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Host": "attacker.invalid",
+                "X-Forwarded-Port": "443",
+                "X-A2A-Fixture-Proxy-Authorization": "not-the-private-secret",
+            },
+            content=b"",
+        )
+        self.assertEqual(direct_hostile_htu.status_code, 401)
+
+    async def test_proxy_authenticates_mcp_against_the_public_htu(self) -> None:
+        credential = await self.issue_seed_credential("fixture_sender")
+        path = "/mcp"
+        htu = f"{self.public.origin}{path}"
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "proxy-fixture-test", "version": "1"},
+            },
+        }
+        base_headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "Authorization": f"DPoP {credential.token}",
+        }
+
+        def headers(nonce: str | None, *, direct: bool = False) -> dict[str, str]:
+            values = {
+                **base_headers,
+                "DPoP": credential.key.proof(
+                    "POST",
+                    path,
+                    token=credential.token,
+                    nonce=nonce,
+                    issued_at=self.v2_now,
+                    htu=htu,
+                ),
+            }
+            if direct:
+                values["Host"] = self.public.origin.removeprefix("http://")
+            return values
+
+        challenge = await self.public_http.post(
+            path, headers=headers(None), json=body
+        )
+        self.assertEqual(challenge.status_code, 401, challenge.text)
+        self.assertIn(
+            'error="use_dpop_nonce"', challenge.headers["www-authenticate"]
+        )
+        nonce = challenge.headers["dpop-nonce"]
+
+        proxied = await self.public_http.post(
+            path, headers=headers(nonce), json=body
+        )
+        self.assertEqual(proxied.status_code, 200, proxied.text)
+        direct = await self.internal_http.post(
+            path, headers=headers(nonce, direct=True), json={**body, "id": 2}
+        )
+        self.assertEqual(direct.status_code, 200, direct.text)
+
+    async def test_proxy_preserves_raw_percent_path_and_excludes_query(
+        self,
+    ) -> None:
+        credential = await self.issue_seed_credential("fixture_sender")
+        public_authority = self.public.origin.removeprefix("http://")
+        for encoded_path in (
+            "/api/v2/delivery%2factivate",
+            "/api/v2/delivery/%61ctivate",
+        ):
+            with self.subTest(path=encoded_path):
+                proxied = await self.protected(
+                    self.public_http,
+                    credential,
+                    "POST",
+                    encoded_path,
+                    htu=f"{self.public.origin}{encoded_path}",
+                    content=b"",
+                )
+                self.assertEqual(proxied.status_code, 200, proxied.text)
+
+                direct = await self.protected(
+                    self.internal_http,
+                    credential,
+                    "POST",
+                    encoded_path,
+                    htu=f"{self.public.origin}{encoded_path}",
+                    extra_headers={"Host": public_authority},
+                    content=b"",
+                )
+                self.assertEqual(direct.status_code, 200, direct.text)
+
+        receive_path = "/api/v2/messages/receive"
+        receive = await self.protected(
+            self.public_http,
+            credential,
+            "GET",
+            receive_path,
+            params={"timeout": 0, "limit": 1},
+        )
+        self.assertEqual(receive.status_code, 200, receive.text)
+        self.assertEqual(receive.json(), {"messages": []})
+
+    async def test_listener_shutdown_completes_and_closes_proxy_client(
+        self,
+    ) -> None:
+        await self.public.close()
+        self.assertTrue(self.public.task.done())
+        proxy_application = self.public.server.config.loaded_app
+        self.assertIsNone(proxy_application.client)
+        with self.assertRaises(httpx.TransportError):
+            await self.public_http.get("/readyz")
 
 
 if __name__ == "__main__":
