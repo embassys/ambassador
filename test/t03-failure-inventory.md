@@ -1,7 +1,7 @@
 # T03 red failure inventory
 
-Status: runnable future-v2 gateway contract; G01 credential checks green,
-later gateway work intentionally red
+Status: runnable future-v2 gateway contract; G01 credential and G02 enrollment
+checks green, later gateway work intentionally red
 
 The user accepted this classified gateway inventory on 2026-08-30. It merged
 through PR `#28`. Central S01 review and enforcement remain separate gates.
@@ -25,38 +25,40 @@ node --test --test-concurrency=1 --test-reporter=spec \
 ```
 
 The final `0.2.6` observation on 2026-08-29 was 128 red behavior vectors and
-one existing closed-schema guard green. After G01 at commit `3ccc6f4`, 109 of
-the 129 behavior vectors remain red and 20 are green: 19 G01 credential checks
-and the shipped guard. Node reports 139 test nodes: 118 failed and 21 passed
-because nine failing and one passing parameterized parents are counted in
-addition to their child vectors.
+one existing closed-schema guard green. G02 review added seven response-order,
+case-collision, redirect, and cookie-header regression vectors. After G02, 31
+of the 136 behavior vectors remain red and 105 are green: 19 G01 credential
+checks, 85 newly green G02 enrollment checks, and the shipped guard. Node
+reports 146 test nodes: 34 failed and 112 passed because three failing and
+seven passing parameterized parents are counted in addition to their child
+vectors.
 
 ## Failure classification
 
-| Test | Behavior vectors | Post-G01 observation | Required gateway behavior |
+| Test | Behavior vectors | Post-G02 observation | Required gateway behavior |
 | --- | ---: | --- | --- |
-| T03-R01 | 1 | Bootstrap catalog fails when central MCP is unavailable | Own and list the three bootstrap tools locally |
-| T03-R02 | 1 | Bootstrap schemas omit accepted bounds and patterns | Publish exact closed registration, verification, and resend schemas |
-| T03-R03, B01 | 2 | Registration uses legacy central MCP | Send one credential-free `POST /api/register` with the exact projection |
-| T03-R04 | 1 | Resend uses MCP and rejects its credential-bearing result | Send `POST /api/resend_verification` and return only the generic safe result |
-| T03-R05, S01 | 2 | Verification fails before REST issuance | Generate a P-256 key, perform one independently verified ES256 nonce retry, validate token binding, return no token, and save one credential-v2 string |
-| T03-R06 | 1 | Verification never reaches the injected save failure | Treat persistence as the issuance commit and remain unenrolled on failure |
+| T03-R01 | 1 | Green: bootstrap catalog remains available without central MCP | Preserve gateway ownership of the three bootstrap tools |
+| T03-R02 | 1 | Green: bootstrap schemas match the accepted bounds and patterns | Preserve exact closed registration, verification, and resend schemas |
+| T03-R03, B01 | 2 | Green: registration uses the fixed REST request and projection | Preserve one credential-free `POST /api/register` without fallback |
+| T03-R04 | 1 | Green: resend uses REST and returns the generic safe result | Preserve the token-free resend projection |
+| T03-R05, S01 | 2 | Green: verification creates fresh bound proofs and persists one credential-v2 record | Preserve nonce retry, independent binding validation, and token interception |
+| T03-R06 | 1 | Green: persistence failure leaves the gateway unenrolled | Preserve persistence as the issuance commit point |
 | T03-R07 | 1 | The credential-v2 record loads, then protected startup stops at the isolated legacy accessor | Reload the bound key/token and use fresh token-free DPoP after restart |
-| T03-B02 | 13 | Twelve invalid inputs reach central or are accepted; the existing MCP schema rejects one extra verification field | Reject exact one-over/character/unknown-field inputs locally. The one green vector is not REST-v2 evidence |
-| T03-B02a | 1 | Exact maximum valid bootstrap fields are not accepted on REST | Accept 254-byte email, 50-byte username, and 128-byte display name |
-| T03-B03 | 8 | REST outcomes are bypassed through MCP | Emit each fixed local error identifier/data shape; reject redirects and never retry or fall back after uncertainty |
-| T03-B04a | 1 | An exact 64 KiB valid response is not projected | Accept the body boundary before schema projection |
-| T03-B04b | 3 | Valid depth-16, 128-member, and 128-element extensions are not projected | Accept and discard safe extensions at each parser boundary |
-| T03-B04 | 13 | Malformed and one-over REST responses are bypassed | Fail closed on status, media, encoding, UTF-8, duplicate keys, depth 17, 129 members/elements, 64 KiB plus one, oversized headers, malformed error pairs, and credential-shaped extensions |
-| T03-B05 | 1 | No REST request exists to cancel | Close the in-flight bootstrap transport on shutdown without retry or MCP fallback |
-| T03-B06-B08 | 3 | Verification/resend never use the selected REST route | Map lost verification/resend outcomes and resend rate limiting exactly, with one request and no persistence/fallback |
-| T03-N01 | 11 | Verification responses use legacy MCP error handling | Apply the exact `verification_failed`, nonce, proof, `no-store`, retry-count, safe-message, and token-free error mappings |
-| T03-N02 | 15 | Invalid issuance responses never reach the v2 interceptor | Reject type/lifetime/identity/audience/binding/JWT/duplicate/reflection/media/cache and 4097/4098 token cases before persistence |
-| T03-N03 | 1 | Exact 4096-byte issuance cannot complete | Accept and persist a bound 4096-byte token without exposing it locally |
+| T03-B02 | 13 | Green: all invalid bootstrap inputs stop locally | Preserve exact one-over, character, and unknown-field rejection |
+| T03-B02a | 1 | Green: exact maximum bootstrap fields remain accepted | Preserve the 254-byte email, 50-byte username, and 128-byte display-name boundaries |
+| T03-B03 | 10 | Green: reviewed errors and unsafe outcomes use fixed local mappings | Preserve no retry or fallback after uncertainty, including bodyless and non-JSON redirects |
+| T03-B04a | 1 | Green: an exact 64 KiB valid response is projected | Preserve the body boundary before schema projection |
+| T03-B04b | 3 | Green: exact structural parser limits are accepted | Preserve safe extension discard at depth, member, and element boundaries |
+| T03-B04 | 14 | Green: malformed and one-over REST responses fail closed | Preserve status, media, encoding, UTF-8, duplicate-key, structure, size, credential-extension, and response-cookie rejection |
+| T03-B05 | 1 | Green: shutdown cancels one in-flight bootstrap request | Preserve cancellation without retry or MCP fallback |
+| T03-B06-B08 | 3 | Green: lost outcomes and resend rate limiting map exactly | Preserve one request with no persistence or fallback |
+| T03-N01 | 13 | Green: verification failures use fixed precedence and retry bounds | Preserve missing-`no-store` precedence before media and body parsing plus exact nonce, proof, cache, safe-message, and token-free mappings |
+| T03-N02 | 17 | Green: invalid issuance credentials are rejected before persistence | Preserve type, lifetime, identity, audience, binding, JWT, case-insensitive token uniqueness, response-cookie, reflection, media, cache, and size validation |
+| T03-N03 | 1 | Green: exact 4096-byte bound token persists without local exposure | Preserve the exact token boundary and interceptor |
 | T03-S02 | 14 | Green: every malformed fresh-install credential-v2 record fails before central dispatch | Preserve rejection of duplicate/missing/unknown fields, wrong version/type/algorithm, malformed JWT/JWK/DER, non-P-256 keys, missing binding, and key mismatch |
 | T03-S03 | 1 | The credential-v2 record loads, then protected startup stops before G03 transport | Complete real protected operations and independently verify every fresh ES256 proof, `htm`, fixed-route `htu`, `ath`, and token-free body |
 | T03-S04 | 1 | The credential-v2 record loads, but scheduled reissue cannot start before G03 transport | Reissue at 12 hours with one idempotency key, one nonce retry, the same P-256 key, and one persisted token replacement |
-| T03-S05 | 1 | V2 issuance is not reached | Scan normal artifacts and captures for runtime email/code/token/key/proof/nonce/request/response markers |
+| T03-S05 | 1 | Green: normal artifacts and captures exclude actual enrollment and DPoP markers | Preserve scanning of runtime email, code, token, key, proof, nonce, request, and response markers |
 | T03-L01 | 8 | Five one-over credential records now fail closed; the three exact-bound records load but stop before G03 protected startup | Preserve G01 credential bounds; complete exact-bound protected work and keep generated proof/auth/combined/total headers within their ceilings |
 | T03-P01 | 1 | The credential-v2 record loads, then protected startup stops before central MCP initialization | Use fresh nonce-bearing proofs for initialize, notification, GET reconnect, catalog, call, cancellation, and DELETE close on fixed `/mcp` |
 | T03-P02 | 1 | The credential-v2 record loads, then protected startup stops before the proof-rejection exchange | Surface a terminal protected-operation failure and never retry, reissue, replace, or use bearer after proof rejection |

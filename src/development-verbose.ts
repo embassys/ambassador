@@ -24,13 +24,16 @@ const SENSITIVE_KEYS = new Set([
   "access_token",
   "authorization",
   "cookie",
+  "dpop",
+  "dpop_nonce",
   "jwt",
   "set_cookie",
   "token",
   "webhook_token",
+  "www_authenticate",
   "x_webhook_signature_v2",
 ]);
-const VERIFICATION_CODE_KEYS = new Set(["code", "verification_code"]);
+const VERIFICATION_CODE_KEYS = new Set(["code", "recovery_code", "verification_code"]);
 
 function normalizedKey(key: string): string {
   return key.trim().toLowerCase().replaceAll("-", "_");
@@ -169,7 +172,7 @@ export class DevelopmentVerboseTranscript {
       if (
         VERIFICATION_CODE_KEYS.has(normalized) &&
         typeof value === "string" &&
-        /^\d{6}$/u.test(value)
+        /^[A-Za-z0-9]{6}$/u.test(value)
       ) {
         return REDACTED;
       }
@@ -206,7 +209,10 @@ export class DevelopmentVerboseTranscript {
         /(["'](?:access_token|authorization|jwt|token|webhook_token)["']\s*:\s*["'])[^"']*(["'])/giu,
         `$1${REDACTED}$2`,
       )
-      .replace(/(["'](?:code|verification_code)["']\s*:\s*["'])\d{6}(["'])/giu, `$1${REDACTED}$2`);
+      .replace(
+        /(["'](?:code|recovery_code|verification_code)["']\s*:\s*["'])[A-Za-z0-9]{6}(["'])/giu,
+        `$1${REDACTED}$2`,
+      );
 
     try {
       return this.#sanitize(JSON.parse(sanitized) as unknown);

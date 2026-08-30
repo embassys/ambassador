@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 
 import { toWebRequest } from "@modelcontextprotocol/node";
 import {
+  ProtocolError,
   Server,
   type Tool,
   WebStandardStreamableHTTPServerTransport,
@@ -33,6 +34,13 @@ export interface LocalMcpRouter {
     arguments_: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<Record<string, unknown>>;
+}
+
+export class LocalMcpToolError extends Error {
+  constructor(readonly code: string) {
+    super("Tool call failed");
+    this.name = "LocalMcpToolError";
+  }
 }
 
 export interface LocalMcpServerOptions {
@@ -318,7 +326,10 @@ export class LocalMcpServer {
           },
           undefined,
         );
-      } catch {
+      } catch (error) {
+        if (error instanceof LocalMcpToolError) {
+          throw new ProtocolError(-32_002, "Tool call failed", { code: error.code });
+        }
         throw new Error("Tool call failed");
       } finally {
         this.#activeToolCalls -= 1;

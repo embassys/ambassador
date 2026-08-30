@@ -30,7 +30,7 @@ export class GatewayIdentity {
     | { readonly version: 2; readonly value: LoadedCentralCredentialV2 }
     | undefined;
   #authenticationFailed = false;
-  #verificationBusy = false;
+  #credentialCommitBusy = false;
 
   private constructor(
     private readonly credentialStore: CredentialStore,
@@ -92,13 +92,23 @@ export class GatewayIdentity {
   }
 
   async commitCredentialV2(record: CentralCredentialV2Record): Promise<LoadedCentralCredentialV2> {
-    if (this.#credential !== undefined) throw new IdentityError("already_enrolled");
-    const serialized = serializeCentralCredentialV2(record);
-    const credential = parseCentralCredentialV2(serialized);
-    const store = requireVersionedCredentialStore(this.credentialStore);
-    await store.saveCredential({ version: 2, plaintext: serialized });
-    this.#credential = { version: 2, value: credential };
-    return credential;
+    return await this.#serializeCredentialCommit(
+      async () => await this.#commitCredentialV2(record),
+    );
+  }
+
+  async enrollCredentialV2<T>(
+    operation: () => Promise<{
+      readonly credential: CentralCredentialV2Record;
+      readonly localResult: T;
+    }>,
+  ): Promise<T> {
+    return await this.#serializeCredentialCommit(async () => {
+      const result = await operation();
+      await this.#commitCredentialV2(result.credential);
+      this.#authenticationFailed = false;
+      return result.localResult;
+    });
   }
 
   async replaceCredentialV2(record: CentralCredentialV2Record): Promise<LoadedCentralCredentialV2> {
@@ -114,28 +124,39 @@ export class GatewayIdentity {
   }
 
   async verify(operation: () => Promise<unknown>): Promise<VerificationSuccess["localResult"]> {
-    if (this.#credential !== undefined) {
-      throw new IdentityError("already_enrolled");
-    }
-    if (this.#verificationBusy) {
-      throw new IdentityError("verification_busy");
-    }
-
-    this.#verificationBusy = true;
-    try {
+    return await this.#serializeCredentialCommit(async () => {
       const verified = parseVerificationSuccess(await operation());
       await this.credentialStore.save(verified.token);
       this.#credential = { version: 1, token: verified.token };
       this.#authenticationFailed = false;
       return verified.localResult;
-    } finally {
-      this.#verificationBusy = false;
-    }
+    });
   }
 
   markAuthenticationFailed(): void {
     if (this.#credential !== undefined) {
       this.#authenticationFailed = true;
+    }
+  }
+
+  async #commitCredentialV2(record: CentralCredentialV2Record): Promise<LoadedCentralCredentialV2> {
+    if (this.#credential !== undefined) throw new IdentityError("already_enrolled");
+    const serialized = serializeCentralCredentialV2(record);
+    const credential = parseCentralCredentialV2(serialized);
+    const store = requireVersionedCredentialStore(this.credentialStore);
+    await store.saveCredential({ version: 2, plaintext: serialized });
+    this.#credential = { version: 2, value: credential };
+    return credential;
+  }
+
+  async #serializeCredentialCommit<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#credential !== undefined) throw new IdentityError("already_enrolled");
+    if (this.#credentialCommitBusy) throw new IdentityError("verification_busy");
+    this.#credentialCommitBusy = true;
+    try {
+      return await operation();
+    } finally {
+      this.#credentialCommitBusy = false;
     }
   }
 }

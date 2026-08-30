@@ -121,6 +121,8 @@ test("T03-S01 enrollment uses fresh bound P-256 proofs and persists one JSON cre
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    observeCentralFetch: true,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();
@@ -467,6 +469,8 @@ test("T03-S05 normal artifacts and captures exclude actual enrollment and DPoP m
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    observeCentralFetch: true,
+    targetContract: "v2",
     credentialStore: {
       async load() {
         return undefined;
