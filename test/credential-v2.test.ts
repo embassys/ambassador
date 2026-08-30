@@ -3,7 +3,10 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { EncryptedFileCredentialStore } from "../src/credential-store.js";
+import {
+  EncryptedFileCredentialStore,
+  type EncryptedFileCredentialStoreOptions,
+} from "../src/credential-store.js";
 import {
   assertSameKeyCredentialReplacement,
   CredentialV2Error,
@@ -113,7 +116,7 @@ test("requires the ES256 compact JWS signature to contain exactly 64 canonical b
   );
 });
 
-test("encrypted envelope version 2 supports fresh creation and atomic same-key replacement", async (t) => {
+test("encrypted envelope version 2 creates fresh state and handles same-key replacement safely", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "a2a-credential-v2-test-"));
   t.after(() => rm(root, { force: true, recursive: true }));
   const path = join(root, "state", "central-credential.json");
@@ -125,7 +128,16 @@ test("encrypted envelope version 2 supports fresh creation and atomic same-key r
       tokenId: "00000000-0000-4000-8000-000000000103",
     }),
   );
-  const store = new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE);
+  const options: EncryptedFileCredentialStoreOptions =
+    process.platform === "win32"
+      ? {
+          windowsAccessControl: {
+            async secure() {},
+          },
+        }
+      : {};
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
+  const store = createStore();
   await store.saveCredential({ version: 2, plaintext: original });
   assert.deepEqual(await store.loadCredential(), { version: 2, plaintext: original });
   await assert.rejects(store.load());
@@ -136,14 +148,19 @@ test("encrypted envelope version 2 supports fresh creation and atomic same-key r
   assert.ok(!firstEnvelope.includes(Buffer.from(HOOK_TOKEN)));
   assert.ok(!firstEnvelope.includes(Buffer.from(SCOPE)));
 
-  await new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE).saveCredential({
-    version: 2,
-    plaintext: replacement,
-  });
-  assert.deepEqual(
-    await new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE).loadCredential(),
-    { version: 2, plaintext: replacement },
-  );
+  if (process.platform === "win32") {
+    await assert.rejects(
+      createStore().saveCredential({ version: 2, plaintext: replacement }),
+      /Windows credential replacement is not qualified/u,
+    );
+    assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: original });
+    assert.deepEqual(await readFile(path), firstEnvelope);
+    assert.deepEqual(await readdir(join(root, "state")), ["central-credential.json"]);
+    return;
+  }
+
+  await createStore().saveCredential({ version: 2, plaintext: replacement });
+  assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: replacement });
   const replacementEnvelope = await readFile(path);
   assert.equal(JSON.parse(replacementEnvelope.toString("utf8")).version, 2);
   assert.ok(!replacementEnvelope.includes(Buffer.from(replacement)));
