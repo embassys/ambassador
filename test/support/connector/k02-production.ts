@@ -498,7 +498,8 @@ export async function readK02Response(socket: Socket, timeoutMs = 7_000): Promis
     });
     socket.once("error", (error) => {
       clearTimeout(timer);
-      reject(error);
+      if ((error as NodeJS.ErrnoException).code === "ECONNRESET") resolve(Buffer.concat(chunks));
+      else reject(error);
     });
   });
 }
