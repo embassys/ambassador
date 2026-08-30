@@ -135,7 +135,7 @@ async function runAppServer(
     });
   });
   input.on("close", () => {
-    tail = tail.then(async () => {
+    void (async () => {
       send({ channel: "stdin_closed" });
       if (plan.killDescendantOnStdinEnd === true && descendant?.pid !== undefined) {
         descendant.kill("SIGTERM");
@@ -146,7 +146,7 @@ async function runAppServer(
         await new Promise<void>((resolve) => setTimeout(resolve, plan.lingerMs ?? 1_500));
       }
       process.exit(0);
-    });
+    })();
   });
   if (plan.spawnDescendant === true) {
     descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {

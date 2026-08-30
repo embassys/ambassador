@@ -340,9 +340,23 @@ license, and platform ADRs.
   response, the adapter cannot prove that the server has finished sending
   post-initialization notifications before it writes the next request. X04
   therefore permits zero or one exact coarse read-only `thread/start` for this
-  vector only. It still requires failure, no `thread/resume`, no `turn/start`,
-  and no A2A input dispatch. Every other invalid handshake vector retains the
-  stricter no-thread-request check.
+  vector only. The same constraint applies to the duplicate initialize
+  response written immediately after the valid response: separate stdout
+  callbacks can expose that duplicate only after the client has written the
+  notification and coarse request. Both vectors still require failure, no
+  `thread/resume`, no `turn/start`, and no A2A input dispatch. Every
+  pre-initialized invalid handshake vector retains the stricter
+  no-thread-request check. The fake gives each race an optional trailing
+  no-response `thread/start` exchange so it records rather than masks the
+  permitted write.
+- The fake App Server now handles stdin EOF independently of a blocked exchange
+  tail. The earlier ordering put default EOF exit behind a gated provider
+  write, so X04's manual deadline could not complete teardown without an
+  unrelated test timeout killing the child. The independent EOF task still
+  records stdin closure, terminates a configured descendant, emits configured
+  late writes, and preserves explicit `resist` and `linger` behavior. This also
+  matches X27's requirement that teardown observations remain independent of
+  an in-flight provider exchange.
 - X08a keeps its byte-exact outbound request assertion, then replaces only the
   cloned text item's contents with a neutral sentinel before scanning local
   setting fields. The earlier scan required the sender's literal
