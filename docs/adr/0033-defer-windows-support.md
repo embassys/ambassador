@@ -13,11 +13,11 @@ and risks presenting portable test results as operating-system support.
 
 ## Decision
 
-The initial gateway and connector release supports macOS and Linux only.
+The initial gateway and connector release is limited to macOS and Linux.
 POSIX permissions, durability, replacement, process, and packaging behaviors
 form the normative release contract. Windows is unsupported and is excluded
-from the GitHub Actions matrix, release artifacts, setup instructions, and
-support claims.
+from the GitHub Actions matrix and setup instructions. The project makes no
+Windows-qualified artifact or support claim.
 
 Implementation-plan task W01 is closed as **deferred**, not passed. It supplies
 no release evidence and is no longer a dependency of R01. K02 and later
@@ -35,13 +35,16 @@ plan before code or CI changes. At minimum it must restore a native Windows CI
 lane and qualify, on the exact release artifact:
 
 1. credential DACL enforcement and atomic first write and replacement;
-2. connector state ownership, DACL, link, SQLite, durability, retirement, and
+2. connector canonical drive-path handling, reparse-point and network-share
+   rejection, exact child-environment allowlisting, and webhook-token
+   scrubbing under ADR 0028;
+3. connector state ownership, DACL, link, SQLite, durability, retirement, and
    recovery behavior;
-3. provider process-tree containment, cancellation, crash recovery, and
+4. provider process-tree containment, cancellation, crash recovery, and
    bounded teardown;
-4. clean packed installation and the complete gateway, connector, and fake
+5. clean packed installation and the complete gateway, connector, and fake
    provider end-to-end lifecycle; and
-5. artifact scans and support documentation for every claimed Windows target.
+6. artifact scans and support documentation for every claimed Windows target.
 
 The new plan must resolve any required native API or dependency choice before
 installation. Passing portable tests or re-adding `windows-latest` alone does
@@ -52,12 +55,13 @@ not reopen support.
 The supported initial platform matrix is smaller and CI no longer detects
 portable Windows regressions. Release evidence is clearer: macOS, Linux,
 Ubuntu Docker, and the approved package lanes are the only platform evidence.
-Windows users receive no artifact or support claim.
+The existing platform-neutral npm package remains unchanged. It is not a
+Windows-qualified artifact or support claim.
 
 This record supersedes the initial-release Windows portions of ADRs 0006,
-0015, 0019, 0025, 0026, 0029, 0031, and 0032. Their Windows-specific security
-requirements remain the minimum future qualification target; they are not
-implemented-release requirements while Windows is deferred.
+0015, 0019, 0025, 0026, 0028, 0029, 0031, and 0032. Their Windows-specific
+security requirements remain the minimum future qualification target; they
+are not implemented-release requirements while Windows is deferred.
 
 This decision changes no CLI, dependency, credential format, state schema, or
 production behavior.

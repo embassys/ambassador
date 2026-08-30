@@ -44,6 +44,7 @@ documentation land.
 | D05 | Complete | ADRs 0028 through 0031 fix the connector startup and retirement interface, state, policy, limits, provider-neutral port, runtime, dependency scope, private package layout, installation model, platform qualification, and publishing gates |
 | D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
 | D07 | Complete | ADR 0032 permits local gateway, connector, and provider implementation against accepted fixtures before central deployment; real central compatibility, activation, qualification, and release remain externally gated |
+| D08 | Complete | ADR 0033 closes W01 as deferred rather than passed, limits initial-release support and CI to macOS and Linux, and fixes the approval and native evidence required to restore Windows |
 
 The accepted contracts contain fixed values for development and test work.
 Facts that only the central deployment owner can supply remain unresolved,

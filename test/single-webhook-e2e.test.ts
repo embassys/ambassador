@@ -26,7 +26,9 @@ const CODE = "246810";
 const MESSAGE_ID = "message_fixture_01";
 const MESSAGE_CONTENT = "fixture message body must stay out of gateway state";
 const WINDOWS_CHILD_PROCESS_SKIP =
-  process.platform === "win32" ? "W01: full-process Windows qualification follows G01" : false;
+  process.platform === "win32"
+    ? "ADR 0033: Windows is deferred and requires a new approved qualification plan"
+    : false;
 const SUCCESSFUL_WINDOWS_ACCESS_CONTROL: WindowsCredentialAccessControl = {
   async secure() {},
 };

@@ -92,12 +92,14 @@ affected choice for review rather than silently changing the client contract.
 ## Accepted Windows deferral
 
 - ADR 0033 limits the initial gateway and connector release to macOS and
-  Linux. Windows has no CI lane, artifact, setup, or support claim.
+  Linux. Windows has no CI lane or setup claim. The platform-neutral npm
+  package is not a Windows-qualified artifact or support claim.
 - W01 is closed as deferred, not passed, and no longer gates R01. K02 must not
   add a Windows lane.
 - Re-enabling Windows requires a new approved plan plus native credential,
-  state, process-containment, packed E2E, artifact-scan, and restored CI
-  evidence. Platform-neutral or injected fail-closed tests are insufficient.
+  connector startup and environment security, state, process-containment,
+  packed E2E, artifact-scan, and restored CI evidence. Platform-neutral or
+  injected fail-closed tests are insufficient.
 
 ## Accepted D05 package
 
