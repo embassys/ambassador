@@ -1,16 +1,15 @@
-# T04 red-suite failure inventory
+# T04 conversation-recovery inventory
 
-Status: accepted gateway contract, intentionally red on `0.2.6`
+Status: accepted gateway contract, green after G04
 
 The user accepted this classified gateway inventory on 2026-08-30. It merged
 through PR `#28`. Central S01 review and the S04/S05 server work remain
 separate gates.
 
-This file classifies the expected failures in the `t04-*.test.ts` files.
-Fixture contract tests are already green. A failure below therefore records an
-observable gateway gap, not evidence about the production central service.
-The target assumes a fresh install. It contains no credential, mailbox, or
-delivery-mode migration case.
+This file preserves the exact reviewed nodes in the `t04-*.test.ts` files.
+Their local fixture evidence is green; it is not evidence about the production
+central service. The target assumes a fresh install and contains no credential,
+mailbox, or delivery-mode migration case.
 
 Run the suite serially because the public gateway owns one fixed loopback
 port:
@@ -21,47 +20,47 @@ node --test --test-concurrency=1 --test-reporter=spec \
   .test-dist/test/t04-*.test.js
 ```
 
-Final `0.2.6` observation on 2026-08-29: 41 behavior checks, of which 40 are
-red and the response-observer support check is green. Unlike T03, T04 has no
-parameterized parent nodes, so Node also reports 41 test nodes: 40 failed and
-one passed.
+The final `0.2.6` observation on 2026-08-29 was 40 red behavior checks and one
+green response-observer support check. After G04, all 41 reviewed test nodes
+are green. The inventory remains exact so a regression cannot silently change
+the reviewed node identities.
 
-| Test | Expected current failure | Owner after review |
+| Test | Implemented boundary | Owner after review |
 | --- | --- | --- |
-| T04-P01 | Gateway forwards enrollment through central MCP, stores a version 1 bearer credential, and starts the consuming version 1 poll. This is the shared G01 through G03 prerequisite. | G01, G02, G03, then G04 activation |
-| T04-C01 | The local catalog has no `start_conversation` or `get_conversation_start` projection. | G04 |
-| T04-D01 | The gateway has no activated REST v2 receive loop, lease redelivery, or restart recovery for an immutable full message. | G04 |
-| T04-R01 | The gateway has no local reply projection or derived REST reply request. | G04 |
-| T04-O01 | The gateway has no terminal completion projection or idempotent completion handling. | G04 |
-| T04-O02 | The original sender cannot inspect a terminal no-reply outcome through the gateway. | G04 |
-| T04-R02 | The gateway cannot resolve a lost reply response without creating another outbound turn. | G04 |
-| T04-A01 | The gateway cannot repeat a committed acknowledgement after its response is lost. | G04 |
-| T04-E01 | Version 2 authorization, anti-enumeration, and rate-limit inputs cannot yet be checked for non-reflection. | G03 and G04 |
-| T04-B01 | Version 2 receive work is absent, so its concurrency, cancellation, and shutdown behavior cannot run. | G04 |
-| T04-S01 | Version 2 message and completion paths are absent, so their quiescent artifact and transcript scan cannot run. | G04 |
-| T04-V01 | Fresh-install activation does not exist and cannot repeat after a lost committed response. | G04 |
-| T04-C02 | Uncertain start lookup, safe same-ID repeat, and changed-input conflict are absent. | G04 |
-| T04-C03 | The gateway has no strict local v2 start projection or pre-dispatch bounds. | G04 |
-| T04-R03 | Reply retry and changed-text conflict behavior are absent. | G04 |
-| T04-R04 | A synthetic exact `mailbox_full` response cannot yet prove that the gateway preserves the open buffered turn. | G04 |
-| T04-O03 | Reply and completion cannot race through one atomic terminal result. | G04 |
-| T04-A02 | The gateway cannot enforce terminal-before-ack, retain the journal row after a mismatched acknowledgement result, or delete it only after the exact result. | G04 |
-| T04-M02-* | The gateway cannot reject unknown, conflicting-duplicate-ID, duplicate-key, oversized-text, exact 524,289-byte, and over-4-MiB strict receive results before journal or inbox admission. | G04 |
-| T04-D06 | The gateway cannot prove one active central receive while every local poll remains local. | G04 |
-| T04-D07 | The gateway cannot accept a strict 100-message response at exactly 524,288 bytes without reordering it in the local inbox. | G04 |
-| T04-V05 | The gateway does not use only the fixed REST receive and start routes or reject a redirect before its target is requested. | G04 |
-| T04-E02 | The gateway cannot keep a DPoP challenge distinct from a nested application error without reflecting challenge data. | G03 and G04 |
-| T04-X-startup | A crash before gateway startup must leave no partial durable work; restart is currently blocked at the missing v2 catalog. | G01 through G04 |
-| T04-X-readiness | A crash after listener readiness must restart without using a bearer credential or consuming poll. | G01 through G04 |
-| T04-X-operation | A crash before side-effect dispatch must allow the caller to reuse its opaque request ID. | G04 |
-| T04-X-commit | A dropped response after the central start commits must resolve to the one recorded conversation on restart. | G04 |
-| T04-X-response | A crash after the local response must preserve central idempotency without persisting request content. | G04 |
-| T04-X-teardown | An interrupted teardown must release process ownership and recover with the same opaque operation ID. | G04 |
-| T04-X-start-commit | A held successful start response must survive a process kill and resolve to one conversation. | G04 |
-| T04-X-receive-commit | A held receive response must redeliver the same immutable message after lease expiry and restart. | G04 |
-| T04-X-reply-commit | A held reply response must recover the one recorded reply without replaying content. | G04 |
-| T04-X-complete-commit | A held completion response must recover the one terminal completion. | G04 |
-| T04-X-ack-commit | A held acknowledgement response must recover from the content-free tombstone. | G04 |
+| T04-P01 | REST enrollment persists a DPoP credential, activates v2, and begins leased receive without v1 poll. | G01 through G04 |
+| T04-C01 | Fixed local start and content-free start-lookup projections preserve central idempotency. | G04 |
+| T04-D01 | Activated REST receive redelivers one immutable leased message after restart. | G04 |
+| T04-R01 | Reply routing and the reply idempotency key derive only from the current inbound ID. | G04 |
+| T04-O01 | Every accepted terminal completion pair records idempotently before acknowledgement. | G04 |
+| T04-O02 | The original sender observes a content-free terminal no-reply outcome. | G04 |
+| T04-R02 | Outcome lookup resolves a lost reply response without a second outbound turn. | G04 |
+| T04-A01 | A committed acknowledgement with a lost response repeats from the ID-only row. | G04 |
+| T04-E01 | Authorization, anti-enumeration, and rate-limit errors remain fixed and non-reflecting. | G03 and G04 |
+| T04-B01 | Local work is capped at eight calls and shutdown cancels a waiting poll. | G04 |
+| T04-S01 | Quiescent artifacts and normal transcripts contain no credential or conversation content. | G04 |
+| T04-V01 | Fresh-install activation repeats safely after a lost committed response. | G04 |
+| T04-C02 | Start lookup resolves uncertainty; same input repeats and changed input conflicts. | G04 |
+| T04-C03 | Strict start bounds reject locally before central application work. | G04 |
+| T04-R03 | Same-text reply repetition returns one outbound ID; changed text conflicts. | G04 |
+| T04-R04 | `mailbox_full` leaves the inbound turn open and buffered. | G04 |
+| T04-O03 | Concurrent reply and completion produce exactly one terminal result. | G04 |
+| T04-A02 | Ack requires terminal state and deletes the row only after the exact matching result. | G04 |
+| T04-M02-* | Unknown keys, conflicting IDs, duplicate keys, and every receive size violation fail before admission. | G04 |
+| T04-D06 | One central leased receive stays active while every local poll remains local. | G04 |
+| T04-D07 | The exact 524,288-byte, 100-message boundary preserves order. | G04 |
+| T04-V05 | Conversation lifecycle traffic uses fixed REST routes, rejects redirects, and never falls back to central MCP message tools. | G04 |
+| T04-E02 | DPoP challenges remain distinct from nested application errors and reflect no challenge data. | G03 and G04 |
+| T04-X-startup | A pre-start crash leaves no partial work and restarts with the same opaque request ID. | G01 through G04 |
+| T04-X-readiness | A post-readiness crash restarts without bearer fallback or v1 consuming poll. | G01 through G04 |
+| T04-X-operation | A pre-dispatch crash safely reuses the same opaque request ID. | G04 |
+| T04-X-commit | A dropped committed start resolves to the one recorded conversation after restart. | G04 |
+| T04-X-response | A post-response crash preserves central idempotency without durable request content. | G04 |
+| T04-X-teardown | Interrupted teardown releases ownership and recovers with the same operation ID. | G04 |
+| T04-X-start-commit | A held committed start recovers one conversation after process kill. | G04 |
+| T04-X-receive-commit | A held committed receive redelivers the immutable message after lease expiry. | G04 |
+| T04-X-reply-commit | A held committed reply recovers the one recorded reply without replaying content. | G04 |
+| T04-X-complete-commit | A held committed completion recovers the one terminal outcome. | G04 |
+| T04-X-ack-commit | A held committed acknowledgement recovers from the ID-only tombstone path. | G04 |
 
 The full-process conversation-start crash matrix uses all six merged T02
 barriers: startup, readiness, operation, commit, response, and teardown. Each

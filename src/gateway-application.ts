@@ -1,4 +1,12 @@
 import {
+  CentralConversationClient,
+  CentralConversationError,
+  VERSION_TWO_LOCAL_TOOLS,
+  validateCompletionArguments,
+  validateMessageIdArguments,
+  validateReplyArguments,
+} from "./central-conversation.js";
+import {
   CentralEnrollmentClient,
   CentralEnrollmentError,
   type CentralTokenProfile,
@@ -22,9 +30,14 @@ import {
   upstreamToolArguments,
 } from "./mcp-contract.js";
 import { NotificationJournal, validateNotificationId } from "./notification-journal.js";
-import { NotificationRelay, NotificationRelayError } from "./notification-relay.js";
+import {
+  NotificationRelay,
+  NotificationRelayError,
+  RetryableNotificationReceiveError,
+} from "./notification-relay.js";
 
 const MCP_NOTIFICATION_POLL_SECONDS = 20;
+const VERSION_TWO_LOCAL_TOOL_NAMES = new Set(VERSION_TWO_LOCAL_TOOLS.map((tool) => tool.name));
 
 export interface GatewayApplicationOptions {
   webhookUrl: string;
@@ -37,6 +50,7 @@ export interface GatewayApplicationOptions {
   centralEnrollmentFetch?: typeof fetch;
   credentialStore?: CredentialStore;
   verboseTranscript?: DevelopmentVerboseTranscript;
+  signal?: AbortSignal;
 }
 
 export interface RunningGatewayApplication {
@@ -74,7 +88,7 @@ function contentAcknowledgement(
   return validateNotificationId(result.message_id);
 }
 
-function pollTimeout(arguments_: Record<string, unknown>): number {
+function pollTimeout(arguments_: Record<string, unknown>, contract: 1 | 2): number {
   const keys = Object.keys(arguments_);
   if (keys.some((key) => key !== "timeout")) throw new McpContractError();
   if (arguments_.timeout === undefined) return 30;
@@ -82,7 +96,7 @@ function pollTimeout(arguments_: Record<string, unknown>): number {
     typeof arguments_.timeout !== "number" ||
     !Number.isInteger(arguments_.timeout) ||
     arguments_.timeout < 0 ||
-    arguments_.timeout > 60
+    arguments_.timeout > (contract === 2 ? 30 : 60)
   ) {
     throw new McpContractError();
   }
@@ -164,9 +178,17 @@ export async function openGatewayApplication(
             : { verboseTranscript: options.verboseTranscript }),
         });
   const controller = new AbortController();
+  const lifetimeSignal =
+    options.signal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, options.signal]);
   let identity: GatewayIdentity | undefined;
   let protectedCentral: CentralMcpClient | undefined;
   let protectedCatalog: readonly CentralToolDefinition[] | undefined;
+  let protectedConversation: CentralConversationClient | undefined;
+  let versionTwoDeliveryActive = false;
+  let versionTwoAuthenticationRejected = false;
+  let protectedIdentityActivation: Promise<void> | undefined;
   let reissue: CentralReissueController | undefined;
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
@@ -209,47 +231,162 @@ export async function openGatewayApplication(
     }
   };
 
-  const enableProtectedIdentity = (): void => {
-    if (protectedCentral !== undefined || reissue !== undefined) return;
-    const currentIdentity = requireIdentity();
-    const credential = currentIdentity.authenticatedCredentialV2();
-    if (options.centralApiUrl === undefined || options.centralMcpUrl === undefined) {
-      throw safeFailure();
+  const enableProtectedIdentity = async (): Promise<void> => {
+    if (versionTwoDeliveryActive) return;
+    if (protectedIdentityActivation !== undefined) {
+      await protectedIdentityActivation;
+      return;
     }
-    options.verboseTranscript?.addSecret(credential.record.access_token);
-    options.verboseTranscript?.addSecret(credential.record.dpop_private_key_pkcs8);
-    const mcpTransport = new CentralProtectedTransport({
-      domain: "mcp",
-      credential: () => currentIdentity.authenticatedCredentialV2(),
-      nonceCache: protectedNonces,
-      ...(options.verboseTranscript === undefined
-        ? {}
-        : { verboseTranscript: options.verboseTranscript }),
-    });
-    protectedCentral = new CentralMcpClient({
-      centralMcpUrl: options.centralMcpUrl,
-      fetch: async (url, init) => await mcpTransport.fetch(url, init),
-      ...(options.verboseTranscript === undefined
-        ? {}
-        : { verboseTranscript: options.verboseTranscript }),
-    });
-    const apiTransport = new CentralProtectedTransport({
-      domain: "api",
-      credential: () => currentIdentity.authenticatedCredentialV2(),
-      nonceCache: protectedNonces,
-      ...(options.verboseTranscript === undefined
-        ? {}
-        : { verboseTranscript: options.verboseTranscript }),
-    });
-    reissue = new CentralReissueController({
-      centralApiUrl: options.centralApiUrl,
-      identity: currentIdentity,
-      transport: apiTransport,
-      ...(options.verboseTranscript === undefined
-        ? {}
-        : { verboseTranscript: options.verboseTranscript }),
-    });
-    reissue.start();
+    const activation = (async (): Promise<void> => {
+      const currentIdentity = requireIdentity();
+      const credential = currentIdentity.authenticatedCredentialV2();
+      if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) {
+        currentIdentity.markAuthenticationFailed();
+        return;
+      }
+      if (options.centralApiUrl === undefined || options.centralMcpUrl === undefined) {
+        throw safeFailure();
+      }
+      options.verboseTranscript?.addSecret(credential.record.access_token);
+      options.verboseTranscript?.addSecret(credential.record.dpop_private_key_pkcs8);
+      const mcpTransport = new CentralProtectedTransport({
+        domain: "mcp",
+        credential: () => currentIdentity.authenticatedCredentialV2(),
+        nonceCache: protectedNonces,
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+      });
+      const nextProtectedCentral = new CentralMcpClient({
+        centralMcpUrl: options.centralMcpUrl,
+        fetch: async (url, init) => await mcpTransport.fetch(url, init),
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+      });
+      const apiTransport = new CentralProtectedTransport({
+        domain: "api",
+        credential: () => currentIdentity.authenticatedCredentialV2(),
+        nonceCache: protectedNonces,
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+      });
+      const receiveTransport = new CentralProtectedTransport({
+        domain: "api",
+        credential: () => currentIdentity.authenticatedCredentialV2(),
+        nonceCache: protectedNonces,
+        deadlineMs: 40_000,
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+      });
+      const conversation = new CentralConversationClient({
+        centralApiUrl: options.centralApiUrl,
+        transport: apiTransport,
+        receiveTransport,
+      });
+      const nextReissue = new CentralReissueController({
+        centralApiUrl: options.centralApiUrl,
+        identity: currentIdentity,
+        transport: apiTransport,
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+      });
+      reissue = nextReissue;
+      nextReissue.start();
+      try {
+        await conversation.activate(lifetimeSignal);
+      } catch (error) {
+        await nextProtectedCentral.close().catch(() => undefined);
+        throw error;
+      }
+      if (lifetimeSignal.aborted) {
+        await nextProtectedCentral.close().catch(() => undefined);
+        throw safeFailure();
+      }
+      protectedCentral = nextProtectedCentral;
+      protectedConversation = conversation;
+      versionTwoDeliveryActive = true;
+      versionTwoAuthenticationRejected = false;
+
+      const nextRelay = new NotificationRelay({
+        journal,
+        centralApiUrl: options.centralApiUrl,
+        webhookUrl: options.webhookUrl,
+        webhookToken: options.webhookToken,
+        ...(options.verboseTranscript === undefined
+          ? {}
+          : { verboseTranscript: options.verboseTranscript }),
+        receiveMessagesThroughV2: async (signal) => {
+          try {
+            return await conversation.receive(signal);
+          } catch (error) {
+            if (error instanceof CentralConversationError && error.authenticationFailure) {
+              throw new NotificationRelayError(
+                "central_authentication_failed",
+                "Central authentication failed",
+              );
+            }
+            if (
+              error instanceof CentralConversationError &&
+              error.code === "central_conversation_outcome_uncertain"
+            ) {
+              throw new RetryableNotificationReceiveError();
+            }
+            if (
+              error instanceof CentralConversationError &&
+              ["receive_in_progress", "temporarily_unavailable"].includes(error.code)
+            ) {
+              throw new RetryableNotificationReceiveError();
+            }
+            if (
+              error instanceof CentralConversationError &&
+              error.code === "rate_limited" &&
+              error.retryAfterMs !== undefined &&
+              error.retryAfterMs !== null
+            ) {
+              throw new RetryableNotificationReceiveError(error.retryAfterMs);
+            }
+            if (error instanceof CentralConversationError) {
+              throw new NotificationRelayError(
+                "invalid_notification_response",
+                "Central notification response is invalid",
+              );
+            }
+            throw new NotificationRelayError("relay_failed", "Notification relay failed");
+          }
+        },
+      });
+      relay = nextRelay;
+      relayRun = nextRelay.run(lifetimeSignal).catch(async (error: unknown) => {
+        if (
+          error instanceof NotificationRelayError &&
+          error.code === "central_authentication_failed"
+        ) {
+          await stopRelayForAuthenticationFailure();
+          return;
+        }
+        if (
+          error instanceof NotificationRelayError &&
+          ["invalid_notification_response", "notification_response_too_large"].includes(error.code)
+        ) {
+          // A deterministic version 2 receive contract failure stops central
+          // delivery without tearing down content-free recovery and outcome tools.
+          return;
+        }
+        relay = undefined;
+        reportFailure?.(safeFailure());
+        reportFailure = undefined;
+      });
+    })();
+    protectedIdentityActivation = activation;
+    try {
+      await activation;
+    } finally {
+      if (protectedIdentityActivation === activation) protectedIdentityActivation = undefined;
+    }
   };
 
   const remoteTool = async (
@@ -272,9 +409,12 @@ export async function openGatewayApplication(
 
   const stopRelayForAuthenticationFailure = async (): Promise<void> => {
     requireIdentity().markAuthenticationFailed();
+    versionTwoAuthenticationRejected = true;
     protectedCatalog = undefined;
     await relay?.shutdown().catch(() => undefined);
     relay = undefined;
+    await reissue?.close().catch(() => undefined);
+    reissue = undefined;
     await local.sendToolListChanged().catch(() => undefined);
   };
 
@@ -329,12 +469,19 @@ export async function openGatewayApplication(
       }
       if (currentIdentity.credentialVersion === 2) {
         try {
+          if (versionTwoAuthenticationRejected) throw safeFailure();
+          if (!versionTwoDeliveryActive) return [];
           const credential = currentIdentity.authenticatedCredentialV2();
           if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) return [];
           const catalog = await requireCentral().listTools();
           const selected = selectCentralTools(catalog, true);
           protectedCatalog = selected;
-          const localCatalog = selected.map(localToolDefinition);
+          const localCatalog = [
+            ...selected
+              .filter((tool) => !VERSION_TWO_LOCAL_TOOL_NAMES.has(tool.name))
+              .map(localToolDefinition),
+            ...VERSION_TWO_LOCAL_TOOLS,
+          ];
           assertSafeUpstreamResult(localCatalog, credential.record.access_token);
           return localCatalog;
         } catch (error) {
@@ -371,7 +518,17 @@ export async function openGatewayApplication(
                     async () => await requireEnrollment().verify(arguments_, enrollmentSignal),
                   ),
               );
-              enableProtectedIdentity();
+              try {
+                await enableProtectedIdentity();
+              } catch (error) {
+                if (error instanceof CentralConversationError && error.authenticationFailure) {
+                  await stopRelayForAuthenticationFailure();
+                } else if (!lifetimeSignal.aborted) {
+                  reportFailure?.(safeFailure());
+                  reportFailure = undefined;
+                }
+                throw error;
+              }
               await local.sendToolListChanged();
               return localResult;
             }
@@ -407,9 +564,45 @@ export async function openGatewayApplication(
         }
 
         if (currentIdentity.credentialVersion === 2) {
+          if (!versionTwoDeliveryActive) throw new McpContractError();
           const credential = currentIdentity.authenticatedCredentialV2();
           if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) {
             throw new McpContractError();
+          }
+          const conversation = protectedConversation;
+          if (conversation === undefined) throw new McpContractError();
+          if (name === "poll_messages") {
+            const localArguments = safeLocalToolArguments(arguments_);
+            return await requireRelay().pollMessages(pollTimeout(localArguments, 2), signal);
+          }
+          if (name === "start_conversation") {
+            return await conversation.start(arguments_, signal);
+          }
+          if (name === "get_conversation_start") {
+            return await conversation.getStart(arguments_, signal);
+          }
+          if (name === "reply_message") {
+            const input = validateReplyArguments(arguments_);
+            const conversationId = requireRelay().currentMessageConversationId(input.message_id);
+            if (conversationId === undefined) throw new McpContractError();
+            return await conversation.reply(input, signal, conversationId);
+          }
+          if (name === "complete_message") {
+            const input = validateCompletionArguments(arguments_);
+            if (!requireRelay().hasCurrentMessage(input.message_id)) throw new McpContractError();
+            return await conversation.complete(input, signal);
+          }
+          if (name === "get_message_outcome") {
+            return await conversation.outcome(arguments_, signal);
+          }
+          if (name === "ack_message") {
+            const input = validateMessageIdArguments(arguments_);
+            if (!requireRelay().canAcknowledge(input.message_id)) throw new McpContractError();
+            const result = await conversation.acknowledge(input, signal);
+            if (!requireRelay().confirmContentAcknowledgement(input.message_id)) {
+              throw new McpContractError();
+            }
+            return result;
           }
           const tool = await remoteTool(name, true, signal);
           const upstreamArguments = upstreamToolArguments(tool, arguments_, undefined);
@@ -426,7 +619,7 @@ export async function openGatewayApplication(
         const centralToken = currentIdentity.authenticatedToken();
         if (name === "poll_messages") {
           const localArguments = safeLocalToolArguments(arguments_);
-          const result = await requireRelay().pollMessages(pollTimeout(localArguments), signal);
+          const result = await requireRelay().pollMessages(pollTimeout(localArguments, 1), signal);
           assertSafeUpstreamResult(result, centralToken);
           return result;
         }
@@ -461,14 +654,21 @@ export async function openGatewayApplication(
         ) {
           await stopRelayForAuthenticationFailure();
         }
+        if (error instanceof CentralConversationError && error.authenticationFailure) {
+          await stopRelayForAuthenticationFailure();
+        }
         if (
           error instanceof CentralEnrollmentError ||
+          error instanceof CentralConversationError ||
           error instanceof CentralMcpError ||
           error instanceof IdentityError ||
           error instanceof McpContractError
         ) {
           if (error instanceof CentralEnrollmentError) {
             throw new LocalMcpToolError(error.code);
+          }
+          if (error instanceof CentralConversationError && error.applicationError) {
+            throw new LocalMcpToolError(error.code, error.retryAfterMs);
           }
           throw safeFailure();
         }
@@ -486,8 +686,20 @@ export async function openGatewayApplication(
     await local.listen();
     identity = await GatewayIdentity.open(credentialStore);
     if (identity.enrolled) {
-      if (identity.credentialVersion === 2) enableProtectedIdentity();
-      else startRelay(identity.authenticatedToken());
+      if (identity.credentialVersion === 2) {
+        try {
+          await enableProtectedIdentity();
+        } catch (error) {
+          if (error instanceof CentralConversationError && error.authenticationFailure) {
+            identity.markAuthenticationFailed();
+            versionTwoAuthenticationRejected = true;
+            await reissue?.close().catch(() => undefined);
+            reissue = undefined;
+          } else {
+            throw error;
+          }
+        }
+      } else startRelay(identity.authenticatedToken());
     }
   } catch (error) {
     controller.abort();

@@ -31,13 +31,17 @@ export async function startT04GatewayScenario(
 ): Promise<T04GatewayScenario> {
   const central = await startFakeCentral(t);
   const gatewayTime = Math.floor(Date.now() / 1_000);
-  if (gatewayTime > central.clock()) central.advanceClock(gatewayTime - central.clock());
+  if (gatewayTime > central.clock()) {
+    central.advanceClock(gatewayTime - central.clock());
+    central.refreshSeedCredentials();
+  }
   const webhook = await startFakeWebhook(t);
   const gateway = await startGateway(t, {
     webhookUrl: webhook.url,
     webhookToken: T04_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    targetContract: "v2",
     ...(options.artifactRoot === undefined ? {} : { artifactRoot: options.artifactRoot }),
   });
   const client = new TestMcpClient(gateway.endpoint, T04_WEBHOOK_TOKEN);
@@ -70,6 +74,7 @@ export async function restartT04Gateway(
     webhookToken: T04_WEBHOOK_TOKEN,
     centralApiUrl: scenario.central.apiUrl,
     centralMcpUrl: scenario.central.mcpUrl,
+    targetContract: "v2",
     artifactRoot: scenario.gateway.artifactRoot,
   });
   const client = new TestMcpClient(gateway.endpoint, T04_WEBHOOK_TOKEN);
