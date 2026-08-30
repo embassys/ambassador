@@ -436,6 +436,5 @@ local authority inputs, and whole-provider retirement command described above.
 ADRs 0029 through 0031 were accepted with this record and complete D05.
 
 This approval does not select a provider executable or SDK version, authorize
-public package publication, or make a provider/platform support claim. K01
-remains blocked until G04 supplies the accepted gateway delivery-control
-contract.
+public package publication, or make a provider/platform support claim. ADR
+0032 permits K01 against the accepted G04 fixture contract.
