@@ -56,6 +56,7 @@ interface ConnectorHandle {
   close(): Promise<void>;
   shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void>;
   crash(): Promise<void>;
+  waitForFatal(): Promise<never>;
   waitForIdle(): Promise<void>;
   inspectAdmissionStateForTest(): {
     queuedIds: readonly string[];
@@ -172,7 +173,15 @@ class ConnectorRuntime implements ConnectorHandle {
   readonly #startupRecoveryIds = new Set<string>();
   readonly #startupRecoveryWaiters = new Set<() => void>();
   readonly #idleWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
+  readonly #fatalSignal: Promise<never>;
+  #rejectFatal: ((error: Error) => void) | undefined;
   #fatal: Error | undefined;
+  #fatalCleanup: Promise<void> | undefined;
+  #receiverClose: Promise<void> | undefined;
+  #gatewayClose: Promise<void> | undefined;
+  #transportClose: Promise<void> | undefined;
+  #shutdownPromise: Promise<void> | undefined;
+  #stateClosed = false;
   #closed = false;
   #stopping = false;
 
@@ -180,6 +189,10 @@ class ConnectorRuntime implements ConnectorHandle {
     private readonly options: ConnectorFoundationOptions,
     state: ConnectorState,
   ) {
+    this.#fatalSignal = new Promise<never>((_resolve, reject) => {
+      this.#rejectFatal = reject;
+    });
+    void this.#fatalSignal.catch(() => undefined);
     this.#clock = options.clock ?? SYSTEM_CLOCK;
     this.#state = state;
     this.#gateway = new GatewayClient(options.gatewayEndpoint, options.webhookToken, this.#clock);
@@ -254,49 +267,86 @@ class ConnectorRuntime implements ConnectorHandle {
     return new Promise<void>((resolve, reject) => this.#idleWaiters.add({ resolve, reject }));
   }
 
+  waitForFatal(): Promise<never> {
+    return this.#fatalSignal;
+  }
+
   async close(): Promise<void> {
+    if (this.#fatalCleanup !== undefined) {
+      await this.#fatalCleanup;
+      await this.#transportClose;
+      return;
+    }
     if (this.#closed) return;
     await this.#stop(false);
   }
   async crash(): Promise<void> {
+    if (this.#fatalCleanup !== undefined) {
+      await this.#fatalCleanup;
+      await this.#transportClose;
+      return;
+    }
     if (this.#closed) return;
+    this.#stopping = true;
     this.#closed = true;
     this.#clearActiveTimers();
-    await this.#gateway.close();
-    await this.#receiver.close();
-    this.#state.close();
+    await this.#closeAdmissionAndGateway();
+    this.#closeState();
   }
 
-  async shutdown(_signal: "SIGINT" | "SIGTERM"): Promise<void> {
-    if (this.#closed || this.#stopping) return;
+  shutdown(_signal: "SIGINT" | "SIGTERM"): Promise<void> {
+    if (this.#shutdownPromise !== undefined) return this.#shutdownPromise;
+    if (this.#closed) return Promise.resolve();
+    this.#shutdownPromise = this.#shutdown();
+    void this.#shutdownPromise.catch(() => undefined);
+    return this.#shutdownPromise;
+  }
+
+  async #shutdown(): Promise<void> {
+    const startedAt = this.#clock.nowMs();
+    const admissionDeadline = startedAt + 1_000;
+    const containmentDeadline = startedAt + 14_000;
+    const absoluteDeadline = startedAt + 15_000;
     this.#stopping = true;
-    const active = [...this.#active.values()];
-    const cancellations = active.map(async (work) => {
-      try {
-        await this.options.provider.cancel({
-          kind: "cancel",
-          execution_id: work.executionId,
-          provider_session_id: work.sessionId,
-          provider_turn_id: work.turnId,
-          reason: "shutdown",
-        });
-      } catch {}
-    });
-    await this.#receiver.close();
-    if (active.length > 0) {
-      await Promise.race([Promise.all(cancellations), sleep(this.#clock, 15_000)]).catch(() => {});
-    }
-    this.#closed = true;
     this.#clearActiveTimers();
-    await this.#gateway.close();
-    this.#state.close();
+    this.#queue.length = 0;
+    this.#queued.clear();
+    this.#starting.clear();
+    const active = [...this.#active.values()];
+    const transportClose = this.#closeAdmissionAndGateway();
+    const admissionClosed = await this.#settlesBy(
+      this.#receiverClose as Promise<void>,
+      admissionDeadline,
+    );
+    const cleanup = await Promise.all(
+      active.map(async (work) => await this.#shutdownExecution(work, containmentDeadline)),
+    );
+    const transportClosed =
+      admissionClosed || (await this.#settlesBy(transportClose, absoluteDeadline));
+    this.#closed = true;
+    this.#active.clear();
+    let stateClosed = true;
+    try {
+      this.#closeState();
+    } catch {
+      stateClosed = false;
+    }
+    if (
+      !transportClosed ||
+      !admissionClosed ||
+      !stateClosed ||
+      cleanup.some((contained) => !contained) ||
+      this.#clock.nowMs() > absoluteDeadline
+    ) {
+      throw new ConnectorError("connector_shutdown_incomplete");
+    }
   }
 
   async #stop(cancel: boolean): Promise<void> {
+    this.#stopping = true;
     this.#closed = true;
     this.#clearActiveTimers();
-    await this.#receiver.close();
-    await this.#gateway.close();
+    await this.#closeAdmissionAndGateway();
     if (cancel) {
       await Promise.all(
         [...this.#active.values()].map(async (work) => {
@@ -312,6 +362,92 @@ class ConnectorRuntime implements ConnectorHandle {
         }),
       );
     }
+    this.#closeState();
+  }
+
+  async #shutdownExecution(work: Work, shutdownProviderDeadline: number): Promise<boolean> {
+    const cancellationStartedAt = this.#clock.nowMs();
+    const durableDeadline = work.stored.turnDeadlineMs;
+    const graceEnd = Math.min(
+      cancellationStartedAt + CONNECTOR_LIMITS.cancellationGraceMs,
+      (durableDeadline ?? cancellationStartedAt) + CONNECTOR_LIMITS.cancellationGraceMs,
+      shutdownProviderDeadline - CONNECTOR_LIMITS.containmentCleanupMs,
+    );
+    try {
+      void this.options.provider
+        .cancel({
+          kind: "cancel",
+          execution_id: work.executionId,
+          provider_session_id: work.sessionId,
+          provider_turn_id: work.turnId,
+          reason: "shutdown",
+        })
+        .catch(() => undefined);
+    } catch {}
+    await this.#sleepUntil(graceEnd);
+    const cleanupDeadline = Math.min(
+      graceEnd + CONNECTOR_LIMITS.containmentCleanupMs,
+      shutdownProviderDeadline,
+    );
+    let containment: Promise<boolean>;
+    try {
+      containment = this.options.provider.contain(work.executionId).catch(() => false);
+    } catch {
+      return false;
+    }
+    return await this.#settlesBy(containment, cleanupDeadline, (result) => result === true);
+  }
+
+  async #sleepUntil(deadline: number): Promise<void> {
+    const remaining = deadline - this.#clock.nowMs();
+    if (remaining > 0) await sleep(this.#clock, remaining);
+  }
+
+  async #settlesBy<T>(
+    operation: Promise<T>,
+    deadline: number,
+    accepts: (result: T) => boolean = () => true,
+  ): Promise<boolean> {
+    let settled = false;
+    const observed = operation.then(
+      (result) => {
+        settled = true;
+        return accepts(result);
+      },
+      () => {
+        settled = true;
+        return false;
+      },
+    );
+    await Promise.resolve();
+    if (settled) return await observed;
+    const remaining = deadline - this.#clock.nowMs();
+    if (remaining <= 0) return false;
+    let timeout: unknown;
+    const expired = new Promise<false>((resolve) => {
+      timeout = this.#clock.setTimer(() => resolve(false), remaining);
+    });
+    try {
+      return await Promise.race([observed, expired]);
+    } finally {
+      this.#clock.clearTimer(timeout);
+    }
+  }
+
+  #closeAdmissionAndGateway(): Promise<void> {
+    if (this.#transportClose === undefined) {
+      this.#receiverClose = this.#receiver.close();
+      this.#gatewayClose = this.#gateway.close();
+      this.#transportClose = Promise.allSettled([this.#receiverClose, this.#gatewayClose]).then(
+        () => undefined,
+      );
+    }
+    return this.#transportClose;
+  }
+
+  #closeState(): void {
+    if (this.#stateClosed) return;
+    this.#stateClosed = true;
     this.#state.close();
   }
 
@@ -320,6 +456,7 @@ class ConnectorRuntime implements ConnectorHandle {
   }
 
   #admit(id: string): "accepted" | "coalesced" | "full" {
+    if (this.#stopping || this.#closed || this.#fatal !== undefined) return "full";
     if (this.#queued.has(id) || this.#starting.has(id) || this.#active.has(id)) return "coalesced";
     try {
       this.#state.beforeExternalEffect();
@@ -374,6 +511,7 @@ class ConnectorRuntime implements ConnectorHandle {
       await this.#admitMessage(matching[0] as GatewayMessage);
     } catch (error) {
       this.#starting.delete(id);
+      if (this.#stopping || this.#closed) return;
       this.#fail(
         error instanceof GatewayObservation
           ? new ConnectorError("connector_gateway_operation_failed")
@@ -694,6 +832,7 @@ class ConnectorRuntime implements ConnectorHandle {
         return;
       }
     } catch (error) {
+      if (this.#stopping || this.#closed) return;
       if (error instanceof Error && error.message === "connector_test_crash") {
         this.#fail(error);
         return;
@@ -1039,6 +1178,7 @@ class ConnectorRuntime implements ConnectorHandle {
         this.#finish(work);
         return;
       } catch (error) {
+        if (this.#stopping || this.#closed) return;
         if (error instanceof Error && error.message === "connector_test_crash") {
           this.#fail(error);
           return;
@@ -1296,7 +1436,7 @@ class ConnectorRuntime implements ConnectorHandle {
   }
 
   async #deadline(work: Work): Promise<void> {
-    if (!this.#active.has(work.message.id)) return;
+    if (this.#stopping || this.#closed || !this.#active.has(work.message.id)) return;
     const storedDeadline = this.#state.readMessage(work.message.id)?.turnDeadlineMs;
     const cleanupAt =
       (storedDeadline ?? this.#clock.nowMs()) + CONNECTOR_LIMITS.cancellationGraceMs;
@@ -1540,6 +1680,7 @@ class ConnectorRuntime implements ConnectorHandle {
     this.#pump();
   }
   #fail(error: unknown): void {
+    if (this.#fatal !== undefined || this.#stopping || this.#closed) return;
     const normalized =
       error instanceof ConnectorError || error instanceof Error
         ? error
@@ -1547,6 +1688,28 @@ class ConnectorRuntime implements ConnectorHandle {
     this.#fatal = normalized;
     for (const resolve of this.#startupRecoveryWaiters) resolve();
     this.#startupRecoveryWaiters.clear();
+    this.#stopping = true;
+    this.#closed = true;
+    this.#clearActiveTimers();
+    this.#queue.length = 0;
+    this.#queued.clear();
+    this.#starting.clear();
+    try {
+      this.#closeState();
+    } catch {}
+    const publicError =
+      normalized instanceof ConnectorError
+        ? normalized
+        : new ConnectorError("connector_internal_error");
+    const cleanupDeadline = this.#clock.nowMs() + 1_000;
+    this.#closeAdmissionAndGateway();
+    this.#fatalCleanup = this.#settlesBy(
+      this.#receiverClose as Promise<void>,
+      cleanupDeadline,
+    ).then(() => {
+      this.#rejectFatal?.(publicError);
+      this.#rejectFatal = undefined;
+    });
     for (const waiter of this.#idleWaiters) waiter.reject(normalized);
     this.#idleWaiters.clear();
   }

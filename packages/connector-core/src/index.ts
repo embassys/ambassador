@@ -32,6 +32,7 @@ export {
 } from "./state.js";
 
 const EXIT_CODES: Readonly<Record<string, number>> = {
+  connector_internal_error: 1,
   invalid_connector_arguments: 2,
   webhook_token_unavailable: 4,
   connector_already_running: 7,
@@ -41,6 +42,11 @@ const EXIT_CODES: Readonly<Record<string, number>> = {
   connector_state_retire_refused: 7,
   connector_state_filesystem_unqualified: 7,
   connector_listener_unavailable: 8,
+  connector_message_blocked: 1,
+  connector_conversation_unavailable: 1,
+  connector_provider_cleanup_incomplete: 1,
+  connector_gateway_operation_failed: 1,
+  connector_shutdown_incomplete: 1,
 };
 
 function dormantProvider(provider: ProviderKind): ProviderPort {
@@ -75,9 +81,10 @@ function dormantProvider(provider: ProviderKind): ProviderPort {
 }
 
 function publicError(error: unknown): never {
-  const code = error instanceof ConnectorError ? error.code : "connector_internal_error";
+  const candidate = error instanceof ConnectorError ? error.code : "connector_internal_error";
+  const code = Object.hasOwn(EXIT_CODES, candidate) ? candidate : "connector_internal_error";
   process.stderr.write(`a2a connector: ${code}\n`);
-  process.exit(EXIT_CODES[code] ?? 1);
+  process.exit(EXIT_CODES[code] as number);
 }
 
 export async function runConnectorCli(provider: ProviderKind): Promise<void> {
@@ -110,21 +117,12 @@ export async function runConnectorCli(provider: ProviderKind): Promise<void> {
       provider: dormantProvider(provider),
     });
     process.stdout.write(`Connector webhook: ${connector.webhookUrl}\n`);
-    await new Promise<void>((resolve) => {
-      let closing = false;
-      const stop = async (signal: "SIGINT" | "SIGTERM") => {
-        if (closing) return;
-        closing = true;
-        try {
-          await connector.shutdown(signal);
-          resolve();
-        } catch (error) {
-          publicError(error);
-        }
-      };
-      process.once("SIGINT", () => void stop("SIGINT"));
-      process.once("SIGTERM", () => void stop("SIGTERM"));
+    const signal = new Promise<"SIGINT" | "SIGTERM">((resolve) => {
+      process.once("SIGINT", () => resolve("SIGINT"));
+      process.once("SIGTERM", () => resolve("SIGTERM"));
     });
+    const received = await Promise.race([signal, connector.waitForFatal()]);
+    await connector.shutdown(received);
   } catch (error) {
     publicError(error);
   }
