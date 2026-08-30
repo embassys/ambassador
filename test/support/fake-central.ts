@@ -716,6 +716,7 @@ export interface FakeCentral {
   clock: () => number;
   resetV2: () => void;
   refreshSeedCredentials: () => void;
+  currentV2Token: (username: string) => string;
   failNextV2: (operation: V2FaultOperation, fault: V2Fault) => void;
   setV1MigrationBlocked: (username: string, blocked: boolean) => void;
   setConversationGrant: (
@@ -2801,6 +2802,19 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
         assert.ok(agent !== undefined);
         client.setAccessToken(issueToken(agent, client.jkt));
       }
+    },
+    currentV2Token(username) {
+      const agent = agentsByUsername.get(username);
+      assert.ok(agent !== undefined);
+      const current = [...tokens.values()]
+        .filter((record) => record.agentId === agent.id && !record.revoked)
+        .sort(
+          (left, right) =>
+            left.issuedAt - right.issuedAt || left.tokenId.localeCompare(right.tokenId),
+        )
+        .at(-1);
+      assert.ok(current !== undefined);
+      return current.token;
     },
     failNextV2(operation, fault) {
       const queued = nextFaults.get(operation) ?? [];

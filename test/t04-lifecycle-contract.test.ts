@@ -13,8 +13,10 @@ import {
   T04_MESSAGE_TEXT,
   T04_REPLY_TEXT,
   T04_USERNAME,
+  T04_WEBHOOK_TOKEN,
   waitForLocalMessage,
 } from "./support/t04-gateway-harness.js";
+import { T04RawMcpClient } from "./support/t04-raw-mcp.js";
 
 const START_PROPERTIES = ["payload", "recipient_username", "request_id"];
 const REPLY_PROPERTIES = ["message_id", "payload"];
@@ -278,7 +280,29 @@ test("T04-A02 rejects acknowledgement before terminal state and deletes only aft
   assert.equal(journalContains(scenario.gateway.stateRoot, inbound.messageId), true);
   await waitForLocalMessage(scenario.client, inbound.messageId);
   interceptor.restore();
-  await scenario.client.callTool("ack_message", { message_id: inbound.messageId });
+  let upstreamAckCalls = 0;
+  installT04FetchInterceptor(t, async (_request, call) => {
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "POST" &&
+      call.pathname === `/api/v2/messages/${inbound.messageId}/ack`
+    ) {
+      upstreamAckCalls += 1;
+    }
+    return undefined;
+  });
+  const discarded = new T04RawMcpClient(scenario.gateway.endpoint, T04_WEBHOOK_TOKEN);
+  await discarded.initialize();
+  await discarded.callToolAndDiscardResponse("ack_message", { message_id: inbound.messageId });
+  const repeated = await Promise.all([
+    scenario.client.callTool("ack_message", { message_id: inbound.messageId }),
+    scenario.client.callTool("ack_message", { message_id: inbound.messageId }),
+  ]);
+  assert.deepEqual(repeated, [
+    { message_id: inbound.messageId, status: "acked" },
+    { message_id: inbound.messageId, status: "acked" },
+  ]);
+  assert.equal(upstreamAckCalls, 3);
   assert.equal(scenario.central.v2MessageState(inbound.messageId).acknowledged, true);
   assert.equal(journalContains(scenario.gateway.stateRoot, inbound.messageId), false);
   assert.deepEqual(await scenario.client.callTool("poll_messages", { timeout: 0 }), {
