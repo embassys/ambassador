@@ -2,6 +2,9 @@
 
 Status: runnable future-v2 gateway contract, intentionally red on `0.2.6`
 
+The user accepted this classified gateway inventory on 2026-08-30. It merged
+through PR `#28`. Central S01 review and enforcement remain separate gates.
+
 T03 is separate from the shipped compatibility suite. Every case begins as a
 fresh install or with a fixture-issued version 2 credential. It does not cover
 version 1 conversion, legacy bearer migration, matching-identity replacement,
@@ -66,15 +69,16 @@ counted in addition to their child vectors.
 
 - A rejected scheduled reissue has no externally observable completion event.
   U06/U07 observe the complete server response, continued old-token work, and
-  terminal gateway shutdown, but a future Gate-A decision must add a
-  test-only reissue-runner completion observer if rejection completion must be
-  distinguished from shutdown cancellation. No production hook is added by
-  this test-first change.
+  terminal gateway shutdown. The accepted inventory records that distinction.
+  A later authorized implementation or qualification task may add a test-only
+  completion observer if it must distinguish rejection from shutdown
+  cancellation. The red specification adds no production hook.
 - C01 is pre-response uncertainty, not the credential store's internal
   pre-rename crash point. The POSIX/Windows temp-write, sync, pre-rename, and
-  post-rename micro-boundaries require a reviewed credential-store fault seam.
-  C02 uses the externally observable encrypted-file digest change as a real
-  post-publication barrier.
+  post-rename micro-boundaries are accepted qualification deferrals. G01 or W01
+  may add a test-only credential-store fault seam when those tasks are
+  authorized. C02 uses the externally observable encrypted-file digest change
+  as a real post-publication barrier.
 - The product routes are fixed, including central `/mcp`. T03 verifies the
   canonical `htu` for URLs the gateway actually sends. The complete
   scheme/host/default-port/percent/dot/path normalization matrix belongs behind

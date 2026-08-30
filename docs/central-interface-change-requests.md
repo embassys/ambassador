@@ -21,8 +21,9 @@ still works as a bearer token.
 
 Items 1 through 4 define the v2 conversation and recovery contract. Central
 retains full message content until terminal acknowledgement. The gateway
-remains content-free on disk. None of these requests changes the published v1
-gateway behavior for an identity that has not activated version 2.
+remains content-free on disk. ADR 0027 makes the future release a fresh-install
+cutover. These requests do not migrate a version 1 credential, mailbox, or
+identity, and they do not change the published v1 gateway regression contract.
 
 `Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces the inspected contract for gateway tests. It does not prove the behavior of a deployed service. The supplied live tunnel returned `404`, so deployment of that revision was not checked.
 
@@ -289,9 +290,9 @@ terminal acknowledgement.
      Per ADR 0026, central retains at most eight results, accepts at most four
      previously unseen reissue keys per identity per rolling 24 hours, and
      permits at most three unexpired tokens for one identity and proof key.
-  2. **Email-control recovery.** A user who has lost the token or key, changed
-     the local decryption secret, or must migrate a bearer credential requests
-     a generic verification resend. For an existing verified identity, central
+  2. **Email-control recovery.** A fresh version 2 user who has lost the token
+     or key, or changed the local decryption secret, requests a generic
+     verification resend. For an existing verified version 2 identity, central
      creates a distinct bounded recovery challenge; for a pending registration,
      it keeps ADR 0023's existing verification behavior. Both modes use the
      same non-enumerating resend response. A successful issuance-proof
@@ -397,9 +398,9 @@ terminal acknowledgement.
 
   `/mcp` remains the canonical MCP endpoint. Adding message-lifecycle tools
   does not change the API/MCP endpoint pair used as ADR 0019 credential
-  authenticated data. A future endpoint change requires a coordinated
-  credential reissue and a separate decision before an existing credential can
-  load against it.
+  authenticated data. Normal same-key reissue rejects an endpoint-pair change.
+  A future endpoint change therefore requires a separate credential and
+  interface decision or a fresh enrollment boundary.
 
 - **Why**
 
@@ -433,9 +434,9 @@ terminal acknowledgement.
   fall back. The MCP endpoint remains `/mcp`, so the credential endpoint pair
   does not change merely because v2 tools exist.
 
-  Every identity begins in v1 delivery mode. After the gateway has durably
-  stored an ADR 0026 DPoP credential, it calls the monotonic, idempotent
-  activation transition:
+  A newly enrolled version 2 identity has no version 1 credential, mailbox, or
+  delivery state to convert. After the gateway has durably stored an ADR 0026
+  DPoP credential, it calls the monotonic, idempotent activation operation:
 
   ```http
   POST /api/v2/delivery/activate
@@ -444,35 +445,23 @@ terminal acknowledgement.
   Content-Length: 0
   ```
 
-  Its single transaction verifies DPoP binding, checks for no queued,
-  delivered, or unrecoverable v1 row, records the recipient's explicit v2
-  opt-in, and changes that identity to v2 delivery. First success and every
-  repeat return `{"delivery_version":"v2","status":"active"}`.
-
-  ```text
-  empty v1 mailbox -> v2 delivery mode
-  any queued row   -> migration_incomplete
-  any delivered row with or without a body -> migration_incomplete
-  ```
-
-  After activation, v1 polling for that identity returns `protocol_mismatch`
-  instead of racing the v2 receiver.
+  Its single transaction verifies DPoP binding, records the recipient's
+  explicit v2 opt-in, and selects v2 delivery for that fresh identity. First
+  success and every repeat return
+  `{"delivery_version":"v2","status":"active"}`. It does not inspect or
+  migrate version 1 rows. A fixture may retain separate version 1 identities
+  only to protect the shipped regression baseline.
 
   A v2 gateway starts neither v1 polling nor v2 receive until it observes this
   exact success. If activation is uncertain, it repeats only activation with a
   fresh DPoP proof. DPoP issuance and enforcement therefore deploy before
   activation, and activation deploys before v2 conversation traffic.
 
-  Existing version 1 action messages cannot be converted safely into the
-  strict version 2 conversation schema. An already-deleted body cannot be
-  represented as recovered. The central owner must resolve old rows before
-  activation.
-
-  Keep v1 endpoints and behavior unchanged for identities that have not
-  activated v2. Deprecation or retirement requires a separate decision after
-  published v1 gateways have migrated. Changing the API base or `/mcp` requires
-  separately coordinated credential reissue because ADR 0019 authenticates the
-  endpoint pair as credential additional data.
+  Keep v1 endpoints and behavior unchanged for the shipped regression
+  contract. The target gateway neither reads nor converts that state. Changing
+  the API base or `/mcp` requires a separately coordinated credential decision
+  because ADR 0019 authenticates the endpoint pair as credential additional
+  data.
 
 - **Why**
 
@@ -539,7 +528,6 @@ terminal acknowledgement.
   idempotency_conflict
   mailbox_full
   protocol_mismatch
-  migration_incomplete
   rate_limited
   request_too_large
   temporarily_unavailable
@@ -558,7 +546,7 @@ terminal acknowledgement.
 
   The gateway can apply safe retry and backpressure rules without parsing remote prose. Server and client limits fail at documented boundaries.
 
-## 10. Isolate the consuming v1 poll during migration
+## 10. Keep the consuming v1 regression separate from v2
 
 - **Now**
 
@@ -596,13 +584,16 @@ terminal acknowledgement.
   ```
 
   Version 2 REST and MCP use the same start, lease, outcome, reply, and
-  acknowledgement state through the canonical `/mcp` endpoint. The gateway
-  uses REST without probing or fallback. Version 1 remains on its existing
-  endpoints and can access only identities that have not activated version 2.
+  acknowledgement state through the canonical `/mcp` endpoint. The target
+  gateway uses REST without probing or fallback. Version 1 remains a separate
+  shipped regression contract for separate identities and state. The future
+  gateway does not transition an identity between the two.
 
 - **Why**
 
-  One canonical state per identity prevents REST, MCP, v1, and v2 from racing to consume the same message.
+  One canonical v2 state per fresh identity prevents REST and MCP from racing
+  to receive the same message. Keeping v1 as a separate regression contract
+  avoids a mixed-version runtime.
 
 ## Target flow
 

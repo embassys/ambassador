@@ -1,6 +1,10 @@
 # T04 red-suite failure inventory
 
-Status: intentionally red pending the gateway review gate
+Status: accepted gateway contract, intentionally red on `0.2.6`
+
+The user accepted this classified gateway inventory on 2026-08-30. It merged
+through PR `#28`. Central S01 review and the S04/S05 server work remain
+separate gates.
 
 This file classifies the expected failures in the `t04-*.test.ts` files.
 Fixture contract tests are already green. A failure below therefore records an
