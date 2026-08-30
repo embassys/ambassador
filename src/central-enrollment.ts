@@ -78,11 +78,14 @@ export interface VerificationEnrollmentSuccess {
 
 type BootstrapToolName = "register_agent" | "resend_verification" | "verify_email";
 
-interface EnrollmentHttpResponse {
+interface EnrollmentHttpResponseHead {
   readonly status: number;
   readonly headers: Headers;
   readonly headerValues: ReadonlyMap<string, readonly string[]>;
   readonly rawHeaderBytes: number;
+}
+
+interface EnrollmentHttpResponse extends EnrollmentHttpResponseHead {
   readonly body: Uint8Array;
 }
 
@@ -464,29 +467,44 @@ async function readFetchResponseBody(response: Response, signal: AbortSignal): P
   return bytes;
 }
 
-function assertResponseHeaderSize(response: EnrollmentHttpResponse): void {
+function assertResponseHeaderSize(response: EnrollmentHttpResponseHead): void {
   if (response.rawHeaderBytes > RESPONSE_HEADERS_MAX_BYTES) {
     throw new EnrollmentContractError();
   }
 }
 
-function assertNoResponseCookies(response: EnrollmentHttpResponse): void {
+function assertNoResponseCookies(response: EnrollmentHttpResponseHead): void {
   if (response.headerValues.has("set-cookie")) throw new EnrollmentContractError();
 }
 
-function assertSafeRepresentationHeaders(response: EnrollmentHttpResponse): void {
+function assertSafeRepresentationHeaders(response: EnrollmentHttpResponseHead): void {
   const mediaType = response.headers.get("content-type");
   if (mediaType === null || !SAFE_MEDIA_TYPE.test(mediaType)) throw new EnrollmentContractError();
   if (response.headers.has("content-encoding")) throw new EnrollmentContractError();
 }
 
-function hasNoStore(response: EnrollmentHttpResponse): boolean {
+function hasNoStore(response: EnrollmentHttpResponseHead): boolean {
   return (
     response.headers
       .get("cache-control")
       ?.split(",")
       .some((directive) => directive.trim().toLowerCase() === "no-store") === true
   );
+}
+
+function assertPreBodyResponse(
+  route: BootstrapToolName,
+  response: EnrollmentHttpResponseHead,
+): void {
+  assertResponseHeaderSize(response);
+  if (route === "verify_email" && !hasNoStore(response)) {
+    throw new CentralEnrollmentError("central_verification_response_unsafe");
+  }
+  assertNoResponseCookies(response);
+  if (response.status >= 300 && response.status < 400) {
+    throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+  }
+  assertSafeRepresentationHeaders(response);
 }
 
 function assertSafeResponseValue(
@@ -904,27 +922,20 @@ export class CentralEnrollmentClient {
     let response: EnrollmentHttpResponse;
     try {
       response = await this.#request(
+        route,
         target,
         serialized,
         init.headers as Record<string, string>,
         requestSignal,
       );
     } catch (error) {
+      if (error instanceof CentralEnrollmentError) throw error;
       if (error instanceof EnrollmentContractError) {
         throw new CentralEnrollmentError("central_enrollment_contract_failed");
       }
       throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
     }
     try {
-      assertResponseHeaderSize(response);
-      if (route === "verify_email" && !hasNoStore(response)) {
-        throw new CentralEnrollmentError("central_verification_response_unsafe");
-      }
-      assertNoResponseCookies(response);
-      if (response.status >= 300 && response.status < 400) {
-        throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
-      }
-      assertSafeRepresentationHeaders(response);
       const value = parseStrictResponse(response.body);
       return { response, value };
     } catch (error) {
@@ -937,13 +948,14 @@ export class CentralEnrollmentClient {
   }
 
   async #request(
+    route: BootstrapToolName,
     target: URL,
     body: string,
     headers: Readonly<Record<string, string>>,
     signal: AbortSignal,
   ): Promise<EnrollmentHttpResponse> {
     if (this.#fetch !== undefined) {
-      return await this.#requestWithFetch(target, body, headers, signal);
+      return await this.#requestWithFetch(route, target, body, headers, signal);
     }
     return await new Promise((resolve, reject) => {
       let settled = false;
@@ -974,12 +986,22 @@ export class CentralEnrollmentClient {
           void (async () => {
             try {
               const collected = responseHeaders(incoming);
-              const responseBody = await readResponseBody(incoming, collected.headers, signal);
-              finish(resolve, {
+              const head: EnrollmentHttpResponseHead = {
                 status: incoming.statusCode ?? 0,
                 headers: collected.headers,
                 headerValues: collected.values,
                 rawHeaderBytes: collected.rawBytes,
+              };
+              try {
+                assertPreBodyResponse(route, head);
+              } catch (error) {
+                incoming.destroy();
+                fail(error);
+                return;
+              }
+              const responseBody = await readResponseBody(incoming, collected.headers, signal);
+              finish(resolve, {
+                ...head,
                 body: responseBody,
               });
             } catch (error) {
@@ -1012,6 +1034,7 @@ export class CentralEnrollmentClient {
   }
 
   async #requestWithFetch(
+    route: BootstrapToolName,
     target: URL,
     body: string,
     headers: Readonly<Record<string, string>>,
@@ -1041,11 +1064,20 @@ export class CentralEnrollmentClient {
       rawHeaderBytes +=
         Buffer.byteLength(name, "latin1") + 2 + Buffer.byteLength(value, "latin1") + 2;
     }
-    return {
+    const head: EnrollmentHttpResponseHead = {
       status: response.status,
       headers: response.headers,
       headerValues: values,
       rawHeaderBytes,
+    };
+    try {
+      assertPreBodyResponse(route, head);
+    } catch (error) {
+      void response.body?.cancel().catch(() => undefined);
+      throw error;
+    }
+    return {
+      ...head,
       body: await readFetchResponseBody(response, signal),
     };
   }
