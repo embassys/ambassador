@@ -29,17 +29,12 @@ keeps content-free correlation in connector-owned state. Central and provider
 credentials do not cross that boundary, and an uncertain provider turn is not
 replayed blindly.
 
-ADR 0024 does not approve the connector CLI, state implementation, limits,
-runtime, dependencies, provider port, policy, packaging, installation,
-supported platforms, or publishing plan. Those decisions require separate
-records and user approval before tests or production code.
-
-ADRs 0028 through 0031 are the proposed D05 connector foundation package.
-They recommend the startup and retirement interface, encrypted content-free
-state, execution and recovery contract, fixed limits, runtime, dependencies,
-package layout, platform qualification, installation, and publishing gates.
-They are not approved. No connector test, code, dependency, package, or
-distribution change may rely on them until the user accepts each record.
+ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. They fix
+the startup and retirement interface, encrypted content-free state, execution
+and recovery contract, fixed limits, runtime, dependency scope, private
+package layout, platform qualification, installation model, and later
+publishing gates. K01 remains blocked by G04. Provider interfaces and public
+distribution remain behind their separate ADR and release gates.
 
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and

@@ -1,19 +1,19 @@
 # Next architecture and security plan
 
-Status: accepted gateway architecture and provider-neutral connector boundary, production implementation not started
+Status: accepted gateway architecture and provider-neutral connector foundation, production implementation not started
 
 Date: 2026-08-30
 
 This document collects the accepted REST enrollment, conversation, recovery,
 DPoP, and provider-neutral connector work for later implementation agents. The
 user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29 and accepted ADR
-0024's connector boundary on 2026-08-30. D06 also approves the exact test-only
-Python fixture dependency recorded in ADR 0020. ADR 0024 does not approve a
-connector CLI, state implementation, limits, runtime, dependency, provider
-port, policy, package, platform, installation, or publishing choice. Those D05
-decisions remain pending. The current product and protocol continue to
-describe shipped version 1 behavior until implementation lands. Tests and
-fixtures come before production changes under `docs/implementation-plan.md`.
+0024's connector boundary on 2026-08-30. The user accepted ADRs 0028 through
+0031 on the same date, completing D05. D06 also approves the exact test-only
+Python fixture dependency recorded in ADR 0020. Provider-specific interfaces,
+support claims, and public distribution remain behind later gates. The current
+product and protocol continue to describe shipped version 1 behavior until
+implementation lands. Tests and fixtures come before production changes under
+`docs/implementation-plan.md`.
 
 ADRs 0023 and 0026 are accepted. PR `#28` merged T01 through T04 and C01,
 and the user accepted the T03 and T04 gateway failure inventory on 2026-08-30.
@@ -320,19 +320,19 @@ start a second provider turn.
 - Keep prompts, responses, tool data, permissions, and credentials out of
   connector state, gateway state, logs, diagnostics, metrics, and errors.
 
-### Proposed decisions requiring approval before tests or code
+### Accepted connector foundation decisions
 
 | ID | Decision | Required record |
 | --- | --- | --- |
-| N3-D1 | Connector executable, CLI, working-directory authority, and whole-provider retirement interface | Proposed ADR 0028 and user approval |
-| N3-D2 | Correlation-store format, access controls, encryption, retention, retirement, and fresh-install lifecycle | Proposed ADR 0029 and explicit extension of ADR 0007 |
-| N3-D3 | Common implementation runtime, package layout, dependencies, and supported platforms | Proposed ADR 0031 and user approval |
-| N3-D4 | Fixed webhook, concurrency, process, provider timeout, event, stdout, stderr, response, and retry limits | Proposed ADR 0030 and user approval |
-| N3-D5 | Provider port, local approval behavior, crash recovery, and terminal outcomes | Proposed ADR 0030 and user approval |
-| N3-D6 | Packaging, installation, qualification, and publishing model | Proposed ADR 0031 and later distribution approval |
+| N3-D1 | Connector executable, CLI, working-directory authority, and whole-provider retirement interface | Accepted ADR 0028 |
+| N3-D2 | Correlation-store format, access controls, encryption, retention, retirement, and fresh-install lifecycle | Accepted ADR 0029 and explicit extension of ADR 0007 |
+| N3-D3 | Common implementation runtime, private package layout, dependency scope, and platform qualification | Accepted ADR 0031 |
+| N3-D4 | Fixed webhook, concurrency, process, provider timeout, event, stdout, stderr, response, and retry limits | Accepted ADR 0030 |
+| N3-D5 | Provider port, local approval behavior, crash recovery, and terminal outcomes | Accepted ADR 0030 |
+| N3-D6 | Private packaging, installation, qualification, and later publishing gates | Accepted ADR 0031; distribution still requires Q03 or Q05 approval |
 
-Do not infer approval for these choices from acceptance of ADR 0024's product
-boundary.
+The user approved N3-D1 through N3-D6 on 2026-08-30. This does not bypass G04,
+the provider-specific ADRs, or Q03 and Q05 publication approval.
 
 ### Work order and gates
 
@@ -640,6 +640,5 @@ open until the external central owner publishes and accepts S01. N2 server
 operations use N6 protected transport. Gateway changes overlap in the MCP
 catalog, central clients, credential store, fixtures, application assembly,
 and product documentation, so G01 through G04 stay serialized and blocked by
-Gate A. ADR 0024's boundary is accepted. N3 through N5 remain blocked on the
-concrete D05 connector CLI, state, limits, dependency, provider-port, policy,
-packaging, installation, platform, and publishing decisions.
+Gate A. ADR 0024's boundary and D05 are accepted. N3 remains blocked by G04.
+N4 and N5 additionally retain provider-specific and distribution gates.

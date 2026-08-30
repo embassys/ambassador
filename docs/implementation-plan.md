@@ -41,7 +41,7 @@ documentation land.
 | D02 | Complete | ADR 0025 fixes leased delivery, conversations, replies, terminal outcomes, acknowledgement, and activation |
 | D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, and revocation; ADR 0027 removes in-place migration from scope |
 | D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
-| D05 | Proposed package ready; pending user approval | ADRs 0028 through 0031 propose the connector startup and retirement interface, state, policy, limits, provider-neutral port, runtime, dependency scope, package layout, installation, platform, and publishing gates; none is approved |
+| D05 | Complete | ADRs 0028 through 0031 fix the connector startup and retirement interface, state, policy, limits, provider-neutral port, runtime, dependency scope, private package layout, installation model, platform qualification, and publishing gates |
 | D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
 
 The accepted contracts contain fixed values for development and test work.
@@ -162,9 +162,9 @@ this order.
 
 ## Phase 5: connector and provider work
 
-ADR 0024 accepts the separate provider-neutral connector boundary. ADRs 0028
-through 0031 now propose the concrete D05 choices. No connector test or
-production code starts until the user approves all four records:
+ADR 0024 accepts the separate provider-neutral connector boundary. The user
+accepted ADRs 0028 through 0031 on 2026-08-30, completing D05 with these
+connector-wide choices:
 
 - connector executable, startup CLI, and explicit whole-provider state retirement;
 - working-directory and local security policy inputs;
@@ -212,7 +212,6 @@ artifact tests.
   staging or release.
 - The local user-authorized reset interface for an unreadable credential or
   uncertain revocation remains unresolved.
-- D05's connector CLI, state technology and schema, cryptographic design,
-  limits, dependencies, provider-neutral port, approval policy, packaging,
-  installation, publishing, and supported-platform decisions are proposed in
-  ADRs 0028 through 0031 and remain unapproved.
+- D05 is complete. G04 still blocks K01, and provider-specific interfaces,
+  versions, dependencies, platform support, and public distribution remain
+  behind their later ADR and release gates.

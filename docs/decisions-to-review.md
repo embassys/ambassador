@@ -44,17 +44,17 @@ Updated: 2026-08-30
   state. The central credential remains in the gateway, provider credentials
   remain in the provider runtime, and the connector never blindly replays an
   uncertain provider turn.
-- This boundary approval does not complete D05. Concrete connector CLI, state,
-  cryptography, limits, dependencies, provider interfaces, approval policy,
-  packaging, installation, platform, and publishing decisions remain pending.
+- ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. Real
+  provider interfaces, versions, dependencies, support claims, and public
+  distribution remain behind their later ADR and release gates.
 
-## Proposed D05 package for review
+## Accepted D05 package
 
 ADRs 0028 through 0031 use the user's instruction to choose reasonable
-defaults and record them for later review. They remain proposed. Approval must
-confirm all of these choices before K01 or any connector production work:
+defaults and record them for review. The user accepted all four records on
+2026-08-30:
 
-- ADR 0028 proposes three provider-specific foreground binaries. `start` has
+- ADR 0028 accepts three provider-specific foreground binaries. `start` has
   exactly four required named options for a loopback port, token environment
   reference, canonical absolute working directory, and explicit
   `read-only` or `workspace-write` maximum policy. The gateway MCP endpoint and
@@ -63,8 +63,8 @@ confirm all of these choices before K01 or any connector production work:
   provider's allowlisted correlation artifacts. The retired location is never
   reused; a future design would need a different versioned location and new
   identity proof while preserving the old tombstone.
-- ADR 0029 proposes one fixed per-provider SQLite store using the already
-  pinned `better-sqlite3` only after its approved scope is extended. It uses a
+- ADR 0029 accepts one fixed per-provider SQLite store and extends the already
+  pinned `better-sqlite3` scope. It uses a
   fresh-install-only schema, Node-core scrypt, AES-256-GCM encrypted IDs,
   keyed indexes, provider and working-directory scope binding, exact
   platform-qualified filesystem protections, acknowledgement-based message
@@ -74,13 +74,13 @@ confirm all of these choices before K01 or any connector production work:
   Restoring both encrypted databases together to an older, mutually consistent
   snapshot can replay local correlation state; the design detects mismatched
   or partial rollback but cannot prevent that same-user backup rollback.
-- ADR 0030 proposes the provider-neutral `start`, `resume`, `recover`, and
+- ADR 0030 accepts the provider-neutral `start`, `resume`, `recover`, and
   `cancel` port; exact webhook and process bounds; one turn per conversation;
   two turns globally; a 100-ID queue; fail-closed approval, cancellation, and
   uncertainty; exact ADR 0025 completion mapping; reply-before-ack ordering;
   an absolute non-resetting provider deadline, and one non-resetting
   content-free central retry schedule.
-- ADR 0031 proposes extending the accepted Node 24, TypeScript, pnpm,
+- ADR 0031 accepts extending the Node 24, TypeScript, pnpm,
   `node:test`, Biome, Zod, MCP client, and Node-core toolchain to connectors,
   with no new foundation framework. It proposes shared repository source
   compiled directly into separate Codex, Claude, and Gemini artifacts,
@@ -91,10 +91,10 @@ confirm all of these choices before K01 or any connector production work:
   source commit to the exact tarball digest and verify the resulting registry
   provenance after publication.
 
-Approving this package would complete only the provider-neutral D05
-foundation decisions. G04 would still block K01, and Codex, Claude Code, and
-Gemini would still require separate executable or SDK, version, protocol,
-sandbox, approval, history, license, and platform ADRs.
+This approval completes the provider-neutral D05 foundation decisions. G04
+still blocks K01. Codex, Claude Code, and Gemini still require separate
+executable or SDK, version, protocol, sandbox, approval, history, license, and
+platform ADRs.
 
 ## Test-only stand-ins
 
@@ -111,14 +111,14 @@ central owner and returns a material contract difference for review.
 
 ## Active architecture and dependency decisions
 
-- D05 remains pending after ADR 0024's boundary approval. ADRs 0028 through
-  0031 contain the proposed connector foundation decisions and need explicit
-  user approval.
+- D05 is complete. ADRs 0028 through 0031 contain the accepted connector
+  foundation decisions; G04 now blocks K01.
 - Each Codex, Claude Code, and Gemini adapter still needs its own exact
   executable or SDK version, protocol schema, dependency decision, sandbox and
   approval policy, history behavior, supported platforms, and update policy.
-- Connector installation, packaging, publishing, and distribution remain
-  unapproved. The gateway CLI stays unchanged.
+- The private package and installation model is accepted. Public-repository
+  conversion, publish jobs, preview or stable publication, and support claims
+  remain unapproved until their later gates. The gateway CLI stays unchanged.
 - The local user-authorized interface for intentional identity reset,
   unreadable credentials, and uncertain revocation remains undecided. Ordinary
   authentication or key failure must not enter recovery or overwrite a

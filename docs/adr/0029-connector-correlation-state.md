@@ -1,6 +1,6 @@
 # 0029 Connector correlation state
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-30
 
@@ -936,11 +936,11 @@ mappings and uncertain or closed tombstones. Acknowledgement deletes no
 conversation row. Only the explicit whole-provider `retire-state` sequence
 removes them and permanently retires the location.
 
-### Acceptance cases if approved
+### Required acceptance cases
 
 These cases use the exact DDL above, real transactions, deterministic clocks,
-and abrupt process barriers. They do not authorize test implementation before
-approval.
+and abrupt process barriers. Their implementation remains ordered behind G04
+and K01.
 
 | ID | Case | Required result |
 | --- | --- | --- |
@@ -960,8 +960,8 @@ approval.
 
 ## Dependency, license, packaging, and platform impact
 
-This proposal adds no package version and no ORM. If approved, it extends the
-already pinned `better-sqlite3` 13.0.3 and
+This accepted record adds no package version and no ORM. It extends the already
+pinned `better-sqlite3` 13.0.3 and
 `@types/better-sqlite3` 9.6.0 to connector state. Both packages use MIT;
 SQLite is public domain. AES-GCM, HMAC, random generation, constant-time
 comparison, scrypt, filesystem checks, and account lookup use Node core and
@@ -1023,15 +1023,15 @@ listed above.
 
 ## Approval
 
-Not approved. This record recommends the N3-D2 connector correlation-state
-design for user review. Approval must explicitly extend ADR 0007's
-`better-sqlite3` scope and accept the account-derived location, literal file
-set, 100,000-row lifetime ceiling, 256 MiB database bound, cryptographic
-encoding and metadata leakage, access control, network-home exclusion,
-locking, crash and paired-rollback limits, retirement, indefinite tombstone
-retention, dependency, license, packaging, and platform impact.
+Approved by the user on 2026-08-30. This approval explicitly extends ADR
+0007's `better-sqlite3` scope to connector correlation state and accepts the
+account-derived location, literal file set, 100,000-row lifetime ceiling,
+256 MiB database bound, cryptographic encoding and metadata leakage, access
+control, network-home exclusion, locking, crash and paired-rollback limits,
+retirement, indefinite tombstone retention, dependency, license, packaging,
+and platform impact.
 
-This proposal authorizes no connector test, production code, dependency or
-lockfile change, schema creation, state migration, deletion implementation,
-package change, installation work, platform claim, or publication. The rest
-of D05 remains pending.
+The accepted design is fresh-install-only and adds no migration. Public
+publication and provider/platform support claims remain behind ADR 0031's
+later gates. ADRs 0028, 0030, and 0031 were accepted with this record and
+complete D05; K01 remains blocked by G04.

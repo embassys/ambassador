@@ -1,13 +1,13 @@
 # 0031 Connector runtime and distribution
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-30
 
 ## Problem
 
 ADR 0024 accepts provider connectors as products separate from the gateway.
-D05 still needs an exact common runtime, repository package boundary,
+D05 needed an exact common runtime, repository package boundary,
 dependency policy, installation model, supported-platform rule, and publishing
 gate before connector tests or production code begin.
 
@@ -42,8 +42,9 @@ cryptography package, provider SDK, or provider executable as part of the
 foundation. A provider-specific ADR may propose an SDK or executable only with
 its exact version, license, protocol, release policy, and platform impact.
 
-This is an amendment proposal, not permission to install or update any
-dependency. Exact entries and lockfile changes wait for user approval of D05.
+This accepted amendment does not itself install or update a dependency. Exact
+workspace entries and lockfile changes wait for G04 and the K01 through K03
+implementation sequence.
 
 The connector is an MCP client, not an MCP server, and uses the client
 package's approved HTTP transport. No MCP server or Node transport package is
@@ -228,9 +229,10 @@ importing the module directly is not a command smoke test.
 
 The initial foundation dependency object in each manifest contains exactly
 `@modelcontextprotocol/client` 2.0.0, `better-sqlite3` 13.0.3, and Zod 4.4.3.
-It may include `better-sqlite3` only if ADR 0029 is approved with D05. A later
-provider ADR may add that provider's exact approved runtime dependency to its
-own static manifest. It cannot add the dependency to the other two manifests.
+ADR 0029's D05 approval authorizes the connector use of `better-sqlite3`. A
+later provider ADR may add that provider's exact approved runtime dependency
+to its own static manifest. It cannot add the dependency to the other two
+manifests.
 
 Each artifact exposes only its provider-specific foreground command approved
 by ADR 0028. The gateway package, binary, CLI, dependencies, state, and release
@@ -270,10 +272,10 @@ npx --yes @a2adev/<provider>-connector@<qualified-version> start <approved-optio
 Repository work, audits, packs, and clean-install qualification continue to
 use pnpm. End users do not need pnpm or a global connector installation.
 
-No distribution tooling is added during D05. After D05 and G04 approval, K01
-through K03 may add the private static manifests, build configuration, staging
-script, and local packed-install tests described above. They may not remove
-`private`, add a publish job, or publish a package.
+No distribution tooling was added during D05. After G04, K01 through K03 may
+add the private static manifests, build configuration, staging script, and
+local packed-install tests described above. They may not remove `private`, add
+a publish job, or publish a package.
 
 Q03 is the preview publication decision and release gate. It applies to one
 selected provider that has passed Q01, Q02, its provider qualification, and
@@ -406,10 +408,14 @@ reviewable.
 
 ## Approval
 
-Not approved. This record proposes the D05 runtime, package, installation, and
-platform choices for user review. It authorizes no dependency change,
-workspace restructuring, package manifest, distribution tooling, provider
-installation, public-repository change, support claim, preview publication, or
-stable publication. It adds no state migration. A state-schema change still
-requires a separate reviewed plan and cannot migrate a first-release store
-automatically.
+Approved by the user on 2026-08-30. This accepts the D05 runtime, private
+package layout, installation model, dependency scope, and platform
+qualification rules. With ADRs 0028 through 0030, it completes D05. After G04,
+K01 through K03 may add the private manifests, build configuration, staging,
+and packed-install tests authorized above.
+
+This approval does not authorize a public-repository change, publish job,
+preview or stable publication, or provider/platform support claim. Those stay
+behind Q03, Q05, and the provider qualification gates. It adds no state
+migration; a later state-schema change requires a separate reviewed plan and
+cannot migrate a first-release store automatically.

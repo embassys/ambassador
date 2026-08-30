@@ -130,7 +130,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | D02 | Complete | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 fixes messages, leased recovery, replies, acknowledgement, idempotency, terminal status, bounds, and activation |
 | D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and recovery; ADR 0027 removes migration from the target |
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
-| D05 | Proposed package ready; pending user approval | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | ADRs 0028 through 0031 propose the connector command and explicit retirement, working-directory input, state technology and schema, access control, encryption, runtime and dependency scope, provider port, concurrency, timeouts, approvals, terminal outcomes, packaging, installation, supported platforms, and publishing gates |
+| D05 | Complete | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | ADRs 0028 through 0031 fix the connector command and explicit retirement, working-directory input, state technology and schema, access control, encryption, runtime and dependency scope, provider port, concurrency, timeouts, approvals, terminal outcomes, private packaging, installation model, platform qualification, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
 
 The gateway uses the fixed accepted route split and never adds runtime
@@ -255,8 +255,7 @@ path.
 
 ## Wave 6: build the provider-neutral connector foundation
 
-D05 review may run while gateway implementation waits on its external gates.
-Connector code waits for both accepted ADRs 0028 through 0031 and G04 because
+D05 is complete. Connector code waits for G04 because
 it needs the final local `poll_messages`, `reply_message`, `complete_message`,
 `get_message_outcome`, and `ack_message` contracts.
 
@@ -436,9 +435,9 @@ expose a crash barrier.
 
 These groups may run in parallel after their dependencies are green:
 
-- D05 decision work and the external S01 red specification;
 - S04 and S06 after S03;
-- D05 decision work while later G01 through G04 proceed;
+- provider-specific ADR research while later G01 through G04 proceed, without
+  installing a provider dependency or implementing an adapter;
 - the Codex, Claude Code, and Gemini tracks after K03; and
 - G05, G06, and G07 after their separate staging gates.
 
