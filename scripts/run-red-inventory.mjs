@@ -45,6 +45,27 @@ const definitions = {
     timeoutMs: 120_000,
     vectorNote: "41 behavior checks: 40 expected red, 1 response-observer support check green",
   },
+  k02: {
+    key: "k02",
+    label: "K02 provider-neutral connector",
+    filePrefix: "k02-",
+    files: [
+      "k02-correlation-state.test.js",
+      "k02-crash-matrix.test.js",
+      "k02-execution-boundaries.test.js",
+      "k02-limits-timeouts.test.js",
+      "k02-loader-boundary.test.js",
+      "k02-provider-automata.test.js",
+      "k02-recovery-outcomes.test.js",
+      "k02-startup-state-package.test.js",
+      "k02-state-scheduling.test.js",
+      "k02-webhook-admission.test.js",
+    ],
+    expected: { tests: 69, pass: 1, fail: 68, skipped: 0, todo: 0 },
+    timeoutMs: 180_000,
+    boundaryKind: "marker",
+    vectorNote: "69 checks: 68 expected red at the exact absent K03 entry, 1 loader guard green",
+  },
   "packaged-docker": {
     key: "packaged-docker",
     label: "Packaged gateway and independent Docker v2 fixture",
@@ -52,6 +73,7 @@ const definitions = {
     files: ["c01-packaged-docker-v2.test.js"],
     expected: { tests: 1, pass: 0, fail: 1, skipped: 0, todo: 0 },
     timeoutMs: 60_000,
+    boundaryKind: "marker",
     vectorNote: "1 future-v2 packaged smoke check: 1 expected red",
   },
 };
@@ -59,11 +81,16 @@ const definitions = {
 const requested = process.argv.slice(2);
 let selected;
 if (requested.length === 0) {
-  selected = [definitions.t03, definitions.t04];
-} else if (requested.length === 1 && requested[0] === "--suite=packaged-docker") {
-  selected = [definitions["packaged-docker"]];
+  selected = [definitions.t03, definitions.t04, definitions.k02];
+} else if (requested.length === 1 && requested[0]?.startsWith("--suite=")) {
+  const key = requested[0].slice("--suite=".length);
+  const definition = definitions[key];
+  if (definition === undefined) {
+    throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|packaged-docker]");
+  }
+  selected = [definition];
 } else {
-  throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=packaged-docker]");
+  throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|packaged-docker]");
 }
 
 const root = join(process.cwd(), ".test-dist", "test");
@@ -148,7 +175,7 @@ function classifyEvents(events, definition) {
       throw new Error(`${definition.label} exact reviewed node directive changed`);
     }
     if (reviewed.status === "fail") {
-      const boundary = definition.key === "packaged-docker" ? observed.marker : observed.signature;
+      const boundary = definition.boundaryKind === "marker" ? observed.marker : observed.signature;
       if (boundary !== reviewed.boundary) {
         throw new Error(`${definition.label} advanced beyond a reviewed failure boundary`);
       }
@@ -280,7 +307,7 @@ async function runSuite(definition) {
 const results = [];
 for (const definition of selected) results.push(await runSuite(definition));
 
-console.log("C01 classified red inventory matched:");
+console.log("Classified red inventory matched:");
 for (const { definition, observed } of results) {
   console.log(
     `- ${definition.label} | ${observed.tests} | ${observed.fail} | ${observed.pass} | ${observed.skipped} | ${observed.todo} | ${definition.vectorNote}`,
@@ -290,7 +317,7 @@ for (const { definition, observed } of results) {
 const summaryPath = process.env.GITHUB_STEP_SUMMARY;
 if (summaryPath !== undefined && summaryPath !== "") {
   const markdown = [
-    "\n## C01 classified red inventory\n",
+    "\n## Classified red inventory\n",
     "| Suite | Node test nodes | Expected red nodes | Current green nodes | Skipped | Todo | Behavior classification |",
     "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ...results.map(
