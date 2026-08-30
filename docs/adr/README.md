@@ -34,6 +34,13 @@ runtime, dependencies, provider port, policy, packaging, installation,
 supported platforms, or publishing plan. Those decisions require separate
 records and user approval before tests or production code.
 
+ADRs 0028 through 0031 are the proposed D05 connector foundation package.
+They recommend the startup and retirement interface, encrypted content-free
+state, execution and recovery contract, fixed limits, runtime, dependencies,
+package layout, platform qualification, installation, and publishing gates.
+They are not approved. No connector test, code, dependency, package, or
+distribution change may rely on them until the user accepts each record.
+
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and
 deployment facts, tests use only the stand-ins in

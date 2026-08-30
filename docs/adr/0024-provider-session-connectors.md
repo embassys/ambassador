@@ -138,13 +138,13 @@ provider state, persist provider session IDs, choose a working directory, or
 modify provider configuration files.
 
 The connector is the MCP client for delivery-control operations. It calls
-`poll_messages`, `reply_message`, and `ack_message` itself. It does not need to
-give the provider process the gateway bearer or expose those tools to the
-model. Codex, Claude Code, and Gemini CLI continue to use the user's existing
-MCP servers and extensions for local work. Allowing a model to initiate other
-A2A actions through the gateway would need a separate narrowed tool and
-credential decision; it must not happen implicitly as part of notification
-delivery.
+`poll_messages`, `reply_message`, `complete_message`, `get_message_outcome`,
+and `ack_message` itself. It does not need to give the provider process the
+gateway bearer or expose those tools to the model. Codex, Claude Code, and
+Gemini CLI continue to use the user's existing MCP servers and extensions for
+local work. Allowing a model to initiate other A2A actions through the gateway
+would need a separate narrowed tool and credential decision; it must not
+happen implicitly as part of notification delivery.
 
 ## Connector state boundary
 
@@ -300,11 +300,14 @@ Connector tests and production work remain blocked until D05 approves:
 2. the correlation-store technology, schema, access control, encryption,
    deletion, and fresh-install behavior;
 3. fixed concurrency, timeout, event, process, output, and response limits;
-4. the common runtime and dependencies, plus each provider interface,
-   executable or SDK version, and protocol schema;
+4. the common runtime, dependencies, and provider-neutral port;
 5. local approval behavior and the mapping from provider results to terminal
    or uncertain outcomes; and
 6. packaging, installation, supported platforms, and publishing gates.
+
+Each provider interface, executable or SDK version, and protocol schema stays
+behind its later provider-specific ADR and blocks only that adapter's tests and
+production work.
 
 ## Approval
 
