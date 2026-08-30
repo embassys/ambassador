@@ -362,6 +362,13 @@ license, and platform ADRs.
   setting fields. The earlier scan required the sender's literal
   `dangerFullAccess` text both present and absent in the same serialized
   request list. X09 continues to prove byte-exact input preservation.
+- X09 retains the exact structured-input equality check, then replaces only
+  the cloned input text with a sentinel and recursively inspects every other
+  request, argument, and environment string. The earlier `JSON.stringify`
+  substring count could not find a sender newline because JSON must escape it,
+  even though the structured value was preserved. The recursive leaf check
+  proves that input is absent from every other carrier without depending on
+  JSON escaping.
 - X06 uses the existing `session_binding` recovery crash seam for the
   post-session-publication case. The earlier `binding_published` seam runs
   before the provider-port call and therefore cannot observe the one

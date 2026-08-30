@@ -25,6 +25,16 @@ function eventName(value: unknown): unknown {
     : undefined;
 }
 
+function collectStringLeaves(value: unknown, leaves: string[] = []): string[] {
+  if (typeof value === "string") leaves.push(value);
+  else if (Array.isArray(value)) {
+    for (const item of value) collectStringLeaves(item, leaves);
+  } else if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) collectStringLeaves(item, leaves);
+  }
+  return leaves;
+}
+
 function agentMessage(
   text: string,
   phase: "commentary" | "final_answer" | null = "final_answer",
@@ -120,7 +130,22 @@ test("CX02-X09 preserves adversarial A2A bytes only in one structured text input
     assert.deepEqual((turn.params as { input?: unknown }).input, [
       { type: "text", text, text_elements: [] },
     ]);
-    assert.equal(JSON.stringify(launch.requests).split(text).length - 1, 1);
+    const withoutInput = structuredClone(launch.requests) as Record<string, unknown>[];
+    const clonedTurn = withoutInput.find((request) => request.method === "turn/start");
+    assert.ok(clonedTurn !== undefined && clonedTurn.params !== null);
+    const clonedParams = clonedTurn.params as { input?: { text?: string }[] };
+    assert.equal(clonedParams.input?.length, 1);
+    assert.equal(clonedParams.input?.[0]?.text, text);
+    if (clonedParams.input?.[0] !== undefined) clonedParams.input[0].text = "<input_text>";
+    const remainingStrings = [
+      ...collectStringLeaves(withoutInput),
+      ...launch.arguments,
+      ...Object.values(launch.environment),
+    ];
+    assert.equal(
+      remainingStrings.some((value) => value === text || value.includes(text)),
+      false,
+    );
   }
 });
 
