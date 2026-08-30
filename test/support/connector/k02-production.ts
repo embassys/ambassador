@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createCipheriv, createHmac, randomBytes, scryptSync } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+
+import Database from "better-sqlite3";
 
 import {
   type FakeConnectorGateway,
@@ -426,6 +428,130 @@ export class K02GatewayFaultProxy {
       response.writeHead(upstreamResponse.status, responseHeaders);
       response.end(bytes);
     });
+  }
+}
+
+function k02StateFrame(domain: number, parts: readonly Buffer[]): Buffer {
+  const fields = parts.map((part) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(part.byteLength);
+    return Buffer.concat([length, part]);
+  });
+  return Buffer.concat([
+    Buffer.from("A2A-CONNECTOR-STATE\0", "ascii"),
+    Buffer.from([1, domain]),
+    ...fields,
+  ]);
+}
+
+function k02StateHmac(key: Buffer, domain: number, parts: readonly Buffer[]): Buffer {
+  return createHmac("sha256", key).update(k02StateFrame(domain, parts)).digest();
+}
+
+function k02StateEnvelope(
+  key: Buffer,
+  raw: Buffer,
+  aad: Buffer,
+  iv: Buffer,
+): { iv: Buffer; ciphertext: Buffer; tag: Buffer } {
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(aad);
+  return {
+    iv,
+    ciphertext: Buffer.concat([cipher.update(raw), cipher.final()]),
+    tag: cipher.getAuthTag(),
+  };
+}
+
+export function seedK02ConversationCapacityForTest(options: {
+  stateDirectory: string;
+  webhookToken: string;
+  providerKind: "codex" | "claude" | "gemini";
+  workingDirectory: string;
+  count: number;
+  activeConversationId: string;
+  activeProviderSessionId: string;
+}): void {
+  assert.ok(options.count >= 1 && options.count <= 100_000);
+  const database = new Database(join(options.stateDirectory, "correlation.sqlite3"));
+  const meta = database
+    .prepare<[], { kdf_salt: Buffer }>("SELECT kdf_salt FROM store_meta WHERE singleton=1")
+    .get();
+  assert.ok(meta !== undefined);
+  const derived = scryptSync(Buffer.from(options.webhookToken, "hex"), meta.kdf_salt, 64, {
+    N: 131_072,
+    r: 8,
+    p: 1,
+    maxmem: 268_435_456,
+  });
+  const aesKey = derived.subarray(0, 32);
+  const hmacKey = derived.subarray(32, 64);
+  const provider = Buffer.from(options.providerKind, "ascii");
+  const directory = Buffer.from(options.workingDirectory, "utf8");
+  const ivs = randomBytes(options.count * 12 + 12);
+  const insert = database.prepare(
+    "INSERT INTO conversations(conversation_hmac, conversation_iv, conversation_ciphertext, conversation_tag, provider_session_hmac, provider_session_iv, provider_session_ciphertext, provider_session_tag, lifecycle, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const now = Date.now();
+  try {
+    database.pragma("synchronous=OFF");
+    database.transaction(() => {
+      for (let index = 0; index < options.count; index += 1) {
+        const conversationId =
+          index === 0 ? options.activeConversationId : `capacity_conversation_${index}`;
+        const conversationRaw = Buffer.from(conversationId, "ascii");
+        const conversationHmac = k02StateHmac(hmacKey, 0x02, [conversationRaw]);
+        const conversationEnvelope = k02StateEnvelope(
+          aesKey,
+          conversationRaw,
+          k02StateFrame(0x11, [provider, directory, conversationHmac]),
+          ivs.subarray(index * 12, index * 12 + 12),
+        );
+        if (index === 0) {
+          const sessionRaw = Buffer.from(options.activeProviderSessionId, "utf8");
+          const sessionHmac = k02StateHmac(hmacKey, 0x04, [sessionRaw]);
+          const sessionEnvelope = k02StateEnvelope(
+            aesKey,
+            sessionRaw,
+            k02StateFrame(0x13, [provider, directory, conversationHmac, sessionHmac]),
+            ivs.subarray(options.count * 12, options.count * 12 + 12),
+          );
+          insert.run(
+            conversationHmac,
+            conversationEnvelope.iv,
+            conversationEnvelope.ciphertext,
+            conversationEnvelope.tag,
+            sessionHmac,
+            sessionEnvelope.iv,
+            sessionEnvelope.ciphertext,
+            sessionEnvelope.tag,
+            "active",
+            now,
+            now,
+          );
+        } else {
+          insert.run(
+            conversationHmac,
+            conversationEnvelope.iv,
+            conversationEnvelope.ciphertext,
+            conversationEnvelope.tag,
+            null,
+            null,
+            null,
+            null,
+            "closed",
+            now,
+            now,
+          );
+        }
+      }
+    })();
+    database.pragma("wal_checkpoint(TRUNCATE)");
+  } finally {
+    aesKey.fill(0);
+    hmacKey.fill(0);
+    derived.fill(0);
+    database.close();
   }
 }
 

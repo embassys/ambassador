@@ -648,6 +648,14 @@ test("K02-A03 rejects ciphertext transplanted across authenticated AAD parents",
 });
 
 test("K02-A04 commits paired message and conversation transitions atomically", async (t) => {
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
   const scenario = await startK02Scenario(t, "K02-K03:A04", {
     failPairedStateWriteAfter: "conversation_update",
     scripts: [
@@ -842,6 +850,114 @@ test("K02-A04 commits paired message and conversation transitions atomically", a
     recoveredDatabase.close();
   }
 
+  await check("bindTurn rejects an invalid old message-conversation pair", async () => {
+    const pairScenario = await startK02Scenario(t, "K02-K03:A04", { scripts: [] });
+    await pairScenario.connector.close();
+    const now = Date.now();
+    const state = openConnectorState({
+      stateDirectory: pairScenario.stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: realpathSync.native(pairScenario.workingDirectory),
+      nowMs: now,
+    });
+    try {
+      state.insertConversationAndMessage("bind_turn_pair", "bind_turn_message", now);
+      state.dispatch("bind_turn_message", false, now);
+      state.bindSession("bind_turn_pair", "bind_turn_message", "bind_turn_session", now);
+      state.database.exec("UPDATE conversations SET lifecycle='uncertain'");
+      assert.throws(
+        () => state.bindTurn("bind_turn_message", "bind_turn_session", "bind_turn_id", now),
+        /connector_state_unavailable/u,
+      );
+      assert.deepEqual(
+        state.database
+          .prepare<
+            [],
+            { conversation: string; message: string; provider_turn_hmac: Buffer | null }
+          >(
+            "SELECT c.lifecycle AS conversation, m.lifecycle AS message, m.provider_turn_hmac FROM conversations c JOIN messages m USING(conversation_hmac)",
+          )
+          .get(),
+        { conversation: "uncertain", message: "turn_starting", provider_turn_hmac: null },
+      );
+    } finally {
+      state.close();
+    }
+  });
+
+  await check("message-only transition rejects an invalid new pair", async () => {
+    const pairScenario = await startK02Scenario(t, "K02-K03:A04", { scripts: [] });
+    await pairScenario.connector.close();
+    const now = Date.now();
+    const state = openConnectorState({
+      stateDirectory: pairScenario.stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: realpathSync.native(pairScenario.workingDirectory),
+      nowMs: now,
+    });
+    try {
+      state.insertConversationAndMessage("message_pair", "message_pair_id", now);
+      state.dispatch("message_pair_id", false, now);
+      state.bindSession("message_pair", "message_pair_id", "message_pair_session", now);
+      state.bindTurn("message_pair_id", "message_pair_session", "message_pair_turn", now);
+      assert.throws(
+        () => state.transitionMessage("message_pair_id", "turn_running", "uncertain", now),
+        /connector_state_unavailable/u,
+      );
+      assert.deepEqual(
+        state.database
+          .prepare<[], { conversation: string; message: string }>(
+            "SELECT c.lifecycle AS conversation, m.lifecycle AS message FROM conversations c JOIN messages m USING(conversation_hmac)",
+          )
+          .get(),
+        { conversation: "active", message: "turn_running" },
+      );
+    } finally {
+      state.close();
+    }
+  });
+
+  await check("closed-row deletion rejects an invalid old pair", async () => {
+    const pairScenario = await startK02Scenario(t, "K02-K03:A04", { scripts: [] });
+    await pairScenario.connector.close();
+    const now = Date.now();
+    const state = openConnectorState({
+      stateDirectory: pairScenario.stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: realpathSync.native(pairScenario.workingDirectory),
+      nowMs: now,
+    });
+    try {
+      state.insertConversationAndMessage("delete_pair", "delete_pair_id", now);
+      state.dispatch("delete_pair_id", false, now);
+      state.bindSession("delete_pair", "delete_pair_id", "delete_pair_session", now);
+      state.bindTurn("delete_pair_id", "delete_pair_session", "delete_pair_turn", now);
+      state.transitionMessage("delete_pair_id", "turn_running", "central_pending", now, {
+        terminal_operation: "reply",
+      });
+      state.transitionMessage("delete_pair_id", "central_pending", "ack_pending", now);
+      state.transitionMessage("delete_pair_id", "ack_pending", "closed", now);
+      state.database.exec("UPDATE conversations SET lifecycle='uncertain'");
+      assert.throws(
+        () => state.deleteClosedMessage("delete_pair_id"),
+        /connector_state_unavailable/u,
+      );
+      assert.deepEqual(
+        state.database
+          .prepare<[], { conversation: string; message: string }>(
+            "SELECT c.lifecycle AS conversation, m.lifecycle AS message FROM conversations c JOIN messages m USING(conversation_hmac)",
+          )
+          .get(),
+        { conversation: "uncertain", message: "closed" },
+      );
+    } finally {
+      state.close();
+    }
+  });
+
   const joinScenario = await startK02Scenario(t, "K02-K03:A04", { scripts: [] });
   await joinScenario.connector.close();
   const joinNow = Date.now();
@@ -964,6 +1080,7 @@ test("K02-A04 commits paired message and conversation transitions atomically", a
       );
     }
   }
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-A05 independently rejects ciphertext, GCM-tag, HMAC-index, and schema corruption", async (t) => {
@@ -1019,6 +1136,84 @@ test("K02-A06 rejects token, provider, and canonical-directory scope changes", a
 });
 
 test("K02-A07 deletes only an acknowledged message and retains the conversation mapping", async (t) => {
+  const startupCleanup = await startK02Scenario(t, "K02-K03:A07", { scripts: [] });
+  await startupCleanup.connector.close();
+  const startupNow = Date.now();
+  const startupState = openConnectorState({
+    stateDirectory: startupCleanup.stateDirectory,
+    webhookToken: K02_TOKEN,
+    providerKind: "codex",
+    workingDirectory: realpathSync.native(startupCleanup.workingDirectory),
+    nowMs: startupNow,
+  });
+  try {
+    startupState.insertConversationAndMessage(
+      "startup_closed_conversation",
+      "startup_closed_message",
+      startupNow,
+    );
+    startupState.dispatch("startup_closed_message", false, startupNow);
+    startupState.bindSession(
+      "startup_closed_conversation",
+      "startup_closed_message",
+      "startup_closed_session",
+      startupNow,
+    );
+    startupState.bindTurn(
+      "startup_closed_message",
+      "startup_closed_session",
+      "startup_closed_turn",
+      startupNow,
+    );
+    startupState.transitionMessage(
+      "startup_closed_message",
+      "turn_running",
+      "central_pending",
+      startupNow,
+      { terminal_operation: "reply" },
+    );
+    startupState.transitionMessage(
+      "startup_closed_message",
+      "central_pending",
+      "ack_pending",
+      startupNow,
+    );
+    startupState.transitionMessage("startup_closed_message", "ack_pending", "closed", startupNow);
+  } finally {
+    startupState.close();
+  }
+  const beforeRestart = openState(startupCleanup.stateDirectory);
+  try {
+    assert.deepEqual(
+      beforeRestart
+        .prepare<[], { conversation: string; message: string }>(
+          "SELECT c.lifecycle AS conversation, m.lifecycle AS message FROM conversations c JOIN messages m USING(conversation_hmac)",
+        )
+        .get(),
+      { conversation: "active", message: "closed" },
+    );
+  } finally {
+    beforeRestart.close();
+  }
+  const startupRestart = await startupCleanup.restart([]);
+  await startupRestart.connector.waitForIdle();
+  assert.deepEqual(startupCleanup.gateway.calls, [], "startup cleanup contacted the gateway");
+  const afterRestart = openState(startupCleanup.stateDirectory);
+  try {
+    assert.equal(
+      afterRestart.prepare<[], { count: number }>("SELECT count(*) AS count FROM messages").get()
+        ?.count,
+      0,
+      "startup retained a closed acknowledged row",
+    );
+    assert.deepEqual(
+      afterRestart.prepare<[], { lifecycle: string }>("SELECT lifecycle FROM conversations").all(),
+      [{ lifecycle: "active" }],
+    );
+  } finally {
+    afterRestart.close();
+  }
+
   const { scenario, message } = await establishMapping(t, "K02-K03:A07", "retention");
   const database = openState(scenario.stateDirectory);
   try {
