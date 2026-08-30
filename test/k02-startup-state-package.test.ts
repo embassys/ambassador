@@ -794,7 +794,11 @@ test("K02-S09 initializes once and fails closed at every owner/correlation crash
       },
     );
     t.after(async () => {
-      await writeFile(tokenRelease, "release\n", { encoding: "utf8", mode: 0o600 });
+      await writeFile(tokenRelease, "release\n", { encoding: "utf8", mode: 0o600 }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        },
+      );
       if (owner.child.exitCode === null && owner.child.signalCode === null)
         owner.child.kill("SIGKILL");
       await owner.exit;
@@ -866,7 +870,11 @@ test("K02-S09 initializes once and fails closed at every owner/correlation crash
       },
     );
     t.after(async () => {
-      await writeFile(markerRelease, "release\n", { encoding: "utf8", mode: 0o600 });
+      await writeFile(markerRelease, "release\n", { encoding: "utf8", mode: 0o600 }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        },
+      );
       if (starting.child.exitCode === null && starting.child.signalCode === null) {
         starting.child.kill("SIGKILL");
       }

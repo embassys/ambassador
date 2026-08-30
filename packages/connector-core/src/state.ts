@@ -18,6 +18,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   statfsSync,
   statSync,
   unlinkSync,
@@ -70,6 +71,7 @@ export interface StateOptions {
   stateActionObserverForTest?: {
     observe(event: Readonly<Record<string, unknown>>): void;
   };
+  reservation?: ConnectorStateReservation;
 }
 
 interface Keys {
@@ -127,6 +129,19 @@ function validatePrivateDirectory(path: string): void {
   }
 }
 
+function validateOwnedDirectory(path: string): void {
+  const metadata = lstatSync(path);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    connectorError("connector_state_unavailable");
+  }
+  if (process.platform !== "win32") {
+    const effectiveUid = process.geteuid?.();
+    if (effectiveUid === undefined || metadata.uid !== effectiveUid) {
+      connectorError("connector_state_unavailable");
+    }
+  }
+}
+
 function validatePrivateFile(path: string): void {
   const metadata = lstatSync(path);
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
@@ -172,8 +187,7 @@ function ensureDirectory(path: string): void {
   validatePrivateDirectory(path);
 }
 
-function qualifyLocalAccountHome(path: string): void {
-  validatePrivateDirectory(path);
+function qualifyLocalStateDirectory(path: string): void {
   let type: number;
   try {
     type = Number(statfsSync(path).type);
@@ -187,11 +201,12 @@ function qualifyLocalAccountHome(path: string): void {
   if (!localTypes.has(type)) connectorError("connector_state_unavailable");
 }
 
-function ensureProtectedStateDirectory(path: string): void {
+function ensureProtectedStateDirectory(path: string): string[] {
   if (!isAbsolute(path)) connectorError("connector_state_unavailable");
   const accountHome = dirname(dirname(dirname(dirname(path))));
-  validatePrivateDirectory(accountHome);
+  validateOwnedDirectory(accountHome);
   const chain: string[] = [];
+  const created: string[] = [];
   let current = path;
   while (current !== accountHome) {
     chain.push(current);
@@ -201,9 +216,11 @@ function ensureProtectedStateDirectory(path: string): void {
     if (!existsSync(directory)) {
       mkdirSync(directory, { mode: 0o700 });
       chmodSync(directory, 0o700);
+      created.push(directory);
     }
     validatePrivateDirectory(directory);
   }
+  return created;
 }
 
 function configureOwner(database: Database.Database): void {
@@ -320,6 +337,81 @@ function openOwnerForExclusiveCheck(stateDirectory: string): Database.Database {
     database.close();
     if (error instanceof ConnectorError) throw error;
     connectorError("connector_state_unavailable");
+  }
+}
+
+function validateStartMarker(
+  stateDirectory: string,
+  present = existsSync(join(stateDirectory, "retired.v1")),
+): void {
+  if (!present) return;
+  const marker = join(stateDirectory, "retired.v1");
+  validatePrivateFile(marker);
+  if (readFileSync(marker).equals(RETIREMENT_BYTES)) connectorError("connector_state_retired");
+  connectorError("connector_state_unavailable");
+}
+
+export class ConnectorStateReservation {
+  #owner: Database.Database | undefined;
+
+  constructor(
+    readonly stateDirectory: string,
+    owner: Database.Database,
+  ) {
+    this.#owner = owner;
+  }
+
+  take(stateDirectory: string): Database.Database {
+    if (stateDirectory !== this.stateDirectory || this.#owner === undefined) {
+      connectorError("connector_state_unavailable");
+    }
+    const owner = this.#owner;
+    this.#owner = undefined;
+    return owner;
+  }
+
+  close(): void {
+    const owner = this.#owner;
+    this.#owner = undefined;
+    if (owner === undefined) return;
+    try {
+      owner.exec("ROLLBACK");
+    } catch {}
+    owner.close();
+  }
+}
+
+export function reserveConnectorState(
+  stateDirectory: string,
+  retirement = false,
+): ConnectorStateReservation {
+  const created = ensureProtectedStateDirectory(stateDirectory);
+  try {
+    qualifyLocalStateDirectory(stateDirectory);
+    validateLeaves(stateDirectory, retirement);
+    if (!retirement) {
+      validateStartMarker(stateDirectory, readdirSync(stateDirectory).includes("retired.v1"));
+    }
+    const owner = openOwnerForExclusiveCheck(stateDirectory);
+    try {
+      validateLeaves(stateDirectory, retirement);
+      if (!retirement) validateStartMarker(stateDirectory);
+      return new ConnectorStateReservation(stateDirectory, owner);
+    } catch (error) {
+      try {
+        owner.exec("ROLLBACK");
+      } catch {}
+      owner.close();
+      throw error;
+    }
+  } catch (error) {
+    for (const directory of created.reverse()) {
+      try {
+        rmdirSync(directory);
+      } catch {}
+    }
+    if (retirement) connectorError("connector_state_retire_refused");
+    throw error;
   }
 }
 
@@ -666,6 +758,43 @@ export class ConnectorState {
     this.#checkStorageBoundary();
   }
 
+  deleteClosedMessagesAtStartup(): void {
+    const result = this.database.transaction(() => {
+      const closed = this.database
+        .prepare<[], LifecyclePairRow>(
+          `SELECT c.lifecycle AS conversation_lifecycle,
+            m.lifecycle AS message_lifecycle,
+            m.terminal_operation,
+            m.blocked_class,
+            c.provider_session_hmac,
+            m.provider_turn_hmac
+           FROM messages m JOIN conversations c USING(conversation_hmac)
+           WHERE m.lifecycle='closed'`,
+        )
+        .all();
+      if (closed.some((row) => !allowedLifecyclePair(row))) {
+        connectorError("connector_state_unavailable");
+      }
+      return this.database.prepare("DELETE FROM messages WHERE lifecycle='closed'").run();
+    })();
+    if (result.changes > 0) this.#afterWrite();
+  }
+
+  #readMessagePair(messageHmac: Buffer): LifecyclePairRow | undefined {
+    return this.database
+      .prepare<[Buffer], LifecyclePairRow>(
+        `SELECT c.lifecycle AS conversation_lifecycle,
+          m.lifecycle AS message_lifecycle,
+          m.terminal_operation,
+          m.blocked_class,
+          c.provider_session_hmac,
+          m.provider_turn_hmac
+         FROM messages m JOIN conversations c USING(conversation_hmac)
+         WHERE m.message_hmac=?`,
+      )
+      .get(messageHmac);
+  }
+
   transitionPair(options: {
     conversationId: string;
     messageId: string;
@@ -992,6 +1121,7 @@ export class ConnectorState {
   }
 
   bindTurn(messageId: string, sessionId: string, turnId: string, nowMs: number): void {
+    const time = validateTime(nowMs);
     const message = this.readMessage(messageId);
     if (message === undefined) connectorError("connector_state_unavailable");
     const session = Buffer.from(sessionId, "utf8");
@@ -1010,12 +1140,32 @@ export class ConnectorState {
         turnHmac,
       ]),
     );
-    const result = this.database
-      .prepare(
-        "UPDATE messages SET provider_turn_hmac=?, provider_turn_iv=?, provider_turn_ciphertext=?, provider_turn_tag=?, lifecycle='turn_running', updated_at_ms=? WHERE message_hmac=? AND lifecycle='turn_starting'",
-      )
-      .run(turnHmac, envelope.iv, envelope.ciphertext, envelope.tag, nowMs, message.messageHmac);
-    if (result.changes !== 1) connectorError("connector_state_unavailable");
+    this.database.transaction(() => {
+      const old = this.#readMessagePair(message.messageHmac);
+      if (
+        old === undefined ||
+        old.message_lifecycle !== "turn_starting" ||
+        old.provider_session_hmac === null ||
+        !timingSafeEqual(old.provider_session_hmac, sessionHmac) ||
+        !allowedLifecyclePair(old)
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+      const result = this.database
+        .prepare(
+          "UPDATE messages SET provider_turn_hmac=?, provider_turn_iv=?, provider_turn_ciphertext=?, provider_turn_tag=?, lifecycle='turn_running', updated_at_ms=? WHERE message_hmac=? AND lifecycle='turn_starting'",
+        )
+        .run(turnHmac, envelope.iv, envelope.ciphertext, envelope.tag, time, message.messageHmac);
+      if (result.changes !== 1) connectorError("connector_state_unavailable");
+      const current = this.#readMessagePair(message.messageHmac);
+      if (
+        current === undefined ||
+        current.message_lifecycle !== "turn_running" ||
+        !allowedLifecyclePair(current)
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+    })();
     this.#afterWrite();
   }
 
@@ -1026,6 +1176,7 @@ export class ConnectorState {
     nowMs: number,
     values: Readonly<Record<string, unknown>> = {},
   ): void {
+    const time = validateTime(nowMs);
     const allowed = Array.isArray(from) ? from : [from];
     const assignments = [
       "lifecycle=@to",
@@ -1034,12 +1185,31 @@ export class ConnectorState {
     ];
     const placeholders = allowed.map((_, index) => `@from${index}`).join(",");
     const fromValues = Object.fromEntries(allowed.map((value, index) => [`from${index}`, value]));
-    const result = this.database
-      .prepare(
-        `UPDATE messages SET ${assignments.join(",")} WHERE message_hmac=@message AND lifecycle IN (${placeholders})`,
-      )
-      .run({ to, now: nowMs, message: this.messageIndex(messageId), ...values, ...fromValues });
-    if (result.changes !== 1) connectorError("connector_state_unavailable");
+    const messageHmac = this.messageIndex(messageId);
+    this.database.transaction(() => {
+      const old = this.#readMessagePair(messageHmac);
+      if (
+        old === undefined ||
+        !allowed.includes(old.message_lifecycle) ||
+        !allowedLifecyclePair(old)
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+      const result = this.database
+        .prepare(
+          `UPDATE messages SET ${assignments.join(",")} WHERE message_hmac=@message AND lifecycle IN (${placeholders})`,
+        )
+        .run({ to, now: time, message: messageHmac, ...values, ...fromValues });
+      if (result.changes !== 1) connectorError("connector_state_unavailable");
+      const current = this.#readMessagePair(messageHmac);
+      if (
+        current === undefined ||
+        current.message_lifecycle !== to ||
+        !allowedLifecyclePair(current)
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+    })();
     this.#afterWrite();
   }
 
@@ -1061,10 +1231,17 @@ export class ConnectorState {
   }
 
   deleteClosedMessage(messageId: string): void {
-    const result = this.database
-      .prepare("DELETE FROM messages WHERE message_hmac=? AND lifecycle='closed'")
-      .run(this.messageIndex(messageId));
-    if (result.changes !== 1) connectorError("connector_state_unavailable");
+    const messageHmac = this.messageIndex(messageId);
+    this.database.transaction(() => {
+      const old = this.#readMessagePair(messageHmac);
+      if (old === undefined || old.message_lifecycle !== "closed" || !allowedLifecyclePair(old)) {
+        connectorError("connector_state_unavailable");
+      }
+      const result = this.database
+        .prepare("DELETE FROM messages WHERE message_hmac=? AND lifecycle='closed'")
+        .run(messageHmac);
+      if (result.changes !== 1) connectorError("connector_state_unavailable");
+    })();
     this.#afterWrite();
   }
 
@@ -1170,18 +1347,23 @@ export function openConnectorState(options: StateOptions): ConnectorState {
     options.filesystemQualification === "unproven"
   )
     connectorError("connector_state_filesystem_unqualified");
-  ensureDirectory(options.stateDirectory);
-  validateLeaves(options.stateDirectory);
-  const marker = join(options.stateDirectory, "retired.v1");
-  if (existsSync(marker)) {
-    validatePrivateFile(marker);
-    if (readFileSync(marker).equals(RETIREMENT_BYTES)) connectorError("connector_state_retired");
-    connectorError("connector_state_unavailable");
+  let owner: Database.Database;
+  if (options.reservation === undefined) {
+    ensureDirectory(options.stateDirectory);
+    validateLeaves(options.stateDirectory);
+    validateStartMarker(
+      options.stateDirectory,
+      readdirSync(options.stateDirectory).includes("retired.v1"),
+    );
+    owner = openOwner(options.stateDirectory);
+    acquireOwner(owner);
+  } else {
+    owner = options.reservation.take(options.stateDirectory);
   }
-  const owner = openOwner(options.stateDirectory);
-  acquireOwner(owner);
   let opened: ReturnType<typeof openCorrelation> | undefined;
   try {
+    validateLeaves(options.stateDirectory);
+    validateStartMarker(options.stateDirectory);
     const guard = owner
       .prepare<[], { ever_initialized: number }>(
         "SELECT ever_initialized FROM owner_guard WHERE singleton=1",
@@ -1189,15 +1371,45 @@ export function openConnectorState(options: StateOptions): ConnectorState {
       .get();
     const correlationPath = join(options.stateDirectory, "correlation.sqlite3");
     if (guard?.ever_initialized === 0) {
-      if (existsSync(correlationPath)) connectorError("connector_state_unavailable");
-      owner
+      if (
+        [
+          "correlation.sqlite3",
+          "correlation.sqlite3-wal",
+          "correlation.sqlite3-shm",
+          "correlation.sqlite3-journal",
+        ].some((leaf) => existsSync(join(options.stateDirectory, leaf)))
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+      const updated = owner
         .prepare(
           "UPDATE owner_guard SET ever_initialized=1 WHERE singleton=1 AND ever_initialized=0",
         )
         .run();
+      if (updated.changes !== 1) connectorError("connector_state_unavailable");
       owner.exec("COMMIT");
-      createCorrelation(correlationPath, options, validateTime(options.nowMs ?? Date.now()));
+      syncFile(join(options.stateDirectory, "owner.sqlite3"));
+      syncFile(options.stateDirectory);
       acquireOwner(owner);
+      validateLeaves(options.stateDirectory);
+      validateStartMarker(options.stateDirectory);
+      const committed = owner
+        .prepare<[], { ever_initialized: number }>(
+          "SELECT ever_initialized FROM owner_guard WHERE singleton=1",
+        )
+        .get();
+      if (
+        committed?.ever_initialized !== 1 ||
+        [
+          "correlation.sqlite3",
+          "correlation.sqlite3-wal",
+          "correlation.sqlite3-shm",
+          "correlation.sqlite3-journal",
+        ].some((leaf) => existsSync(join(options.stateDirectory, leaf)))
+      ) {
+        connectorError("connector_state_unavailable");
+      }
+      createCorrelation(correlationPath, options, validateTime(options.nowMs ?? Date.now()));
     } else if (!existsSync(correlationPath)) connectorError("connector_state_unavailable");
     opened = openCorrelation(correlationPath, options);
     const state = new ConnectorState(
@@ -1230,6 +1442,7 @@ export function openConnectorState(options: StateOptions): ConnectorState {
     if (newest !== null && newest !== undefined && newest > (options.nowMs ?? Date.now())) {
       connectorError("connector_state_unavailable");
     }
+    state.deleteClosedMessagesAtStartup();
     LIVE_STATES.set(realpathSync.native(options.stateDirectory), {
       correlation: opened.database,
       owner,
@@ -1444,6 +1657,7 @@ export async function retireConnectorStateForTest(options: {
   stateDirectory: string;
   providerKind: ProviderKind;
   arguments: readonly string[];
+  reservation?: ConnectorStateReservation;
   crashAfter?:
     | { kind: "marker_created" }
     | { kind: "marker_prefix"; bytes: number }
@@ -1459,11 +1673,17 @@ export async function retireConnectorStateForTest(options: {
   )
     connectorError("invalid_connector_arguments");
   try {
-    ensureDirectory(options.stateDirectory);
-    validateLeaves(options.stateDirectory, true);
-    const owner = openOwner(options.stateDirectory);
-    acquireOwner(owner);
+    let owner: Database.Database;
+    if (options.reservation === undefined) {
+      ensureDirectory(options.stateDirectory);
+      validateLeaves(options.stateDirectory, true);
+      owner = openOwner(options.stateDirectory);
+      acquireOwner(owner);
+    } else {
+      owner = options.reservation.take(options.stateDirectory);
+    }
     try {
+      validateLeaves(options.stateDirectory, true);
       const marker = join(options.stateDirectory, "retired.v1");
       if (!existsSync(marker)) {
         const descriptor = openSync(marker, "wx", 0o600);
@@ -1519,6 +1739,67 @@ export async function retireConnectorStateForTest(options: {
   }
 }
 
+export async function retireConnectorState(options: {
+  stateDirectory: string;
+  providerKind: ProviderKind;
+  arguments: readonly string[];
+  reservation: ConnectorStateReservation;
+}): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  if (
+    options.arguments.length !== 2 ||
+    options.arguments[0] !== "retire-state" ||
+    options.arguments[1] !== "--confirm=retire-all-correlation"
+  ) {
+    connectorError("invalid_connector_arguments");
+  }
+  try {
+    const owner = options.reservation.take(options.stateDirectory);
+    try {
+      validateLeaves(options.stateDirectory, true);
+      const marker = join(options.stateDirectory, "retired.v1");
+      if (!existsSync(marker)) {
+        const descriptor = openSync(marker, "wx", 0o600);
+        closeSync(descriptor);
+        writeFileSync(marker, RETIREMENT_BYTES, { mode: 0o600 });
+      }
+      const existing = readFileSync(marker);
+      if (
+        existing.byteLength <= RETIREMENT_BYTES.byteLength &&
+        RETIREMENT_BYTES.subarray(0, existing.byteLength).equals(existing)
+      ) {
+        writeFileSync(marker, RETIREMENT_BYTES, { mode: 0o600 });
+      } else if (!existing.equals(RETIREMENT_BYTES)) {
+        connectorError("connector_state_retire_refused");
+      }
+      syncFile(marker);
+      syncFile(options.stateDirectory);
+      for (const leaf of [
+        "correlation.sqlite3-shm",
+        "correlation.sqlite3-wal",
+        "correlation.sqlite3-journal",
+        "correlation.sqlite3",
+      ]) {
+        const path = join(options.stateDirectory, leaf);
+        if (existsSync(path)) unlinkSync(path);
+      }
+      syncFile(options.stateDirectory);
+    } finally {
+      if (owner.open) {
+        try {
+          owner.exec("ROLLBACK");
+        } catch {}
+        owner.close();
+      }
+    }
+    return { exitCode: 0, stdout: "Connector correlation state retired.\n", stderr: "" };
+  } catch (error) {
+    if (error instanceof ConnectorError && error.code === "connector_state_retire_refused") {
+      throw error;
+    }
+    connectorError("connector_state_retire_refused");
+  }
+}
+
 export function accountStateDirectory(accountHome: string, provider: ProviderKind): string {
   let canonical: string;
   try {
@@ -1526,24 +1807,10 @@ export function accountStateDirectory(accountHome: string, provider: ProviderKin
   } catch {
     connectorError("connector_state_unavailable");
   }
-  qualifyLocalAccountHome(canonical);
+  validateOwnedDirectory(canonical);
   if (process.platform === "linux")
     return join(canonical, ".local", "state", "a2a-connectors", provider);
   if (process.platform === "darwin")
     return join(canonical, "Library", "Application Support", "a2a-connectors", provider);
   connectorError("connector_state_unavailable");
-}
-
-export function ensureOwnerBeforeToken(stateDirectory: string): void {
-  ensureProtectedStateDirectory(stateDirectory);
-  validateLeaves(stateDirectory);
-  const owner = openOwnerForExclusiveCheck(stateDirectory);
-  try {
-    return;
-  } finally {
-    try {
-      owner.exec("ROLLBACK");
-    } catch {}
-    owner.close();
-  }
 }

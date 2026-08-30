@@ -4,15 +4,18 @@ import { realpathSync } from "node:fs";
 import {
   CONNECTOR_LIMITS,
   ConnectorError,
+  type ConnectorPolicy,
   connectorError,
+  type ProviderKind,
   URI_UNRESERVED_ID_PATTERN,
 } from "./constants.js";
 import { GatewayClient, GatewayObservation } from "./local-mcp-client.js";
 import { buildProviderChildEnvironment } from "./provider-boundary.js";
-import type { ConnectorClock, ConnectorFoundationOptions } from "./runtime-types.js";
+import type { ConnectorClock, ConnectorFoundationOptions, ProviderPort } from "./runtime-types.js";
 import { SYSTEM_CLOCK } from "./runtime-types.js";
 import {
   type ConnectorState,
+  type ConnectorStateReservation,
   openConnectorState,
   type StoredConversation,
   type StoredMessage,
@@ -219,6 +222,9 @@ class ConnectorRuntime implements ConnectorHandle {
       providerKind: canonicalOptions.providerKind,
       workingDirectory: canonicalOptions.workingDirectory,
       nowMs: (canonicalOptions.clock ?? SYSTEM_CLOCK).nowMs(),
+      ...(canonicalOptions.stateReservation === undefined
+        ? {}
+        : { reservation: canonicalOptions.stateReservation }),
       ...(canonicalOptions.stateActionObserverForTest === undefined
         ? {}
         : { stateActionObserverForTest: canonicalOptions.stateActionObserverForTest }),
@@ -321,8 +327,7 @@ class ConnectorRuntime implements ConnectorHandle {
     const cleanup = await Promise.all(
       active.map(async (work) => await this.#shutdownExecution(work, containmentDeadline)),
     );
-    const transportClosed =
-      admissionClosed || (await this.#settlesBy(transportClose, absoluteDeadline));
+    const transportClosed = await this.#settlesBy(transportClose, absoluteDeadline);
     this.#closed = true;
     this.#active.clear();
     let stateClosed = true;
@@ -512,6 +517,11 @@ class ConnectorRuntime implements ConnectorHandle {
     } catch (error) {
       this.#starting.delete(id);
       if (this.#stopping || this.#closed) return;
+      if (error instanceof ConnectorError && error.code === "connector_state_capacity") {
+        process.stderr.write("a2a connector: connector_state_capacity\n");
+        this.#pump();
+        return;
+      }
       this.#fail(
         error instanceof GatewayObservation
           ? new ConnectorError("connector_gateway_operation_failed")
@@ -1507,8 +1517,6 @@ class ConnectorRuntime implements ConnectorHandle {
       if (conversation === undefined) connectorError("connector_state_unavailable");
       if (stored.lifecycle === "blocked") connectorError("connector_message_blocked");
       if (stored.lifecycle === "received") {
-        this.#queue.push(stored.messageId);
-        this.#queued.add(stored.messageId);
         continue;
       }
       const work: Work = {
@@ -1789,7 +1797,54 @@ function workPhaseExecuted(phase: string): boolean {
   ].includes(phase);
 }
 
-export async function startConnectorFoundation(
+function dormantProvider(provider: ProviderKind): ProviderPort {
+  const unavailable = (): AsyncIterable<unknown> => ({
+    [Symbol.asyncIterator]() {
+      return {
+        async next(): Promise<IteratorResult<unknown>> {
+          connectorError("connector_provider_unavailable");
+        },
+      };
+    },
+  });
+  return {
+    spawnRecord: {
+      executable: provider,
+      arguments: [],
+      environment: {},
+      shell: false,
+    },
+    containmentAttempts: 0,
+    postTerminalDeliveries: 0,
+    start: unavailable,
+    resume: unavailable,
+    recover: unavailable,
+    async cancel() {
+      return { accepted: false };
+    },
+    async contain() {
+      return false;
+    },
+  };
+}
+
+export async function startConnector(options: {
+  providerKind: ProviderKind;
+  webhookPort: number;
+  webhookToken: string;
+  workingDirectory: string;
+  policy: ConnectorPolicy;
+  stateReservation: ConnectorStateReservation;
+}): Promise<ConnectorHandle> {
+  return await ConnectorRuntime.start({
+    ...options,
+    gatewayEndpoint: "http://127.0.0.1:8787/mcp",
+    stateDirectory: options.stateReservation.stateDirectory,
+    provider: dormantProvider(options.providerKind),
+  });
+}
+
+export async function startConnectorRuntime(
   options: ConnectorFoundationOptions,
 ): Promise<ConnectorHandle> {
   return await ConnectorRuntime.start(options);

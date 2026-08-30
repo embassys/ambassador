@@ -49,9 +49,7 @@ function canonicalDirectory(value: string): string {
   return resolved;
 }
 
-export function parseConnectorArgumentsForTest(
-  arguments_: readonly string[],
-): ParsedConnectorArguments {
+export function parseConnectorArguments(arguments_: readonly string[]): ParsedConnectorArguments {
   if (
     arguments_.length === 2 &&
     arguments_[0] === "retire-state" &&

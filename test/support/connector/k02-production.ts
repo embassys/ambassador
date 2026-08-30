@@ -886,7 +886,7 @@ export function validateK02ProductionModule(loaded: unknown): K02ProductionModul
 }
 
 export async function loadK02Production(caseId: string): Promise<K02ProductionModule> {
-  const url = new URL("../../../packages/connector-core/src/index.js", import.meta.url);
+  const url = new URL("./k02-module.js", import.meta.url);
   let loaded: unknown;
   try {
     loaded = await import(url.href);
