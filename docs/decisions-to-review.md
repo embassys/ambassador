@@ -221,6 +221,11 @@ platform ADRs.
   the test observes a registered request rather than host socket scheduling.
   Production deadlines and the rejection of every other socket error are
   unchanged.
+- W08 now replaces that event-loop yield with a content-free barrier on the
+  injected clock: it advances only after the header timer is cleared and the
+  request timer remains. This proves the held request reached `request_parsed`
+  without adding a connector, CLI, staged-package, or public control surface;
+  every production deadline and manual-clock value is unchanged.
 - External reopened SQLite connections no longer assert `trusted_schema` or
   `max_page_count`: both are connection-local observations. The live
   connector-owned connection still proves their exact accepted values, and
