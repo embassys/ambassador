@@ -338,7 +338,12 @@ class ProviderFixture implements ScriptedFakeProvider {
 }
 
 export function startScriptedFakeProvider(t: TestContext): ScriptedFakeProvider {
-  const fixture = new ProviderFixture();
+  const fixture = createScriptedFakeProvider();
   t.after(async () => fixture.close());
   return fixture;
+}
+
+/** Creates a fixture whose lifecycle is owned by a test-only child process. */
+export function createScriptedFakeProvider(): ScriptedFakeProvider {
+  return new ProviderFixture();
 }
