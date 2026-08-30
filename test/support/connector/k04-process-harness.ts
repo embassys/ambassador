@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 
+import Database from "better-sqlite3";
+
 import { type FakeCentral, startFakeCentral } from "../fake-central.js";
 import { TestMcpClient } from "../mcp-client.js";
 import {
@@ -14,9 +16,23 @@ import {
   type V2ManagedProcess,
   v2NodeProcessEnvironment,
 } from "../v2-process-runtime.js";
-import { K04_EMAIL, K04_INBOUND_TEXT, K04_USERNAME, K04_WEBHOOK_TOKEN } from "./k04-constants.js";
+import {
+  K04_CONTENT_PREFIX,
+  K04_EMAIL,
+  K04_INBOUND_TEXT,
+  K04_USERNAME,
+  K04_VERIFICATION_CODE,
+  K04_WEBHOOK_TOKEN,
+} from "./k04-constants.js";
 
-export { K04_REPLY_TEXT, K04_WEBHOOK_TOKEN } from "./k04-constants.js";
+export {
+  K04_CONTENT_PREFIX,
+  K04_EMAIL,
+  K04_REPLY_TEXT,
+  K04_USERNAME,
+  K04_VERIFICATION_CODE,
+  K04_WEBHOOK_TOKEN,
+} from "./k04-constants.js";
 
 const ID = /^[A-Za-z0-9._~-]{1,128}$/u;
 
@@ -34,13 +50,25 @@ export interface K04ProviderRequestRecord {
   readonly kind: "start" | "resume" | "recover";
   readonly conversationId: string;
   readonly messageId: string;
-  readonly providerSessionId: string | null;
+  readonly providerSessionId: string;
+  readonly providerTurnId: string | null;
 }
+
+export type K04ConnectorCrashBarrier =
+  | "binding_published"
+  | "turn_published"
+  | "provider_terminal_received"
+  | "reply_accepted";
 
 export interface K04ConnectorControl {
   providerRequests(): readonly K04ProviderRequestRecord[];
+  providerSpawnSha256(): string;
+  fatalCode(): string | undefined;
+  waitForProviderSpawnProof(): Promise<void>;
   waitForProviderRequests(count: number): Promise<void>;
   waitForProviderBarriers(count: number): Promise<void>;
+  waitForCrashBarrier(barrier: K04ConnectorCrashBarrier): Promise<void>;
+  waitForIdle(): Promise<void>;
   releaseProviderBarrier(): void;
 }
 
@@ -60,6 +88,10 @@ export type K04GatewayOperation = "receive" | "wake" | "reply" | "complete" | "o
 
 export interface K04GatewayControl {
   operations(): readonly K04GatewayOperation[];
+  completionRequests(): readonly {
+    outcome: "failed";
+    reasonCode: "provider_start_failed";
+  }[];
   waitForFetchBarrier(barrier: K04GatewayFetchBarrier): Promise<void>;
   releaseFetchBarrier(barrier: K04GatewayFetchBarrier): void;
 }
@@ -84,6 +116,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return (
+    Object.keys(value).length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key))
+  );
+}
+
 async function unusedLoopbackPort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
@@ -104,100 +143,251 @@ async function unusedLoopbackPort(): Promise<number> {
 function connectorControl(process: V2ManagedProcess): K04ConnectorControl {
   const records: K04ProviderRequestRecord[] = [];
   let barrierCount = 0;
-  const requestWaiters = new Set<{ count: number; resolve: () => void }>();
-  const barrierWaiters = new Set<{ count: number; resolve: () => void }>();
+  let providerSpawnSha256: string | undefined;
+  let fatalCode: string | undefined;
+  let idleRequestSequence = 0;
+  const crashBarriers = new Set<K04ConnectorCrashBarrier>();
+  const idleSequences = new Set<number>();
+  let protocolError: Error | undefined;
+  const boundaryWaiters = new Set<{
+    readonly ready: () => boolean;
+    readonly resolve: () => void;
+    readonly reject: (error: Error) => void;
+    readonly timer: NodeJS.Timeout;
+  }>();
+  const settleWaiters = (): void => {
+    for (const waiter of boundaryWaiters) {
+      if (protocolError === undefined && !waiter.ready()) continue;
+      clearTimeout(waiter.timer);
+      boundaryWaiters.delete(waiter);
+      if (protocolError === undefined) waiter.resolve();
+      else waiter.reject(protocolError);
+    }
+  };
+  const failProtocol = (detail: string): void => {
+    protocolError ??= new Error(`K04 connector IPC protocol violation: ${detail}`);
+    settleWaiters();
+  };
   process.child.on("message", (message: unknown) => {
+    if (!isRecord(message) || message.channel !== "k04") return;
     if (
-      isRecord(message) &&
-      message.channel === "k04" &&
+      hasExactKeys(message, ["channel", "event", "code"]) &&
+      message.event === "fatal" &&
+      typeof message.code === "string" &&
+      /^(?:connector_[a-z_]+|unexpected)$/u.test(message.code)
+    ) {
+      if (fatalCode !== undefined) {
+        failProtocol("duplicate fatal observation");
+        return;
+      }
+      fatalCode = message.code;
+      settleWaiters();
+      return;
+    }
+    if (
+      hasExactKeys(message, ["channel", "event", "sha256"]) &&
+      message.event === "provider_spawn"
+    ) {
+      if (
+        providerSpawnSha256 !== undefined ||
+        typeof message.sha256 !== "string" ||
+        !/^[0-9a-f]{64}$/u.test(message.sha256)
+      ) {
+        failProtocol("invalid provider spawn proof");
+        return;
+      }
+      providerSpawnSha256 = message.sha256;
+      settleWaiters();
+      return;
+    }
+    if (
+      hasExactKeys(message, ["channel", "event", "name", "sequence"]) &&
       message.event === "provider_barrier" &&
-      message.name === "reply"
+      message.name === "reply" &&
+      Number.isSafeInteger(message.sequence) &&
+      message.sequence === barrierCount + 1
     ) {
       barrierCount += 1;
-      for (const waiter of barrierWaiters) {
-        if (barrierCount < waiter.count) continue;
-        barrierWaiters.delete(waiter);
-        waiter.resolve();
-      }
+      settleWaiters();
       return;
     }
     if (
-      !isRecord(message) ||
-      message.channel !== "k04" ||
-      message.event !== "provider_request" ||
-      !["start", "resume", "recover"].includes(String(message.kind)) ||
-      typeof message.conversation_id !== "string" ||
-      !ID.test(message.conversation_id) ||
-      typeof message.message_id !== "string" ||
-      !ID.test(message.message_id) ||
-      !(
-        message.provider_session_id === null ||
-        (typeof message.provider_session_id === "string" && ID.test(message.provider_session_id))
-      )
+      hasExactKeys(message, ["channel", "event", "name", "sequence"]) &&
+      message.event === "crash_barrier" &&
+      [
+        "binding_published",
+        "turn_published",
+        "provider_terminal_received",
+        "reply_accepted",
+      ].includes(String(message.name)) &&
+      message.sequence === 1
     ) {
+      const name = message.name as K04ConnectorCrashBarrier;
+      if (crashBarriers.has(name)) {
+        failProtocol("duplicate crash barrier");
+        return;
+      }
+      crashBarriers.add(name);
+      settleWaiters();
       return;
     }
-    records.push({
-      kind: message.kind as K04ProviderRequestRecord["kind"],
-      conversationId: message.conversation_id,
-      messageId: message.message_id,
-      providerSessionId: message.provider_session_id,
-    });
-    for (const waiter of requestWaiters) {
-      if (records.length < waiter.count) continue;
-      requestWaiters.delete(waiter);
-      waiter.resolve();
+    if (
+      hasExactKeys(message, ["channel", "event", "sequence"]) &&
+      message.event === "idle" &&
+      Number.isSafeInteger(message.sequence) &&
+      (message.sequence as number) >= 1
+    ) {
+      const sequence = message.sequence as number;
+      if (idleSequences.has(sequence) || sequence > idleRequestSequence) {
+        failProtocol("invalid idle observation");
+        return;
+      }
+      idleSequences.add(sequence);
+      settleWaiters();
+      return;
     }
+    if (
+      hasExactKeys(message, [
+        "channel",
+        "event",
+        "kind",
+        "conversation_id",
+        "message_id",
+        "provider_session_id",
+        "provider_turn_id",
+      ]) &&
+      message.event === "provider_request" &&
+      ["start", "resume", "recover"].includes(String(message.kind)) &&
+      typeof message.conversation_id === "string" &&
+      ID.test(message.conversation_id) &&
+      typeof message.message_id === "string" &&
+      ID.test(message.message_id) &&
+      typeof message.provider_session_id === "string" &&
+      (typeof message.provider_turn_id === "string" || message.provider_turn_id === null) &&
+      ID.test(message.provider_session_id) &&
+      (message.provider_turn_id === null || ID.test(message.provider_turn_id)) &&
+      (message.kind === "recover"
+        ? message.provider_turn_id !== null
+        : message.provider_turn_id === null)
+    ) {
+      records.push({
+        kind: message.kind as K04ProviderRequestRecord["kind"],
+        conversationId: message.conversation_id,
+        messageId: message.message_id,
+        providerSessionId: message.provider_session_id,
+        providerTurnId: message.provider_turn_id,
+      });
+      settleWaiters();
+      return;
+    }
+    failProtocol("unexpected message shape");
   });
-  const boundedWait = async (
-    ready: () => boolean,
-    subscribe: (resolve: () => void) => void,
-  ): Promise<void> => {
+  const assertProtocol = (): void => {
+    if (protocolError !== undefined) throw protocolError;
+  };
+  const boundedWait = async (ready: () => boolean): Promise<void> => {
+    assertProtocol();
     if (ready()) return;
-    let timer: NodeJS.Timeout | undefined;
-    await Promise.race([
-      new Promise<void>((resolve) => subscribe(resolve)),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("K04 child did not reach its content-free IPC boundary")),
-          10_000,
-        );
-        timer.unref();
-      }),
-    ]).finally(() => {
-      if (timer !== undefined) clearTimeout(timer);
+    await new Promise<void>((resolve, reject) => {
+      const waiter = {
+        ready,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          boundaryWaiters.delete(waiter);
+          reject(new Error("K04 child did not reach its content-free IPC boundary"));
+        }, 10_000),
+      };
+      waiter.timer.unref();
+      boundaryWaiters.add(waiter);
     });
   };
   return {
-    providerRequests: () => records.map((record) => ({ ...record })),
+    providerRequests: () => {
+      assertProtocol();
+      return records.map((record) => ({ ...record }));
+    },
+    providerSpawnSha256: () => {
+      assertProtocol();
+      assert.ok(providerSpawnSha256 !== undefined, "K04 provider spawn proof is unavailable");
+      return providerSpawnSha256;
+    },
+    fatalCode: () => {
+      assertProtocol();
+      return fatalCode;
+    },
+    waitForProviderSpawnProof: async () => {
+      await boundedWait(() => providerSpawnSha256 !== undefined);
+    },
     waitForProviderRequests: async (count) => {
       assert.ok(Number.isSafeInteger(count) && count >= 1);
-      await boundedWait(
-        () => records.length >= count,
-        (resolve) => requestWaiters.add({ count, resolve }),
-      );
+      await boundedWait(() => records.length >= count);
     },
     waitForProviderBarriers: async (count) => {
       assert.ok(Number.isSafeInteger(count) && count >= 1);
-      await boundedWait(
-        () => barrierCount >= count,
-        (resolve) => barrierWaiters.add({ count, resolve }),
-      );
+      await boundedWait(() => barrierCount >= count);
+    },
+    waitForCrashBarrier: async (barrier) => {
+      await boundedWait(() => crashBarriers.has(barrier));
+    },
+    waitForIdle: async () => {
+      idleRequestSequence += 1;
+      const sequence = idleRequestSequence;
+      await new Promise<void>((resolve, reject) => {
+        process.child.send(
+          { channel: "k04_control", command: "wait_for_idle", sequence },
+          (error) => (error === null ? resolve() : reject(error)),
+        );
+      });
+      await boundedWait(() => idleSequences.has(sequence));
     },
     releaseProviderBarrier: () => {
+      assertProtocol();
       process.child.send({ channel: "k04_control", command: "release_provider_barrier" });
     },
   };
 }
 
+function expectedK04ProviderSpawnSha256(): string {
+  const canonical = JSON.stringify({
+    executable: process.execPath,
+    arguments: [
+      join(process.cwd(), ".test-dist", "test", "support", "connector", "fake-provider-worker.js"),
+    ],
+    environment: {},
+    shell: false,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
 function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
   const operations: K04GatewayOperation[] = [];
+  const completionRequests: Array<{
+    outcome: "failed";
+    reasonCode: "provider_start_failed";
+  }> = [];
   const arrivals = new Map<K04GatewayFetchBarrier, number[]>();
-  const waiters = new Map<K04GatewayFetchBarrier, Array<() => void>>();
+  const arrivedBarriers = new Set<K04GatewayFetchBarrier>();
+  const waiters = new Map<
+    K04GatewayFetchBarrier,
+    Array<{ readonly resolve: () => void; readonly reject: (error: Error) => void }>
+  >();
   const releasable = new Map<K04GatewayFetchBarrier, number[]>();
+  let protocolError: Error | undefined;
+  const assertProtocol = (): void => {
+    if (protocolError !== undefined) throw protocolError;
+  };
+  const failProtocol = (detail: string): void => {
+    protocolError ??= new Error(`K04 gateway IPC protocol violation: ${detail}`);
+    for (const pending of waiters.values()) {
+      for (const waiter of pending) waiter.reject(protocolError);
+    }
+    waiters.clear();
+  };
   process.child.on("message", (message: unknown) => {
     if (!isRecord(message) || message.channel !== "k04_gateway_fetch") return;
     if (
+      hasExactKeys(message, ["channel", "event", "operation"]) &&
       message.event === "request" &&
       ["receive", "wake", "reply", "complete", "outcome", "ack"].includes(String(message.operation))
     ) {
@@ -205,6 +395,16 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
       return;
     }
     if (
+      hasExactKeys(message, ["channel", "event", "outcome", "reason_code"]) &&
+      message.event === "completion_request" &&
+      message.outcome === "failed" &&
+      message.reason_code === "provider_start_failed"
+    ) {
+      completionRequests.push({ outcome: message.outcome, reasonCode: message.reason_code });
+      return;
+    }
+    if (
+      !hasExactKeys(message, ["channel", "event", "barrier", "sequence"]) ||
       message.event !== "barrier" ||
       ![
         "receive_selected",
@@ -212,19 +412,24 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
         "reply_accepted_unobserved",
         "ack_accepted_unobserved",
       ].includes(String(message.barrier)) ||
-      !Number.isSafeInteger(message.sequence) ||
-      (message.sequence as number) < 1
+      message.sequence !== 1
     ) {
+      failProtocol("unexpected message shape");
       return;
     }
     const barrier = message.barrier as K04GatewayFetchBarrier;
     const sequence = message.sequence as number;
+    if (arrivedBarriers.has(barrier)) {
+      failProtocol("duplicate fetch barrier");
+      return;
+    }
+    arrivedBarriers.add(barrier);
     const waiter = waiters.get(barrier)?.shift();
     if (waiter !== undefined) {
       const ready = releasable.get(barrier) ?? [];
       ready.push(sequence);
       releasable.set(barrier, ready);
-      waiter();
+      waiter.resolve();
       return;
     }
     const queued = arrivals.get(barrier) ?? [];
@@ -232,8 +437,16 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
     arrivals.set(barrier, queued);
   });
   return {
-    operations: () => [...operations],
+    operations: () => {
+      assertProtocol();
+      return [...operations];
+    },
+    completionRequests: () => {
+      assertProtocol();
+      return completionRequests.map((request) => ({ ...request }));
+    },
     waitForFetchBarrier: async (barrier) => {
+      assertProtocol();
       const queued = arrivals.get(barrier)?.shift();
       if (queued !== undefined) {
         const ready = releasable.get(barrier) ?? [];
@@ -242,9 +455,15 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
         return;
       }
       await new Promise<void>((resolve, reject) => {
-        const waiter = (): void => {
-          clearTimeout(timer);
-          resolve();
+        const waiter = {
+          resolve: (): void => {
+            clearTimeout(timer);
+            resolve();
+          },
+          reject: (error: Error): void => {
+            clearTimeout(timer);
+            reject(error);
+          },
         };
         const pending = waiters.get(barrier) ?? [];
         pending.push(waiter);
@@ -259,6 +478,7 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
       });
     },
     releaseFetchBarrier: (barrier) => {
+      assertProtocol();
       const sequence = releasable.get(barrier)?.shift();
       if (sequence === undefined) throw new Error(`${barrier} is not waiting for release`);
       process.child.send({
@@ -305,11 +525,7 @@ export async function startK04ConnectorProcess(
   options: {
     readonly plan: "reply" | "safe-wait";
     readonly providerGate?: "reply";
-    readonly crashAfter?:
-      | "binding_published"
-      | "turn_published"
-      | "provider_terminal_received"
-      | "reply_accepted";
+    readonly crashBarrier?: K04ConnectorCrashBarrier;
     readonly clockOffsetMs?: number;
     readonly proveNoProviderDispatch?: boolean;
   },
@@ -330,7 +546,7 @@ export async function startK04ConnectorProcess(
       K04_STATE_DIRECTORY: fixture.connectorStateDirectory,
       K04_WEBHOOK_TOKEN,
       ...(options.providerGate === undefined ? {} : { K04_PROVIDER_GATE: options.providerGate }),
-      ...(options.crashAfter === undefined ? {} : { K04_CRASH_AFTER: options.crashAfter }),
+      ...(options.crashBarrier === undefined ? {} : { K04_CRASH_BARRIER: options.crashBarrier }),
       ...(options.clockOffsetMs === undefined
         ? {}
         : { K04_CLOCK_OFFSET_MS: String(options.clockOffsetMs) }),
@@ -351,6 +567,8 @@ export async function startK04ConnectorProcess(
     );
   }
   assert.equal(managed.stderr(), "");
+  await control.waitForProviderSpawnProof();
+  assert.equal(control.providerSpawnSha256(), expectedK04ProviderSpawnSha256());
   return { process: managed, control, webhookUrl };
 }
 
@@ -419,7 +637,7 @@ export async function enrollK04Gateway(
     email: K04_EMAIL,
     display_name: "K04 fixture gateway",
   });
-  await client.callTool("verify_email", { email: K04_EMAIL, code: "123456" });
+  await client.callTool("verify_email", { email: K04_EMAIL, code: K04_VERIFICATION_CODE });
   fixture.central.setConversationGrant(K04_USERNAME, "fixture_sender", true);
   return client;
 }
@@ -563,11 +781,33 @@ export async function stopK04ConnectorProcess(
   return await connector.process.waitForExit();
 }
 
+export function assertK04MessageRows(fixture: K04Fixture, expected: number): void {
+  const database = new Database(join(fixture.connectorStateDirectory, "correlation.sqlite3"), {
+    readonly: true,
+  });
+  try {
+    assert.deepEqual(
+      database.prepare<[], { count: number }>("SELECT count(*) AS count FROM messages").get(),
+      { count: expected },
+    );
+  } finally {
+    database.close();
+  }
+}
+
 export async function scanK04Artifacts(options: {
   readonly fixture: K04Fixture;
   readonly captures: readonly Capture[];
   readonly markers: readonly Marker[];
 }): Promise<void> {
+  const commonMarkers: readonly Marker[] = [
+    { name: "common-webhook-token", value: K04_WEBHOOK_TOKEN },
+    { name: "common-central-token", value: options.fixture.central.currentV2Token(K04_USERNAME) },
+    { name: "common-enrollment-email", value: K04_EMAIL },
+    { name: "common-enrollment-username", value: K04_USERNAME },
+    { name: "common-verification-code", value: K04_VERIFICATION_CODE },
+    { name: "common-content-prefix", value: K04_CONTENT_PREFIX },
+  ];
   const child = spawn(process.execPath, [`${process.cwd()}/scripts/t02-artifact-scan.mjs`], {
     cwd: process.cwd(),
     env: v2NodeProcessEnvironment(),
@@ -585,7 +825,7 @@ export async function scanK04Artifacts(options: {
     JSON.stringify({
       roots: [options.fixture.rootDirectory],
       captures: options.captures.map((capture) => ({ ...capture, truncated: false })),
-      markers: options.markers.map((marker) => ({
+      markers: [...commonMarkers, ...options.markers].map((marker) => ({
         name: marker.name,
         encoding: "utf8",
         value: marker.value,
