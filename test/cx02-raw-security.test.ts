@@ -11,6 +11,7 @@ import { startConnectorRuntime } from "../packages/connector-core/src/connector.
 import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 
 import {
+  CX02_EXECUTION_ID,
   CX02_THREAD_ID,
   CX02_TURN_ID,
   collectEvents,
@@ -328,7 +329,7 @@ test("CX02-X21 preserves every common exact limit through valid App Server envel
   const matrices: readonly {
     name: string;
     writes: readonly FakeCodexWireWrite[];
-    accepted: boolean;
+    terminal: "reply" | "failed" | "uncertain";
     stderrBytes?: number;
   }[] = [
     {
@@ -337,12 +338,12 @@ test("CX02-X21 preserves every common exact limit through valid App Server envel
         ...Array.from({ length: 9_997 }, () => ({ kind: "json" as const, value: delta("x") })),
         { kind: "json", value: completed("reply") },
       ],
-      accepted: true,
+      terminal: "reply",
     },
     {
       name: "10001 normalized events",
       writes: Array.from({ length: 9_999 }, () => ({ kind: "json" as const, value: delta("x") })),
-      accepted: false,
+      terminal: "uncertain",
     },
     {
       name: "progress exact",
@@ -350,42 +351,52 @@ test("CX02-X21 preserves every common exact limit through valid App Server envel
         { kind: "json", value: delta("x".repeat(262_144)) },
         { kind: "json", value: completed() },
       ],
-      accepted: true,
+      terminal: "reply",
     },
     {
       name: "progress one over",
       writes: [{ kind: "json", value: delta("x".repeat(262_145)) }],
-      accepted: false,
+      terminal: "uncertain",
     },
     {
       name: "reply exact",
       writes: [{ kind: "json", value: completed("x".repeat(262_144)) }],
-      accepted: true,
+      terminal: "reply",
     },
     {
       name: "reply one over",
       writes: [{ kind: "json", value: completed("x".repeat(262_145)) }],
-      accepted: false,
+      terminal: "failed",
     },
     {
       name: "turn ID exact",
       writes: [{ kind: "json", value: completed("reply") }],
-      accepted: true,
+      terminal: "reply",
     },
     {
       name: "stderr exact",
       writes: [{ kind: "json", value: completed() }],
       stderrBytes: 8_388_608,
-      accepted: true,
+      terminal: "reply",
     },
-    { name: "stderr one over", writes: [], stderrBytes: 8_388_609, accepted: false },
+    { name: "stderr one over", writes: [], stderrBytes: 8_388_609, terminal: "uncertain" },
   ];
   for (const vector of matrices) {
     const { adapter } = await createCx02Adapter(t, "CX02-CX03:X21", {
       appPlan: activePlan(cwd, vector.writes, vector.stderrBytes),
     });
     const terminal = (await collectEvents(adapter.start(startRequest()))).at(-1);
-    assert.equal(eventName(terminal), vector.accepted ? "reply" : "uncertain", vector.name);
+    if (vector.terminal === "failed") {
+      assert.deepEqual(
+        terminal,
+        {
+          event: "failed",
+          execution_id: CX02_EXECUTION_ID,
+          reason_code: "provider_result_invalid",
+        },
+        vector.name,
+      );
+    } else assert.equal(eventName(terminal), vector.terminal, vector.name);
   }
 
   for (const bytes of [1_024, 1_025]) {
@@ -467,7 +478,14 @@ test("CX02-X21 preserves every common exact limit through valid App Server envel
       },
     });
     const events = await collectEvents(adapter.start(startRequest()));
-    assert.equal(eventName(events.at(-1)), bytes === 1_024 ? "reply" : "uncertain");
+    if (bytes === 1_024) assert.equal(eventName(events.at(-1)), "reply");
+    else {
+      assert.deepEqual(events.at(-1), {
+        event: "failed",
+        execution_id: CX02_EXECUTION_ID,
+        reason_code: "provider_start_failed",
+      });
+    }
   }
 
   for (const bytes of [1_024, 1_025]) {
