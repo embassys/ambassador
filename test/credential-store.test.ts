@@ -279,12 +279,6 @@ test("reports persistence failure without writing plaintext or a final file", as
   await assertNoSecretFiles(item.root);
 });
 
-if (process.platform === "win32") {
-  test("W01 qualifies native Windows DACL and atomic replacement", {
-    skip: "W01: native credential DACL and replacement are not qualified on Windows",
-  }, () => {});
-}
-
 test("fails closed when injected Windows DACL enforcement fails", async (t) => {
   const item = await fixture(t, "a2a-credential-windows-acl-test-");
   let calls = 0;
@@ -302,6 +296,29 @@ test("fails closed when injected Windows DACL enforcement fails", async (t) => {
   await expectSafeRejection(() => store.save(CENTRAL_JWT));
   assert.equal(calls, 1);
   await expectSafeRejection(() => access(item.path));
+  await assertNoSecretFiles(item.root);
+});
+
+test("fails closed when Windows DACL validation fails on restart", async (t) => {
+  const item = await fixture(t, "a2a-credential-windows-restart-acl-test-");
+  const options: EncryptedFileCredentialStoreOptions = {
+    platform: "win32",
+    windowsAccessControl: SUCCESSFUL_WINDOWS_ACCESS_CONTROL,
+  };
+  await credentialStore(item.path, HOOK_TOKEN, CREDENTIAL_SCOPE, options).save(CENTRAL_JWT);
+  const before = await readFile(item.path);
+  const restarted = credentialStore(item.path, HOOK_TOKEN, CREDENTIAL_SCOPE, {
+    platform: "win32",
+    windowsAccessControl: {
+      async secure(_path, kind) {
+        if (kind === "file") throw new Error("injected file DACL validation failure");
+      },
+    },
+  });
+
+  await expectSafeRejection(() => restarted.load());
+  assert.deepEqual(await readFile(item.path), before);
+  assert.deepEqual(await readdir(item.directory), ["central-credential.json"]);
   await assertNoSecretFiles(item.root);
 });
 
