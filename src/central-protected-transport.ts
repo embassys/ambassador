@@ -7,8 +7,8 @@ import {
   parseDpopNonce,
 } from "./dpop.js";
 
-const DEFAULT_DEADLINE_MS = 40_000;
-const MAX_DEADLINE_MS = 120_000;
+const DEFAULT_DEADLINE_MS = 30_000;
+const LEASED_RECEIVE_DEADLINE_MS = 40_000;
 const ACCESS_TOKEN_MAX_BYTES = 4_096;
 const DPOP_PROOF_MAX_BYTES = 4_096;
 const AUTHORIZATION_MAX_BYTES = 4_101;
@@ -59,6 +59,7 @@ export interface CentralProtectedTransportOptions {
   readonly verboseTranscript?: DevelopmentVerboseTranscript;
   readonly fetch?: typeof fetch;
   readonly deadlineMs?: number;
+  readonly deadlineSignal?: (deadlineMs: number) => AbortSignal;
 }
 
 function failure(code: CentralProtectedTransportErrorCode): CentralProtectedTransportError {
@@ -156,13 +157,14 @@ export class CentralProtectedTransport {
   readonly #verboseTranscript: DevelopmentVerboseTranscript | undefined;
   readonly #request: typeof fetch;
   readonly #deadlineMs: number;
+  readonly #deadlineSignal: (deadlineMs: number) => AbortSignal;
 
   constructor(options: CentralProtectedTransportOptions) {
+    const deadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
     if (
       (options.domain !== "api" && options.domain !== "mcp") ||
-      !Number.isSafeInteger(options.deadlineMs ?? DEFAULT_DEADLINE_MS) ||
-      (options.deadlineMs ?? DEFAULT_DEADLINE_MS) <= 0 ||
-      (options.deadlineMs ?? DEFAULT_DEADLINE_MS) > MAX_DEADLINE_MS
+      (deadlineMs !== DEFAULT_DEADLINE_MS && deadlineMs !== LEASED_RECEIVE_DEADLINE_MS) ||
+      (options.deadlineSignal !== undefined && typeof options.deadlineSignal !== "function")
     ) {
       throw failure("central_protected_request_invalid");
     }
@@ -171,7 +173,8 @@ export class CentralProtectedTransport {
     this.#nonceCache = options.nonceCache;
     this.#verboseTranscript = options.verboseTranscript;
     this.#request = options.fetch ?? globalThis.fetch;
-    this.#deadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
+    this.#deadlineMs = deadlineMs;
+    this.#deadlineSignal = options.deadlineSignal ?? ((value) => AbortSignal.timeout(value));
   }
 
   readonly fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
@@ -229,10 +232,19 @@ export class CentralProtectedTransport {
         throw failure("central_protected_request_invalid");
       }
       this.#verboseTranscript?.addSecret(proof);
+      let deadlineSignal: AbortSignal;
+      try {
+        deadlineSignal = this.#deadlineSignal(this.#deadlineMs);
+      } catch {
+        throw failure("central_protected_request_invalid");
+      }
+      if (!(deadlineSignal instanceof AbortSignal)) {
+        throw failure("central_protected_request_invalid");
+      }
       const signal =
         init?.signal === undefined || init.signal === null
-          ? AbortSignal.timeout(this.#deadlineMs)
-          : AbortSignal.any([init.signal, AbortSignal.timeout(this.#deadlineMs)]);
+          ? deadlineSignal
+          : AbortSignal.any([init.signal, deadlineSignal]);
       const requestInit: RequestInit = {
         ...init,
         method,
