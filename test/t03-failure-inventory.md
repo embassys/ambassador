@@ -77,11 +77,11 @@ addition to their child vectors.
   completion observer if it must distinguish rejection from shutdown
   cancellation. The red specification adds no production hook.
 - C01 is pre-response uncertainty, not the credential store's internal
-  pre-rename crash point. The POSIX/Windows temp-write, sync, pre-rename, and
-  post-rename micro-boundaries are accepted qualification deferrals. G01 or W01
-  may add a test-only credential-store fault seam when those tasks are
-  authorized. C02 uses the externally observable encrypted-file digest change
-  as a real post-publication barrier.
+  pre-rename crash point. POSIX temp-write, sync, pre-rename, and post-rename
+  micro-boundaries remain qualification work. ADR 0033 defers the Windows
+  variants with W01 rather than counting them as passed. C02 uses the
+  externally observable encrypted-file digest change as a real
+  post-publication barrier.
 - The product routes are fixed, including central `/mcp`. T03 verifies the
   canonical `htu` for URLs the gateway actually sends. The complete
   scheme/host/default-port/percent/dot/path normalization matrix belongs behind

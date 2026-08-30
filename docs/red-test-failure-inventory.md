@@ -17,6 +17,10 @@ The 142 legacy tests still pass. The dependency-free central contract test also 
 
 ## CI matrix
 
+This table records the historical 2026-08-25 run. Its Windows row is not a
+current CI lane or support claim; ADR 0033 later made Windows unsupported for
+the initial release.
+
 | Job | Pass | Fail | Skip | Classification |
 | --- | ---: | ---: | ---: | --- |
 | Ubuntu Node | 143 | 8 | 0 | Expected red failures only |

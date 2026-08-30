@@ -68,7 +68,8 @@ review. A deployment-only value does not amend the client contract.
 
 - Gate A still requires the central S01 failure inventory and owner review.
 - S07 still gates real central compatibility and production activation.
-- E01 through E03 and W01 still gate gateway release evidence.
+- E01 through E03 still gate gateway release evidence. ADR 0033 closes W01 as
+  deferred, not passed, and removes it from the initial-release gate.
 - Each provider still needs its exact interface, version, dependency, license,
   sandbox, approval, recovery, history, update, and platform ADR.
 - Q03 and Q05 still require explicit user approval before preview or stable

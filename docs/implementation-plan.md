@@ -97,7 +97,7 @@ change the external review or release gate.
 | T02 | Gateway | Add full-process barriers, deterministic clocks, a separate sender client, proxy simulation, teardown, and artifact scans | T01 | Support tests pass on their intended CI platforms without production gateway changes |
 | T03 | Gateway | Add the red REST enrollment, DPoP, credential version 2, token lifecycle, and transport suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
 | T04 | Gateway | Add the red conversation, leased recovery, reply, completion, acknowledgement, and activation suite | T01, T02 | Every expected failure maps to missing production behavior rather than a fixture assumption |
-| C01 | Gateway | Run unit and Node integration tests on Linux, macOS, and Windows; run packaged Docker E2E on Ubuntu | T01-T04 | CI publishes a classified red failure inventory |
+| C01 | Gateway | Run unit and Node integration tests on Linux and macOS; run packaged Docker E2E on Ubuntu | T01-T04 | CI publishes a classified red failure inventory |
 | S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
 | GATE-A | User and central owner | Review T03, T04, and S01 failure inventories | C01, S01 | Written approval that failures represent the accepted contracts |
 
@@ -160,11 +160,11 @@ this order.
 | E01 | Qualify REST enrollment, DPoP, reissue, recovery, and bearer rejection | G01-G03, S07 | Node, Docker, packed-install, and staging checks pass |
 | E02 | Qualify lease, reply, completion, acknowledgement, and every crash barrier | G04, S07 | One logical message, provider turn, reply, and terminal acknowledgement survive each tested interruption |
 | E03 | Run bounded soak, outage, quota, shutdown, and complete artifact scans | E01, E02 | No credential, proof, nonce, code, message, reply, or tool content crosses its approved boundary |
-| W01 | Qualify credential replacement and packed installation on Windows | G01 | DACL, atomic replacement, native SQLite, restart, and end-to-end tests pass |
+| W01 | Deferred: qualify Windows under a new approved plan | ADR 0033 | Closed as deferred, not passed; supplies no initial-release evidence |
 | G05 | Remove Python-literal MCP result normalization | S02 stable, E01, E02 | Native structured results pass fixtures and staging before compatibility code is deleted |
 | G06 | Remove the version 1 404-only MCP polling fallback | S04 stable, E02 | The canonical leased receive path passes outage and recovery tests |
 | G07 | Remove the development verbose transcript | Stable central machine-readable errors, E01, E02 | ADR 0022's option, tests, exception, and TODO are removed together |
-| R01 | Review the gateway release | E01-E03, W01, G05-G07 | Product, protocol, setup, security review, dependency audit, package, and platform evidence match shipped behavior |
+| R01 | Review the gateway release | E01-E03, G05-G07 | Product, protocol, setup, security review, dependency audit, package, and macOS/Linux evidence match shipped behavior |
 
 ## Phase 5: connector and provider work
 
@@ -188,6 +188,8 @@ implementation, then full fake-provider E2E. Only then start separate
 Codex, Claude Code, and Gemini tracks. Each provider needs its own protocol and
 dependency decision, fake adapter tests, red-suite review, implementation, and
 manual opt-in qualification with an existing authenticated installation.
+ADR 0033 limits K02 and the initial connector release to Linux and macOS; K02
+must not add a Windows CI lane.
 
 Real provider credentials never enter repository CI. Connector publication or
 installation tooling still needs explicit user approval.
@@ -224,3 +226,5 @@ artifact tests.
   contract. Provider-specific interfaces, versions, dependencies, platform
   support, and public distribution remain behind their later ADR and release
   gates.
+- ADR 0033 closes W01 as deferred, not passed. Windows is unsupported for the
+  initial release and is not an R01 dependency or CI lane.

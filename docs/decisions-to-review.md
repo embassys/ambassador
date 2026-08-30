@@ -86,8 +86,18 @@ affected choice for review rather than silently changing the client contract.
   token ID and a later expiry. An authentication-failed identity cannot enter
   this path.
 - POSIX version 2 credential replacement uses the reviewed atomic file path.
-  Windows replacement remains fail-closed until W01 supplies and qualifies
-  the approved native replacement and DACL behavior.
+  Windows replacement code may remain fail-closed, but ADR 0033 makes it
+  unsupported and excludes it from initial-release evidence.
+
+## Accepted Windows deferral
+
+- ADR 0033 limits the initial gateway and connector release to macOS and
+  Linux. Windows has no CI lane, artifact, setup, or support claim.
+- W01 is closed as deferred, not passed, and no longer gates R01. K02 must not
+  add a Windows lane.
+- Re-enabling Windows requires a new approved plan plus native credential,
+  state, process-containment, packed E2E, artifact-scan, and restored CI
+  evidence. Platform-neutral or injected fail-closed tests are insufficient.
 
 ## Accepted D05 package
 

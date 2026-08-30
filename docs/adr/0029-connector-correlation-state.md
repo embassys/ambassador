@@ -899,6 +899,12 @@ correlation database artifact exists:
    or sync is failed or uncertain, retain the marker, write no success stdout,
    and report `connector_state_retire_refused` with exit `7`. A later `start`
    remains blocked and a later `retire-state` resumes.
+
+ADR 0033 defers the complete Windows state path for the initial release.
+Satisfying this durability condition alone does not restore support; a new
+approved plan, the complete native qualification, and restored CI are also
+required.
+
 4. Revalidate `retired.v1`, sync the provider directory on POSIX or apply the
    same qualified Windows flush sequence, and retain `retired.v1` and
    `owner.sqlite3` permanently. SQLite alone creates, recovers, and removes
