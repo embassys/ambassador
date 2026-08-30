@@ -5,8 +5,11 @@ import {
   REST_BOOTSTRAP_TOOLS,
 } from "./central-enrollment.js";
 import { CentralMcpClient, CentralMcpError } from "./central-mcp.js";
+import { CentralProtectedTransport } from "./central-protected-transport.js";
+import { CentralReissueController } from "./central-reissue.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
+import { DpopNonceCache } from "./dpop.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
 import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "./local-mcp.js";
 import {
@@ -146,6 +149,7 @@ export async function openGatewayApplication(
             ? {}
             : { verboseTranscript: options.verboseTranscript }),
         });
+  const protectedNonces = new DpopNonceCache();
   const enrollment =
     options.centralApiUrl === undefined || options.centralEnrollmentProfile === undefined
       ? undefined
@@ -161,6 +165,9 @@ export async function openGatewayApplication(
         });
   const controller = new AbortController();
   let identity: GatewayIdentity | undefined;
+  let protectedCentral: CentralMcpClient | undefined;
+  let protectedCatalog: readonly CentralToolDefinition[] | undefined;
+  let reissue: CentralReissueController | undefined;
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
   let local: LocalMcpServer;
@@ -172,8 +179,9 @@ export async function openGatewayApplication(
   });
 
   const requireCentral = (): CentralMcpClient => {
-    if (central === undefined) throw safeFailure();
-    return central;
+    const selected = identity?.credentialVersion === 2 ? protectedCentral : central;
+    if (selected === undefined) throw safeFailure();
+    return selected;
   };
 
   const requireEnrollment = (): CentralEnrollmentClient => {
@@ -201,13 +209,62 @@ export async function openGatewayApplication(
     }
   };
 
+  const enableProtectedIdentity = (): void => {
+    if (protectedCentral !== undefined || reissue !== undefined) return;
+    const currentIdentity = requireIdentity();
+    const credential = currentIdentity.authenticatedCredentialV2();
+    if (options.centralApiUrl === undefined || options.centralMcpUrl === undefined) {
+      throw safeFailure();
+    }
+    options.verboseTranscript?.addSecret(credential.record.access_token);
+    options.verboseTranscript?.addSecret(credential.record.dpop_private_key_pkcs8);
+    const mcpTransport = new CentralProtectedTransport({
+      domain: "mcp",
+      credential: () => currentIdentity.authenticatedCredentialV2(),
+      nonceCache: protectedNonces,
+      ...(options.verboseTranscript === undefined
+        ? {}
+        : { verboseTranscript: options.verboseTranscript }),
+    });
+    protectedCentral = new CentralMcpClient({
+      centralMcpUrl: options.centralMcpUrl,
+      fetch: async (url, init) => await mcpTransport.fetch(url, init),
+      ...(options.verboseTranscript === undefined
+        ? {}
+        : { verboseTranscript: options.verboseTranscript }),
+    });
+    const apiTransport = new CentralProtectedTransport({
+      domain: "api",
+      credential: () => currentIdentity.authenticatedCredentialV2(),
+      nonceCache: protectedNonces,
+      ...(options.verboseTranscript === undefined
+        ? {}
+        : { verboseTranscript: options.verboseTranscript }),
+    });
+    reissue = new CentralReissueController({
+      centralApiUrl: options.centralApiUrl,
+      identity: currentIdentity,
+      transport: apiTransport,
+      ...(options.verboseTranscript === undefined
+        ? {}
+        : { verboseTranscript: options.verboseTranscript }),
+    });
+    reissue.start();
+  };
+
   const remoteTool = async (
     name: string,
     enrolled: boolean,
     signal: AbortSignal,
   ): Promise<CentralToolDefinition> => {
+    if (identity?.credentialVersion === 2 && protectedCatalog !== undefined) {
+      const cached = protectedCatalog.find((candidate) => candidate.name === name);
+      if (cached === undefined) throw new McpContractError();
+      return cached;
+    }
     const catalog = await requireCentral().listTools(signal);
     const selected = selectCentralTools(catalog, enrolled);
+    if (identity?.credentialVersion === 2) protectedCatalog = selected;
     const tool = selected.find((candidate) => candidate.name === name);
     if (tool === undefined) throw new McpContractError();
     return tool;
@@ -215,6 +272,7 @@ export async function openGatewayApplication(
 
   const stopRelayForAuthenticationFailure = async (): Promise<void> => {
     requireIdentity().markAuthenticationFailed();
+    protectedCatalog = undefined;
     await relay?.shutdown().catch(() => undefined);
     relay = undefined;
     await local.sendToolListChanged().catch(() => undefined);
@@ -266,10 +324,28 @@ export async function openGatewayApplication(
   const router: LocalMcpRouter = {
     async listTools() {
       const currentIdentity = requireIdentity();
-      if (enrollment !== undefined) {
-        if (!currentIdentity.enrolled) return [...REST_BOOTSTRAP_TOOLS];
-        currentIdentity.authenticatedCredentialV2();
-        return [];
+      if (!currentIdentity.enrolled && enrollment !== undefined) {
+        return [...REST_BOOTSTRAP_TOOLS];
+      }
+      if (currentIdentity.credentialVersion === 2) {
+        try {
+          const credential = currentIdentity.authenticatedCredentialV2();
+          if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) return [];
+          const catalog = await requireCentral().listTools();
+          const selected = selectCentralTools(catalog, true);
+          protectedCatalog = selected;
+          const localCatalog = selected.map(localToolDefinition);
+          assertSafeUpstreamResult(localCatalog, credential.record.access_token);
+          return localCatalog;
+        } catch (error) {
+          if (
+            error instanceof CentralMcpError &&
+            error.code === "central_mcp_authentication_failed"
+          ) {
+            await stopRelayForAuthenticationFailure();
+          }
+          throw safeFailure();
+        }
       }
       const catalog = await requireCentral().listTools();
       const localCatalog = selectCentralTools(catalog, currentIdentity.enrolled).map(
@@ -295,6 +371,7 @@ export async function openGatewayApplication(
                     async () => await requireEnrollment().verify(arguments_, enrollmentSignal),
                   ),
               );
+              enableProtectedIdentity();
               await local.sendToolListChanged();
               return localResult;
             }
@@ -329,9 +406,21 @@ export async function openGatewayApplication(
           return result;
         }
 
-        if (enrollment !== undefined) {
-          currentIdentity.authenticatedCredentialV2();
-          throw new McpContractError();
+        if (currentIdentity.credentialVersion === 2) {
+          const credential = currentIdentity.authenticatedCredentialV2();
+          if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) {
+            throw new McpContractError();
+          }
+          const tool = await remoteTool(name, true, signal);
+          const upstreamArguments = upstreamToolArguments(tool, arguments_, undefined);
+          const result = await requireCentral().callTool(
+            name,
+            upstreamArguments,
+            signal,
+            credential.record.access_token,
+          );
+          assertSafeUpstreamResult(result, credential.record.access_token);
+          return result;
         }
 
         const centralToken = currentIdentity.authenticatedToken();
@@ -397,13 +486,15 @@ export async function openGatewayApplication(
     await local.listen();
     identity = await GatewayIdentity.open(credentialStore);
     if (identity.enrolled) {
-      if (enrollment === undefined) startRelay(identity.authenticatedToken());
-      else identity.authenticatedCredentialV2();
+      if (identity.credentialVersion === 2) enableProtectedIdentity();
+      else startRelay(identity.authenticatedToken());
     }
   } catch (error) {
     controller.abort();
     await local.close().catch(() => undefined);
     await central?.close().catch(() => undefined);
+    await reissue?.close().catch(() => undefined);
+    await protectedCentral?.close().catch(() => undefined);
     journal.close();
     throw error;
   }
@@ -419,6 +510,8 @@ export async function openGatewayApplication(
       await local.close();
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
+      await reissue?.close().catch(() => undefined);
+      await protectedCentral?.close().catch(() => undefined);
       await central?.close().catch(() => undefined);
       journal.close();
     },

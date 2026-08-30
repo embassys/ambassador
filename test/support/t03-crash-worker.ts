@@ -68,6 +68,7 @@ async function run(): Promise<void> {
   const webhookUrl = requiredEnvironment("T03_WEBHOOK_URL");
   const webhookToken = requiredEnvironment("T03_WEBHOOK_TOKEN");
   const credentialDigest = requiredEnvironment("T03_CREDENTIAL_DIGEST");
+  const credentialPath = requiredEnvironment("T03_CREDENTIAL_PATH");
   const expectPublication = process.env.T03_EXPECT_PUBLICATION === "1";
 
   await arriveAtV2ProcessBarrier("startup", 30_000);
@@ -105,10 +106,7 @@ async function run(): Promise<void> {
   await arriveAtV2ProcessBarrier("readiness", 30_000);
   await arriveAtV2ProcessBarrier("operation", 30_000);
   if (expectPublication) {
-    await waitForPublishedCredential(
-      join(artifactRoot, "state", "a2a-gateway", "central-credential.json"),
-      credentialDigest,
-    );
+    await waitForPublishedCredential(credentialPath, credentialDigest);
   }
   await arriveAtV2ProcessBarrier("commit", 30_000);
   await arriveAtV2ProcessBarrier("response", 30_000);
