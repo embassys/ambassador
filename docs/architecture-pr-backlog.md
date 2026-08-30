@@ -4,17 +4,19 @@ Status: active implementation backlog for the accepted version 2 architecture
 
 Date: 2026-08-30
 
-This document turns the accepted architecture in ADRs 0023, 0025, 0026, and
-0027, plus the proposed connector boundary in ADR 0024, into reviewable tasks
-and pull requests. It covers central REST enrollment, DPoP,
+This document turns the accepted architecture in ADRs 0023, 0024, 0025, 0026,
+and 0027 into reviewable tasks and pull requests. It covers central REST
+enrollment, DPoP,
 recoverable conversations and replies, provider connectors, provider adapters,
 end-to-end tests, compatibility cleanup, and release qualification.
 
-The user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29. The user also
+The user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29, and accepted
+ADR 0024's provider-neutral connector boundary on 2026-08-30. The user also
 completed D06 by approving the exact test-only fixture dependency in ADR 0020.
-This backlog does not approve ADR 0024, another dependency, a connector CLI,
-package layout, provider interface, installation, or publishing change. The
-red-suite review and release gates remain mandatory.
+This backlog does not approve another dependency, a connector CLI, state
+technology or schema, cryptographic design, limit, package layout, provider
+interface, approval policy, installation, platform claim, or publishing
+change. The red-suite review and release gates remain mandatory.
 
 Unknown production deployment facts do not reopen the accepted client
 contract. Fixtures use the deterministic stand-ins in
@@ -126,7 +128,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | D02 | Complete | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 fixes messages, leased recovery, replies, acknowledgement, idempotency, terminal status, bounds, and activation |
 | D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and recovery; ADR 0027 removes migration from the target |
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
-| D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and proposed ADR 0024 | Separate ADRs fix the connector command, working directory input, state format, access control, deletion, runtime, dependencies, concurrency, timeouts, approvals, terminal outcomes, installation, and publishing gates |
+| D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | Separate ADRs fix the connector command, working directory input, state technology and schema, access control, encryption, deletion, runtime, dependencies, provider interfaces, concurrency, timeouts, approvals, terminal outcomes, packaging, installation, supported platforms, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
 
 The gateway uses the fixed accepted route split and never adds runtime

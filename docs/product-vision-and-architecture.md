@@ -5,8 +5,10 @@ Read this before working on the project.
 ## Status
 
 Version `0.2.6` is the shipped compatibility implementation. ADRs 0023, 0025,
-and 0026 define the accepted next contract as of 2026-08-29. The production
-central service does not yet advertise that contract. Tests use the test-only
+0026, and 0027 define the accepted next gateway contract as of 2026-08-29. ADR
+0024 defines the accepted provider-neutral connector boundary as of 2026-08-30.
+The production central service does not yet advertise the next gateway
+contract. Tests use the test-only
 [version 2 fixture profile](v2-fixture-profile.md) for missing deployment
 facts, but fixture URLs and policies are not production defaults.
 
@@ -98,6 +100,35 @@ Gateway in-memory inbox and ID-only journal
 Configured local webhook
 ```
 
+### Provider companion boundary
+
+ADR 0024 accepts separately launched foreground provider connectors as
+companion products. One connector is one gateway's configured loopback webhook
+target and controls one provider runtime. Supporting more than one provider at
+once requires independent gateway and connector pairs. The gateway stays
+provider-neutral, and its two-option CLI does not change.
+
+The gateway sends the existing authenticated ID-only webhook wake. The
+connector authenticates that wake, then retrieves the message and performs
+delivery-control operations through the gateway's authenticated local MCP
+endpoint. The central credential and DPoP private key stay in the gateway. The
+connector uses the provider's existing authenticated installation without
+requesting, copying, or proxying provider credentials.
+
+The connector, not the gateway journal, owns durable conversation-to-session
+correlation. That state contains only approved opaque IDs, lifecycle state,
+and bounded retry timing. It contains no prompts, messages, replies, tool data,
+credentials, working-directory paths, or provider transcripts. After a crash,
+the connector may recover only the exact prior provider turn. If it cannot
+determine that turn's outcome, it records uncertainty and does not start a new
+turn blindly.
+
+ADR 0024 does not choose the connector executable, CLI or configuration,
+working-directory interface, store format, access controls, encryption,
+deletion, limits, runtime, dependencies, provider port, approval policy,
+package layout, supported platforms, installation, publishing, or release
+model. D05 keeps those choices pending.
+
 ### Startup
 
 1. Acquire the singleton lock before resolving tokens, opening credentials,
@@ -166,6 +197,8 @@ or connector durable state.
 | Gateway MCP path | Local bearer authentication, bootstrap tools, credential interception, token-free results, DPoP-authenticated central transport, limits, and cancellation |
 | Gateway relay | Fixed REST v2 receive, bounded in-memory bodies, ID-only durable wake state, retries, terminal outcomes, and acknowledgement observation |
 | Local runtime | User interaction, MCP tool use, model execution, and webhook handling |
+| Provider connector | Authenticated ID-only wake handling, local MCP retrieval, content-free correlation, provider-session control, and fail-closed uncertainty |
+| Provider runtime | Model execution through the user's existing authentication, MCP servers, extensions, tools, sandbox, and approval controls |
 
 ## Deployment facts still needed
 
