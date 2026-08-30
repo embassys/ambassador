@@ -6,9 +6,9 @@ Date: 2026-08-30
 
 Approval: approved by the user on 2026-08-30
 
-This accepted record completes its part of D05. K01 remains blocked by G04,
-and provider interfaces, installation, and publication retain their later
-gates.
+This accepted record completes its part of D05. ADR 0032 permits K01 against
+the accepted G04 fixture contract. Provider interfaces, installation, and
+publication retain their later gates.
 
 ## Problem
 
@@ -1044,5 +1044,6 @@ No package may be installed and no platform may be claimed from this proposal.
 Approved by the user on 2026-08-30. This freezes the provider-neutral port,
 all fixed limits, webhook admission order, local maximum policy, failure
 mapping, crash behavior, and fake-provider cases. ADRs 0028, 0029, and 0031
-were accepted with this record and complete D05. G04 still blocks K01, and
-each real provider interface remains behind its provider-specific ADR.
+were accepted with this record and complete D05. ADR 0032 permits K01 against
+the accepted G04 fixture contract. Each real provider interface remains behind
+its provider-specific ADR.
