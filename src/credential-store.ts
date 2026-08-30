@@ -363,7 +363,7 @@ if (($destinationAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) 
 if (($sourceAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 76 }
 if (($destinationAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 77 }
 try {
-  [System.IO.File]::Replace($source, $destination, $null, $true)
+  [System.IO.File]::Replace($source, $destination, $null)
 } catch {
   $nativeException = $_.Exception.GetBaseException()
   $nativeStatus = $nativeException.HResult -band 65535
