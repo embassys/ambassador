@@ -369,6 +369,15 @@ license, and platform ADRs.
   even though the structured value was preserved. The recursive leaf check
   proves that input is absent from every other carrier without depending on
   JSON escaping.
+- Default direct-adapter CX02 paths now use a deterministic manual clock
+  anchored 100 seconds before the fixed fixture deadline; vectors that supply
+  an explicit clock remain authoritative. The fixed timestamp had passed in
+  wall-clock time, so production's required absolute-deadline enforcement
+  would otherwise make unrelated protocol vectors time-dependent. Owner and
+  diagnostic workers and the two direct factory cases use the same clock.
+  X01's deliberately held version process explicitly uses the system clock so
+  the independent five-second preflight timeout can elapse without advancing
+  the invocation clock.
 - X06 uses the existing `session_binding` recovery crash seam for the
   post-session-publication case. The earlier `binding_published` seam runs
   before the provider-port call and therefore cannot observe the one
