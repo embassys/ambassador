@@ -71,9 +71,28 @@ async function assertOnlyPublishedCredential(directory: string): Promise<void> {
 }
 
 function executeWindowsPowerShell(script: string, environment: NodeJS.ProcessEnv): Promise<string> {
+  const systemRoot = process.env.SystemRoot;
+  assert.ok(systemRoot !== undefined && systemRoot.length > 0);
+  const inheritedEnvironment: NodeJS.ProcessEnv = {};
+  for (const name of [
+    "SystemRoot",
+    "WINDIR",
+    "ComSpec",
+    "PATHEXT",
+    "PATH",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "PROGRAMDATA",
+  ]) {
+    const value = process.env[name];
+    if (value !== undefined) inheritedEnvironment[name] = value;
+  }
   return new Promise((resolve, reject) => {
     execFile(
-      "powershell.exe",
+      join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
       [
         "-NoLogo",
         "-NoProfile",
@@ -83,8 +102,9 @@ function executeWindowsPowerShell(script: string, environment: NodeJS.ProcessEnv
       ],
       {
         encoding: "utf8",
-        env: { ...process.env, ...environment },
+        env: { ...inheritedEnvironment, ...environment },
         maxBuffer: 32 * 1024,
+        timeout: 30_000,
         windowsHide: true,
       },
       (error, stdout, stderr) => {
@@ -117,35 +137,74 @@ $ErrorActionPreference = 'Stop'
 if ($args.Count -ne 0) { exit 61 }
 $target = [Environment]::GetEnvironmentVariable('A2A_W01A_ACL_TARGET', 'Process')
 if ([String]::IsNullOrEmpty($target)) { exit 62 }
-$acl = Get-Acl -LiteralPath $target
+$attributes = [System.IO.File]::GetAttributes($target)
+if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 63 }
+$artifact = if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) {
+  [System.IO.DirectoryInfo]::new($target)
+} else {
+  [System.IO.FileInfo]::new($target)
+}
+$acl = $artifact.GetAccessControl(
+  [System.Security.AccessControl.AccessControlSections]'Access,Owner'
+)
 $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$rules = @($acl.GetAccessRules(
+$rules = $acl.GetAccessRules(
   $true,
   $true,
   [System.Security.Principal.SecurityIdentifier]
-) | ForEach-Object {
-  [ordered]@{
-    sid = $_.IdentityReference.Value
-    rights = [int]$_.FileSystemRights
-    inheritance = [int]$_.InheritanceFlags
-    propagation = [int]$_.PropagationFlags
-    type = [int]$_.AccessControlType
-    inherited = [bool]$_.IsInherited
-  }
-})
-[ordered]@{
-  currentSid = $currentSid
-  ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-  protected = [bool]$acl.AreAccessRulesProtected
-  rules = $rules
-} | ConvertTo-Json -Compress -Depth 4
+)
+$lines = [System.Collections.Generic.List[string]]::new()
+[void]$lines.Add($currentSid)
+[void]$lines.Add($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value)
+[void]$lines.Add($(if ($acl.AreAccessRulesProtected) { '1' } else { '0' }))
+foreach ($rule in $rules) {
+  [void]$lines.Add([String]::Join('|', @(
+    $rule.IdentityReference.Value,
+    [int]$rule.FileSystemRights,
+    [int]$rule.InheritanceFlags,
+    [int]$rule.PropagationFlags,
+    [int]$rule.AccessControlType,
+    $(if ($rule.IsInherited) { '1' } else { '0' })
+  )))
+}
+[Console]::Out.Write([String]::Join("\`n", $lines))
 `;
 
 async function observeWindowsAcl(path: string): Promise<WindowsAclObservation> {
   const output = await executeWindowsPowerShell(WINDOWS_ACL_OBSERVATION_SCRIPT, {
     A2A_W01A_ACL_TARGET: path,
   });
-  return JSON.parse(output) as WindowsAclObservation;
+  const lines = output.split("\n");
+  assert.ok(lines.length >= 4);
+  const currentSid = lines[0];
+  const ownerSid = lines[1];
+  assert.ok(currentSid !== undefined && /^S-[0-9-]+$/u.test(currentSid));
+  assert.ok(ownerSid !== undefined && /^S-[0-9-]+$/u.test(ownerSid));
+  assert.ok(lines[2] === "0" || lines[2] === "1");
+  return {
+    currentSid,
+    ownerSid,
+    protected: lines[2] === "1",
+    rules: lines.slice(3).map((line) => {
+      const fields = line.split("|");
+      assert.equal(fields.length, 6);
+      const [sid, rights, inheritance, propagation, type, inherited] = fields;
+      assert.ok(sid !== undefined && /^S-[0-9-]+$/u.test(sid));
+      assert.ok(rights !== undefined && /^[0-9]+$/u.test(rights));
+      assert.ok(inheritance !== undefined && /^[0-9]+$/u.test(inheritance));
+      assert.ok(propagation !== undefined && /^[0-9]+$/u.test(propagation));
+      assert.ok(type !== undefined && /^[0-9]+$/u.test(type));
+      assert.ok(inherited === "0" || inherited === "1");
+      return {
+        sid,
+        rights: Number(rights),
+        inheritance: Number(inheritance),
+        propagation: Number(propagation),
+        type: Number(type),
+        inherited: inherited === "1",
+      };
+    }),
+  };
 }
 
 function assertWindowsAcl(observation: WindowsAclObservation, kind: "directory" | "file"): void {
