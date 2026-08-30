@@ -26,6 +26,10 @@ Store the file under the platform's private `a2a-gateway` state directory. The f
 
 On POSIX, require mode `0700` for directories and `0600` for files, reject symlinks and unexpected hard links, create a sibling temporary file exclusively, sync it, rename it without replacing an existing identity, and sync the parent directory before reporting verification success. On Windows, remove inherited access and restrict the state directory and credential file DACLs to the current user SID and `SYSTEM`; fail if the DACL cannot be verified. Sync the temporary file, rename it, reopen and sync the final file, and verify its DACL before reporting success.
 
+ADR 0033 supersedes the Windows portion for the initial release. Windows code
+may remain fail-closed, but this DACL design is a future qualification
+requirement rather than current support evidence.
+
 Changing the webhook token makes the stored JWT unreadable. The shipped release reports that condition without deleting or replacing the credential.
 
 This encryption protects against accidental plaintext disclosure and access to the state file alone. It does not protect against a same-user attacker who can read both the webhook token and ciphertext. An OS credential vault would provide stronger separation later.

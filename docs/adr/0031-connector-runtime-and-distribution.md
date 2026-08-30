@@ -222,8 +222,7 @@ The `bin` file imports only staged relative files and direct declared runtime
 dependencies. Its TypeScript source and compiled JavaScript both begin with
 the ASCII bytes `#!/usr/bin/env node` followed by one LF byte. Staging rejects
 a missing or altered shebang. Packed-file tests require the bin target to carry an executable tar
-mode on POSIX, and clean-install tests invoke the installed npm shim on
-Windows. Every claimed platform runs the actual packed `npx ... start` command
+mode on POSIX. Every claimed platform runs the actual packed `npx ... start` command
 against the fake gateway and observes readiness and bounded shutdown;
 importing the module directly is not a command smoke test.
 
@@ -326,9 +325,10 @@ schema requires a separate reviewed plan rather than an automatic upgrade.
 
 ### Platform qualification
 
-Linux x64, macOS arm64, macOS x64, and Windows x64 are candidate test lanes,
-not a shared support claim. A provider package may advertise one of those
-platforms only when all of these pass for that exact provider and platform:
+Linux x64, macOS arm64, and macOS x64 are initial candidate test lanes, not a
+shared support claim. Under ADR 0033, Windows x64 is not an initial-release
+candidate. A provider package may advertise one of the initial candidates
+only when all of these pass for that exact provider and platform:
 
 1. the gateway's current packed-install and credential-permission checks;
 2. connector unit, state, process, crash, and artifact-scan tests;
@@ -346,15 +346,17 @@ second submission while proving no orphan continues work. A normal child exit,
 successful graceful shutdown, or exact-turn ID alone is not that proof.
 
 If the selected provider interface and platform cannot meet that rule, the
-package does not advertise that provider-platform pair. This applies to Linux,
-macOS, and Windows independently. The candidate matrix does not promise that a
-Node child-process wrapper, Windows job object, POSIX process group, provider
-daemon, or SDK can satisfy the rule before its tests pass.
+package does not advertise that provider-platform pair. The candidate matrix
+does not promise that a Node child-process wrapper, POSIX process group,
+provider daemon, or SDK can satisfy the rule before its tests pass. A future
+Windows candidate additionally requires ADR 0033's new approved plan, native
+qualification, and restored CI.
 
 An adapter advertises the intersection of the gateway, connector foundation,
 Node runtime, native dependency, and provider runtime matrices. Failure on one
-platform narrows that adapter's documented support; it does not silently
-remove the platform from CI or broaden another adapter's claim.
+claimed platform narrows that adapter's documented support; it does not
+silently remove a claimed platform from CI or broaden another adapter's claim.
+ADR 0033's explicit Windows deferral is not such a silent removal.
 
 CI never contains real provider credentials. Jobs that need a real provider
 remain manual and local until the project approves a secure provider-owned

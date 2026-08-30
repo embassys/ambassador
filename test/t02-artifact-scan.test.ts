@@ -29,7 +29,9 @@ interface ScanManifest {
 const SCANNER = join(process.cwd(), "scripts", "t02-artifact-scan.mjs");
 const SAFE_MARKER = "known-secret-marker-7db2a759";
 const WINDOWS_NO_FOLLOW_SKIP =
-  process.platform === "win32" ? "E03/W01: Node exposes no no-follow file open on Windows" : false;
+  process.platform === "win32"
+    ? "ADR 0033: Windows artifact scanning is deferred pending a new approved plan"
+    : false;
 
 async function artifactRoot(t: TestContext): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "a2a-t02-artifact-scan-"));

@@ -4,19 +4,16 @@ Status: merged CI specification, intentionally red only inside the classified
 future-v2 jobs
 
 C01 keeps two contracts separate. The normal test command runs the shipped
-`0.2.6` regression suite and must be green on Linux and macOS. On Windows it
-runs the platform-neutral subset and reports named native qualification
-deferrals. The red-inventory command runs the fresh-install future-v2
-specifications on Linux and macOS and succeeds only when their exact audited
-red classifications remain unchanged.
+`0.2.6` regression suite and must be green on Linux and macOS. The
+red-inventory command runs the fresh-install future-v2 specifications on those
+same platforms and succeeds only when their exact audited red classifications
+remain unchanged.
 
 Linux and macOS run the complete T03 and T04 inventory through the fast Node
-fixture. Windows runs the shipped platform-neutral Node checks, but does not
-run or classify the complete future-v2 inventory. Ubuntu also packs and
-installs the gateway, runs the shipped flow against the independent Python
-container as a green regression, then classifies a full future-v2 packaged
-smoke flow as red. This is the only packed C01 lane. C01 does not claim a
-packed Windows result.
+fixture. Ubuntu also packs and installs the gateway, runs the shipped flow
+against the independent Python container as a green regression, then
+classifies a full future-v2 packaged smoke flow as red. This is the only packed
+C01 lane.
 
 None of these fixture results proves that the production central service
 implements DPoP, lease redelivery, shared replay, or the other accepted
@@ -79,56 +76,28 @@ process signal, stderr output, module failure, loopback bind failure, uncaught
 exception, cancellation, or unhandled rejection therefore requires review
 instead of being accepted as intended red behavior.
 
-## Windows boundary
+## Deferred Windows boundary
 
-The Windows normal-test lane remains useful, but it is a green
-platform-neutral subset. Its test output names these deferrals:
-
-- one Windows-only test defers native current-user-and-`SYSTEM` DACL and atomic
-  replacement qualification to G01 and W01;
-- two true child-process `0.2.6` cases defer native process and packed
-  qualification to G01 and W01; and
-- ten artifact-file scan cases defer to E03 until Windows has a reviewed
-  no-follow file-open mechanism. The scanner continues to fail closed when
-  that mechanism is unavailable.
-
-Eight portable credential envelope, cryptography, endpoint-AAD, tamper,
-schema, first-write, and concurrency cases use the credential store's injected
-successful Windows access-control boundary. Six in-process gateway enrollment,
-verification, retry, endpoint-binding, and verbose cases use an in-memory
-credential or the same successful access-control injection. The injected
-DACL-failure test, Windows path handling, capture-only artifact checks, fixture
-contracts, and other platform-neutral tests also continue to run.
-
-The Windows lane does not qualify a native version 2 credential, atomic
-replacement, full T03 or T04 lifecycle, artifact-file scan, package install,
-or packed end-to-end flow. G01 and W01 own native credential, child-process,
-and packed qualification. E03 owns Windows artifact-file scan qualification.
-
-This boundary also preserves the dependency order. C01 supplies the gateway
-inventory for Gate A. Gate A unlocks external S02 and S03 work. G01 starts only
-after S03 enforces DPoP in development for dedicated identities, and W01 then
-qualifies the resulting version 2 credential and packed lifecycle. Requiring
-W01 evidence in C01 would create a dependency cycle through Gate A, S03, G01,
-and W01.
+ADR 0033 removes Windows from the CI and initial-release matrices. The former
+portable subset, injected access-control boundary, and platform skips were
+never native Windows qualification. They remain historical C01 evidence only.
+W01 is closed as deferred, not passed, and a Windows lane may return only under
+a new approved plan with the complete native and packed evidence in ADR 0033.
 
 ## Platform evidence
 
-The normal-test CI matrix is Node `24.19.0` on `ubuntu-latest`,
-`macos-latest`, and `windows-latest`. The exact future-v2 red inventory runs on
-Linux and macOS. The packaged Docker lane is Ubuntu `linux/amd64` only. GitHub
-Actions run `33282853898` passed the Ubuntu, macOS, and narrowed Windows checks,
-the Ubuntu Docker lane, and both package lanes. The Windows job ran the
-platform-neutral current regression and published the explicit deferral table.
-It did not classify the unrun future-v2 or native qualification work as green.
+The current normal-test CI matrix is Node `24.19.0` on `ubuntu-latest` and
+`macos-latest`. The exact future-v2 red inventory runs on both. The packaged
+Docker lane is Ubuntu `linux/amd64` only. GitHub Actions run `33282853898`
+predates ADR 0033 and passed the former narrowed Windows subset alongside the
+Ubuntu, macOS, Docker, and package lanes. That historical Windows job did not
+qualify a native credential, process lifecycle, artifact scan, or package.
 
 The user accepted the T03 and T04 classification on 2026-08-30, and PR `#28`
 merged the complete C01 inventory. The external central S01 inventory and
 central-owner review remain required before gateway production work begins.
 
 The Linux and macOS jobs append a count-only classified-red table to their job
-summaries. The Windows job appends a count-only deferral table and does not
-represent deferred work as passing or expected-red behavior. The expected-red
-runner itself exits zero only after the classification matches, which
-separates a reviewed missing behavior from a broken test environment while
-keeping the feature specification visibly red.
+summaries. The expected-red runner exits zero only after the classification
+matches, which separates a reviewed missing behavior from a broken test
+environment while keeping the feature specification visibly red.

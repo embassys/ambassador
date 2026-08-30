@@ -280,8 +280,8 @@ test("reports persistence failure without writing plaintext or a final file", as
 });
 
 if (process.platform === "win32") {
-  test("W01 qualifies native Windows DACL and atomic replacement", {
-    skip: "W01: native credential DACL and replacement are not qualified on Windows",
+  test("ADR 0033 defers native Windows DACL and atomic replacement", {
+    skip: "Windows requires a new approved implementation and qualification plan",
   }, () => {});
 }
 

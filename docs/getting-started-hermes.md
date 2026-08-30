@@ -6,7 +6,7 @@ This guide connects one Hermes Agent to the A2A development service. It works wi
 
 - Hermes Agent already installed and able to answer a normal chat message.
 - Hermes Agent `0.20.5` or newer. The commands in this guide were checked with `0.20.5`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.6`.
+- macOS or Linux. Windows is unsupported for the initial release.
 - Node.js 24.19 with npm and `npx`.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.

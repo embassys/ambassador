@@ -649,8 +649,8 @@ sharing one database.
 | E02 | Return a DPoP nonce, proof, or token challenge | Use only ADR 0026's flat or challenge form; perform no application work |
 | E03 | Rate limit for 1, 1,001, and 60,000 milliseconds | Set `Retry-After` to 1, 2, and 60 seconds respectively |
 
-The gateway runs these cases against the fast Node fixture on Linux, macOS,
-and Windows. Ubuntu CI also runs them through the independently implemented
+The gateway runs these cases against the fast Node fixture on Linux and macOS.
+Ubuntu CI also runs them through the independently implemented
 Python container and a packaged gateway process. Central CI owns the real
 database and two-replica cases. A staging smoke test must use the canonical
 HTTPS proxy before version 2 is enabled for production identities.
