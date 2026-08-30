@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import type { CentralTokenProfile } from "./central-enrollment.js";
 import type { CredentialStore } from "./credential-store.js";
 import { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { GatewayError } from "./errors.js";
@@ -29,6 +29,8 @@ export interface CliTestOverrides {
   centralMcpUrl: string;
   stateRoot: string;
   credentialStore?: CredentialStore;
+  centralEnrollmentProfile?: CentralTokenProfile;
+  centralEnrollmentFetch?: typeof fetch;
 }
 
 export interface CliContext {
@@ -118,6 +120,12 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
         : {
             centralApiUrl: context.testOverrides.centralApiUrl,
             centralMcpUrl: context.testOverrides.centralMcpUrl,
+            ...(context.testOverrides.centralEnrollmentProfile === undefined
+              ? {}
+              : { centralEnrollmentProfile: context.testOverrides.centralEnrollmentProfile }),
+            ...(context.testOverrides.centralEnrollmentFetch === undefined
+              ? {}
+              : { centralEnrollmentFetch: context.testOverrides.centralEnrollmentFetch }),
             ...(context.testOverrides.credentialStore === undefined
               ? {}
               : { credentialStore: context.testOverrides.credentialStore }),

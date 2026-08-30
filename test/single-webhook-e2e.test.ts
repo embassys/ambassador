@@ -18,7 +18,7 @@ import { startFakeWebhook, type WebhookWake } from "./support/fake-webhook.js";
 import { runSecondGateway, startGatewayProcess } from "./support/gateway-process.js";
 import { McpCallError, type McpTool, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
-import { startGateway } from "./support/start-gateway.js";
+import { startCurrentGateway as startGateway } from "./support/start-gateway.js";
 
 const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const EMAIL = "fixture-agent@example.test";

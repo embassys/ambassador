@@ -49,6 +49,7 @@ test("T03-R01 full process owns the bootstrap catalog while central MCP is unava
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();
@@ -240,6 +241,7 @@ test("T03-R06 persistence failure leaves the gateway unenrolled after valid issu
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
     credentialStore: failingStore,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();

@@ -23,10 +23,10 @@ const definitions = {
       "t03-security-lifecycle.test.js",
       "t03-size-boundaries.test.js",
     ],
-    expected: { tests: 139, pass: 21, fail: 118, skipped: 0, todo: 0 },
+    expected: { tests: 139, pass: 105, fail: 34, skipped: 0, todo: 0 },
     timeoutMs: 90_000,
     vectorNote:
-      "129 behavior vectors: 109 expected red, 20 current green (19 G01 credential checks and 1 shipped closed-schema guard)",
+      "129 behavior vectors: 31 expected red, 98 current green (19 G01 credential checks, 78 newly green G02 enrollment checks, and 1 shipped closed-schema guard)",
   },
   t04: {
     key: "t04",
