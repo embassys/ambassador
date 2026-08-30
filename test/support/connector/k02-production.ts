@@ -872,10 +872,13 @@ export async function startK02Scenario(
       gateway.enqueueMessage(message);
     },
     async wake(messageId, timestampSeconds) {
+      const effectiveTimestamp =
+        timestampSeconds ??
+        (options.clock === undefined ? undefined : Math.floor(options.clock.nowMs() / 1_000));
       return await gateway.sendWake(
         connector.webhookUrl,
         messageId,
-        timestampSeconds === undefined ? {} : { timestampSeconds },
+        effectiveTimestamp === undefined ? {} : { timestampSeconds: effectiveTimestamp },
       );
     },
     releaseProviderEvent(event) {
