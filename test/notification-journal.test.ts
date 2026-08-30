@@ -44,29 +44,32 @@ test("creates a strict ID-only schema", (t) => {
   fixture.close(journal);
 
   const database = new Database(fixture.path, { readonly: true });
-  t.after(() => database.close());
-  const table = database
-    .prepare<[string], { name: string; strict: number }>(
-      "SELECT name, strict FROM pragma_table_list WHERE name = ?",
-    )
-    .get("notification_relay");
-  assert.deepEqual(table, { name: "notification_relay", strict: 1 });
+  try {
+    const table = database
+      .prepare<[string], { name: string; strict: number }>(
+        "SELECT name, strict FROM pragma_table_list WHERE name = ?",
+      )
+      .get("notification_relay");
+    assert.deepEqual(table, { name: "notification_relay", strict: 1 });
 
-  const columns = database
-    .prepare<[], { name: string }>("SELECT name FROM pragma_table_info('notification_relay')")
-    .all()
-    .map(({ name }) => name);
-  assert.deepEqual(columns, [
-    "message_id",
-    "notification_ack_state",
-    "notification_ack_attempt_count",
-    "notification_ack_next_attempt_at_ms",
-    "wake_state",
-    "wake_attempt_count",
-    "wake_next_attempt_at_ms",
-    "wake_may_have_reached",
-  ]);
-  assert.equal(database.pragma("user_version", { simple: true }), 1);
+    const columns = database
+      .prepare<[], { name: string }>("SELECT name FROM pragma_table_info('notification_relay')")
+      .all()
+      .map(({ name }) => name);
+    assert.deepEqual(columns, [
+      "message_id",
+      "notification_ack_state",
+      "notification_ack_attempt_count",
+      "notification_ack_next_attempt_at_ms",
+      "wake_state",
+      "wake_attempt_count",
+      "wake_next_attempt_at_ms",
+      "wake_may_have_reached",
+    ]);
+    assert.equal(database.pragma("user_version", { simple: true }), 1);
+  } finally {
+    database.close();
+  }
 });
 
 test("validates complete batches and coalesces exact URI-unreserved IDs", (t) => {
