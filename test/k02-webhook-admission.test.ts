@@ -254,6 +254,30 @@ test("K02-W06 verifies HMAC before strict JSON and correlation validation", asyn
     assert.equal(k02ResponseStatus(response), 400);
     assert.ok(response.toString("utf8").includes("connector_wake_invalid"));
   }
+  for (const [suffix, duplicateKey] of [
+    ["literal", '"name"'],
+    ["escaped", '"na\\u006de"'],
+  ] as const) {
+    const id = `w06_equivalent_duplicate_${suffix}`;
+    const body = k02WakeBody(id).replace(
+      '"name":"A2A Gateway"',
+      `"name":"A2A Gateway",${duplicateKey}:"A2A Gateway"`,
+    );
+    const headers = k02WakeHeaders(
+      scenario.connector.webhookUrl,
+      id,
+      Math.floor(Date.now() / 1_000),
+      body,
+    );
+    assertCanonicalJsonResponse(
+      await exchange(
+        scenario.connector.webhookUrl,
+        `${k02RawHead("POST /webhook HTTP/1.1", headers)}${body}`,
+      ),
+      400,
+      '{"error":"connector_wake_invalid"}',
+    );
+  }
   const mismatchBodyId = "w06_body_id";
   const mismatchBody = k02WakeBody(mismatchBodyId);
   for (const [headerName, headerValue] of [

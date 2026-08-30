@@ -101,6 +101,7 @@ export interface FakeConnectorGateway {
   readonly pollResultBytes: number;
   readonly rawContentBytes: number;
   enqueueMessage(message: FakeGatewayMessage): void;
+  setNextPollResultForTest(result: Readonly<Record<string, unknown>>): void;
   tombstone(messageId: string): FakeGatewayTombstone | undefined;
   sendWake(webhookUrl: string, messageId: string, options?: WakeOptions): Promise<Response>;
   close(): Promise<void>;
@@ -332,6 +333,7 @@ class GatewayFixture implements FakeConnectorGateway {
   readonly #server: Server;
   readonly #records = new Map<string, MessageRecord>();
   readonly #callRecords: FakeGatewayCall[] = [];
+  readonly #pollResultOverrides: Readonly<Record<string, unknown>>[] = [];
   readonly #sessionId = "connector-fixture-session";
   #endpoint: string | undefined;
   #accepting = false;
@@ -409,6 +411,10 @@ class GatewayFixture implements FakeConnectorGateway {
       terminal: undefined,
       acknowledged: false,
     });
+  }
+
+  setNextPollResultForTest(result: Readonly<Record<string, unknown>>): void {
+    this.#pollResultOverrides.push(clone(result));
   }
 
   tombstone(messageId: string): FakeGatewayTombstone | undefined {
@@ -607,6 +613,8 @@ class GatewayFixture implements FakeConnectorGateway {
     ) {
       throw new Error("invalid_request");
     }
+    const override = this.#pollResultOverrides.shift();
+    if (override !== undefined) return clone(override);
     return { messages: this.#activeMessages() };
   }
 

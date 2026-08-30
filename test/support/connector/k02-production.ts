@@ -122,6 +122,10 @@ export interface K02ConnectorOptions {
   crashAfterTurnStarting?: boolean;
   proveNoProviderDispatch?: boolean;
   stallWebhookResponseAfterCommit?: boolean;
+  providerDispatchDelayMsForTest?: number;
+  stateActionObserverForTest?: {
+    observe(event: Readonly<Record<string, unknown>>): void;
+  };
 }
 
 export interface K02ConnectorHandle {
@@ -192,6 +196,7 @@ export interface K02ProductionModule {
     count: number;
     activeConversationId: string;
     activeProviderSessionId: string;
+    openMessageCount?: number;
   }): Promise<void>;
   retireConnectorStateForTest(options: {
     stateDirectory: string;
@@ -790,6 +795,10 @@ export async function startK02Scenario(
     crashAfterTurnStarting?: boolean;
     proveNoProviderDispatch?: boolean;
     stallWebhookResponseAfterCommit?: boolean;
+    providerDispatchDelayMsForTest?: number;
+    stateActionObserverForTest?: {
+      observe(event: Readonly<Record<string, unknown>>): void;
+    };
     policy?: K02Policy;
     gatedEvents?: readonly string[];
     gatewayProxy?: boolean;
@@ -886,6 +895,12 @@ export async function startK02Scenario(
     ...(options.stallWebhookResponseAfterCommit === undefined
       ? {}
       : { stallWebhookResponseAfterCommit: options.stallWebhookResponseAfterCommit }),
+    ...(options.providerDispatchDelayMsForTest === undefined
+      ? {}
+      : { providerDispatchDelayMsForTest: options.providerDispatchDelayMsForTest }),
+    ...(options.stateActionObserverForTest === undefined
+      ? {}
+      : { stateActionObserverForTest: options.stateActionObserverForTest }),
   });
   connectorsForCleanup.push(connector);
   const webhookPort = Number(new URL(connector.webhookUrl).port);

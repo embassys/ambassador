@@ -126,6 +126,15 @@ async function unusedPort(): Promise<number> {
   return port;
 }
 
+async function assertLoopbackPortReusable(port: number): Promise<void> {
+  const server = createServer();
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolveListen());
+  });
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+}
+
 async function startGatewayConnectionGuard(t: TestContext): Promise<() => number> {
   let acceptedConnections = 0;
   const server = createServer((socket) => {
@@ -149,6 +158,10 @@ async function userInfoPreload(
   t: TestContext,
   accountHome: string,
   providerProcessMarker?: string,
+  filesystem?: {
+    behavior: "unproven" | "wrong_uid" | "observe_sync";
+    marker: string;
+  },
 ): Promise<string> {
   const preloadDirectory = await temporaryDirectory(t, "a2a-k02-user-info-");
   const preload = join(preloadDirectory, "user-info.mjs");
@@ -156,23 +169,101 @@ async function userInfoPreload(
     providerProcessMarker === undefined
       ? []
       : [
-          'import childProcess from "node:child_process";',
-          'import { appendFileSync } from "node:fs";',
           `const providerProcessMarker = ${JSON.stringify(providerProcessMarker)};`,
           "const rejectProviderProcess = () => {",
-          '  appendFileSync(providerProcessMarker, "provider process attempted\\n", { mode: 0o600 });',
+          '  fs.appendFileSync(providerProcessMarker, "provider process attempted\\n", { mode: 0o600 });',
           '  throw new Error("provider process attempted before CLI admission");',
           "};",
           'for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]) {',
           "  childProcess[name] = rejectProviderProcess;",
           "}",
         ];
+  const filesystemGuard =
+    filesystem === undefined
+      ? []
+      : filesystem.behavior === "unproven"
+        ? [
+            `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+            "const filesystemFailure = () => {",
+            '  fs.appendFileSync(filesystemMarker, "statfs\\n", { mode: 0o600 });',
+            '  const error = new Error("filesystem residence unproven");',
+            '  error.code = "ENOSYS";',
+            "  return error;",
+            "};",
+            "fs.statfsSync = () => {",
+            "  throw filesystemFailure();",
+            "};",
+            "fs.statfs = (_path, options, callback) => {",
+            '  const done = typeof options === "function" ? options : callback;',
+            "  queueMicrotask(() => done(filesystemFailure()));",
+            "};",
+            "fs.promises.statfs = async () => { throw filesystemFailure(); };",
+          ]
+        : filesystem.behavior === "wrong_uid"
+          ? [
+              `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+              "const withWrongUid = (path, metadata) => {",
+              `  if (String(path) === ${JSON.stringify(accountHome)}) {`,
+              '    fs.appendFileSync(filesystemMarker, "wrong_uid\\n", { mode: 0o600 });',
+              '    Object.defineProperty(metadata, "uid", { value: Number(metadata.uid) + 1 });',
+              "  }",
+              "  return metadata;",
+              "};",
+              "const realLstatSync = fs.lstatSync;",
+              "fs.lstatSync = (path, options) => {",
+              "  return withWrongUid(path, realLstatSync(path, options));",
+              "};",
+              "const realLstat = fs.lstat;",
+              "fs.lstat = (path, options, callback) => {",
+              '  const done = typeof options === "function" ? options : callback;',
+              '  const selectedOptions = typeof options === "function" ? undefined : options;',
+              "  realLstat(path, selectedOptions, (error, metadata) => {",
+              "    done(error, error === null ? withWrongUid(path, metadata) : metadata);",
+              "  });",
+              "};",
+              "const realPromiseLstat = fs.promises.lstat;",
+              "fs.promises.lstat = async (path, options) => {",
+              "  return withWrongUid(path, await realPromiseLstat(path, options));",
+              "};",
+            ]
+          : [
+              `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+              "const recordSync = (metadata) => {",
+              '  const kind = metadata.isDirectory() ? "directory" : "file";',
+              '  fs.appendFileSync(filesystemMarker, kind + "\\n", { mode: 0o600 });',
+              "};",
+              "const realFsyncSync = fs.fsyncSync;",
+              "fs.fsyncSync = (descriptor) => {",
+              "  recordSync(fs.fstatSync(descriptor));",
+              "  return realFsyncSync(descriptor);",
+              "};",
+              "const realFsync = fs.fsync;",
+              "fs.fsync = (descriptor, callback) => {",
+              "  recordSync(fs.fstatSync(descriptor));",
+              "  return realFsync(descriptor, callback);",
+              "};",
+              'const probeHandle = await fs.promises.open(filesystemMarker, "a", 0o600);',
+              "const fileHandlePrototype = Object.getPrototypeOf(probeHandle);",
+              "await probeHandle.close();",
+              "const realHandleSync = fileHandlePrototype.sync;",
+              "fileHandlePrototype.sync = async function () {",
+              "  recordSync(await this.stat());",
+              "  return realHandleSync.call(this);",
+              "};",
+            ];
   await writeFile(
     preload,
     [
       'import os from "node:os";',
+      ...(providerProcessMarker === undefined
+        ? []
+        : ['import childProcess from "node:child_process";']),
+      ...(providerProcessMarker === undefined && filesystem === undefined
+        ? []
+        : ['import fs from "node:fs";']),
       'import { syncBuiltinESMExports } from "node:module";',
       ...processGuard,
+      ...filesystemGuard,
       "const realUserInfo = os.userInfo;",
       `os.userInfo = () => ({ ...realUserInfo(), homedir: ${JSON.stringify(accountHome)} });`,
       "syncBuiltinESMExports();",
@@ -191,6 +282,10 @@ function startArguments(port: number, workingDirectory: string): string[] {
     `--working-directory=${workingDirectory}`,
     "--policy=read-only",
   ];
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function providerStateDirectory(accountHome: string, provider: (typeof PROVIDERS)[number]): string {
@@ -363,7 +458,7 @@ test("K02-D02 starts each exact foreground entrypoint with ordered fixed errors"
   const accountHome = await realpath(accountHomeInput);
   const workingDirectory = await realpath(workingDirectoryInput);
   const preload = await userInfoPreload(t, accountHome);
-  await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
+  const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
   const completedProviders: string[] = [];
 
   for (const provider of PROVIDERS) {
@@ -471,6 +566,32 @@ test("K02-D02 starts each exact foreground entrypoint with ordered fixed errors"
     });
     assert.equal(foreground.stdout(), readiness);
     assert.equal(foreground.stderr(), "");
+
+    const fatalPort = await unusedPort();
+    const fatalForeground = run(startArguments(fatalPort, workingDirectory));
+    t.after(async () => {
+      if (fatalForeground.child.exitCode === null && fatalForeground.child.signalCode === null) {
+        fatalForeground.child.kill("SIGKILL");
+      }
+      await fatalForeground.exit;
+    });
+    const fatalReadiness = `Connector webhook: http://127.0.0.1:${fatalPort}/webhook\n`;
+    await waitForReadiness(fatalForeground, fatalReadiness);
+    const malformedIdWake = `runtime_fatal_${provider}`;
+    gateway.setNextPollResultForTest({
+      messages: [{ ...k02Message("ignored_string_id", "runtime_fatal_conversation"), id: 7 }],
+    });
+    assert.equal(
+      (await gateway.sendWake(`http://127.0.0.1:${fatalPort}/webhook`, malformedIdWake)).status,
+      202,
+    );
+    assert.deepEqual(await waitForCapturedExit(fatalForeground, `${provider} runtime fatal`), {
+      code: 1,
+      signal: null,
+    });
+    assert.equal(fatalForeground.stdout(), fatalReadiness);
+    assert.equal(fatalForeground.stderr(), "a2a connector: connector_gateway_operation_failed\n");
+    await assertLoopbackPortReusable(fatalPort);
 
     const occupied = createServer();
     await new Promise<void>((resolveListen, reject) => {
@@ -762,6 +883,52 @@ test("K02-S11 refuses only conversation 100001 and admits a mapped continuation"
   if (resume?.kind === "resume") {
     assert.equal(resume.provider_session_id, activeProviderSessionId);
   }
+
+  const messageQuotaDirectory = await temporaryDirectory(t, "a2a-k02-s11-message-quota-");
+  await module.initializeConnectorStateForTest({
+    stateDirectory: messageQuotaDirectory,
+    webhookToken: K02_TOKEN,
+    providerKind: "codex",
+    workingDirectory: WORKING_DIRECTORY,
+  });
+  await module.seedConnectorConversationsForTest({
+    stateDirectory: messageQuotaDirectory,
+    webhookToken: K02_TOKEN,
+    providerKind: "codex",
+    workingDirectory: WORKING_DIRECTORY,
+    count: 2,
+    activeConversationId: "s11_message_quota_existing",
+    activeProviderSessionId: "s11_message_quota_session",
+    openMessageCount: 2,
+  });
+  const quotaDatabase = new Database(join(messageQuotaDirectory, "correlation.sqlite3"), {
+    readonly: true,
+  });
+  try {
+    assert.equal(
+      quotaDatabase.prepare<[], { count: number }>("SELECT count(*) AS count FROM messages").get()
+        ?.count,
+      2,
+      "the message-capacity fixture did not create two durable open rows",
+    );
+  } finally {
+    quotaDatabase.close();
+  }
+  const messageQuota = await startK02Scenario(t, "K02-K03:S11", {
+    stateDirectory: messageQuotaDirectory,
+    workingDirectory: WORKING_DIRECTORY,
+    scripts: [],
+  });
+  await messageQuota.connector.waitForIdle();
+  const excessMessage = k02Message("s11_message_quota_excess", "s11_message_quota_new");
+  messageQuota.enqueue(excessMessage);
+  assert.equal((await messageQuota.wake(excessMessage.id)).status, 202);
+  await assert.rejects(messageQuota.connector.waitForIdle(), /connector_state_capacity/u);
+  assert.equal(messageQuota.provider.requests.length, 0);
+  assert.deepEqual(
+    messageQuota.gateway.calls.map((call) => call.name),
+    ["poll_messages", "poll_messages", "poll_messages"],
+  );
 });
 
 test("K02-S12 opens no state until the injected filesystem qualification proves local", async (t) => {
@@ -792,6 +959,151 @@ test("K02-S12 opens no state until the injected filesystem qualification proves 
     "correlation.sqlite3",
     "owner.sqlite3",
   ]);
+
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+  const cli = resolve(".test-dist/packages/codex-connector/src/cli.js");
+  const runPublic = (
+    preload: string,
+    arguments_: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ) =>
+    startCapturedChild(process.execPath, [`--import=${preload}`, cli, ...arguments_], {
+      cwd,
+      env,
+    });
+
+  await check("unproven production filesystem", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s12-public-unproven-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const marker = join(root, "filesystem-probe");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await userInfoPreload(t, accountHome, undefined, {
+      behavior: "unproven",
+      marker,
+    });
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), workspace),
+      workspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "unproven production filesystem"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+    assert.match(await readFile(marker, "utf8"), /statfs\n/u);
+    await assert.rejects(readdir(providerStateDirectory(accountHome, "codex")), /ENOENT/u);
+  });
+
+  await check("effective UID rejection", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s12-public-uid-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const marker = join(root, "uid-probe");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await userInfoPreload(t, accountHome, undefined, {
+      behavior: "wrong_uid",
+      marker,
+    });
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), workspace),
+      workspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "wrong effective UID"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+    assert.match(await readFile(marker, "utf8"), /wrong_uid\n/u);
+    await assert.rejects(readdir(providerStateDirectory(accountHome, "codex")), /ENOENT/u);
+  });
+
+  const durableRoot = await temporaryDirectory(t, "a2a-k02-s12-public-durable-");
+  const durableHomeInput = join(durableRoot, "account-home");
+  const durableWorkspaceInput = join(durableRoot, "workspace");
+  const durabilityMarker = join(durableRoot, "durability-probe");
+  await mkdir(durableHomeInput, { mode: 0o700 });
+  await mkdir(durableWorkspaceInput, { mode: 0o700 });
+  const durableHome = await realpath(durableHomeInput);
+  const durableWorkspace = await realpath(durableWorkspaceInput);
+  const durablePreload = await userInfoPreload(t, durableHome, undefined, {
+    behavior: "observe_sync",
+    marker: durabilityMarker,
+  });
+  const durablePort = await unusedPort();
+  await check("initialization durability", async () => {
+    const captured = runPublic(
+      durablePreload,
+      startArguments(durablePort, durableWorkspace),
+      durableWorkspace,
+      { ...process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+    );
+    t.after(async () => {
+      if (captured.child.exitCode === null && captured.child.signalCode === null) {
+        captured.child.kill("SIGKILL");
+      }
+      await captured.exit;
+    });
+    const readiness = `Connector webhook: http://127.0.0.1:${durablePort}/webhook\n`;
+    await waitForReadiness(captured, readiness);
+    assert.equal(captured.child.kill("SIGTERM"), true);
+    assert.deepEqual(await waitForCapturedExit(captured, "durable initialization shutdown"), {
+      code: 0,
+      signal: null,
+    });
+    assert.deepEqual((await readFile(durabilityMarker, "utf8")).trim().split("\n"), [
+      "file",
+      "directory",
+      "file",
+      "directory",
+    ]);
+  });
+
+  await check("protected parent chain", async () => {
+    const connectorRoot = dirname(providerStateDirectory(durableHome, "codex"));
+    await chmod(connectorRoot, 0o755);
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const preload = await userInfoPreload(t, durableHome);
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), durableWorkspace),
+      durableWorkspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "weak protected parent"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+  });
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-S13 distinguishes partial markers while retirement resumes every crash barrier", async (t) => {

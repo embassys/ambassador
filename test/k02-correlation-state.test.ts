@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { createDecipheriv, createHash, createHmac, scryptSync } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { chmod, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -19,6 +28,56 @@ import {
 
 function openState(stateDirectory: string): Database.Database {
   return new Database(join(stateDirectory, "correlation.sqlite3"));
+}
+
+async function holdWalAbove(
+  stateDirectory: string,
+  minimumBytes: number,
+): Promise<{ bytes: number; release(): void }> {
+  const path = join(stateDirectory, "correlation.sqlite3");
+  const wal = `${path}-wal`;
+  const reader = new Database(path, { readonly: true });
+  const writer = new Database(path);
+  let released = false;
+  try {
+    reader.pragma("wal_autocheckpoint=0");
+    reader.exec("BEGIN");
+    reader.prepare("SELECT conversation_hmac FROM conversations ORDER BY rowid LIMIT 1").get();
+    writer.pragma("wal_autocheckpoint=0");
+    writer.pragma("synchronous=OFF");
+    const update = writer.prepare(
+      "UPDATE conversations SET updated_at_ms=updated_at_ms+1 WHERE rowid=(SELECT min(rowid) FROM conversations)",
+    );
+    let bytes = 0;
+    for (let writes = 0; bytes <= minimumBytes; writes += 1) {
+      assert.ok(writes < 8_192, "failed to grow the real correlation WAL to its boundary");
+      update.run();
+      if (writes % 32 === 31) bytes = (await stat(wal)).size;
+    }
+    writer.close();
+    return {
+      bytes,
+      release() {
+        if (released) return;
+        released = true;
+        reader.exec("COMMIT");
+        reader.close();
+      },
+    };
+  } catch (error) {
+    if (writer.open) writer.close();
+    if (reader.open) {
+      try {
+        reader.exec("ROLLBACK");
+      } catch {}
+      reader.close();
+    }
+    throw error;
+  }
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function normalizedSql(value: string): string {
@@ -233,6 +292,120 @@ test("K02-A01 creates the exact strict schema and fixed SQLite settings", async 
     "4716592838eb52969c40af85fcd9c574e1cfa105260fc6fb5e5cb7b71d4b208f",
   );
   assert.deepEqual(inspection.ownerGuard, { singleton: 1, ever_initialized: 1 });
+
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+
+  await check("4 MiB checkpoint target", async () => {
+    const actions: Readonly<Record<string, unknown>>[] = [];
+    const target = await startK02Scenario(t, "K02-K03:A01", {
+      stateActionObserverForTest: {
+        observe(event) {
+          actions.push(structuredClone(event));
+        },
+      },
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "a01_wal_target_session" },
+          { kind: "turn", provider_turn_id: "a01_wal_target_turn_1" },
+          { kind: "reply", text: "establish WAL target mapping" },
+        ],
+        [
+          { kind: "turn", provider_turn_id: "a01_wal_target_turn_2" },
+          { kind: "reply", text: "continue after checkpoint" },
+        ],
+      ],
+    });
+    const first = k02Message("a01_wal_target_first", "a01_wal_target_conversation");
+    target.enqueue(first);
+    assert.equal((await target.wake(first.id)).status, 202);
+    await target.connector.waitForIdle();
+    const held = await holdWalAbove(target.stateDirectory, 4_194_304);
+    held.release();
+    actions.length = 0;
+    const second = k02Message(
+      "a01_wal_target_second",
+      first.conversation_id,
+      "checkpoint before continuation",
+      first.id,
+    );
+    target.enqueue(second);
+    assert.equal((await target.wake(second.id)).status, 202);
+    await target.connector.waitForIdle();
+    const checkpoint = actions.findIndex(
+      (event) => event.kind === "wal_checkpoint" && event.mode === "PASSIVE",
+    );
+    const externalEffect = actions.findIndex((event) => event.kind === "external_effect");
+    assert.ok(checkpoint >= 0, "no PASSIVE checkpoint was observed above the 4 MiB target");
+    assert.ok(
+      externalEffect > checkpoint,
+      "an external effect preceded the required WAL target checkpoint",
+    );
+  });
+
+  await check("16 MiB hard action boundary", async () => {
+    const actions: Readonly<Record<string, unknown>>[] = [];
+    const hard = await startK02Scenario(t, "K02-K03:A01", {
+      stateActionObserverForTest: {
+        observe(event) {
+          actions.push(structuredClone(event));
+        },
+      },
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "a01_wal_hard_session" },
+          { kind: "turn", provider_turn_id: "a01_wal_hard_turn_1" },
+          { kind: "reply", text: "establish hard WAL mapping" },
+        ],
+        [
+          { kind: "turn", provider_turn_id: "a01_wal_hard_turn_2" },
+          { kind: "reply", text: "must not dispatch" },
+        ],
+      ],
+    });
+    const first = k02Message("a01_wal_hard_first", "a01_wal_hard_conversation");
+    hard.enqueue(first);
+    assert.equal((await hard.wake(first.id)).status, 202);
+    await hard.connector.waitForIdle();
+    const held = await holdWalAbove(hard.stateDirectory, 16_777_216);
+    actions.length = 0;
+    const providerCalls = hard.provider.requests.length;
+    try {
+      const second = k02Message(
+        "a01_wal_hard_second",
+        first.conversation_id,
+        "hard boundary continuation",
+        first.id,
+      );
+      hard.enqueue(second);
+      const wake = await hard.wake(second.id).catch(() => undefined);
+      assert.notEqual(wake?.status, 202, "accepted a wake while the WAL remained above 16 MiB");
+      await assert.rejects(hard.connector.waitForIdle(), /connector_state_unavailable/u);
+      assert.equal(hard.provider.requests.length, providerCalls);
+      const passive = actions.findIndex(
+        (event) => event.kind === "wal_checkpoint" && event.mode === "PASSIVE",
+      );
+      const truncate = actions.findIndex(
+        (event) => event.kind === "wal_checkpoint" && event.mode === "TRUNCATE",
+      );
+      assert.ok(passive >= 0 && truncate > passive, "hard boundary skipped PASSIVE then TRUNCATE");
+      assert.equal(
+        actions.some((event) => event.kind === "external_effect"),
+        false,
+      );
+    } finally {
+      held.release();
+      await hard.connector.crash();
+    }
+  });
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-A02 derives full HMAC indexes and authenticates every AES-256-GCM envelope", async (t) => {
@@ -946,20 +1119,35 @@ test("K02-A07 deletes only an acknowledged message and retains the conversation 
 });
 
 test("K02-A08 fails closed on unexpected artifacts, weak modes, and database damage", async (t) => {
-  for (const failure of ["unexpected_artifact", "weak_mode", "database_damage"] as const) {
+  for (const failure of [
+    "unexpected_artifact",
+    "weak_mode",
+    "hard_link",
+    "database_damage",
+  ] as const) {
     const { scenario } = await establishMapping(t, "K02-K03:A08", `filesystem_${failure}`);
     await scenario.connector.close();
     const unexpected = join(scenario.stateDirectory, "unexpected.backup");
     const databasePath = join(scenario.stateDirectory, "correlation.sqlite3");
+    const hardLink = join(scenario.rootDirectory, "correlation-hard-link");
+    const effectiveUid = process.geteuid?.();
+    for (const leaf of await readdir(scenario.stateDirectory)) {
+      const metadata = await stat(join(scenario.stateDirectory, leaf));
+      if (effectiveUid !== undefined) assert.equal(metadata.uid, effectiveUid);
+      assert.equal(metadata.nlink, 1);
+    }
     if (failure === "unexpected_artifact") {
       await writeFile(unexpected, "content-free but unallowlisted", { mode: 0o600 });
     } else if (failure === "weak_mode") {
       await chmod(databasePath, 0o644);
+    } else if (failure === "hard_link") {
+      await link(databasePath, hardLink);
     } else {
       await writeFile(databasePath, "not a SQLite database");
     }
     await assert.rejects(scenario.restart([]), /connector_state_unavailable/u);
     if (failure === "unexpected_artifact") await unlink(unexpected);
+    if (failure === "hard_link") await unlink(hardLink);
   }
 });
 
