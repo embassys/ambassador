@@ -1034,4 +1034,4 @@ and platform impact.
 The accepted design is fresh-install-only and adds no migration. Public
 publication and provider/platform support claims remain behind ADR 0031's
 later gates. ADRs 0028, 0030, and 0031 were accepted with this record and
-complete D05; K01 remains blocked by G04.
+complete D05. ADR 0032 permits K01 against the accepted G04 fixture contract.

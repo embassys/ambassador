@@ -42,9 +42,9 @@ cryptography package, provider SDK, or provider executable as part of the
 foundation. A provider-specific ADR may propose an SDK or executable only with
 its exact version, license, protocol, release policy, and platform impact.
 
-This accepted amendment does not itself install or update a dependency. Exact
-workspace entries and lockfile changes wait for G04 and the K01 through K03
-implementation sequence.
+This accepted amendment does not itself install or update a dependency. ADR
+0032 permits the exact workspace entries and lockfile changes in the K01
+through K03 implementation sequence.
 
 The connector is an MCP client, not an MCP server, and uses the client
 package's approved HTTP transport. No MCP server or Node transport package is
@@ -272,8 +272,8 @@ npx --yes @a2adev/<provider>-connector@<qualified-version> start <approved-optio
 Repository work, audits, packs, and clean-install qualification continue to
 use pnpm. End users do not need pnpm or a global connector installation.
 
-No distribution tooling was added during D05. After G04, K01 through K03 may
-add the private static manifests, build configuration, staging script, and
+No distribution tooling was added during D05. Under ADR 0032, K01 through K03
+may add the private static manifests, build configuration, staging script, and
 local packed-install tests described above. They may not remove `private`, add
 a publish job, or publish a package.
 
@@ -410,9 +410,9 @@ reviewable.
 
 Approved by the user on 2026-08-30. This accepts the D05 runtime, private
 package layout, installation model, dependency scope, and platform
-qualification rules. With ADRs 0028 through 0030, it completes D05. After G04,
-K01 through K03 may add the private manifests, build configuration, staging,
-and packed-install tests authorized above.
+qualification rules. With ADRs 0028 through 0030, it completes D05. K01
+through K03 were originally gated on G04. ADR 0032 now permits that local work
+against the accepted fixture contract.
 
 This approval does not authorize a public-repository change, publish job,
 preview or stable publication, or provider/platform support claim. Those stay

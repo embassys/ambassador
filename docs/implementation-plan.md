@@ -43,6 +43,7 @@ documentation land.
 | D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
 | D05 | Complete | ADRs 0028 through 0031 fix the connector startup and retirement interface, state, policy, limits, provider-neutral port, runtime, dependency scope, private package layout, installation model, platform qualification, and publishing gates |
 | D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
+| D07 | Complete | ADR 0032 permits local gateway, connector, and provider implementation against accepted fixtures before central deployment; real central compatibility, activation, qualification, and release remain externally gated |
 
 The accepted contracts contain fixed values for development and test work.
 Facts that only the central deployment owner can supply remain unresolved,
@@ -86,7 +87,9 @@ G04 contract + D05
 Green support work may merge before production behavior. Gateway red
 specifications may merge after the user accepts their exact inventory. The
 central red specification may merge after the central owner accepts its exact
-inventory. Neither repository review closes Gate A by itself.
+inventory. Neither repository review closes Gate A by itself. ADR 0032 permits
+local contract-first implementation before Gate A closes, but it does not
+change the external review or release gate.
 
 | ID | Repository | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
@@ -102,7 +105,9 @@ The gateway half of this gate is complete. PR `#28` merged T03, T04, and C01
 after the user accepted their classified failure inventory on 2026-08-30.
 Gate A remains open until the central owner publishes and accepts S01 in the
 central repository. The merge records the reviewed gateway specification; it
-does not authorize G01 through G04 or stand in for central DPoP enforcement.
+does not stand in for central DPoP enforcement. ADR 0032 separately authorizes
+G01 through G04 against the accepted fixtures and requires that evidence to be
+labeled local rather than production central compatibility.
 
 D06 is complete. T01 may use the approved `cryptography==50.0.0` wheel for
 independent fixture key and signature operations. The fixture must not share
@@ -131,16 +136,17 @@ proxy peers, quotas, and rollout dates remain central-owner deliverables.
 
 ## Phase 3: gateway implementation
 
-Do not begin G01 through G04 before GATE-A. Do not enable a production DPoP
-path before S03 is deployed for dedicated development identities and rejects
-bearer use of the same bound tokens.
+ADR 0032 permits G01 through G04 to begin against the accepted fixtures before
+GATE-A. Do not enable a production DPoP path before S03 is deployed for
+dedicated development identities and rejects bearer use of the same bound
+tokens.
 
 | ID | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- |
-| G01 | Implement P-256 DPoP proofs, nonce handling, encrypted credential version 2, and same-key replacement | GATE-A, S03 development deployment | T03 cryptographic, restart, corruption, and artifact-scan cases pass |
-| G02 | Move local bootstrap tools to bounded central REST enrollment | G01, S02 | Registration, verification, resend, lost response, persistence ordering, and token-free local results pass |
-| G03 | Authenticate all protected central REST and MCP requests with DPoP and remove MCP token arguments | G02, S03 | Fresh-proof, nonce, cancellation, reconnect, bearer-rejection, and safe-error cases pass |
-| G04 | Implement version 2 activation, leased receive, conversations, replies, outcomes, completion, and acknowledgement | G03, S04, S05, T04 approval | T04 passes without durable gateway message or reply bodies |
+| G01 | Implement P-256 DPoP proofs, nonce handling, encrypted credential version 2, and same-key replacement | ADR 0032, T03 approval | T03 cryptographic, restart, corruption, and artifact-scan cases pass locally; S03 remains required for live qualification |
+| G02 | Move local bootstrap tools to bounded central REST enrollment | G01, accepted REST fixture contract | Registration, verification, resend, lost response, persistence ordering, and token-free local results pass; S02 remains required for live qualification |
+| G03 | Authenticate all protected central REST and MCP requests with DPoP and remove MCP token arguments | G02, accepted DPoP fixture contract | Fresh-proof, nonce, cancellation, reconnect, bearer-rejection, and safe-error cases pass; S03 remains required for live qualification |
+| G04 | Implement version 2 activation, leased receive, conversations, replies, outcomes, completion, and acknowledgement | G03, T04 approval, accepted conversation fixture contract | T04 passes without durable gateway message or reply bodies; S04 and S05 remain required for live qualification |
 
 Serialize G01 through G04. They overlap in identity, credential, application,
 MCP, relay, journal, fixture, and documentation files. An implementation agent
@@ -175,9 +181,10 @@ connector-wide choices:
 - provider approval and uncertain-turn behavior; and
 - installation, packaging, supported platforms, and publishing gates.
 
-After D05 and G04, implement the provider-neutral connector in the K01 through
-K04 order recorded in `docs/architecture-pr-backlog.md`: fixtures, red suite,
-review, implementation, then full fake-provider E2E. Only then start separate
+After D05 and the accepted G04 contract, implement the provider-neutral
+connector in the K01 through K04 order recorded in
+`docs/architecture-pr-backlog.md`: fixtures, red suite, review,
+implementation, then full fake-provider E2E. Only then start separate
 Codex, Claude Code, and Gemini tracks. Each provider needs its own protocol and
 dependency decision, fake adapter tests, red-suite review, implementation, and
 manual opt-in qualification with an existing authenticated installation.
@@ -202,7 +209,8 @@ artifact tests.
 ## Current blockers and pending decisions
 
 - The user accepted the T03 and T04 gateway inventory. Gate A still lacks the
-  external S01 inventory and central-owner review.
+  external S01 inventory and central-owner review. ADR 0032 allows local
+  implementation to proceed but not production central claims or activation.
 - The central implementation repository and owners must complete S01 through
   S07. This gateway workspace does not contain that production service.
 - Production issuer, API resource, MCP resource, API base, and MCP endpoint
@@ -212,6 +220,7 @@ artifact tests.
   staging or release.
 - The local user-authorized reset interface for an unreadable credential or
   uncertain revocation remains unresolved.
-- D05 is complete. G04 still blocks K01, and provider-specific interfaces,
-  versions, dependencies, platform support, and public distribution remain
-  behind their later ADR and release gates.
+- D05 is complete. ADR 0032 permits K01 against the accepted G04 fixture
+  contract. Provider-specific interfaces, versions, dependencies, platform
+  support, and public distribution remain behind their later ADR and release
+  gates.

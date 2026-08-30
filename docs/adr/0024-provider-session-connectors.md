@@ -306,9 +306,10 @@ ADRs 0028 through 0031 complete D05 by approving:
    or uncertain outcomes; and
 6. packaging, installation, supported platforms, and publishing gates.
 
-G04 still blocks K01. Each provider interface, executable or SDK version, and
-protocol schema stays behind its later provider-specific ADR and blocks only
-that adapter's tests and production work.
+ADR 0032 permits K01 against the accepted G04 fixture contract. Each provider
+interface, executable or SDK version, and protocol schema stays behind its
+later provider-specific ADR and blocks only that adapter's tests and
+production work.
 
 ## Approval
 

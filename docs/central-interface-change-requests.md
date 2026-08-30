@@ -2,10 +2,16 @@
 
 Status: accepted target contract, not implemented or deployment-verified
 
-The user accepted the client-visible contracts in ADRs 0023, 0025, and 0026
-on 2026-08-29. This document is the handoff to the central service owners. It
-does not claim that the production service, database, shared security state,
+The user accepted the client-visible contracts in ADRs 0023, 0025, 0026, and
+0027 on 2026-08-29. This document is the handoff to the central service owners.
+It does not claim that the production service, database, shared security state,
 proxy, or email system implements them.
+
+Central implementers should use
+[`central-server-implementation-spec.md`](central-server-implementation-spec.md)
+as the ordered S01 through S07 work specification. This document keeps the
+current-versus-target interface comparison and the reasons for each request.
+The ADRs remain normative if the two handoff documents disagree.
 
 Where production facts are unavailable, fixtures use the deterministic values
 in `docs/v2-fixture-profile.md`. Those values are test-only. Central owners
@@ -603,7 +609,7 @@ central -> authorize recipient opt-in and sender policy, then create one turn
 agent   -> on uncertainty, get_conversation_start with the same request_id
 agent   -> retain opaque outbound IDs and poll get_message_outcome every 30s
 
-gateway -> receive_messages()
+gateway -> GET /api/v2/messages/receive?timeout=30&limit=100
 central -> lease and return full immutable messages
 gateway -> keep bodies in bounded memory and persist IDs only
 gateway -> wake local webhook with message_id
