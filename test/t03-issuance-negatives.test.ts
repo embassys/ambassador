@@ -264,6 +264,18 @@ test("T03-N01 verification nonce and proof failures use fixed precedence and ret
       requests: 1,
     },
     {
+      name: "missing no-store precedes wrong media type",
+      plans: [challenge({ nonce: VALID_NONCE, mediaType: "text/plain", noStore: false })],
+      code: "central_verification_response_unsafe",
+      requests: 1,
+    },
+    {
+      name: "missing no-store precedes malformed JSON",
+      plans: [challenge({ nonce: VALID_NONCE, body: "{", noStore: false })],
+      code: "central_verification_response_unsafe",
+      requests: 1,
+    },
+    {
       name: "invalid proof",
       plans: [safeProofRejection()],
       code: "central_dpop_proof_rejected",
@@ -411,6 +423,35 @@ test("T03-N02 invalid verification credentials are rejected before persistence",
             raw: (token) =>
               `{"agent_id":"agent_fixture_0001","username":"t03_gateway","token":"${token}","token":"${token}","token_type":"DPoP","expires_in":86400}`,
           }),
+      },
+      code: "central_enrollment_contract_failed",
+    },
+    {
+      name: "case-colliding token member",
+      response: {
+        status: 200,
+        headers: SAFE_JSON_HEADERS,
+        body: (request) =>
+          successBody(request, {
+            raw: (token) =>
+              JSON.stringify({
+                agent_id: "agent_fixture_0001",
+                username: "t03_gateway",
+                token,
+                Token: token,
+                token_type: "DPoP",
+                expires_in: 86_400,
+              }),
+          }),
+      },
+      code: "central_enrollment_contract_failed",
+    },
+    {
+      name: "verification set-cookie header",
+      response: {
+        status: 200,
+        headers: { ...SAFE_JSON_HEADERS, "set-cookie": "fixture_session=forbidden" },
+        body: (request) => successBody(request),
       },
       code: "central_enrollment_contract_failed",
     },
