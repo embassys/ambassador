@@ -1,6 +1,6 @@
 # 0028 Connector startup interface
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-30
 
@@ -103,9 +103,8 @@ caller's original spelling, supply the bytes used by ADR 0029.
 
 The connector may pass the directory transiently as the provider process
 working directory after the provider-specific contract is approved. It does
-not persist or print the path. D05's state ADR must define a content-free way
-to bind state to the canonical directory without storing the path in
-plaintext.
+not persist or print the path. ADR 0029 defines the content-free binding to the
+canonical directory without storing the path in plaintext.
 
 ### Local policy
 
@@ -336,7 +335,7 @@ output, or state contents.
 The stderr form is exactly `a2a connector: <fixed_error_code>`. A normal error
 does not echo the rejected value or distinguish a missing token variable from
 a malformed token. Provider-turn errors and terminal outcomes are not startup
-errors and remain part of D05's later process and approval-policy decisions.
+errors and remain part of ADR 0030's execution and approval-policy decisions.
 
 `start` applies these mappings in order after argument and canonical-directory
 validation: a missing or syntactically invalid token is
@@ -379,10 +378,10 @@ requested policy without broadening it.
 
 The fixed IPv4 loopback address and port range are portable, but canonical
 path comparison, singleton ownership, state access control, signal handling,
-and provider policy enforcement differ by operating system. D05 and the later
-provider ADRs must define and test those mechanisms before claiming a
-platform. This proposal makes no Windows, macOS, Linux, package, or packed
-installation claim.
+and provider policy enforcement differ by operating system. This record and
+the later provider ADRs must define and test those mechanisms before claiming
+a platform. This accepted record makes no Windows, macOS, Linux, package, or
+packed installation claim.
 
 The connector's supported platforms cannot exceed both the gateway's
 qualified platforms and the selected provider runtime's qualified platforms.
@@ -430,15 +429,13 @@ is non-interactive and scriptable, so setup documentation must explain its
 irreversible continuity and manual central-handling consequences before
 showing the command.
 
-## Approval required
+## Approval
 
-Not approved. This proposed ADR records an N3-D1 recommendation for user
-review. It does not complete D05, authorize connector tests or production
-code, approve a concrete provider entrypoint name, add or select a dependency,
-choose a state mechanism, approve a provider executable or SDK, add packaging
-or installation tooling, make a platform claim, or authorize publishing.
+Approved by the user on 2026-08-30. This fixes the N3-D1 startup interface,
+local authority inputs, and whole-provider retirement command described above.
+ADRs 0029 through 0031 were accepted with this record and complete D05.
 
-Approval of this ADR would fix only the startup interface and local authority
-inputs described above. The connector state, limits, process protocol,
-provider interfaces, approval behavior, packaging, installation, platform,
-and publishing decisions would remain pending.
+This approval does not select a provider executable or SDK version, authorize
+public package publication, or make a provider/platform support claim. K01
+remains blocked until G04 supplies the accepted gateway delivery-control
+contract.

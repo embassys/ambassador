@@ -1,13 +1,14 @@
 # 0030 Connector execution contract
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-30
 
-Approval: not approved
+Approval: approved by the user on 2026-08-30
 
-This proposal authorizes no tests, production code, dependency, provider
-interface, installation, or publishing work.
+This accepted record completes its part of D05. K01 remains blocked by G04,
+and provider interfaces, installation, and publication retain their later
+gates.
 
 ## Problem
 
@@ -40,11 +41,12 @@ files, crash artifacts, or support bundles. A separately approved provider may
 retain its own native history as disclosed under ADR 0024; the connector never
 copies that history.
 
-This ADR would complete N3-D4 and N3-D5 only for the common execution contract.
+This ADR completes N3-D4 and N3-D5 only for the common execution contract.
 It does not choose the connector executable or CLI, state implementation,
 runtime, library, provider transport, provider executable or SDK, package,
-supported platform, installation method, or publishing path. Those decisions
-remain gated by D05 and the provider-specific ADRs.
+supported platform, installation method, or publishing path. ADRs 0028, 0029,
+and 0031 fix the remaining D05 choices; provider-specific choices retain their
+later ADRs.
 
 ## Work scheduling
 
@@ -180,7 +182,7 @@ does not silently amend that schema.
 ## Webhook admission
 
 The connector is the gateway's one configured literal-loopback webhook target.
-When proposed ADR 0028 is accepted with this record, it accepts only `POST` to
+ADR 0028, accepted with this record, accepts only `POST` to
 `/webhook` on that ADR's exact loopback port, with no query. It accepts HTTP/1.1
 only. Keep-alive and pipelining are disabled. The server processes at most one
 request on a TCP connection, sends `Connection: close` on every parsed
@@ -924,7 +926,8 @@ only the content-free state permitted by ADR 0029.
 
 ## Fake-provider acceptance cases
 
-No test work starts unless the user accepts this ADR and the other D05 records.
+No test work starts until G04 is complete; the user accepted this ADR and the
+other D05 records on 2026-08-30.
 If accepted, the fake provider and fake gateway must cover at least these
 cases:
 
@@ -991,7 +994,8 @@ containment dependency before its provider-specific ADR.
 
 ## Security effects
 
-This proposal limits connector authority rather than granting new authority.
+This accepted contract limits connector authority rather than granting new
+authority.
 The sender supplies text, not execution settings. The user fixes a local
 maximum policy, and adapters may only narrow it. Provider safeguards remain in
 force. Authentication and replay checks happen before body parsing, and raw
@@ -1021,7 +1025,7 @@ from persisting webhook bodies or HMAC material.
 
 ## Provider and dependency impact
 
-None is selected. This proposal names no Codex, Claude Code, or Gemini command,
+None is selected. This record names no Codex, Claude Code, or Gemini command,
 SDK, transport, event schema, version, package, or dependency. Each provider
 ADR must show how its chosen interface implements the common port, exposes a
 stable session identifier and any stable per-turn identifier the provider
@@ -1037,8 +1041,8 @@ No package may be installed and no platform may be claimed from this proposal.
 
 ## Approval gate
 
-Not approved. User review must confirm the port, all fixed limits, webhook
-admission order, local maximum policy, failure mapping, crash behavior, and
-fake-provider cases. Approval would freeze this common execution contract but
-would not authorize tests or production code until the remaining D05 records
-and G04 dependency are complete.
+Approved by the user on 2026-08-30. This freezes the provider-neutral port,
+all fixed limits, webhook admission order, local maximum policy, failure
+mapping, crash behavior, and fake-provider cases. ADRs 0028, 0029, and 0031
+were accepted with this record and complete D05. G04 still blocks K01, and
+each real provider interface remains behind its provider-specific ADR.
