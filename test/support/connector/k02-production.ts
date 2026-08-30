@@ -476,6 +476,7 @@ export async function openK02Socket(webhookUrl: string): Promise<Socket> {
     socket.once("error", reject);
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   return socket;
 }
 
