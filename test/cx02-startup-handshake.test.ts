@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { appendFile, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import test from "node:test";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
 import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 import {
-  type CodexSpawnObservationForTest,
+  type CodexAppServerSpawnOptionsForTest,
   CX02_DEADLINE_MS,
   CX02_EXECUTION_ID,
   CX02_THREAD_ID,
@@ -251,37 +252,46 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
     NODE_OPTIONS: "--import=forbidden",
     A2A_REMOTE_COMMAND: "forbidden",
   };
-  const observedSpawns: CodexSpawnObservationForTest[] = [];
+  const actualSpawns: {
+    readonly executable: string;
+    readonly arguments: readonly string[];
+    readonly options: CodexAppServerSpawnOptionsForTest;
+  }[] = [];
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X02", {
     appPlan: validStartPlan(cwd),
     inheritedEnvironment: inherited,
-    spawnObserverForTest: {
-      observe(record) {
-        observedSpawns.push(structuredClone(record));
-      },
+    spawnAppServerForTest(executable, arguments_, options) {
+      actualSpawns.push({
+        executable,
+        arguments: [...arguments_],
+        options: structuredClone(options),
+      });
+      return spawn(executable, [...arguments_], {
+        cwd: options.cwd,
+        env: { ...options.env },
+        shell: options.shell,
+        stdio: [...options.stdio],
+      });
     },
   });
   await collectEvents(adapter.start(startRequest()));
-  const app = fake.launches.find((launch) => launch.mode === "app-server");
-  assert.ok(app !== undefined);
-  assert.equal(app.executable, fake.executablePath);
-  assert.equal(app.shell, false);
-  assert.deepEqual(app.arguments, ["app-server", "--listen", "stdio://", "--strict-config"]);
-  assert.equal(app.cwd, cwd);
   const expectedEnvironment = syntheticCx02Environment("launch-record");
-  assert.deepEqual(app.environment, expectedEnvironment);
-  assert.deepEqual(observedSpawns, [
+  assert.deepEqual(actualSpawns, [
     {
       executable: fake.executablePath,
       arguments: ["app-server", "--listen", "stdio://", "--strict-config"],
-      cwd,
-      environment: expectedEnvironment,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
+      options: {
+        cwd,
+        env: expectedEnvironment,
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
     },
   ]);
-  assert.ok(!JSON.stringify(app).includes("CX02 untrusted input"));
-  assert.ok(Object.keys(app.environment).every((name) => Object.hasOwn(inherited, name)));
+  assert.ok(!JSON.stringify(actualSpawns).includes("CX02 untrusted input"));
+  assert.ok(
+    Object.keys(actualSpawns[0]?.options.env ?? {}).every((name) => Object.hasOwn(inherited, name)),
+  );
 });
 
 test("CX02-X03 keeps the pinned stable schema test-only and out of production package surfaces", async (t) => {

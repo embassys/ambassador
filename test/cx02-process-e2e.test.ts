@@ -486,7 +486,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     const expected = expectedExecutions.get(messageId as string);
     assert.ok(expected !== undefined, `unexpected provider invocation for ${String(messageId)}`);
     assert.equal(invocation.method, expected.method);
-    assert.equal(invocation.request.text, expected.input);
+    assert.equal(invocation.request.input_text, expected.input);
     if (expected.method === "resume") {
       assert.equal(invocation.request.provider_session_id, expected.sessionId);
     }

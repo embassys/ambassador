@@ -1,3 +1,5 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+
 import type {
   ConnectorClock,
   ProviderPort,
@@ -21,23 +23,25 @@ export interface CodexAdapterForTestOptions {
   readonly fixtureExecutablePath: string | null;
   readonly clock?: ConnectorClock;
   readonly afterVersionProbeForTest?: () => void | Promise<void>;
-  readonly spawnObserverForTest?: {
-    observe(record: CodexSpawnObservationForTest): void;
-  };
+  readonly spawnAppServerForTest?: CodexAppServerSpawnForTest;
   readonly containmentForTest?: {
     contain(executionId: string): Promise<boolean>;
     isEmpty(executionId: string): boolean;
   };
 }
 
-export interface CodexSpawnObservationForTest {
-  readonly executable: string;
-  readonly arguments: readonly string[];
+export interface CodexAppServerSpawnOptionsForTest {
   readonly cwd: string;
-  readonly environment: Readonly<Record<string, string>>;
+  readonly env: Readonly<Record<string, string>>;
   readonly shell: false;
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
 }
+
+export type CodexAppServerSpawnForTest = (
+  executable: string,
+  arguments_: readonly string[],
+  options: CodexAppServerSpawnOptionsForTest,
+) => ChildProcessWithoutNullStreams;
 
 export interface CodexAdapterPort
   extends Omit<ProviderPort, "start" | "resume" | "recover" | "cancel"> {
