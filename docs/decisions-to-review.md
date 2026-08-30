@@ -117,6 +117,13 @@ affected choice for review rather than silently changing the client contract.
   bearer relay. Scheduled authenticated same-key reissue remains G03 work
   because it requires the protected DPoP REST transport; G02 reuses G01's
   credential replacement primitives but does not dispatch reissue itself.
+- The K02 pre-implementation inventory is accepted under the user's delegated
+  implementation judgment with 69 top-level nodes: 68 exact reviewed failures
+  and one loader guard. K03 owns the repository-only connector build, stage,
+  packed-check, state-fault, capacity, retirement, dispatch-proof, and account
+  home test seams described in `test/k02-failure-inventory.md`. None is a
+  public CLI, configuration, packaged crash control, provider qualification,
+  publishing approval, or Windows support claim.
 
 ## Accepted D05 package
 

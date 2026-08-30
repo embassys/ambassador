@@ -1,6 +1,6 @@
 # K02 red failure inventory
 
-Status: provider-neutral connector contract, awaiting failure review
+Status: provider-neutral connector contract accepted for K03 implementation
 
 K02 specifies the accepted connector foundation in ADRs 0024 and 0028 through
 0032. It uses the K01 authenticated gateway and scripted provider port plus
