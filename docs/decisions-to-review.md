@@ -336,7 +336,13 @@ license, and platform ADRs.
   `initialized` and before the adapter sends `thread/start`. The earlier fake
   attached the warning to the `thread/start` response while also requiring
   that no `thread/start` request occur, so no implementation could satisfy
-  both observations. The opted-out warning still fails before provider input.
+  both observations. Because JSONL `initialized` is a notification with no
+  response, the adapter cannot prove that the server has finished sending
+  post-initialization notifications before it writes the next request. X04
+  therefore permits zero or one exact coarse read-only `thread/start` for this
+  vector only. It still requires failure, no `thread/resume`, no `turn/start`,
+  and no A2A input dispatch. Every other invalid handshake vector retains the
+  stricter no-thread-request check.
 - X08a keeps its byte-exact outbound request assertion, then replaces only the
   cloned text item's contents with a neutral sentinel before scanning local
   setting fields. The earlier scan required the sender's literal
