@@ -100,6 +100,23 @@ affected choice for review rather than silently changing the client contract.
   connector startup and environment security, state, process-containment,
   packed E2E, artifact-scan, and restored CI evidence. Platform-neutral or
   injected fail-closed tests are insufficient.
+- G02 keeps the shipped version 1 bootstrap assembly as a regression-only
+  test path and selects the fresh version 2 enrollment assembly only through
+  an internal application/test seam. That seam is not a CLI option,
+  environment setting, route probe, or runtime capability selector. The
+  version 2 assembly requires one immutable expected issuer and ordered API
+  and MCP audience profile. Tests inject the fixture-only profile; release
+  activation remains blocked until the central owner supplies the production
+  profile and G03/G04 complete the coordinated protected path.
+- G02 uses Node core HTTP and HTTPS for bounded enrollment so cancellation can
+  destroy and await the exact request and duplicate nonce headers remain
+  observable. Tests that inspect request and response bytes inject the
+  existing fetch observer explicitly; that observer is not present in the
+  release assembly.
+- G02 stops after durable version 2 enrollment and does not enter the legacy
+  bearer relay. Scheduled authenticated same-key reissue remains G03 work
+  because it requires the protected DPoP REST transport; G02 reuses G01's
+  credential replacement primitives but does not dispatch reissue itself.
 
 ## Accepted D05 package
 

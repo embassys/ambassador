@@ -169,6 +169,8 @@ async function runVerificationFailure(
     centralApiUrl: api.url,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    observeCentralFetch: true,
+    targetContract: "v2",
   });
   const client = new T03RawMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();
@@ -557,6 +559,7 @@ test("T03-N03 verification accepts an exact 4096-byte bound token without exposi
     centralApiUrl: api.url,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();

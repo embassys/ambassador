@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-
+import type { CentralTokenProfile } from "../../src/central-enrollment.js";
 import { type CliContext, runCli } from "../../src/cli.js";
 import type { CredentialStore, VersionedCredentialStore } from "../../src/credential-store.js";
 
@@ -12,7 +12,14 @@ interface TestOverrides {
   centralMcpUrl: string;
   stateRoot: string;
   credentialStore?: CredentialStore & Partial<VersionedCredentialStore>;
+  centralEnrollmentProfile?: CentralTokenProfile;
+  centralEnrollmentFetch?: typeof fetch;
 }
+
+const V2_FIXTURE_TOKEN_PROFILE: CentralTokenProfile = {
+  issuer: "urn:a2a:fixture:issuer:v2",
+  audiences: ["urn:a2a:fixture:resource:api:v2", "urn:a2a:fixture:resource:mcp:v2"],
+};
 
 interface RunningGateway {
   endpoint: string;
@@ -46,6 +53,8 @@ export async function startGateway(
     artifactRoot?: string;
     credentialStore?: TestOverrides["credentialStore"];
     verbose?: boolean;
+    targetContract?: "current" | "v2";
+    observeCentralFetch?: boolean;
   },
 ): Promise<RunningGateway> {
   const directory =
@@ -93,6 +102,10 @@ export async function startGateway(
       centralApiUrl: options.centralApiUrl,
       centralMcpUrl: options.centralMcpUrl,
       stateRoot,
+      ...(options.targetContract === "v2"
+        ? { centralEnrollmentProfile: V2_FIXTURE_TOKEN_PROFILE }
+        : {}),
+      ...(options.observeCentralFetch === true ? { centralEnrollmentFetch: globalThis.fetch } : {}),
       ...(options.credentialStore === undefined
         ? {}
         : { credentialStore: options.credentialStore }),
@@ -126,4 +139,11 @@ export async function startGateway(
     waitForExit: async () => await completion,
     stop,
   };
+}
+
+export async function startCurrentGateway(
+  t: TestContext,
+  options: Parameters<typeof startGateway>[1],
+): Promise<RunningGateway> {
+  return await startGateway(t, { ...options, targetContract: "current" });
 }

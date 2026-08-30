@@ -1,8 +1,14 @@
+import {
+  CentralEnrollmentClient,
+  CentralEnrollmentError,
+  type CentralTokenProfile,
+  REST_BOOTSTRAP_TOOLS,
+} from "./central-enrollment.js";
 import { CentralMcpClient, CentralMcpError } from "./central-mcp.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
-import { type LocalMcpRouter, LocalMcpServer } from "./local-mcp.js";
+import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "./local-mcp.js";
 import {
   assertSafeUpstreamResult,
   type CentralToolDefinition,
@@ -24,6 +30,8 @@ export interface GatewayApplicationOptions {
   credentialPath: string;
   centralApiUrl?: string;
   centralMcpUrl?: string;
+  centralEnrollmentProfile?: CentralTokenProfile;
+  centralEnrollmentFetch?: typeof fetch;
   credentialStore?: CredentialStore;
   verboseTranscript?: DevelopmentVerboseTranscript;
 }
@@ -138,6 +146,19 @@ export async function openGatewayApplication(
             ? {}
             : { verboseTranscript: options.verboseTranscript }),
         });
+  const enrollment =
+    options.centralApiUrl === undefined || options.centralEnrollmentProfile === undefined
+      ? undefined
+      : new CentralEnrollmentClient({
+          centralApiUrl: options.centralApiUrl,
+          tokenProfile: options.centralEnrollmentProfile,
+          ...(options.centralEnrollmentFetch === undefined
+            ? {}
+            : { fetch: options.centralEnrollmentFetch }),
+          ...(options.verboseTranscript === undefined
+            ? {}
+            : { verboseTranscript: options.verboseTranscript }),
+        });
   const controller = new AbortController();
   let identity: GatewayIdentity | undefined;
   let relay: NotificationRelay | undefined;
@@ -145,6 +166,7 @@ export async function openGatewayApplication(
   let local: LocalMcpServer;
   let closed = false;
   let reportFailure: ((error: Error) => void) | undefined;
+  const enrollmentOperations = new Set<Promise<unknown>>();
   const failure = new Promise<Error>((resolve) => {
     reportFailure = resolve;
   });
@@ -152,6 +174,11 @@ export async function openGatewayApplication(
   const requireCentral = (): CentralMcpClient => {
     if (central === undefined) throw safeFailure();
     return central;
+  };
+
+  const requireEnrollment = (): CentralEnrollmentClient => {
+    if (enrollment === undefined) throw safeFailure();
+    return enrollment;
   };
 
   const requireIdentity = (): GatewayIdentity => {
@@ -162,6 +189,16 @@ export async function openGatewayApplication(
   const requireRelay = (): NotificationRelay => {
     if (relay === undefined) throw safeFailure();
     return relay;
+  };
+
+  const runEnrollment = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const pending = operation();
+    enrollmentOperations.add(pending);
+    try {
+      return await pending;
+    } finally {
+      enrollmentOperations.delete(pending);
+    }
   };
 
   const remoteTool = async (
@@ -229,6 +266,11 @@ export async function openGatewayApplication(
   const router: LocalMcpRouter = {
     async listTools() {
       const currentIdentity = requireIdentity();
+      if (enrollment !== undefined) {
+        if (!currentIdentity.enrolled) return [...REST_BOOTSTRAP_TOOLS];
+        currentIdentity.authenticatedCredentialV2();
+        return [];
+      }
       const catalog = await requireCentral().listTools();
       const localCatalog = selectCentralTools(catalog, currentIdentity.enrolled).map(
         localToolDefinition,
@@ -244,6 +286,30 @@ export async function openGatewayApplication(
       const currentIdentity = requireIdentity();
       try {
         if (!currentIdentity.enrolled) {
+          if (enrollment !== undefined) {
+            const enrollmentSignal = AbortSignal.any([signal, controller.signal]);
+            if (name === "verify_email") {
+              const localResult = await runEnrollment(
+                async () =>
+                  await currentIdentity.enrollCredentialV2(
+                    async () => await requireEnrollment().verify(arguments_, enrollmentSignal),
+                  ),
+              );
+              await local.sendToolListChanged();
+              return localResult;
+            }
+            if (name === "register_agent") {
+              return await runEnrollment(
+                async () => await requireEnrollment().register(arguments_, enrollmentSignal),
+              );
+            }
+            if (name === "resend_verification") {
+              return await runEnrollment(
+                async () => await requireEnrollment().resend(arguments_, enrollmentSignal),
+              );
+            }
+            throw new McpContractError();
+          }
           if (name === "verify_email") {
             const localResult = await currentIdentity.verify(async () => {
               const tool = await remoteTool(name, false, signal);
@@ -261,6 +327,11 @@ export async function openGatewayApplication(
           const result = await requireCentral().callTool(name, upstreamArguments, signal);
           assertSafeUpstreamResult(result);
           return result;
+        }
+
+        if (enrollment !== undefined) {
+          currentIdentity.authenticatedCredentialV2();
+          throw new McpContractError();
         }
 
         const centralToken = currentIdentity.authenticatedToken();
@@ -302,10 +373,14 @@ export async function openGatewayApplication(
           await stopRelayForAuthenticationFailure();
         }
         if (
+          error instanceof CentralEnrollmentError ||
           error instanceof CentralMcpError ||
           error instanceof IdentityError ||
           error instanceof McpContractError
         ) {
+          if (error instanceof CentralEnrollmentError) {
+            throw new LocalMcpToolError(error.code);
+          }
           throw safeFailure();
         }
         throw safeFailure();
@@ -321,7 +396,10 @@ export async function openGatewayApplication(
   try {
     await local.listen();
     identity = await GatewayIdentity.open(credentialStore);
-    if (identity.enrolled) startRelay(identity.authenticatedToken());
+    if (identity.enrolled) {
+      if (enrollment === undefined) startRelay(identity.authenticatedToken());
+      else identity.authenticatedCredentialV2();
+    }
   } catch (error) {
     controller.abort();
     await local.close().catch(() => undefined);
@@ -337,6 +415,7 @@ export async function openGatewayApplication(
       if (closed) return;
       closed = true;
       controller.abort();
+      await Promise.allSettled([...enrollmentOperations]);
       await local.close();
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);

@@ -32,6 +32,7 @@ async function scriptedScenario(t: TestContext, plans: readonly T03ResponsePlan[
     centralApiUrl: api.url,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();
