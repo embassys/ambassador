@@ -4,22 +4,29 @@ Status: runnable CI specification, intentionally red only inside the
 classified future-v2 jobs
 
 C01 keeps two contracts separate. The normal test command runs the shipped
-`0.2.6` regression suite and must be green. The red-inventory command runs the
-fresh-install future-v2 specifications and succeeds only when their exact
-audited red classifications remain unchanged.
+`0.2.6` regression suite and must be green on Linux and macOS. On Windows it
+runs the platform-neutral subset and reports named native qualification
+deferrals. The red-inventory command runs the fresh-install future-v2
+specifications on Linux and macOS and succeeds only when their exact audited
+red classifications remain unchanged.
 
-The Node lanes use the fast fixture on Linux, macOS, and Windows. Ubuntu also
-packs and installs the gateway, runs the shipped flow against the independent
-Python container as a green regression, then classifies a full future-v2
-packaged smoke flow as red. None of these fixture results proves that the
-production central service implements DPoP, lease redelivery, shared replay,
-or the other accepted version 2 behavior.
+Linux and macOS run the complete T03 and T04 inventory through the fast Node
+fixture. Windows runs the shipped platform-neutral Node checks, but does not
+run or classify the complete future-v2 inventory. Ubuntu also packs and
+installs the gateway, runs the shipped flow against the independent Python
+container as a green regression, then classifies a full future-v2 packaged
+smoke flow as red. This is the only packed C01 lane. C01 does not claim a
+packed Windows result.
+
+None of these fixture results proves that the production central service
+implements DPoP, lease redelivery, shared replay, or the other accepted
+version 2 behavior.
 
 ## Commands
 
 ```text
 pnpm run check
-pnpm run test:red-inventory
+pnpm run test:red-inventory  # Linux and macOS
 ```
 
 The Ubuntu packaged-container lane runs this after building the independent
@@ -39,8 +46,8 @@ A2A_PACKED_GATEWAY_CLI=<installed-dist-cli> \
 
 | Lane | Behavior checks or vectors | Node test nodes | Pass | Expected red | Skip | Todo |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| T03 on Linux, macOS, and Windows | 129 vectors | 139 | 1 | 138 | 0 | 0 |
-| T04 on Linux, macOS, and Windows | 41 checks | 41 | 1 | 40 | 0 | 0 |
+| T03 on Linux and macOS | 129 vectors | 139 | 1 | 138 | 0 | 0 |
+| T04 on Linux and macOS | 41 checks | 41 | 1 | 40 | 0 | 0 |
 | Packaged gateway plus Docker v1 regression on Ubuntu | 1 check | 1 | 1 | 0 | 0 | 0 |
 | Packaged gateway plus Docker future-v2 smoke on Ubuntu | 1 check | 1 | 0 | 1 | 0 | 0 |
 
@@ -65,24 +72,60 @@ false for every node, and the runner checks both fields before counting a
 green pass.
 
 The child output is memory-only and bounded to 4 MiB. Each suite has a fixed
-wall-clock timeout, and timeout or overflow tears down its POSIX process group
-or Windows process tree before the classifier fails. The workflow job is also
-bounded. A changed boundary, count change, status swap, missing or duplicate
-node, unexpected pass, skip, process signal, stderr output, module failure,
-loopback bind failure, uncaught exception, cancellation, or unhandled
-rejection therefore requires review instead of being accepted as intended red
-behavior.
+wall-clock timeout, and timeout or overflow tears down its process group before
+the classifier fails. The workflow job is also bounded. A changed boundary,
+count change, status swap, missing or duplicate node, unexpected pass, skip,
+process signal, stderr output, module failure, loopback bind failure, uncaught
+exception, cancellation, or unhandled rejection therefore requires review
+instead of being accepted as intended red behavior.
+
+## Windows boundary
+
+The Windows normal-test lane remains useful, but it is a green
+platform-neutral subset. Its test output names these deferrals:
+
+- one Windows-only test defers native current-user-and-`SYSTEM` DACL and atomic
+  replacement qualification to G01 and W01;
+- two true child-process `0.2.6` cases defer native process and packed
+  qualification to G01 and W01; and
+- ten artifact-file scan cases defer to E03 until Windows has a reviewed
+  no-follow file-open mechanism. The scanner continues to fail closed when
+  that mechanism is unavailable.
+
+Eight portable credential envelope, cryptography, endpoint-AAD, tamper,
+schema, first-write, and concurrency cases use the credential store's injected
+successful Windows access-control boundary. Six in-process gateway enrollment,
+verification, retry, endpoint-binding, and verbose cases use an in-memory
+credential or the same successful access-control injection. The injected
+DACL-failure test, Windows path handling, capture-only artifact checks, fixture
+contracts, and other platform-neutral tests also continue to run.
+
+The Windows lane does not qualify a native version 2 credential, atomic
+replacement, full T03 or T04 lifecycle, artifact-file scan, package install,
+or packed end-to-end flow. G01 and W01 own native credential, child-process,
+and packed qualification. E03 owns Windows artifact-file scan qualification.
+
+This boundary also preserves the dependency order. C01 can publish the
+contract failure inventory for Gate A. Gate A then unlocks G01, and W01
+qualifies the resulting version 2 credential and packed lifecycle. Requiring
+W01 evidence in C01 would create a C01 to Gate A to G01 to W01 dependency
+cycle.
 
 ## Platform evidence
 
-The required CI matrix is Node `24.19.0` on `ubuntu-latest`, `macos-latest`,
-and `windows-latest`. The packaged Docker lane is Ubuntu `linux/amd64` only.
-Local execution on 2026-08-30 used Node `24.14.0` on macOS because the required
-Node `24.19.0` binary was unavailable. It confirmed the audited T03 and T04
-counts and the inventory-runner behavior, but it does not qualify the required
-runtime version or the unrun Linux, Windows, and Docker lanes.
+The normal-test CI matrix is Node `24.19.0` on `ubuntu-latest`,
+`macos-latest`, and `windows-latest`. The exact future-v2 red inventory runs on
+Linux and macOS. The packaged Docker lane is Ubuntu `linux/amd64` only. GitHub
+Actions runs `33281606636` and `33281887094` provide Node `24.19.0` evidence
+for the Ubuntu full check, the macOS full check after its fixture fix, the
+Ubuntu Docker lane, and the Ubuntu package lane. The Windows job in run
+`33281887094` identified the native qualification boundary and stopped in
+the shipped baseline before the exact red inventory. The narrowed Windows lane
+described above remains pending a CI rerun.
 
-The GitHub Actions workflow appends a count-only table to the job summary.
-The expected-red runner itself exits zero only after the classification
-matches, which separates a reviewed missing behavior from a broken test
-environment while keeping the feature specification visibly red.
+The Linux and macOS jobs append a count-only classified-red table to their job
+summaries. The Windows job appends a count-only deferral table and does not
+represent deferred work as passing or expected-red behavior. The expected-red
+runner itself exits zero only after the classification matches, which
+separates a reviewed missing behavior from a broken test environment while
+keeping the feature specification visibly red.

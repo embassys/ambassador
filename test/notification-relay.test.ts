@@ -581,13 +581,15 @@ test("redrives an accepted ID-bearing wake until confirmed content acknowledgeme
 test("discards durable wakes whose consuming message body was lost on restart", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "a2a-notification-restart-test-"));
   const path = join(directory, "notifications.sqlite");
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
   let journal = new NotificationJournal(path);
+  t.after(() => {
+    journal.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
   journal.ingest([MESSAGE_ID], Date.now());
   journal.close();
 
   journal = new NotificationJournal(path);
-  t.after(() => journal.close());
   let wakes = 0;
   const request: NotificationFetch = async (url, init) => {
     if (url.pathname === "/api/poll_messages") return pendingResponse(init.signal);
