@@ -77,6 +77,7 @@ function activePlan(
   cwd: string,
   writes: readonly FakeCodexWireWrite[],
   stderrBytes?: number,
+  exitAfterWrites = false,
 ): Extract<FakeCodexProcessPlan, { kind: "app-server" }> {
   return {
     kind: "app-server",
@@ -95,6 +96,7 @@ function activePlan(
           },
           ...writes,
         ],
+        ...(exitAfterWrites ? { exitCodeAfter: 0 } : {}),
       },
     ],
     ...(stderrBytes === undefined ? {} : { stderrBytes }),
@@ -244,6 +246,7 @@ test("CX02-X20 enforces UTF-8 JSONL record byte and depth boundaries before norm
     name: string;
     writes: readonly FakeCodexWireWrite[];
     accepted: boolean;
+    exitAfterWrites?: boolean;
   }[] = [
     {
       name: "exact record",
@@ -304,11 +307,12 @@ test("CX02-X20 enforces UTF-8 JSONL record byte and depth boundaries before norm
       name: "unterminated line",
       writes: [utf8Write('{"method":"warning","params":{"message":"x"}}')],
       accepted: false,
+      exitAfterWrites: true,
     },
   ];
   for (const vector of cases) {
     const { adapter } = await createCx02Adapter(t, "CX02-CX03:X20", {
-      appPlan: activePlan(cwd, vector.writes),
+      appPlan: activePlan(cwd, vector.writes, undefined, vector.exitAfterWrites),
     });
     const terminal = (await collectEvents(adapter.start(startRequest()))).at(-1);
     assert.equal(eventName(terminal), vector.accepted ? "reply" : "uncertain", vector.name);

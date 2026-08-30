@@ -378,6 +378,11 @@ license, and platform ADRs.
   X01's deliberately held version process explicitly uses the system clock so
   the independent five-second preflight timeout can elapse without advancing
   the invocation clock.
+- X20's unterminated-final-record vector now closes the fake App Server stdout
+  after writing the partial record. An open JSONL stream cannot distinguish a
+  final unterminated record from a valid record split across chunks; EOF is the
+  protocol evidence that makes the record final and invalid. The vector still
+  requires uncertainty and preserves every byte, depth, and parser bound.
 - X06 uses the existing `session_binding` recovery crash seam for the
   post-session-publication case. The earlier `binding_published` seam runs
   before the provider-port call and therefore cannot observe the one
