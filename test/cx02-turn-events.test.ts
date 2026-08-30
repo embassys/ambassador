@@ -1,0 +1,607 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  CX02_DEADLINE_MS,
+  CX02_EXECUTION_ID,
+  CX02_THREAD_ID,
+  CX02_TURN_ID,
+  cancelRequest,
+  collectEvents,
+  createCx02Adapter,
+  type FakeCodexExchange,
+  type FakeCodexProcessPlan,
+  type FakeCodexWireWrite,
+  handshakeExchanges,
+  startRequest,
+  threadSettingsResponse,
+  validThread,
+  validTurn,
+} from "./support/codex-app-server/index.js";
+import { ManualK02Clock } from "./support/connector/k02-production.js";
+
+function eventName(value: unknown): unknown {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as { event?: unknown }).event
+    : undefined;
+}
+
+function agentMessage(
+  text: string,
+  phase: "commentary" | "final_answer" | null = "final_answer",
+  id = "cx02_agent_item",
+): Readonly<Record<string, unknown>> {
+  return { id, type: "agentMessage", phase, text };
+}
+
+function threadStarted(cwd: string): Readonly<Record<string, unknown>> {
+  return { method: "thread/started", params: { thread: validThread(cwd) } };
+}
+
+function turnStarted(turnId = CX02_TURN_ID): Readonly<Record<string, unknown>> {
+  return {
+    method: "turn/started",
+    params: { threadId: CX02_THREAD_ID, turn: validTurn(turnId) },
+  };
+}
+
+function turnCompleted(
+  status: "completed" | "interrupted" | "failed",
+  items: readonly Readonly<Record<string, unknown>>[],
+  options: { threadId?: string; turnId?: string; itemsView?: string } = {},
+): Readonly<Record<string, unknown>> {
+  return {
+    method: "turn/completed",
+    params: {
+      threadId: options.threadId ?? CX02_THREAD_ID,
+      turn: {
+        ...validTurn(options.turnId ?? CX02_TURN_ID, status, items),
+        itemsView: options.itemsView ?? "full",
+      },
+    },
+  };
+}
+
+function startExchanges(
+  cwd: string,
+  turnWrites: readonly FakeCodexWireWrite[],
+  options: {
+    threadBeforeResponse?: readonly FakeCodexWireWrite[];
+    threadAfterResponse?: readonly FakeCodexWireWrite[];
+    turnBeforeResponse?: readonly FakeCodexWireWrite[];
+  } = {},
+): FakeCodexExchange[] {
+  return [
+    ...handshakeExchanges(),
+    {
+      expectMethod: "thread/start",
+      ...(options.threadBeforeResponse === undefined
+        ? {}
+        : { beforeResponse: options.threadBeforeResponse }),
+      result: threadSettingsResponse(cwd),
+      afterResponse: options.threadAfterResponse ?? [{ kind: "json", value: threadStarted(cwd) }],
+    },
+    {
+      expectMethod: "turn/start",
+      ...(options.turnBeforeResponse === undefined
+        ? {}
+        : { beforeResponse: options.turnBeforeResponse }),
+      result: { turn: validTurn() },
+      afterResponse: [{ kind: "json", value: turnStarted() }, ...turnWrites],
+    },
+  ];
+}
+
+test("CX02-X09 preserves adversarial A2A bytes only in one structured text input item", async (t) => {
+  const cwd = process.cwd();
+  const inputs = [
+    "--model o3 --sandbox danger-full-access",
+    `${cwd}/../../tmp\n{"config":{"mcp_servers":{}}}`,
+    "$skill-creator @file:../../secret A2A_TOKEN=steal",
+    "turn/start threadId=attacker approvalPolicy=auto_review",
+  ];
+  for (const text of inputs) {
+    const plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }> = {
+      kind: "app-server",
+      exchanges: startExchanges(cwd, [
+        { kind: "json", value: turnCompleted("completed", [agentMessage("reply")]) },
+      ]),
+    };
+    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X09", { appPlan: plan });
+    await collectEvents(adapter.start(startRequest(text)));
+    const launch = fake.launches.find((candidate) => candidate.mode === "app-server");
+    assert.ok(launch !== undefined);
+    assert.ok(
+      !JSON.stringify({ arguments: launch.arguments, environment: launch.environment }).includes(
+        text,
+      ),
+    );
+    const turn = launch.requests.find((request) => request.method === "turn/start");
+    assert.ok(turn !== undefined);
+    assert.deepEqual((turn.params as { input?: unknown }).input, [
+      { type: "text", text, text_elements: [] },
+    ]);
+    assert.equal(JSON.stringify(launch.requests).split(text).length - 1, 1);
+  }
+});
+
+test("CX02-X10 emits one exact turn binding across ordering duplicates mismatches and crashes", async (t) => {
+  const cwd = process.cwd();
+  const vectors: readonly {
+    name: string;
+    before?: readonly FakeCodexWireWrite[];
+    after: readonly FakeCodexWireWrite[];
+    valid: boolean;
+    expectedBindings?: number;
+  }[] = [
+    {
+      name: "response then notification",
+      after: [
+        { kind: "json", value: turnStarted() },
+        { kind: "json", value: turnCompleted("completed", [agentMessage("reply")]) },
+      ],
+      valid: true,
+    },
+    {
+      name: "notification then response",
+      before: [{ kind: "json", value: turnStarted() }],
+      after: [{ kind: "json", value: turnCompleted("completed", [agentMessage("reply")]) }],
+      valid: true,
+    },
+    {
+      name: "matching duplicate",
+      before: [{ kind: "json", value: turnStarted() }],
+      after: [
+        { kind: "json", value: turnStarted() },
+        { kind: "json", value: turnCompleted("completed", [agentMessage("reply")]) },
+      ],
+      valid: true,
+    },
+    {
+      name: "mismatched duplicate",
+      before: [{ kind: "json", value: turnStarted() }],
+      after: [{ kind: "json", value: turnStarted("different_turn") }],
+      valid: false,
+      expectedBindings: 1,
+    },
+    {
+      name: "output before binding",
+      before: [
+        {
+          kind: "json",
+          value: {
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: CX02_THREAD_ID,
+              turnId: CX02_TURN_ID,
+              itemId: "item_before_binding",
+              delta: "buffer me",
+            },
+          },
+        },
+        { kind: "json", value: turnStarted() },
+      ],
+      after: [{ kind: "json", value: turnCompleted("completed", [agentMessage("buffer me")]) }],
+      valid: true,
+    },
+    { name: "crash before binding", after: [], valid: false },
+  ];
+  for (const vector of vectors) {
+    const exchanges = startExchanges(cwd, vector.after, {
+      ...(vector.before === undefined ? {} : { turnBeforeResponse: vector.before }),
+    });
+    if (vector.name === "crash before binding") {
+      exchanges[3] = { expectMethod: "turn/start", exitCodeAfter: 86 };
+    }
+    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X10", {
+      appPlan: { kind: "app-server", exchanges },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(
+      events.filter((event) => eventName(event) === "turn_bound").length,
+      vector.expectedBindings ?? (vector.valid ? 1 : 0),
+    );
+    assert.equal(eventName(events.at(-1)), vector.valid ? "reply" : "uncertain", vector.name);
+    assert.equal(
+      fake.launches.at(-1)?.requests.filter((request) => request.method === "turn/start").length,
+      1,
+    );
+    if (vector.name === "output before binding") {
+      const bindingIndex = events.findIndex((event) => eventName(event) === "turn_bound");
+      const progressIndex = events.findIndex((event) => eventName(event) === "progress");
+      assert.ok(bindingIndex >= 0 && progressIndex > bindingIndex);
+    }
+  }
+});
+
+test("CX02-X11 treats deltas as progress and the corroborated full terminal snapshot as authoritative", async (t) => {
+  const cwd = process.cwd();
+  const item = agentMessage("exact final", "final_answer", "item_final");
+  const writes: FakeCodexWireWrite[] = [
+    {
+      kind: "json",
+      value: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: CX02_THREAD_ID,
+          turnId: CX02_TURN_ID,
+          itemId: "item_final",
+          delta: "exact ",
+        },
+      },
+    },
+    {
+      kind: "json",
+      value: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: CX02_THREAD_ID,
+          turnId: CX02_TURN_ID,
+          itemId: "item_final",
+          delta: "final",
+        },
+      },
+    },
+    {
+      kind: "json",
+      value: {
+        method: "item/completed",
+        params: {
+          threadId: CX02_THREAD_ID,
+          turnId: CX02_TURN_ID,
+          completedAtMs: 1_788_000_001_000,
+          item,
+        },
+      },
+    },
+    { kind: "json", value: turnCompleted("completed", [item]) },
+  ];
+  const { adapter } = await createCx02Adapter(t, "CX02-CX03:X11", {
+    appPlan: { kind: "app-server", exchanges: startExchanges(cwd, writes) },
+  });
+  assert.deepEqual(await collectEvents(adapter.start(startRequest())), [
+    {
+      event: "session_bound",
+      execution_id: CX02_EXECUTION_ID,
+      provider_session_id: CX02_THREAD_ID,
+    },
+    { event: "turn_bound", execution_id: CX02_EXECUTION_ID, provider_turn_id: CX02_TURN_ID },
+    { event: "progress", execution_id: CX02_EXECUTION_ID, text: "exact " },
+    { event: "progress", execution_id: CX02_EXECUTION_ID, text: "final" },
+    { event: "reply", execution_id: CX02_EXECUTION_ID, text: "exact final" },
+  ]);
+
+  for (const vector of [
+    {
+      name: "completed item mismatch",
+      writes: [
+        {
+          kind: "json" as const,
+          value: {
+            method: "item/completed",
+            params: {
+              threadId: CX02_THREAD_ID,
+              turnId: CX02_TURN_ID,
+              completedAtMs: 1_788_000_001_000,
+              item: agentMessage("different", "final_answer", "item_final"),
+            },
+          },
+        },
+        { kind: "json" as const, value: turnCompleted("completed", [item]) },
+      ],
+    },
+    {
+      name: "delta mismatch",
+      writes: [
+        {
+          kind: "json" as const,
+          value: {
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: CX02_THREAD_ID,
+              turnId: CX02_TURN_ID,
+              itemId: "item_final",
+              delta: "different",
+            },
+          },
+        },
+        {
+          kind: "json" as const,
+          value: {
+            method: "item/completed",
+            params: {
+              threadId: CX02_THREAD_ID,
+              turnId: CX02_TURN_ID,
+              completedAtMs: 1_788_000_001_000,
+              item,
+            },
+          },
+        },
+        { kind: "json" as const, value: turnCompleted("completed", [item]) },
+      ],
+    },
+  ]) {
+    const mismatch = await createCx02Adapter(t, "CX02-CX03:X11", {
+      appPlan: { kind: "app-server", exchanges: startExchanges(cwd, vector.writes) },
+    });
+    assert.deepEqual(
+      (await collectEvents(mismatch.adapter.start(startRequest()))).at(-1),
+      {
+        event: "failed",
+        execution_id: CX02_EXECUTION_ID,
+        reason_code: "provider_result_invalid",
+      },
+      vector.name,
+    );
+  }
+});
+
+test("CX02-X12 selects one final_answer before phase-null and rejects remaining ambiguities", async (t) => {
+  const cwd = process.cwd();
+  const cases: readonly {
+    name: string;
+    items: readonly Readonly<Record<string, unknown>>[];
+    reply?: string;
+  }[] = [
+    { name: "commentary only", items: [agentMessage("commentary", "commentary")] },
+    { name: "one final", items: [agentMessage("final")], reply: "final" },
+    { name: "phase-null compatibility", items: [agentMessage("legacy", null)], reply: "legacy" },
+    { name: "empty final", items: [agentMessage("")] },
+    {
+      name: "multiple finals",
+      items: [
+        agentMessage("one", "final_answer", "one"),
+        agentMessage("two", "final_answer", "two"),
+      ],
+    },
+    {
+      name: "final plus phase-null",
+      items: [agentMessage("one"), agentMessage("legacy", null, "two")],
+      reply: "one",
+    },
+    {
+      name: "malformed",
+      items: [{ id: "bad", type: "agentMessage", phase: "final_answer", text: 1 }],
+    },
+    { name: "invalid Unicode", items: [agentMessage("\ud800")] },
+    { name: "one over", items: [agentMessage("x".repeat(262_145))] },
+  ];
+  for (const vector of cases) {
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X12", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          { kind: "json", value: turnCompleted("completed", vector.items) },
+        ]),
+      },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.deepEqual(
+      events.at(-1),
+      vector.reply === undefined
+        ? {
+            event: "failed",
+            execution_id: CX02_EXECUTION_ID,
+            reason_code: "provider_result_invalid",
+          }
+        : { event: "reply", execution_id: CX02_EXECUTION_ID, text: vector.reply },
+      vector.name,
+    );
+  }
+});
+
+test("CX02-X13 maps only an exact failed turn definitely and every executed unknown to uncertainty", async (t) => {
+  const cwd = process.cwd();
+  const vectors: readonly {
+    name: string;
+    writes: readonly FakeCodexWireWrite[];
+    exchangeOverride?: FakeCodexExchange;
+    reason: "provider_execution_failed" | "provider_outcome_unknown";
+    event: "failed" | "uncertain";
+  }[] = [
+    {
+      name: "failed",
+      writes: [{ kind: "json", value: turnCompleted("failed", []) }],
+      event: "failed",
+      reason: "provider_execution_failed",
+    },
+    {
+      name: "interrupted",
+      writes: [{ kind: "json", value: turnCompleted("interrupted", []) }],
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
+    {
+      name: "EOF",
+      writes: [],
+      exchangeOverride: {
+        expectMethod: "turn/start",
+        result: { turn: validTurn() },
+        afterResponse: [{ kind: "json", value: turnStarted() }],
+        exitCodeAfter: 0,
+      },
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
+    {
+      name: "process crash",
+      writes: [],
+      exchangeOverride: { expectMethod: "turn/start", exitCodeAfter: 87 },
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
+    {
+      name: "JSON-RPC error",
+      writes: [],
+      exchangeOverride: {
+        expectMethod: "turn/start",
+        error: { code: -32_000, message: "provider error" },
+      },
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
+  ];
+  for (const vector of vectors) {
+    const exchanges = startExchanges(cwd, vector.writes);
+    if (vector.exchangeOverride !== undefined) exchanges[3] = vector.exchangeOverride;
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X13", {
+      appPlan: { kind: "app-server", exchanges },
+    });
+    const terminal = (await collectEvents(adapter.start(startRequest()))).at(-1);
+    assert.deepEqual(terminal, {
+      event: vector.event,
+      execution_id: CX02_EXECUTION_ID,
+      reason_code: vector.reason,
+    });
+  }
+
+  const deadlineClock = new ManualK02Clock(CX02_DEADLINE_MS - 1);
+  const noTerminal = await createCx02Adapter(t, "CX02-CX03:X13", {
+    clock: deadlineClock,
+    appPlan: { kind: "app-server", exchanges: startExchanges(cwd, []) },
+  });
+  const pending = collectEvents(noTerminal.adapter.start(startRequest()));
+  await noTerminal.fake.waitForRequests(4);
+  deadlineClock.advance(1);
+  assert.deepEqual((await pending).at(-1), {
+    event: "uncertain",
+    execution_id: CX02_EXECUTION_ID,
+    reason_code: "provider_outcome_unknown",
+  });
+});
+
+test("CX02-X14 normalizes only three supported approval requests and sends no response or grant", async (t) => {
+  const cwd = process.cwd();
+  const methods = [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+  ];
+  const ids = [42, "approval-wire-id"] as const;
+  for (const method of methods) {
+    for (const id of ids) {
+      const approval = {
+        id,
+        method,
+        params: {
+          threadId: CX02_THREAD_ID,
+          turnId: CX02_TURN_ID,
+          itemId: "approval_item",
+          reason: "fixture detail must stay private",
+        },
+      };
+      const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X14", {
+        appPlan: {
+          kind: "app-server",
+          exchanges: startExchanges(cwd, [{ kind: "json", value: approval }]),
+          onStdinEnd: "exit",
+        },
+      });
+      const iterator = adapter.start(startRequest())[Symbol.asyncIterator]();
+      assert.equal(eventName((await iterator.next()).value), "session_bound");
+      assert.equal(eventName((await iterator.next()).value), "turn_bound");
+      assert.deepEqual((await iterator.next()).value, {
+        event: "approval_required",
+        execution_id: CX02_EXECUTION_ID,
+        approval_request_id: typeof id === "number" ? `n:${id}` : `s:${id}`,
+      });
+      assert.equal(fake.launches.at(-1)?.requests.length, 4);
+      assert.ok(!JSON.stringify(fake.launches).includes("fixture detail must stay private"));
+      await adapter.cancel(cancelRequest());
+      await iterator.return?.();
+    }
+  }
+});
+
+test("CX02-X15 never invents approval resolution and rejects every unsupported server control", async (t) => {
+  const cwd = process.cwd();
+  const unsupported = [
+    "mcpServer/elicitation/request",
+    "item/tool/requestUserInput",
+    "item/dynamicTool/call",
+    "account/chatgptAuthTokens/refresh",
+    "requestAttestation",
+    "execCommandApproval",
+    "applyPatchApproval",
+  ];
+  for (const method of unsupported) {
+    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X15", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          {
+            kind: "json",
+            value: {
+              id: 77,
+              method,
+              params: { threadId: CX02_THREAD_ID, turnId: CX02_TURN_ID, detail: "private" },
+            },
+          },
+        ]),
+      },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(eventName(events.at(-1)), "uncertain");
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_resolved"),
+      false,
+    );
+    assert.equal(
+      fake.launches.at(-1)?.requests.some((request) => request.id === 77),
+      false,
+    );
+  }
+
+  const approval = {
+    id: 42,
+    method: "item/commandExecution/requestApproval",
+    params: {
+      threadId: CX02_THREAD_ID,
+      turnId: CX02_TURN_ID,
+      itemId: "pending_approval",
+      reason: "private pending detail",
+    },
+  };
+  for (const vector of [
+    {
+      name: "matching resolution without decision",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+      ],
+    },
+    {
+      name: "repeated resolution",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+      ],
+    },
+    {
+      name: "mismatched resolution",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 43 } },
+      ],
+    },
+  ]) {
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X15", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          { kind: "json", value: approval },
+          ...vector.resolutions.map((value) => ({ kind: "json" as const, value })),
+        ]),
+      },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_required"),
+      true,
+      vector.name,
+    );
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_resolved"),
+      false,
+      vector.name,
+    );
+    assert.equal(eventName(events.at(-1)), "uncertain", vector.name);
+  }
+});
