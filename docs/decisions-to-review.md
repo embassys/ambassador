@@ -37,6 +37,16 @@ Updated: 2026-08-30
   completes the gateway review input to Gate A. The external S01 inventory and
   central-owner review are still required before production gateway work
   begins.
+- ADR 0024 accepts separate foreground provider connectors while the gateway
+  and its CLI remain unchanged. One gateway, connector, and provider form one
+  pair. The connector receives the loopback webhook wake, retrieves content
+  through the local gateway MCP endpoint, and owns content-free correlation
+  state. The central credential remains in the gateway, provider credentials
+  remain in the provider runtime, and the connector never blindly replays an
+  uncertain provider turn.
+- This boundary approval does not complete D05. Concrete connector CLI, state,
+  cryptography, limits, dependencies, provider interfaces, approval policy,
+  packaging, installation, platform, and publishing decisions remain pending.
 
 ## Test-only stand-ins
 
@@ -53,13 +63,12 @@ central owner and returns a material contract difference for review.
 
 ## Active architecture and dependency decisions
 
-- ADR 0024 remains proposed. It keeps Codex, Claude Code, and Gemini provider
-  connectors outside the gateway, but the connector product boundary still
-  needs approval.
-- The connector executable and CLI or configuration interface, working
-  directory, security policy, state format, access controls, migration,
-  deletion, runtime, dependencies, limits, concurrency, timeouts, and approval
-  behavior remain undecided.
+- D05 remains pending after ADR 0024's boundary approval. The connector
+  executable and CLI or configuration interface, working directory, security
+  policy, state technology and schema, access controls, encryption,
+  fresh-install behavior, deletion, runtime, dependencies, provider
+  interfaces, limits, concurrency, timeouts, and approval behavior remain
+  undecided.
 - Each Codex, Claude Code, and Gemini adapter still needs its own exact
   executable or SDK version, protocol schema, dependency decision, sandbox and
   approval policy, history behavior, supported platforms, and update policy.

@@ -1,17 +1,25 @@
 # Next architecture and security plan
 
-Status: accepted gateway architecture, implementation not started
+Status: accepted gateway architecture and provider-neutral connector boundary, production implementation not started
 
-Date: 2026-08-29
+Date: 2026-08-30
 
 This document collects the accepted REST enrollment, conversation, recovery,
-and DPoP work for later implementation agents. The user accepted ADRs 0023,
-0025, and 0026 on 2026-08-29. D06 also approves the exact test-only Python
-fixture dependency recorded in ADR 0020. ADR 0024 and every connector,
-provider, CLI, packaging, installation, publishing, and further dependency
-choice remain pending. The current product and protocol continue to describe
-shipped version 1 behavior until implementation lands. Tests and fixtures come
-before production changes under `docs/implementation-plan.md`.
+DPoP, and provider-neutral connector work for later implementation agents. The
+user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29 and accepted ADR
+0024's connector boundary on 2026-08-30. D06 also approves the exact test-only
+Python fixture dependency recorded in ADR 0020. ADR 0024 does not approve a
+connector CLI, state implementation, limits, runtime, dependency, provider
+port, policy, package, platform, installation, or publishing choice. Those D05
+decisions remain pending. The current product and protocol continue to
+describe shipped version 1 behavior until implementation lands. Tests and
+fixtures come before production changes under `docs/implementation-plan.md`.
+
+ADRs 0023 and 0026 are accepted. PR `#28` merged T01 through T04 and C01,
+and the user accepted the T03 and T04 gateway failure inventory on 2026-08-30.
+That completes only the gateway review input. Gate A remains open until the
+external central owner publishes and accepts S01. Nothing in this document
+authorizes production gateway work before that gate.
 
 `docs/architecture-pr-backlog.md` groups this work into pull requests,
 cross-repository dependencies, red-test gates, and end-to-end qualification
@@ -40,15 +48,16 @@ production facts that still need central-owner confirmation.
 - Define stable gateway-owned local schemas for `register_agent`,
   `verify_email`, and `resend_verification`.
 - Add a bounded central REST client for the three bootstrap operations.
-- Map REST verification into the existing identity persistence transaction.
-- Keep the authenticated central MCP tool set and business semantics unchanged.
-  ADR 0026 separately changes their authentication from tool arguments to the
-  HTTP transport if approved.
-- Keep REST notification polling and its current 404-only MCP fallback
-  unchanged unless a later approved decision removes it.
+- Map REST verification into the first fresh version 2 credential persistence
+  transaction.
+- Keep the authenticated central MCP business semantics while applying ADR
+  0026's accepted DPoP authentication at the HTTP transport.
+- Keep the shipped consuming poll and its 404-only MCP fallback as regression
+  coverage only. The fresh version 2 target uses ADR 0025's fixed leased
+  receive operation without runtime selection, probing, or fallback.
 - Update the Node fake central service and the independent Python fixture with
-  the reviewed REST bootstrap routes.
-- Update user and architecture documentation after the contract is approved.
+  the accepted REST bootstrap routes.
+- Update user and architecture documentation after production implementation.
 
 ### Out of scope
 
@@ -58,8 +67,8 @@ production facts that still need central-owner confirmation.
   MCP to REST.
 - Changing the public CLI, adding configuration, or accepting a central JWT at
   startup.
-- Solving message redelivery, JWT reissue, revocation, or intentional identity
-  reset.
+- Implementing message redelivery, JWT reissue, revocation, or intentional
+  identity reset as part of N1 alone.
 - Installing another HTTP, validation, or parsing dependency.
 
 ### Accepted choices and unresolved production facts
@@ -71,11 +80,16 @@ production facts that still need central-owner confirmation.
 | N1-Q3 | Accepted | ADR 0023 fixes the status and safe error pairs. Central must implement them. |
 | N1-Q4 | Accepted | Remote `message` is optional; the gateway supplies the fixed local message when absent. |
 | N1-Q5 | Accepted | Verification codes contain exactly six ASCII alphanumeric characters and are always redacted. |
-| N1-Q6 | Accepted | Do not retry uncertain verification. Request a fresh recovery code and issue a new bound credential. |
-| N1-Q7 | Accepted | Version 1 polling keeps its shipped semantics during migration. Version 2 uses ADR 0025's leased receive operation. |
+| N1-Q6 | Accepted | Do not retry uncertain verification. For the same freshly enrolled version 2 identity, request a fresh recovery code and issue a new bound credential. |
+| N1-Q7 | Accepted | Shipped version 1 polling remains regression-only. A fresh version 2 installation uses ADR 0025's leased receive operation with no runtime selection or fallback. |
 | N1-Q8 | Accepted target, external implementation | Verification and every protected route enforce ADR 0026 DPoP with no bearer fallback. |
 
 ### Work order and gates
+
+PR `#28` completed the gateway fixture and red-specification work represented
+by N1-T1 through N1-T5, and the user accepted that gateway inventory. The
+implementation rows remain blocked by Gate A and their external central
+dependencies.
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
@@ -84,9 +98,9 @@ production facts that still need central-owner confirmation.
 | N1-T1 | Test support | Add REST bootstrap behavior and fault controls to the Node fake central service | N1-G1 | Support tests pass without production changes |
 | N1-T2 | Central fixture | Add the same REST bootstrap contract to the independent Python fixture | N1-G1, D06 | Fixture contract passes independently; this does not prove production central behavior |
 | N1-T3 | REST client | Add red tests for request projection, bounded parsing, statuses, deadlines, cancellation, redirects, duplicate keys, and safe errors | N1-T1 | Failures are only missing production behavior |
-| N1-T4 | Enrollment | Add red tests for credential interception, persistence ordering, tool-list change, identity replacement, and uncertain verification | N1-T1, N1-T3 | Existing credential and data scans still pass |
+| N1-T4 | Enrollment | Add red tests for credential interception, persistence ordering, tool-list change, first-credential publication, fresh-version-2 recovery, and uncertain verification | N1-T1, N1-T3 | Credential and data scans still pass |
 | N1-T5 | End to end | Add red local and Docker flows for REST registration, verification, restart loading, polling, and acknowledgement | N1-T2, N1-T4 | Full failure inventory written |
-| N1-G2 | User | Review the red suite and failure inventory | N1-T3 through N1-T5 | Approval to write production behavior |
+| N1-G2 | User | Review the red suite and failure inventory | Complete through the accepted T03 inventory on 2026-08-30 | Gateway review input complete; Gate A still waits on external S01 and central-owner review |
 | N1-I1 | Central REST | Implement the bounded REST bootstrap client with no new dependency | N1-G2 | N1-T3 passes |
 | N1-I2 | Local MCP | Replace upstream bootstrap discovery with fixed local schemas and REST dispatch | N1-I1 | Bootstrap catalog and request tests pass |
 | N1-I3 | Identity | Connect REST verification to atomic credential persistence and token-free local results | N1-I2 | N1-T4 passes |
@@ -94,7 +108,8 @@ production facts that still need central-owner confirmation.
 | N1-D2 | Documentation | Update product, protocol, status, setup guides, and accepted ADR references | N1-I4 | Documents describe the shipped behavior only |
 | N1-QA | Release | Run checks, secret scans, packed-install tests, Docker E2E, OpenClaw, and Hermes qualification | N1-D2 | Green qualified release evidence |
 
-Production implementation must not begin before N1-G2.
+N1-G2 is complete, but production implementation remains blocked by Gate A and
+the external central work in `docs/implementation-plan.md`.
 
 ### Acceptance cases
 
@@ -104,7 +119,7 @@ Production implementation must not begin before N1-G2.
 | N1-A02 | Register with valid required fields | Send one exact JSON REST request and return a credential-free local result |
 | N1-A03 | Register with `display_name` | Forward it only when supplied and reject unknown local fields |
 | N1-A04 | Registration times out after transmission | Return a fixed uncertain-outcome error and do not retry |
-| N1-A05 | Verify with a valid response | Extract and atomically persist the approved credential, return token-free success, emit tool-list change, and start polling |
+| N1-A05 | Verify with a valid response | Extract and atomically persist the approved credential, return token-free success, and emit tool-list change; do not start receive before version 2 activation succeeds |
 | N1-A06 | Verification persistence fails | Return failure, enable no authenticated work, and expose no JWT |
 | N1-A07 | Verification response contains duplicate or nested credential fields | Fail closed and persist nothing |
 | N1-A08 | Verification times out after transmission | Do not retry and do not report local enrollment success |
@@ -115,7 +130,7 @@ Production implementation must not begin before N1-G2.
 | N1-A13 | Remote central URL uses plain HTTP | Reject before opening credentials, connecting, or sending user data |
 | N1-A14 | Run the normal artifact scan | Find no email, code, request body, response body, or plaintext JWT in durable or normal diagnostic output |
 | N1-A15 | Run verbose development mode | Redact every code value and JWT while retaining the approved non-credential transcript content |
-| N1-A16 | Poll after REST enrollment | Require `Authorization: DPoP`, a fresh proof, and no bearer fallback while preserving the accepted bounded in-memory delivery behavior |
+| N1-A16 | Activate and receive after REST enrollment | Require `Authorization: DPoP`, a fresh proof, no bearer fallback, and the fixed version 2 leased-receive path |
 
 ### Likely file ownership
 
@@ -174,10 +189,14 @@ locally.
 
 ### Work order and gates
 
+PR `#28` completed the gateway fixture and red-specification work represented
+by N2-T1 through N2-T5, and the user accepted the T04 inventory. N2-T0 remains
+part of external S01 and still requires central-owner review.
+
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
 | N2-D1 | Central contract | Freeze the target conversation and message contract in ADR 0025 | Complete | The accepted client contract fixes messages, errors, idempotency, recovery, and activation; central OpenAPI remains external work |
-| N2-D2 | Documentation | Reconcile the target with protocol v1's shipped delivery, acknowledgement, limits, and data boundary | Complete | The transition and version 1 boundary are explicit |
+| N2-D2 | Documentation | Reconcile the target with protocol v1's shipped delivery, acknowledgement, limits, and data boundary | Complete | The separate release contracts and version 1 regression boundary are explicit |
 | N2-G1 | User | Review ADR 0025 | Complete on 2026-08-29 | ADR status and approval section updated |
 | N2-T0 | Central tests | Add red server tests for conversation IDs, recovery, acknowledgement, idempotent replies, conflicts, authorization, bounds, and crash transactions | N2-G1 | Failures are only missing central production behavior |
 | N2-T1 | Test support | Add conversation IDs, recoverable delivery, idempotent replies, conflicts, and fault controls to the Node fake central service | N2-G1 | Support tests pass without gateway production changes |
@@ -185,7 +204,7 @@ locally.
 | N2-T3 | Local MCP | Add red tests for the token-free `reply_message` schema, buffered-message lookup, authenticated upstream dispatch, bounds, and safe errors | N2-T1 | Failures are only missing gateway behavior |
 | N2-T4 | Relay | Add red crash tests for lease redelivery after an interrupted receive | N2-T1 | Gateway restart recovers content only through central after lease expiry |
 | N2-T5 | End to end | Prove receive, reply, crash-window replay, duplicate suppression, and acknowledgement | N2-T2 through N2-T4 | Full failure inventory written |
-| N2-G2 | User | Review the central and gateway red suites and failure inventories | N2-T0 through N2-T5 | Approval to write production behavior |
+| N2-G2 | User and central owner | Review the central and gateway red suites and failure inventories | Gateway T04 inventory accepted; external N2-T0/S01 inventory pending | Gate A closes only after the central owner publishes and accepts S01 |
 | N2-C1 | Central service | Ship the approved conversation, recovery, and reply contract in a development environment | N2-G2, N2-T0 | Contract probes match the approved schemas over HTTPS or loopback HTTP |
 | N2-I1 | Gateway MCP | Implement exact message correlation validation and the bounded local reply projection | N2-C1 | N2-T3 passes |
 | N2-I2 | Relay | Implement the approved recovery operation without persisting content | N2-C1 | N2-T4 passes |
@@ -193,8 +212,9 @@ locally.
 | N2-D3 | Documentation | Update product, protocol, architecture, and accepted ADR references | N2-I3 | Shipped behavior and crash windows are accurate |
 | N2-QA | Release | Run all unit, integration, Docker, artifact-scan, and interoperability checks | N2-D3 | Green qualified release evidence |
 
-N2 may be designed in parallel with N1. Production integration must use the
-same final central endpoint and credential-binding rules selected for N1.
+N1 and N2 design and gateway red-specification work are complete. Production
+integration follows the serialized G01 through G04 order and external central
+dependencies in `docs/implementation-plan.md`.
 
 ### Acceptance cases
 
@@ -236,8 +256,26 @@ wake, retrieve a message through local MCP, map its conversation to one
 provider session, run one bounded provider turn, reply idempotently, and
 acknowledge only after the reply is accepted.
 
-ADR 0024 defines the proposed boundary. The gateway remains unaware of Codex,
-Claude, and Gemini.
+ADR 0024 defines the accepted provider-neutral boundary. The gateway remains
+unaware of Codex, Claude, and Gemini.
+
+### Accepted boundary
+
+Connectors are separate foreground companion processes. One connector is one
+gateway's loopback webhook target, and one gateway and connector form one
+provider pair. Running more than one provider requires independent pairs. The
+gateway remains provider-neutral and keeps its existing two-option CLI.
+
+The connector receives the authenticated ID-only webhook wake and retrieves
+message content through the gateway's authenticated local MCP endpoint. It
+owns a separate content-free correlation store containing only approved opaque
+IDs and lifecycle state. The central credential and DPoP key never leave the
+gateway, and the connector does not copy or proxy provider credentials.
+
+A connector never starts a replacement provider turn merely because a prior
+outcome is unknown. It recovers the exact turn when the approved provider
+interface supports that operation. Otherwise it records an uncertain outcome
+and waits for reviewed recovery.
 
 ### State model
 
@@ -266,7 +304,7 @@ start a second provider turn.
   loopback with the same timestamp, replay, header, body, and deadline rules.
 - Act as the MCP client for `poll_messages`, `reply_message`, and
   `ack_message`. Do not expose delivery-control credentials to the provider.
-- Keep at most one in-flight turn per conversation and enforce a small fixed
+- Keep at most one in-flight turn per conversation and enforce the reviewed
   global concurrency limit.
 - Persist only the opaque correlation and lifecycle fields allowed by ADR
   0024.
@@ -285,20 +323,20 @@ start a second provider turn.
 | ID | Decision | Required record |
 | --- | --- | --- |
 | N3-D1 | Connector executable, CLI, configuration, and working-directory interface | New CLI/configuration ADR and user approval |
-| N3-D2 | Correlation-store format, access controls, encryption, deletion, and migration | New connector-state ADR and user approval |
-| N3-D3 | Common implementation runtime, package layout, and dependencies | Dependency ADR if not already covered by ADR 0006 |
+| N3-D2 | Correlation-store format, access controls, encryption, deletion, and fresh-install lifecycle | New connector-state ADR and user approval |
+| N3-D3 | Common implementation runtime, package layout, dependencies, and supported platforms | Foundation and dependency ADRs |
 | N3-D4 | Fixed concurrency, provider timeout, event, stdout, stderr, and response limits | Protocol or limit ADR |
-| N3-D5 | Local approval behavior and which outcomes are terminal | ADR 0025 plus connector policy ADR |
-| N3-D6 | Installation and publishing model | Distribution plan and user approval |
+| N3-D5 | Provider port, local approval behavior, and which outcomes are terminal | Connector protocol and policy ADRs |
+| N3-D6 | Packaging, installation, and publishing model | Distribution plan and user approval |
 
-Do not infer approval for these choices from the request to plan provider
-support.
+Do not infer approval for these choices from acceptance of ADR 0024's product
+boundary.
 
 ### Work order and gates
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| N3-G1 | User | Review ADR 0024 and N3-D1 through N3-D6 | Accepted ADR 0025 | All foundation choices are accepted |
+| N3-G1 | User | Review N3-D1 through N3-D6 | Accepted ADRs 0024 and 0025 | All foundation choices are accepted |
 | N3-T1 | Test support | Build a fake authenticated gateway MCP/webhook pair and a scriptable fake provider process | N3-G1 | Support code passes independently |
 | N3-T2 | Security | Add red tests for auth-before-body, replay, injection, environment scrubbing, limits, timeouts, and process cleanup | N3-T1 | Failures are only missing connector behavior |
 | N3-T3 | State | Add red tests for mapping creation, resume, concurrency, repeated wakes, crash points, and uncertainty | N3-T1 | No test expects content persistence or prompt replay |
@@ -337,7 +375,7 @@ port. Each adapter gets its own provider protocol ADR, fake provider, red test
 review, implementation, and manual qualification. Do not add three providers
 to one unreviewed production change.
 
-| Provider | Proposed interface to qualify | Required tests | Decision gate |
+| Provider | Candidate interface to qualify | Required tests | Decision gate |
 | --- | --- | --- | --- |
 | Codex | Local stdio `codex app-server`; record `thread.id`, use `thread/resume` and `turn/start`, and consume terminal and approval events | Generated-schema compatibility, initialization, new thread, resume, streamed output, cancellation, approval, missing thread, exact-turn recovery, and process crash | Approve the Codex version, generated schema, process contract, sandbox, approval policy, and any dependency |
 | Claude Code | Compare Agent SDK `query()` plus `resume` with headless `claude -p` structured output before selecting one | Session-ID capture, resume, strict MCP/tool policy, permission callback or safe denial, result bounds, definite error, process loss, and recoverability | Approve SDK versus CLI, exact version, dependencies, session-history behavior, and permission policy |
@@ -426,7 +464,7 @@ missing, replayed, mismatched, or bearer use of that token.
 
 ADR 0026 defines the accepted proof profile, verification response, protected
 request headers, MCP transport change, nonce and replay behavior, credential
-version 2, migration risks, and server interface.
+version 2, fresh-install boundary, and server interface.
 
 This is a coordinated central and gateway change. Gateway proof generation
 must not ship as a security feature until central enforces the proof at token
@@ -448,8 +486,9 @@ from a DPoP token to bearer authentication.
   explicit challenge rejected before application dispatch.
 - Require server-side replay detection across every replica that can receive
   the request.
-- Define re-verification, token reissue, revocation, key rotation, key loss,
-  and legacy bearer removal before migrating an existing identity.
+- Support same-key reissue, revocation, key rotation, key loss, and
+  email-control recovery only for an identity first enrolled under the fresh
+  version 2 contract.
 
 ### Out of scope
 
@@ -470,7 +509,7 @@ from a DPoP token to bearer authentication.
 | Operation | Required contract |
 | --- | --- |
 | Verify | `POST /api/verify_email` carries `DPoP: <issuance-proof>` and no access-token authorization. The proof signs the exact external verification URL and has no `ath`. |
-| Verify success | The existing identity response adds required `token_type: "DPoP"`; the signed JWT contains `cnf.jkt` equal to the RFC 7638 thumbprint of the proof key. |
+| Verify success | The fresh enrollment response includes required `token_type: "DPoP"`; the signed JWT contains `cnf.jkt` equal to the RFC 7638 thumbprint of the proof key. |
 | Verify caching | Every verification response carries `Cache-Control: no-store`; central proxies and observability do not cache or log its body, proofs, nonces, authorization headers, or JWT claims. |
 | Protected REST | Every route carries `Authorization: DPoP <jwt>` plus a fresh proof whose `htm`, query-free `htu`, `iat`, `jti`, optional `nonce`, and `ath` validate. |
 | Central MCP | Every Streamable HTTP request carries the same two headers with a fresh proof for its actual method. Central tool schemas contain no `token` argument. |
@@ -478,7 +517,7 @@ from a DPoP token to bearer authentication.
 | Resource nonce | HTTP 401, exactly one `DPoP-Nonce` header, and `WWW-Authenticate: DPoP error="use_dpop_nonce"` before application dispatch. |
 | Invalid proof | HTTP 400 with `invalid_dpop_proof` at issuance; HTTP 401 with a DPoP challenge at a protected resource. |
 | Invalid token | HTTP 401 with a DPoP challenge and `invalid_token`; valid authentication without permission remains 403. |
-| Migration | A reviewed re-verification or independently protected reissue operation issues a new key-bound token and revokes the old bearer token. |
+| Version 2 recovery | Email-control verification for a freshly enrolled version 2 identity issues a token bound to a new key and revokes that identity's earlier version 2 tokens. Same-key reissue renews only a working version 2 credential. |
 
 The server must validate the JWT and proof, compare the proof thumbprint with
 `cnf.jkt`, compare `ath` with the presented token, and reserve the replay key
@@ -496,31 +535,35 @@ from configured proxies.
 | N6-D4 | Accepted | ADR 0026 fixes verification success, challenge, proof, and token error schemas. |
 | N6-D5 | Accepted requirement, external implementation | Central must provide shared cross-replica nonce keys and atomic replay rejection. A fixture cannot prove the production mechanism. |
 | N6-D6 | Accepted | Credential version 2 stores the DPoP token and encrypted PKCS#8 P-256 private key atomically. |
-| N6-D7 | Accepted | Use same-key authenticated reissue for renewal and email-control verification for key replacement and migration. |
+| N6-D7 | Accepted | Use same-key authenticated reissue for renewal and email-control verification for key replacement after fresh version 2 enrollment. |
 | N6-D8 | Accepted | ADR 0026 fixes expiry, revocation, rotation, key-loss, and lost-response behavior. |
-| N6-D9 | Production fact unresolved | Central must supply the migration and legacy-bearer removal dates. |
-| N6-D10 | Accepted | Use the service-specific RFC 9449 profile. A later standard OAuth and MCP authorization migration needs another ADR. |
+| N6-D9 | Accepted | The target starts from clean local state and a new version 2 enrollment. Shipped version 1 behavior remains regression-only and has no conversion or retirement date in this plan. |
+| N6-D10 | Accepted | Use the service-specific RFC 9449 profile. A later move to standard OAuth and MCP authorization needs another ADR. |
 
 ### Work order and gates
 
+PR `#28` completed the gateway fixture and red-specification work represented
+by N6-T1 through N6-T5. N6-T6 remains part of external S01 and still requires
+central-owner review.
+
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| N6-C1 | Central contract | Freeze N6-D1 through N6-D10 in the gateway target contract | Complete for the gateway; central publication remains external | Accepted proof, error, token, URI, storage, and migration rules are explicit |
+| N6-C1 | Central contract | Freeze N6-D1 through N6-D10 in the gateway target contract | Complete for the gateway; central publication remains external | Accepted proof, error, token, URI, storage, fresh-enrollment, and recovery rules are explicit |
 | N6-G1 | User | Review ADR 0026 and its amendment to ADR 0019 | Complete on 2026-08-29 | ADR status and approval section updated |
 | N6-T1 | Cryptography tests | Add independent vectors for ES256 proofs, RFC 7638 thumbprints, `ath`, URI projection, clocks, and malformed JOSE | N6-G1 | Red failures identify only missing gateway behavior |
 | N6-T2 | Central fixtures | Add token issuance, `cnf.jkt`, proof validation, nonce, replay, DPoP errors, and token-free MCP schemas to both fixtures | N6-G1, D06 | Fixture contract passes independently. Simulated replicas test the contract but do not prove production shared replay state |
-| N6-T3 | Credential tests | Add red tests for credential version 2, atomic token and key persistence, restart, corruption, mismatch, legacy records, and artifact scans | N6-G1 | No test expects plaintext or content persistence |
+| N6-T3 | Credential tests | Add red tests for first credential version 2 publication, atomic token and key persistence, restart, corruption, mismatch, and artifact scans | N6-G1 | No test expects plaintext, content persistence, or version 1 conversion |
 | N6-T4 | REST tests | Add red verification and polling tests for fresh proofs, nonce retry, unsafe retry rejection, headers, limits, cancellation, and safe errors | N6-T1, N6-T2 | Failure inventory contains no server ambiguity |
 | N6-T5 | MCP tests | Add red tests for a fresh proof on every HTTP method, removal of token arguments, nonce handling before dispatch, reconnect, cancellation, and uncertain calls | N6-T1, N6-T2 | Existing local credential filters remain green |
-| N6-T6 | Central service tests | Add red issuer, middleware, trusted-proxy, cross-replica replay, nonce, migration, and legacy-isolation tests in the central repository | N6-T2 | Failures are only missing central production behavior |
-| N6-G2 | User | Review the complete red suite and failure inventory | N6-T1 through N6-T6 | Approval to write production behavior |
+| N6-T6 | Central service tests | Add red issuer, middleware, trusted-proxy, cross-replica replay, nonce, fresh-enrollment, reissue, recovery, and revocation tests in the central repository | N6-T2 | Central owner publishes S01 with failures caused only by missing production behavior |
+| N6-G2 | User and central owner | Review the complete red suite and failure inventory | Gateway T03/T04 inventory accepted; external N6-T6/S01 pending | Gate A closes only after the central owner publishes and accepts S01 |
 | N6-S1 | Central service | Implement and deploy disabled-by-default DPoP issuance and enforcement to the development environment | N6-G2, N6-T6 | External contract probes match the fixtures over canonical HTTPS URLs |
 | N6-I1 | DPoP core | Implement key generation, public JWK export, thumbprints, proof signing, token hashing, clocks, and nonce memory with Node core | N6-S1 | N6-T1 passes without a new dependency |
 | N6-I2 | Identity | Implement atomic credential version 2 persistence and restart loading | N6-I1 | N6-T3 passes |
 | N6-I3 | Central REST | Add the issuance proof to verification and DPoP authentication to polling and other protected REST routes | N6-I2 | N6-T4 passes |
 | N6-I4 | Central MCP | Add per-request DPoP transport authentication and remove central token schema projection and argument injection | N6-I2 | N6-T5 passes |
-| N6-M1 | Migration | Exercise the approved re-verification or reissue path and revoke the test bearer token | N6-I3, N6-I4 | Restarted gateway uses only the bound token and key |
-| N6-S2 | Central service | Enable enforcement for new and migrated tokens, then remove legacy bearer on the approved schedule | N6-M1 | Bearer use of a bound token and the retired legacy token both fail |
+| N6-E1 | Fresh enrollment | Exercise first version 2 issuance, same-key reissue, and email-control recovery for a dedicated fresh identity | N6-I3, N6-I4 | Restarted gateway uses only the current bound version 2 token and key |
+| N6-S2 | Central service | Enable enforcement only for dedicated fresh version 2 identities after the development gate passes | N6-E1 | Bearer use of every DPoP-bound token fails before application dispatch |
 | N6-DOC | Documentation | Update accepted architecture, protocol, security model, runbook, and central integration guide | N6-S2 | Shipped behavior and remaining limitations are accurate |
 | N6-QA | Release | Run unit, integration, Docker, two-replica replay, packed-install, artifact-scan, OpenClaw, and Hermes qualification | N6-DOC | Green qualified release evidence |
 
@@ -536,20 +579,20 @@ development environment.
 | N6-A02 | Verify without a proof or with a bad proof | Reject before consuming the code or changing verification state |
 | N6-A03 | Verification response lacks DPoP type or matching binding | Persist neither token nor key and enable no authenticated work |
 | N6-A04 | Persist a valid verification result | Commit token, type, algorithm, and private key in one encrypted transaction |
-| N6-A05 | Poll with a valid bound token and proof | Authenticate and return the same bounded message semantics as before |
+| N6-A05 | Receive with a valid bound token and proof | Authenticate and return the accepted bounded version 2 leased-receive result |
 | N6-A06 | Use `Bearer` with a DPoP-bound token | Reject even when the JWT signature and claims are otherwise valid |
 | N6-A07 | Use the token with a proof signed by another key | Reject because the proof thumbprint does not match `cnf.jkt` |
 | N6-A08 | Reuse a captured proof | Reject the replay on the same replica and a different replica |
 | N6-A09 | Change method, path, external origin, token, or proof time | Reject before REST or MCP application dispatch |
-| N6-A10 | Change only the poll query | Validate against the approved query-free `htu` while normal request validation still checks the query |
+| N6-A10 | Change only the receive query | Validate against the approved query-free `htu` while normal request validation still checks the query |
 | N6-A11 | Receive one valid nonce challenge | Retry once with the nonce, a new proof, and a new `jti` |
 | N6-A12 | Receive a second, malformed, or oversized nonce challenge | Stop with a fixed safe error and perform no further retry |
 | N6-A13 | Verification or a tool call times out after transmission | Do not retry and report an uncertain fixed outcome where applicable |
 | N6-A14 | Initialize, list tools, call a tool, reconnect, and close MCP | Use a fresh method-correct proof on every HTTP request |
 | N6-A15 | Inspect a central MCP tool call | Find no token or proof in JSON-RPC params or tool arguments |
 | N6-A16 | Restart with credential version 2 | Load the token and private key without exposing either and resume DPoP authentication |
-| N6-A17 | Start with a legacy bearer credential | Enter only the approved migration behavior, never fabricate a DPoP key or mark it upgraded |
-| N6-A18 | Lose or rotate the key | Use the approved server recovery path and revoke the old token without bearer fallback |
+| N6-A17 | Run the shipped version 1 regression suite | Preserve its recorded behavior without reading or converting that state in the future version 2 target |
+| N6-A18 | Lose or rotate the key after fresh version 2 enrollment | Use email-control recovery and revoke the earlier version 2 tokens without bearer fallback |
 | N6-A19 | Scan state, logs, diagnostics, metrics, temporary files, and transcripts | Find no plaintext token, private key, proof, nonce, email, or verification code |
 | N6-A20 | Run through a trusted reverse proxy | Gateway and server agree on the external `htu`; spoofed forwarding headers do not alter it |
 
@@ -577,7 +620,7 @@ Do not let a gateway-only pull request claim completion of N6.
 
 ```text
 N1 REST enrollment contract ----\
-                                -> coordinated verification and DPoP migration
+                                -> fresh version 2 enrollment and DPoP enforcement
 N6 DPoP contract and server ----/
 
 N2 central conversation/reply contract + N6 protected transport
@@ -588,11 +631,13 @@ N2 central conversation/reply contract + N6 protected transport
         -> N5 setup, qualification, and distribution review
 ```
 
-N1, N2, and N6 contracts are accepted, and D06 is complete. Their fixture and
-red-test work now starts at T01 under the remaining red-suite gates in
-`docs/implementation-plan.md`. N2 server operations use N6 protected
-transport. Gateway changes overlap in the
-MCP catalog, central clients, credential store, fixtures, application
-assembly, and product documentation, so G01 through G04 are serialized. N3
-through N5 remain blocked on ADR 0024 and the connector, provider, CLI,
-dependency, packaging, installation, and publishing decisions.
+N1, N2, and N6 contracts are accepted, and D06 is complete. PR `#28` merged
+T01 through T04 and C01, and the user accepted the T03 and T04 gateway failure
+inventory. This completes the gateway side of the review only. Gate A remains
+open until the external central owner publishes and accepts S01. N2 server
+operations use N6 protected transport. Gateway changes overlap in the MCP
+catalog, central clients, credential store, fixtures, application assembly,
+and product documentation, so G01 through G04 stay serialized and blocked by
+Gate A. ADR 0024's boundary is accepted. N3 through N5 remain blocked on the
+concrete D05 connector CLI, state, limits, dependency, provider-port, policy,
+packaging, installation, platform, and publishing decisions.
