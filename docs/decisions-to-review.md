@@ -1,6 +1,6 @@
 # Decisions to review
 
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Accepted on 2026-08-29
 
@@ -27,7 +27,16 @@ Updated: 2026-08-29
 - D06 approves direct test-only use of the already locked
   `cryptography==50.0.0` manylinux x86-64 wheel for independent P-256 and
   ECDSA operations in the Python fixture. ADR 0020 records its exact hash,
-  license, scope, image effect, and update policy. T01 may now begin.
+  license, scope, image effect, and update policy. T01 through T04 and C01 are
+  now merged.
+
+## Accepted on 2026-08-30
+
+- The user accepted the exact T03 and T04 gateway failure inventory and asked
+  to merge the completed work. PR `#28` merged T03, T04, and C01. This
+  completes the gateway review input to Gate A. The external S01 inventory and
+  central-owner review are still required before production gateway work
+  begins.
 
 ## Test-only stand-ins
 
