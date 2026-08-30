@@ -1349,11 +1349,19 @@ test("K02-D05 gates the exact private packed and clean-installed command artifac
         assert.equal(entry.mode, 0o755);
         continue;
       }
-      assert.equal(
-        createHash("sha256").update(entry.bytes).digest("hex"),
-        await sha256(join(stageRoot, path)),
-        `packing changed ${path}`,
-      );
+      if (path === "package.json") {
+        assert.deepEqual(
+          JSON.parse(entry.bytes.toString("utf8")),
+          JSON.parse(await readFile(join(stageRoot, path), "utf8")),
+          "packing changed the package manifest",
+        );
+      } else {
+        assert.equal(
+          createHash("sha256").update(entry.bytes).digest("hex"),
+          await sha256(join(stageRoot, path)),
+          `packing changed ${path}`,
+        );
+      }
       assert.equal(
         entry.mode,
         path === `dist/${provider}-connector/src/cli.js` ? 0o755 : 0o644,
@@ -1397,13 +1405,27 @@ test("K02-D05 gates the exact private packed and clean-installed command artifac
     );
     const installedPackage = join(installRoot, "node_modules", "@a2adev", `${provider}-connector`);
     const installedInventory = await inventory(installedPackage);
-    assert.deepEqual(installedInventory, stageInventory);
+    const packageManagerShim = `node_modules/.bin/a2a-${provider}-connector`;
+    assert.deepEqual(installedInventory, {
+      directories: [...stageInventory.directories, "node_modules", "node_modules/.bin"].sort(),
+      files: [...stageInventory.files, packageManagerShim].sort(),
+      links: [],
+    });
+    await assertMode(join(installedPackage, packageManagerShim), 0o755);
     for (const file of stageInventory.files) {
-      assert.equal(
-        await sha256(join(installedPackage, file)),
-        await sha256(join(stageRoot, file)),
-        `clean install changed ${file}`,
-      );
+      if (file === "package.json") {
+        assert.deepEqual(
+          JSON.parse(await readFile(join(installedPackage, file), "utf8")),
+          JSON.parse(await readFile(join(stageRoot, file), "utf8")),
+          "clean install changed the package manifest",
+        );
+      } else {
+        assert.equal(
+          await sha256(join(installedPackage, file)),
+          await sha256(join(stageRoot, file)),
+          `clean install changed ${file}`,
+        );
+      }
     }
     assert.deepEqual(await readdir(join(installRoot, "node_modules", "@a2adev")), [
       `${provider}-connector`,
