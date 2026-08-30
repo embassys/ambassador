@@ -12,6 +12,10 @@ contract. Tests use the test-only
 [version 2 fixture profile](v2-fixture-profile.md) for missing deployment
 facts, but fixture URLs and policies are not production defaults.
 
+ADR 0033 limits the initial gateway and connector release to macOS and Linux.
+Windows is unsupported, has no CI or release-artifact claim, and may return
+only through a separately approved implementation and qualification plan.
+
 ## Product
 
 The gateway is one foreground process between a local agent runtime and the

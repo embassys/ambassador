@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -38,26 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
       - name: Validate classified future-v2 red inventory
-        if: runner.os != 'Windows'
         run: pnpm run test:red-inventory
-      - name: Record deferred Windows qualification
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          {
-            echo '## C01 Windows qualification boundary'
-            echo
-            echo '| Scope | Run | Deferred | Owner |'
-            echo '| --- | ---: | ---: | --- |'
-            echo '| Portable credential and in-process gateway cases | 14 cases | 0 | C01 |'
-            echo '| Native DACL and atomic replacement | 0 | 1 qualification area | G01 and W01 |'
-            echo '| True child-process current regression | 0 | 2 cases | G01 and W01 |'
-            echo '| No-follow artifact-file scan | 0 | 10 cases | E03 |'
-            echo '| Full T03 and T04 future-v2 inventory | 0 | 2 suites | G01 and W01 |'
-            echo '| Packed Windows lifecycle | 0 | 1 lane | G01 and W01 |'
-            echo
-            echo 'C01 does not count deferred Windows work as passing or expected-red behavior.'
-          } >> "$GITHUB_STEP_SUMMARY"
       - if: always()
         run: pnpm audit --prod --audit-level=high
       - if: always()

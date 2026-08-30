@@ -681,6 +681,10 @@ its DACL and contents. If the approved runtime cannot provide that Windows
 primitive, implementation stops for a separate dependency or platform
 decision.
 
+ADR 0033 defers that Windows implementation and qualification beyond the
+initial release. The branch may remain fail-closed; only the POSIX path is
+normative release behavior.
+
 A failure before publication leaves the old record. A failure after the atomic
 replace creates an uncertain durability outcome. The gateway then reloads the
 published path and enables authenticated work only if exactly one complete
@@ -901,7 +905,8 @@ the gateway suite must cover:
 - one fresh proof for every POST, GET, DELETE, and reconnect request;
 - removal of `token` from upstream MCP schemas and arguments;
 - atomic persistence and restart loading of the token and private key, with
-  crash points before and after POSIX and Windows replacement publication;
+  crash points before and after POSIX replacement publication; Windows
+  replacement remains a future ADR 0033 qualification item;
 - rejection of reissue when `iss`, `sub`, ordered `aud`, `cnf.jkt`, DPoP
   algorithm, token-signing algorithm, endpoint pair, or 24-hour lifetime
   changes;
