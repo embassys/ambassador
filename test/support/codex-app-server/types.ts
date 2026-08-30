@@ -14,6 +14,7 @@ export interface FakeCodexExchange {
   readonly result?: unknown;
   readonly error?: unknown;
   readonly afterResponse?: readonly FakeCodexWireWrite[];
+  readonly allowConcurrentAfterResponse?: boolean;
   readonly exitCodeAfter?: number;
 }
 
@@ -32,6 +33,8 @@ export type FakeCodexProcessPlan =
       readonly lingerMs?: number;
       readonly writesAfterStdinEnd?: readonly FakeCodexWireWrite[];
       readonly spawnDescendant?: boolean;
+      readonly killDescendantOnStdinEnd?: boolean;
+      readonly stderrBytes?: number;
     };
 
 export interface FakeCodexLaunchRecord {

@@ -6,7 +6,11 @@ import test from "node:test";
 
 import {
   CODEX_FIXTURE_SCHEMA_SHA256,
+  initializeRequest,
   startFakeCodexAppServer,
+  threadSettingsResponse,
+  validThread,
+  validTurn,
 } from "./support/codex-app-server/index.js";
 
 const SCHEMA = "test/fixtures/codex-app-server/0.149.0/codex_app_server_protocol.v2.schemas.json";
@@ -36,6 +40,8 @@ test("CX02 support pins the exact stable Codex 0.149.0 schema and source notice"
 
 test("CX02 support runs a full-process fake Codex handshake, session, and turn over JSONL stdio", async (t) => {
   const cwd = process.cwd();
+  const threadId = "thread_fixture_1";
+  const turnId = "turn_fixture_1";
   const initialized = { method: "initialized" };
   const threadStart = {
     id: 2,
@@ -53,7 +59,7 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
     id: 3,
     method: "turn/start",
     params: {
-      threadId: "thread_fixture_1",
+      threadId,
       input: [{ type: "text", text: "fixture input", text_elements: [] }],
       cwd,
       approvalPolicy: "never",
@@ -79,32 +85,24 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
               kind: "json",
               value: {
                 method: "thread/started",
-                params: { thread: { id: "thread_fixture_1" } },
+                params: { thread: validThread(cwd, threadId) },
               },
             },
           ],
-          result: {
-            thread: {
-              id: "thread_fixture_1",
-              cwd,
-              approvalPolicy: "never",
-              approvalsReviewer: "user",
-              sandbox: "read-only",
-            },
-          },
+          result: threadSettingsResponse(cwd, threadId),
         },
         {
           expectMethod: "turn/start",
           expectRequest: turnStart,
-          result: { turn: { id: "turn_fixture_1" } },
+          result: { turn: validTurn(turnId) },
           afterResponse: [
             {
               kind: "json",
               value: {
                 method: "turn/started",
                 params: {
-                  threadId: "thread_fixture_1",
-                  turn: { id: "turn_fixture_1" },
+                  threadId,
+                  turn: validTurn(turnId),
                 },
               },
             },
@@ -113,20 +111,15 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
               value: {
                 method: "turn/completed",
                 params: {
-                  threadId: "thread_fixture_1",
-                  turn: {
-                    id: "turn_fixture_1",
-                    status: "completed",
-                    itemsView: "full",
-                    items: [
-                      {
-                        id: "item_fixture_1",
-                        type: "agentMessage",
-                        phase: "final_answer",
-                        text: "fixture reply",
-                      },
-                    ],
-                  },
+                  threadId,
+                  turn: validTurn(turnId, "completed", [
+                    {
+                      id: "item_fixture_1",
+                      type: "agentMessage",
+                      phase: "final_answer",
+                      text: "fixture reply",
+                    },
+                  ]),
                 },
               },
             },
@@ -165,23 +158,7 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
       received.push(JSON.parse(line) as Readonly<Record<string, unknown>>);
     }
   });
-  const initialize = {
-    id: 1,
-    method: "initialize",
-    params: {
-      clientInfo: {
-        name: "a2a_codex_connector",
-        title: "A2A Codex Connector",
-        version: "0.0.0-private",
-      },
-      capabilities: {
-        experimentalApi: false,
-        requestAttestation: false,
-        optOutNotificationMethods: ["configWarning"],
-        extensions: null,
-      },
-    },
-  };
+  const initialize = initializeRequest();
   for (const request of [initialize, initialized, threadStart, turnStart]) {
     server.stdin.write(`${JSON.stringify(request)}\n`);
   }

@@ -43,8 +43,11 @@ export interface FakeCodexAppServer {
   readonly launches: readonly FakeCodexLaunchRecord[];
   enqueue(plan: FakeCodexProcessPlan): void;
   release(gate: string): void;
+  releaseAll(gate: string): void;
   waitForLaunches(count: number): Promise<void>;
   waitForRequests(count: number): Promise<void>;
+  waitForStdinClosed(count: number): Promise<void>;
+  waitForDescendants(count: number): Promise<void>;
   readConfigSentinel(): Promise<Buffer>;
   spawnForFixture(
     arguments_: readonly string[],
@@ -243,6 +246,15 @@ export async function startFakeCodexAppServer(
       assert.ok(active !== undefined, "no fake Codex process is active");
       active.socket.write(`${JSON.stringify({ command: "release", gate })}\n`);
     },
+    releaseAll(gate) {
+      const active = records.filter(
+        (record) => record.mode === "app-server" && !record.stdinClosed && record.socket.writable,
+      );
+      assert.ok(active.length > 0, "no fake Codex process is active");
+      for (const record of active) {
+        record.socket.write(`${JSON.stringify({ command: "release", gate })}\n`);
+      }
+    },
     async waitForLaunches(count) {
       await waitFor(() => records.length >= count || fixtureErrors.length > 0);
       assert.deepEqual(fixtureErrors, []);
@@ -251,6 +263,22 @@ export async function startFakeCodexAppServer(
       await waitFor(
         () =>
           records.reduce((total, current) => total + current.requests.length, 0) >= count ||
+          fixtureErrors.length > 0,
+      );
+      assert.deepEqual(fixtureErrors, []);
+    },
+    async waitForStdinClosed(count) {
+      await waitFor(
+        () =>
+          records.filter((record) => record.stdinClosed).length >= count ||
+          fixtureErrors.length > 0,
+      );
+      assert.deepEqual(fixtureErrors, []);
+    },
+    async waitForDescendants(count) {
+      await waitFor(
+        () =>
+          records.filter((record) => record.descendantPid !== undefined).length >= count ||
           fixtureErrors.length > 0,
       );
       assert.deepEqual(fixtureErrors, []);

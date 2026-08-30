@@ -95,15 +95,21 @@ async function runExchange(
         : { id: request.id, error: exchange.error };
     await writeWire({ kind: "json", value: response });
   }
-  for (const write of exchange.afterResponse ?? []) await writeWire(write);
-  if (exchange.exitCodeAfter !== undefined) process.exit(exchange.exitCodeAfter);
+  const finish = async () => {
+    for (const write of exchange.afterResponse ?? []) await writeWire(write);
+    if (exchange.exitCodeAfter !== undefined) process.exit(exchange.exitCodeAfter);
+  };
+  if (exchange.allowConcurrentAfterResponse === true) void finish();
+  else await finish();
 }
 
 async function runAppServer(
   plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }>,
 ): Promise<void> {
+  if (plan.stderrBytes !== undefined) process.stderr.write(Buffer.alloc(plan.stderrBytes, 0x78));
   let exchangeIndex = 0;
   let tail = Promise.resolve();
+  let descendant: ReturnType<typeof spawn> | undefined;
   const input = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
   input.on("line", (line) => {
     tail = tail.then(async () => {
@@ -127,6 +133,9 @@ async function runAppServer(
   input.on("close", () => {
     tail = tail.then(async () => {
       send({ channel: "stdin_closed" });
+      if (plan.killDescendantOnStdinEnd === true && descendant?.pid !== undefined) {
+        descendant.kill("SIGTERM");
+      }
       for (const write of plan.writesAfterStdinEnd ?? []) await writeWire(write);
       if (plan.onStdinEnd === "resist") return;
       if (plan.onStdinEnd === "linger") {
@@ -136,7 +145,7 @@ async function runAppServer(
     });
   });
   if (plan.spawnDescendant === true) {
-    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+    descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
       detached: false,
       env: {},
       shell: false,

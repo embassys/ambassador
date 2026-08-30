@@ -1,4 +1,14 @@
-import type { ProviderPort } from "../../../packages/connector-core/src/runtime-types.js";
+import type {
+  ConnectorClock,
+  ProviderPort,
+} from "../../../packages/connector-core/src/runtime-types.js";
+import type {
+  ProviderCancelRequest,
+  ProviderCancelResult,
+  ProviderRecoverRequest,
+  ProviderResumeRequest,
+  ProviderStartRequest,
+} from "../connector/index.js";
 
 import { CODEX_FIXTURE_SCHEMA_SHA256, CODEX_FIXTURE_VERSION } from "./types.js";
 
@@ -8,13 +18,30 @@ export interface CodexAdapterForTestOptions {
   readonly inheritedEnvironment: Readonly<Record<string, string | undefined>>;
   readonly webhookTokenEnvironmentName: string;
   readonly connectorPackageVersion: string;
-  readonly fixtureExecutablePath: string;
+  readonly fixtureExecutablePath: string | null;
+  readonly clock?: ConnectorClock;
+  readonly afterVersionProbeForTest?: () => void | Promise<void>;
+  readonly containmentForTest?: {
+    contain(executionId: string): Promise<boolean>;
+    isEmpty(executionId: string): boolean;
+  };
+}
+
+export interface CodexAdapterPort
+  extends Omit<ProviderPort, "start" | "resume" | "recover" | "cancel"> {
+  start(request: ProviderStartRequest): AsyncIterable<unknown>;
+  resume(request: ProviderResumeRequest): AsyncIterable<unknown>;
+  recover(request: ProviderRecoverRequest): AsyncIterable<unknown>;
+  cancel(request: ProviderCancelRequest): Promise<ProviderCancelResult>;
+  close(): Promise<void>;
 }
 
 export interface Cx03ProductionModule {
   readonly CODEX_APP_SERVER_VERSION: typeof CODEX_FIXTURE_VERSION;
   readonly CODEX_APP_SERVER_SCHEMA_SHA256: typeof CODEX_FIXTURE_SCHEMA_SHA256;
-  createCodexAppServerAdapterForTest(options: CodexAdapterForTestOptions): Promise<ProviderPort>;
+  createCodexAppServerAdapterForTest(
+    options: CodexAdapterForTestOptions,
+  ): Promise<CodexAdapterPort>;
 }
 
 export function isExactMissingCx03Entry(error: unknown, moduleUrl: URL): boolean {
