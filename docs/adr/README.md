@@ -48,6 +48,14 @@ supports macOS and Linux only. Windows is unsupported, implementation-plan task
 W01 is closed as deferred rather than passed, and Windows CI may return only
 under a new approved implementation and qualification plan.
 
+ADR 0034 is accepted for the Codex-first preview implementation path. It pins
+one Codex App Server release and generated schema and defines the Codex-specific
+stdio, policy, recovery, history, authentication, containment, license, update,
+and CX02 red-test contracts. It authorizes CX02 and, after the red failure
+review, CX03. Later user review remains available but is not a blocker. The
+record does not authorize publication, stable support, real-central
+compatibility claims, or Windows support.
+
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and
 deployment facts, tests use only the stand-ins in
