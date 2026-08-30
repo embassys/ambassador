@@ -101,6 +101,12 @@ type TerminalEvent =
         | "provider_outcome_unknown";
     };
 
+interface SelectedReply {
+  readonly id: string;
+  readonly text: string;
+  readonly item: Record<string, unknown>;
+}
+
 class ProtocolFailure extends Error {}
 class OutputFailure extends Error {}
 class ProcessEnded extends Error {}
@@ -122,7 +128,7 @@ function isUnicodeScalarString(value: unknown): value is string {
     const unit = value.charCodeAt(index);
     if (unit >= 0xd800 && unit <= 0xdbff) {
       const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) return false;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
       index += 1;
     } else if (unit >= 0xdc00 && unit <= 0xdfff) return false;
   }
@@ -135,23 +141,6 @@ function validBoundedString(value: unknown, maximumBytes: number): value is stri
     Buffer.byteLength(value, "utf8") >= 1 &&
     Buffer.byteLength(value, "utf8") <= maximumBytes
   );
-}
-
-function validateUnicode(value: unknown): void {
-  if (typeof value === "string") {
-    if (!isUnicodeScalarString(value)) throw new ProtocolFailure();
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) validateUnicode(item);
-    return;
-  }
-  if (isRecord(value)) {
-    for (const [key, item] of Object.entries(value)) {
-      if (!isUnicodeScalarString(key)) throw new ProtocolFailure();
-      validateUnicode(item);
-    }
-  }
 }
 
 class StrictJsonScanner {
@@ -258,7 +247,7 @@ class StrictJsonScanner {
         } catch {
           throw new ProtocolFailure();
         }
-        if (!isUnicodeScalarString(value)) throw new ProtocolFailure();
+        if (typeof value !== "string") throw new ProtocolFailure();
         return value;
       }
       if (character === "\\") {
@@ -303,7 +292,6 @@ function parseStrictRecord(bytes: Buffer): Record<string, unknown> {
     throw new ProtocolFailure();
   }
   const value = new StrictJsonScanner(source).parse();
-  validateUnicode(value);
   if (!isRecord(value)) throw new ProtocolFailure();
   return value;
 }
@@ -362,19 +350,24 @@ class JsonlTransport {
   }
 
   next(): Promise<IteratorResult<Record<string, unknown>>> {
+    if (this.#failure !== undefined) return Promise.reject(this.#failure);
     if (this.#queue.length > 0) {
       return Promise.resolve({
         done: false,
         value: this.#queue.shift() as Record<string, unknown>,
       });
     }
-    if (this.#failure !== undefined) return Promise.reject(this.#failure);
     if (this.#ended) return Promise.resolve({ done: true, value: undefined });
     return new Promise((resolve, reject) => this.#waiters.push({ resolve, reject }));
   }
 
   tryNext(): Record<string, unknown> | undefined {
+    if (this.#failure !== undefined) throw this.#failure;
     return this.#queue.shift();
+  }
+
+  abort(error: Error): void {
+    this.#fail(error);
   }
 
   closeStdin(): void {
@@ -417,6 +410,7 @@ class JsonlTransport {
   #fail(error: Error): void {
     if (this.#failure !== undefined) return;
     this.#failure = error;
+    this.#queue.splice(0);
     for (const waiter of this.#waiters.splice(0)) waiter.reject(error);
   }
 }
@@ -713,13 +707,17 @@ interface ActiveInvocation {
   terminal: boolean;
   cancellationRequested: boolean;
   interruptRequestId: number | null;
+  cancellationTimer: unknown;
+  teardownPromise: Promise<void> | null;
+  readonly deltas: Map<string, string>;
+  readonly completedItems: Map<string, Record<string, unknown>>;
 }
 
 class CodexAppServerAdapter implements ProviderPort {
   readonly spawnRecord: ProviderPort["spawnRecord"];
   readonly #clock: ConnectorClock;
-  readonly #deadlineClockEnabled: boolean;
   readonly #active = new Map<string, ActiveInvocation>();
+  readonly #terminalExecutions = new Set<string>();
   #closed = false;
   #containmentAttempts = 0;
   #postTerminalDeliveries = 0;
@@ -731,7 +729,6 @@ class CodexAppServerAdapter implements ProviderPort {
     private readonly available: boolean,
   ) {
     this.#clock = options.clock ?? SYSTEM_CLOCK;
-    this.#deadlineClockEnabled = options.clock !== undefined;
     this.spawnRecord = {
       executable: identity?.path ?? "codex",
       arguments: [...APP_SERVER_ARGUMENTS],
@@ -763,7 +760,11 @@ class CodexAppServerAdapter implements ProviderPort {
   async cancel(request: Record<string, unknown>): Promise<CancelResult> {
     const value = request as unknown as CancelRequest;
     const invocation = this.#active.get(value.execution_id);
-    if (invocation === undefined) return { status: "not_found" };
+    if (invocation === undefined) {
+      return this.#terminalExecutions.has(value.execution_id)
+        ? { status: "already_terminal" }
+        : { status: "not_found" };
+    }
     if (invocation.terminal) return { status: "already_terminal" };
     if (
       invocation.turnId === null ||
@@ -819,15 +820,14 @@ class CodexAppServerAdapter implements ProviderPort {
       return;
     }
     let invocation: ActiveInvocation | undefined;
-    let terminalDelivered = false;
     try {
       invocation = this.#spawnInvocation(request);
       await this.#handshake(invocation);
       if (operation === "recover") {
         const terminal = await this.#recoverTerminal(invocation);
-        await this.#teardown(invocation, terminal);
+        await this.#teardownOnce(invocation, terminal);
         invocation.terminal = true;
-        terminalDelivered = true;
+        this.#terminalExecutions.add(invocation.executionId);
         yield terminal;
         return;
       }
@@ -836,24 +836,32 @@ class CodexAppServerAdapter implements ProviderPort {
       const session = this.#threadPhase(invocation, operation, requestedSession);
       for await (const event of session) yield event;
       const terminal = yield* this.#turnPhase(invocation);
-      await this.#teardown(invocation, terminal);
+      await this.#teardownOnce(invocation, terminal);
       invocation.terminal = true;
-      terminalDelivered = true;
+      this.#terminalExecutions.add(invocation.executionId);
       yield terminal;
     } catch (error) {
       if (invocation !== undefined) {
-        await this.#teardown(invocation, undefined);
+        await this.#teardownOnce(invocation, undefined);
       }
-      if (!terminalDelivered) {
+      if (invocation === undefined || !invocation.terminal) {
         const preTurn = invocation === undefined || !invocation.turnWritten;
-        yield preTurn && !(error instanceof OutputFailure)
-          ? operation === "recover"
-            ? uncertain(request.execution_id)
-            : failedStart(request.execution_id)
-          : uncertain(request.execution_id);
+        const terminal =
+          preTurn && !(error instanceof OutputFailure)
+            ? operation === "recover"
+              ? uncertain(request.execution_id)
+              : failedStart(request.execution_id)
+            : uncertain(request.execution_id);
+        if (invocation !== undefined) invocation.terminal = true;
+        this.#terminalExecutions.add(request.execution_id);
+        yield terminal;
       }
     } finally {
-      if (invocation !== undefined) this.#active.delete(invocation.executionId);
+      if (invocation !== undefined) {
+        this.#clock.clearTimer(invocation.cancellationTimer);
+        if (!invocation.terminal) await this.#teardownOnce(invocation, undefined);
+        this.#active.delete(invocation.executionId);
+      }
     }
   }
 
@@ -893,22 +901,30 @@ class CodexAppServerAdapter implements ProviderPort {
       terminal: false,
       cancellationRequested: false,
       interruptRequestId: null,
+      cancellationTimer: undefined,
+      teardownPromise: null,
+      deltas: new Map(),
+      completedItems: new Map(),
     };
     this.#active.set(request.execution_id, invocation);
     return invocation;
   }
 
+  async #next(invocation: ActiveInvocation): Promise<IteratorResult<Record<string, unknown>>> {
+    const bounded = await waitBounded(
+      this.#clock,
+      invocation.transport.next(),
+      Math.max(0, invocation.request.deadline_unix_ms - this.#clock.nowMs()),
+    );
+    if (bounded.timedOut) throw new ProcessEnded();
+    return bounded.value;
+  }
+
   async #handshake(invocation: ActiveInvocation): Promise<void> {
     invocation.transport.write(initializeRequest(this.options.connectorPackageVersion));
-    const next = this.#deadlineClockEnabled
-      ? await waitBounded(
-          this.#clock,
-          invocation.transport.next(),
-          Math.max(0, invocation.request.deadline_unix_ms - this.#clock.nowMs()),
-        )
-      : { timedOut: false as const, value: await invocation.transport.next() };
-    if (next.timedOut || next.value.done) throw new ProtocolFailure();
-    const result = responseResult(next.value.value, 1);
+    const next = await this.#next(invocation);
+    if (next.done) throw new ProtocolFailure();
+    const result = responseResult(next.value, 1);
     if (!isRecord(result) || !hasExactKeys(result, [])) throw new ProtocolFailure();
     if (invocation.transport.tryNext() !== undefined) throw new ProtocolFailure();
     invocation.transport.write({ method: "initialized" });
@@ -940,7 +956,7 @@ class CodexAppServerAdapter implements ProviderPort {
     let responseSeen = false;
     let bindingEmitted = false;
     while (!responseSeen || !bindingEmitted) {
-      const next = await invocation.transport.next();
+      const next = await this.#next(invocation);
       if (next.done) throw new ProcessEnded();
       const record = next.value;
       if (Object.hasOwn(record, "id")) {
@@ -1015,9 +1031,11 @@ class CodexAppServerAdapter implements ProviderPort {
     invocation.turnWritten = true;
     let responseSeen = false;
     let bindingEmitted = false;
+    let terminal: TerminalEvent | undefined;
+    const pendingRecords: Record<string, unknown>[] = [];
     const buffered: unknown[] = [];
     for (;;) {
-      const next = await invocation.transport.next();
+      const next = await this.#next(invocation);
       if (next.done) throw new ProcessEnded();
       const record = next.value;
       if (Object.hasOwn(record, "id")) {
@@ -1031,8 +1049,25 @@ class CodexAppServerAdapter implements ProviderPort {
           this.#handleInterruptResponse(invocation, record);
         }
       } else {
-        const normalized = this.#handleTurnNotification(invocation, record);
-        if (normalized !== undefined) buffered.push(normalized);
+        const method = eventMethod(record);
+        if (
+          invocation.turnId === null &&
+          [
+            "item/agentMessage/delta",
+            "item/completed",
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+          ].includes(method ?? "")
+        ) {
+          pendingRecords.push(record);
+        } else {
+          const normalized = this.#handleTurnNotification(invocation, record);
+          if (this.#terminalEvent(normalized)) {
+            if (terminal !== undefined) throw new ProtocolFailure();
+            terminal = normalized;
+          } else if (normalized !== undefined) buffered.push(normalized);
+        }
       }
       if (!bindingEmitted && invocation.turnId !== null) {
         bindingEmitted = true;
@@ -1041,19 +1076,22 @@ class CodexAppServerAdapter implements ProviderPort {
           execution_id: invocation.executionId,
           provider_turn_id: invocation.turnId,
         };
+        for (const pending of pendingRecords.splice(0)) {
+          const normalized = this.#handleTurnNotification(invocation, pending);
+          if (this.#terminalEvent(normalized)) {
+            if (terminal !== undefined) throw new ProtocolFailure();
+            terminal = normalized;
+          } else if (normalized !== undefined) buffered.push(normalized);
+        }
         for (const event of buffered.splice(0)) {
-          if (this.#terminalEvent(event)) return event;
           yield event;
         }
       } else if (bindingEmitted) {
         for (const event of buffered.splice(0)) {
-          if (this.#terminalEvent(event)) return event;
           yield event;
         }
       }
-      if (responseSeen && bindingEmitted) {
-        // Continue to the authoritative terminal notification.
-      }
+      if (terminal !== undefined && responseSeen && bindingEmitted) return terminal;
     }
   }
 
@@ -1078,8 +1116,63 @@ class CodexAppServerAdapter implements ProviderPort {
     if (method === "turn/completed") {
       return this.#terminalFromTurn(invocation, record);
     }
+    if (method === "item/agentMessage/delta") {
+      return this.#agentDelta(invocation, record);
+    }
+    if (method === "item/completed") {
+      this.#completedItem(invocation, record);
+      return undefined;
+    }
     if (this.#ignoredNotification(invocation, record)) return undefined;
     throw new ProtocolFailure();
+  }
+
+  #agentDelta(invocation: ActiveInvocation, record: Record<string, unknown>): unknown {
+    if (
+      !hasExactKeys(record, ["method", "params"]) ||
+      !isRecord(record.params) ||
+      !hasExactKeys(record.params, ["threadId", "turnId", "itemId", "delta"]) ||
+      record.params.threadId !== invocation.sessionId ||
+      record.params.turnId !== invocation.turnId ||
+      !validateId(record.params.itemId) ||
+      !validBoundedString(record.params.delta, CONNECTOR_LIMITS.finalReplyBytes)
+    ) {
+      throw new ProtocolFailure();
+    }
+    const prior = invocation.deltas.get(record.params.itemId) ?? "";
+    const combined = prior + record.params.delta;
+    if (
+      !isUnicodeScalarString(combined) ||
+      Buffer.byteLength(combined) > CONNECTOR_LIMITS.finalReplyBytes
+    ) {
+      throw new ProtocolFailure();
+    }
+    invocation.deltas.set(record.params.itemId, combined);
+    return {
+      event: "progress",
+      execution_id: invocation.executionId,
+      text: record.params.delta,
+    };
+  }
+
+  #completedItem(invocation: ActiveInvocation, record: Record<string, unknown>): void {
+    if (
+      !hasExactKeys(record, ["method", "params"]) ||
+      !isRecord(record.params) ||
+      !hasExactKeys(record.params, ["threadId", "turnId", "completedAtMs", "item"]) ||
+      record.params.threadId !== invocation.sessionId ||
+      record.params.turnId !== invocation.turnId ||
+      !Number.isSafeInteger(record.params.completedAtMs) ||
+      !isRecord(record.params.item) ||
+      !validateId(record.params.item.id)
+    ) {
+      throw new ProtocolFailure();
+    }
+    const existing = invocation.completedItems.get(record.params.item.id);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(record.params.item)) {
+      throw new ProtocolFailure();
+    }
+    invocation.completedItems.set(record.params.item.id, record.params.item);
   }
 
   #bindTurn(invocation: ActiveInvocation, value: unknown): void {
@@ -1108,20 +1201,20 @@ class CodexAppServerAdapter implements ProviderPort {
     }
     if (turn.status !== "completed") return uncertain(invocation.executionId);
     const reply = this.#selectReply(turn.items);
-    if (reply === null) {
+    if (reply === null || !this.#corroborates(invocation, reply)) {
       return {
         event: "failed",
         execution_id: invocation.executionId,
         reason_code: "provider_result_invalid",
       };
     }
-    return { event: "reply", execution_id: invocation.executionId, text: reply };
+    return { event: "reply", execution_id: invocation.executionId, text: reply.text };
   }
 
-  #selectReply(items: unknown): string | null {
+  #selectReply(items: unknown): SelectedReply | null {
     if (!Array.isArray(items)) return null;
-    const final: string[] = [];
-    const compatibility: string[] = [];
+    const final: SelectedReply[] = [];
+    const compatibility: SelectedReply[] = [];
     for (const item of items) {
       if (!isRecord(item) || item.type !== "agentMessage") continue;
       if (!hasExactKeys(item, ["id", "type", "phase", "text"])) return null;
@@ -1131,19 +1224,29 @@ class CodexAppServerAdapter implements ProviderPort {
       ) {
         return null;
       }
-      if (item.phase === "final_answer") final.push(item.text);
-      else if (item.phase === null) compatibility.push(item.text);
+      const selected = { id: item.id, text: item.text, item };
+      if (item.phase === "final_answer") final.push(selected);
+      else if (item.phase === null) compatibility.push(selected);
       else if (item.phase !== "commentary") return null;
     }
-    if (final.length === 1) return final[0] as string;
-    if (final.length === 0 && compatibility.length === 1) return compatibility[0] as string;
+    if (final.length === 1) return final[0] as SelectedReply;
+    if (final.length === 0 && compatibility.length === 1) return compatibility[0] as SelectedReply;
     return null;
+  }
+
+  #corroborates(invocation: ActiveInvocation, reply: SelectedReply): boolean {
+    const completed = invocation.completedItems.get(reply.id);
+    if (completed !== undefined && JSON.stringify(completed) !== JSON.stringify(reply.item)) {
+      return false;
+    }
+    const delta = invocation.deltas.get(reply.id);
+    return delta === undefined || delta === reply.text;
   }
 
   #ignoredNotification(invocation: ActiveInvocation, record: Record<string, unknown>): boolean {
     const method = eventMethod(record);
     if (method === "configWarning") throw new ProtocolFailure();
-    if (!["warning", "turn/diff/updated", "item/completed"].includes(method ?? "")) return false;
+    if (!["warning", "turn/diff/updated"].includes(method ?? "")) return false;
     if (!hasExactKeys(record, ["method", "params"]) || !isRecord(record.params)) {
       throw new ProtocolFailure();
     }
@@ -1189,7 +1292,7 @@ class CodexAppServerAdapter implements ProviderPort {
     });
     let next: IteratorResult<Record<string, unknown>>;
     try {
-      next = await invocation.transport.next();
+      next = await this.#next(invocation);
     } catch {
       return uncertain(invocation.executionId);
     }
@@ -1219,10 +1322,15 @@ class CodexAppServerAdapter implements ProviderPort {
             execution_id: invocation.executionId,
             reason_code: "provider_result_invalid",
           }
-        : { event: "reply", execution_id: invocation.executionId, text: reply };
+        : { event: "reply", execution_id: invocation.executionId, text: reply.text };
     } catch {
       return uncertain(invocation.executionId);
     }
+  }
+
+  #teardownOnce(invocation: ActiveInvocation, candidate: TerminalEvent | undefined): Promise<void> {
+    invocation.teardownPromise ??= this.#teardown(invocation, candidate);
+    return invocation.teardownPromise;
   }
 
   async #teardown(
@@ -1253,7 +1361,13 @@ class CodexAppServerAdapter implements ProviderPort {
 
   #inspectLate(invocation: ActiveInvocation, candidate: TerminalEvent | undefined): void {
     for (;;) {
-      const record = invocation.transport.tryNext();
+      let record: Record<string, unknown> | undefined;
+      try {
+        record = invocation.transport.tryNext();
+      } catch (error) {
+        if (candidate !== undefined) throw error;
+        return;
+      }
       if (record === undefined) return;
       this.#postTerminalDeliveries += 1;
       if (candidate !== undefined) throw new ProtocolFailure();
