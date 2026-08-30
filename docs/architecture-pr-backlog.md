@@ -94,20 +94,21 @@ D06 fixture dependency, complete -----+--> T01/T02 fixtures and E2E support
                                        +--> T03/T04 red gateway specifications
                                        +--> S01 red central specification
 
+T03/T04 user acceptance + ADR 0032 -> local G01 -> G02 -> G03 -> G04
+
 T03/T04 user acceptance --------\
                                  +--> Gate A -> S02 REST/native results -> S03 DPoP enforcement
-S01 central-owner acceptance ---/
+S01 central-owner acceptance ---/                         |
+                                                           +--> live qualification only
 
 S03 -> S04 recovery and acknowledgement
 S04 -> S05 idempotent reply and terminal outcomes
 S03 -> S06 token lifecycle and recovery
 S02/S03/S04/S05/S06 -> S07 staging contract gate
 
-Gate A + S03 development enforcement -> G01 -> G02 -> G03
-T04 + S04/S05 + G03 -> G04
 S07 + G04 -> E01/E02/E03 gateway qualification
 
-D05 + G04 -> K01 -> K02 -> K03 -> K04 connector foundation
+D05 + accepted G04 contract -> K01 -> K02 -> K03 -> K04 fake connector E2E
 K04 -> Codex, Claude, and Gemini adapter tracks in parallel
 
 gateway qualification -> R01 gateway release review
@@ -119,8 +120,9 @@ Q04 -> Q05 stable publication review
 
 ## Wave 0: contract gate and pending decisions
 
-D01 through D04 and D06 are complete. The user approved the three target
-contracts and the fixture-only cryptography dependency on 2026-08-29.
+D01 through D07 are complete. The user approved the three target contracts and
+the fixture-only cryptography dependency on 2026-08-29, then the connector
+foundation and contract-first local implementation path on 2026-08-30.
 Canonical production URLs and other deployment facts remain central-owner
 inputs. Tests substitute the fixture profile; production code must not do so.
 
@@ -132,6 +134,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
 | D05 | Complete | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | ADRs 0028 through 0031 fix the connector command and explicit retirement, working-directory input, state technology and schema, access control, encryption, runtime and dependency scope, provider port, concurrency, timeouts, approvals, terminal outcomes, private packaging, installation model, platform qualification, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
+| D07 | Complete | Gateway and connector docs | `docs: allow contract-first local implementation` | D01-D06 and user approval | ADR 0032 permits G01-G04, K01-K04, and later provider work against accepted fixtures while preserving Gate A, S07, combined qualification, production activation, and publishing gates |
 
 The gateway uses the fixed accepted route split and never adds runtime
 capability discovery or general endpoint configuration. Accepted lease
@@ -155,7 +158,9 @@ correlation, and message lifecycle failures.
 
 PR `#28` merged T03, T04, and C01 after the user accepted the gateway failure
 inventory on 2026-08-30. This completes the gateway review input only. S01 and
-central-owner review still block Gate A and every production gateway PR.
+central-owner review still block Gate A and production activation. ADR 0032
+allows local production-code PRs against the accepted fixtures before that
+external gate closes.
 
 ### Central repository, external ownership
 
@@ -169,7 +174,8 @@ real database, proxy, email, shared-state, or deployment tests.
 
 ### Gate A
 
-Do not begin production work until:
+Do not claim production central compatibility or activate the target against a
+production endpoint until:
 
 1. T01 and T02 are green;
 2. the user reviews the T03 and T04 red failure inventories;
@@ -207,15 +213,16 @@ add a production endpoint that returns verification codes.
 
 ## Wave 3: implement the gateway
 
-These are stacked PRs on T03 and T04. None is independently releasable until
-the full chain through G04 and E01 passes.
+These are stacked PRs on T03 and T04. ADR 0032 permits local implementation
+against the accepted fixtures. None is independently releasable until the full
+chain through G04 and E01 passes.
 
 | ID | Proposed PR title | Depends on | Primary ownership | Completion evidence |
 | --- | --- | --- | --- | --- |
-| G01 | `security: add DPoP proofs and encrypted credential version 2` | Gate A, S03 enforcing in development for dedicated identities | New DPoP module, `src/credential-store.ts`, `src/identity.ts` | Independent proof vectors pass; token and PKCS#8 key persist atomically; restart, corruption, mismatch, and artifact scans pass from a fresh install |
-| G02 | `feat: move enrollment bootstrap calls to central REST` | G01, S02, S03 | New central REST client, `src/gateway-application.ts`, bootstrap parts of `src/mcp-contract.ts` | Local bootstrap tools work without central MCP discovery; verification uses an issuance proof, validates binding, persists before success, and never exposes the credential |
-| G03 | `security: authenticate protected central REST and MCP with DPoP` | G02, S03 | `src/central-mcp.ts`, `src/notification-relay.ts`, authenticated parts of `src/mcp-contract.ts` | Every protected HTTP request has a fresh proof; nonce retry is bounded; MCP tool arguments contain no token; bearer fallback fails closed |
-| G04 | `feat: add recoverable conversations and idempotent replies` | G03, S04, S05, T04 approval | `src/notification-relay.ts`, `src/notification-journal.ts`, `src/local-mcp.ts`, `src/gateway-application.ts` | The gateway validates conversation fields, recovers bodies only from central, exposes token-free `reply_message`, retains content through reply acceptance, and acknowledges at the approved terminal point |
+| G01 | `security: add DPoP proofs and encrypted credential version 2` | ADR 0032, T03 approval; S03 for live qualification | New DPoP module, `src/credential-store.ts`, `src/identity.ts` | Independent proof vectors pass; token and PKCS#8 key persist atomically; restart, corruption, mismatch, and artifact scans pass from a fresh install |
+| G02 | `feat: move enrollment bootstrap calls to central REST` | G01 and accepted REST fixture contract; S02 for live qualification | New central REST client, `src/gateway-application.ts`, bootstrap parts of `src/mcp-contract.ts` | Local bootstrap tools work without central MCP discovery; verification uses an issuance proof, validates binding, persists before success, and never exposes the credential |
+| G03 | `security: authenticate protected central REST and MCP with DPoP` | G02 and accepted DPoP fixture contract; S03 for live qualification | `src/central-mcp.ts`, `src/notification-relay.ts`, authenticated parts of `src/mcp-contract.ts` | Every protected HTTP request has a fresh proof; nonce retry is bounded; MCP tool arguments contain no token; bearer fallback fails closed |
+| G04 | `feat: add recoverable conversations and idempotent replies` | G03, T04 approval, accepted conversation fixture contract; S04 and S05 for live qualification | `src/notification-relay.ts`, `src/notification-journal.ts`, `src/local-mcp.ts`, `src/gateway-application.ts` | The gateway validates conversation fields, recovers bodies only from central, exposes token-free `reply_message`, retains content through reply acceptance, and acknowledges at the approved terminal point |
 
 G01 must not broaden the credential file beyond the fields approved in ADR
 0026. G04 may add opaque recovery state to SQLite only if the accepted central
@@ -255,16 +262,17 @@ path.
 
 ## Wave 6: build the provider-neutral connector foundation
 
-D05 is complete. Connector code waits for G04 because
-it needs the final local `poll_messages`, `reply_message`, `complete_message`,
-`get_message_outcome`, and `ack_message` contracts.
+D05 is complete. ADR 0032 permits connector fixture and red-test work against
+the accepted G04 contract, which fixes the local `poll_messages`,
+`reply_message`, `complete_message`, `get_message_outcome`, and `ack_message`
+tools. Real-central qualification still waits for G04 and S07 evidence.
 
 | ID | Type | Proposed PR title | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
 | K01 | Green fixture PR | `test: add fake gateway and scriptable provider fixtures` | D05, G04 contract | A fake authenticated gateway exposes the five delivery-control tools; a fake provider emits deterministic session, turn, response, approval, crash, malformed, oversized, and recovery events |
 | K02 | Draft red PR | `test: specify connector security, state, and crash behavior` | K01 | Red cases cover auth-before-body, replay, prompt injection boundaries, process argv and environment, state mapping, concurrency, repeated wakes, qualified containment cleanup, approval, exact-turn recovery, reply-before-ack, and uncertainty |
 | K03 | Implementation PR | `feat: add the provider-neutral connector foundation` | K02 failure review | Implement the approved connector command, loopback wake receiver, bounded local MCP client, opaque state store, per-conversation serialization, global concurrency, cancellation, and provider port |
-| K04 | Green E2E PR | `test: run the fake-provider conversation chain end to end` | K03, E02 | Central fixture to gateway to connector to fake provider to idempotent reply to acknowledgement passes two-turn resume, concurrent conversations, duplicate wakes, every crash barrier, restart, and artifact scans |
+| K04 | Green E2E PR | `test: run the fake-provider conversation chain end to end` | K03, local G04 fixture path | Central fixture to gateway to connector to fake provider to idempotent reply to acknowledgement passes two-turn resume, concurrent conversations, duplicate wakes, every crash barrier, restart, and artifact scans; E02 remains the later real-central qualification gate |
 
 K04 must use the normal gateway and connector processes. It must not call
 connector internals to move a message through the happy path. Test-control

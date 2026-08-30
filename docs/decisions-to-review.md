@@ -35,8 +35,8 @@ Updated: 2026-08-30
 - The user accepted the exact T03 and T04 gateway failure inventory and asked
   to merge the completed work. PR `#28` merged T03, T04, and C01. This
   completes the gateway review input to Gate A. The external S01 inventory and
-  central-owner review are still required before production gateway work
-  begins.
+  central-owner review are still required before real-central qualification
+  or production activation.
 - ADR 0024 accepts separate foreground provider connectors while the gateway
   and its CLI remain unchanged. One gateway, connector, and provider form one
   pair. The connector receives the loopback webhook wake, retrieves content
@@ -47,6 +47,47 @@ Updated: 2026-08-30
 - ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. Real
   provider interfaces, versions, dependencies, support claims, and public
   distribution remain behind their later ADR and release gates.
+- ADR 0032 was accepted on 2026-08-30. It lets local gateway, connector, and
+  provider work proceed against the accepted independent fixtures while the
+  central team implements S01 through S07. Fixture results remain local
+  evidence and cannot support production central or release claims.
+
+## Implementation judgments recorded for later review
+
+These choices unblock contract-first implementation but are not additional
+user-approved ADRs. A conflicting central or platform requirement returns the
+affected choice for review rather than silently changing the client contract.
+
+- The external central specification uses one shared authenticated
+  non-receive counter for REST and MCP: 120 attempts per rolling 60 seconds.
+  It charges malformed and idempotent attempts, while a denied conversation
+  start still returns `recipient_unavailable` to preserve non-enumeration.
+- Central message acceptance records an immutable quota-charge ledger.
+  Acknowledgement releases the recipient mailbox charge and any applicable
+  sender and sender-recipient start charges exactly once in the same
+  transaction.
+- Central email matching uses the named `email-comparison-v1` rule: UTF-8
+  bytes with only ASCII `A` through `Z` folded to lowercase. Enrollment and
+  recovery codes expire after ten minutes, are stored as keyed HMAC
+  verifiers, and allow at most ten failed attempts per active code.
+- The central MCP handoff fixes explicit request, response, nesting, token,
+  session, concurrency, and native-result limits; rejects JSON-RPC batches;
+  and uses one content-free `-32002` application-error projection. These
+  values need central capacity evidence at S07.
+- Central rollout has disabled, development, staging, and production states.
+  Rollback stops new issuance and activation but never downgrades an issued
+  DPoP identity to bearer or version 1 delivery.
+- G01 keeps current version 1 regression access and fresh version 2 target
+  access as separate fail-closed APIs. There is no version migration or
+  automatic replacement between them. A legacy token accessor must reject a
+  version 2 credential.
+- Version 2 same-key replacement is accepted locally only for an unchanged
+  issuer, subject, ordered audiences, P-256 key, and thumbprint, with a new
+  token ID and a later expiry. An authentication-failed identity cannot enter
+  this path.
+- POSIX version 2 credential replacement uses the reviewed atomic file path.
+  Windows replacement remains fail-closed until W01 supplies and qualifies
+  the approved native replacement and DACL behavior.
 
 ## Accepted D05 package
 
@@ -91,8 +132,9 @@ defaults and record them for review. The user accepted all four records on
   source commit to the exact tarball digest and verify the resulting registry
   provenance after publication.
 
-This approval completes the provider-neutral D05 foundation decisions. G04
-still blocks K01. Codex, Claude Code, and Gemini still require separate
+This approval completes the provider-neutral D05 foundation decisions. ADR
+0032 permits K01 against the accepted G04 fixture contract. Codex, Claude
+Code, and Gemini still require separate
 executable or SDK, version, protocol, sandbox, approval, history, license, and
 platform ADRs.
 
@@ -112,7 +154,10 @@ central owner and returns a material contract difference for review.
 ## Active architecture and dependency decisions
 
 - D05 is complete. ADRs 0028 through 0031 contain the accepted connector
-  foundation decisions; G04 now blocks K01.
+  foundation decisions. ADR 0032 permits K01 against the accepted G04 fixture
+  contract before the external central service is ready.
+- D07 is complete. Gate A and S07 now gate live central qualification,
+  activation, and release rather than local implementation.
 - Each Codex, Claude Code, and Gemini adapter still needs its own exact
   executable or SDK version, protocol schema, dependency decision, sandbox and
   approval policy, history behavior, supported platforms, and update policy.

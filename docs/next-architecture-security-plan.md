@@ -8,18 +8,20 @@ This document collects the accepted REST enrollment, conversation, recovery,
 DPoP, and provider-neutral connector work for later implementation agents. The
 user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29 and accepted ADR
 0024's connector boundary on 2026-08-30. The user accepted ADRs 0028 through
-0031 on the same date, completing D05. D06 also approves the exact test-only
-Python fixture dependency recorded in ADR 0020. Provider-specific interfaces,
-support claims, and public distribution remain behind later gates. The current
-product and protocol continue to describe shipped version 1 behavior until
+0031 on the same date, completing D05, and accepted ADR 0032's contract-first
+local implementation path. D06 also approves the exact test-only Python
+fixture dependency recorded in ADR 0020. Provider-specific interfaces, support
+claims, and public distribution remain behind later gates. The current product
+and protocol continue to describe shipped version 1 behavior until
 implementation lands. Tests and fixtures come before production changes under
 `docs/implementation-plan.md`.
 
 ADRs 0023 and 0026 are accepted. PR `#28` merged T01 through T04 and C01,
 and the user accepted the T03 and T04 gateway failure inventory on 2026-08-30.
 That completes only the gateway review input. Gate A remains open until the
-external central owner publishes and accepts S01. Nothing in this document
-authorizes production gateway work before that gate.
+external central owner publishes and accepts S01. ADR 0032 authorizes local
+contract-first gateway and connector implementation before that gate. It does
+not authorize production central activation or compatibility claims.
 
 `docs/architecture-pr-backlog.md` groups this work into pull requests,
 cross-repository dependencies, red-test gates, and end-to-end qualification
@@ -88,8 +90,8 @@ production facts that still need central-owner confirmation.
 
 PR `#28` completed the gateway fixture and red-specification work represented
 by N1-T1 through N1-T5, and the user accepted that gateway inventory. The
-implementation rows remain blocked by Gate A and their external central
-dependencies.
+implementation rows may proceed locally under ADR 0032. Gate A and their
+external central dependencies still block live qualification and activation.
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
@@ -108,8 +110,9 @@ dependencies.
 | N1-D2 | Documentation | Update product, protocol, status, setup guides, and accepted ADR references | N1-I4 | Documents describe the shipped behavior only |
 | N1-QA | Release | Run checks, secret scans, packed-install tests, Docker E2E, OpenClaw, and Hermes qualification | N1-D2 | Green qualified release evidence |
 
-N1-G2 is complete, but production implementation remains blocked by Gate A and
-the external central work in `docs/implementation-plan.md`.
+N1-G2 is complete. Local implementation may proceed under ADR 0032. Gate A and
+the external central work in `docs/implementation-plan.md` still block live
+qualification and activation.
 
 ### Acceptance cases
 
@@ -206,15 +209,15 @@ part of external S01 and still requires central-owner review.
 | N2-T5 | End to end | Prove receive, reply, crash-window replay, duplicate suppression, and acknowledgement | N2-T2 through N2-T4 | Full failure inventory written |
 | N2-G2 | User and central owner | Review the central and gateway red suites and failure inventories | Gateway T04 inventory accepted; external N2-T0/S01 inventory pending | Gate A closes only after the central owner publishes and accepts S01 |
 | N2-C1 | Central service | Ship the approved conversation, recovery, and reply contract in a development environment | N2-G2, N2-T0 | Contract probes match the approved schemas over HTTPS or loopback HTTP |
-| N2-I1 | Gateway MCP | Implement exact message correlation validation and the bounded local reply projection | N2-C1 | N2-T3 passes |
-| N2-I2 | Relay | Implement the approved recovery operation without persisting content | N2-C1 | N2-T4 passes |
+| N2-I1 | Gateway MCP | Implement exact message correlation validation and the bounded local reply projection | ADR 0032, N2-T3; N2-C1 for live qualification | N2-T3 passes |
+| N2-I2 | Relay | Implement the approved recovery operation without persisting content | ADR 0032, N2-T4; N2-C1 for live qualification | N2-T4 passes |
 | N2-I3 | Assembly | Preserve buffered content until reply acceptance and later `ack_message` success | N2-I1, N2-I2 | N2-T5 passes |
 | N2-D3 | Documentation | Update product, protocol, architecture, and accepted ADR references | N2-I3 | Shipped behavior and crash windows are accurate |
 | N2-QA | Release | Run all unit, integration, Docker, artifact-scan, and interoperability checks | N2-D3 | Green qualified release evidence |
 
-N1 and N2 design and gateway red-specification work are complete. Production
-integration follows the serialized G01 through G04 order and external central
-dependencies in `docs/implementation-plan.md`.
+N1 and N2 design and gateway red-specification work are complete. Local
+integration follows the serialized G01 through G04 order under ADR 0032.
+External central dependencies still gate live qualification and release.
 
 ### Acceptance cases
 
@@ -331,15 +334,16 @@ start a second provider turn.
 | N3-D5 | Provider port, local approval behavior, crash recovery, and terminal outcomes | Accepted ADR 0030 |
 | N3-D6 | Private packaging, installation, qualification, and later publishing gates | Accepted ADR 0031; distribution still requires Q03 or Q05 approval |
 
-The user approved N3-D1 through N3-D6 on 2026-08-30. This does not bypass G04,
-the provider-specific ADRs, or Q03 and Q05 publication approval.
+The user approved N3-D1 through N3-D6 on 2026-08-30. ADR 0032 permits local
+work against the accepted G04 fixture contract. It does not bypass the
+provider-specific ADRs or Q03 and Q05 publication approval.
 
 ### Work order and gates
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
 | N3-G1 | User | Review N3-D1 through N3-D6 | Accepted ADRs 0024 and 0025 | All foundation choices are accepted |
-| N3-T1 | Test support | Build a fake authenticated gateway MCP/webhook pair and a scriptable fake provider process | N3-G1, G04 | Support code passes independently |
+| N3-T1 | Test support | Build a fake authenticated gateway MCP/webhook pair and a scriptable fake provider process | N3-G1, accepted G04 fixture contract | Support code passes independently |
 | N3-T2 | Security | Add red tests for auth-before-body, replay, injection, environment scrubbing, limits, timeouts, and process cleanup | N3-T1 | Failures are only missing connector behavior |
 | N3-T3 | State | Add red tests for mapping creation, resume, concurrency, repeated wakes, crash points, and uncertainty | N3-T1 | No test expects content persistence or prompt replay |
 | N3-T4 | End to end | Add a fake-provider flow from central message through reply and acknowledgement | N3-T2, N3-T3 | Full failure inventory written |
@@ -560,10 +564,10 @@ central-owner review.
 | N6-T6 | Central service tests | Add red issuer, middleware, trusted-proxy, cross-replica replay, nonce, fresh-enrollment, reissue, recovery, and revocation tests in the central repository | N6-T2 | Central owner publishes S01 with failures caused only by missing production behavior |
 | N6-G2 | User and central owner | Review the complete red suite and failure inventory | Gateway T03/T04 inventory accepted; external N6-T6/S01 pending | Gate A closes only after the central owner publishes and accepts S01 |
 | N6-S1 | Central service | Implement and deploy disabled-by-default DPoP issuance and enforcement to the development environment | N6-G2, N6-T6 | External contract probes match the fixtures over canonical HTTPS URLs |
-| N6-I1 | DPoP core | Implement key generation, public JWK export, thumbprints, proof signing, token hashing, clocks, and nonce memory with Node core | N6-S1 | N6-T1 passes without a new dependency |
+| N6-I1 | DPoP core | Implement key generation, public JWK export, thumbprints, proof signing, token hashing, clocks, and nonce memory with Node core | ADR 0032, N6-T1; N6-S1 for live qualification | N6-T1 passes without a new dependency |
 | N6-I2 | Identity | Implement atomic credential version 2 persistence and restart loading | N6-I1 | N6-T3 passes |
-| N6-I3 | Central REST | Add the issuance proof to verification and DPoP authentication to polling and other protected REST routes | N6-I2 | N6-T4 passes |
-| N6-I4 | Central MCP | Add per-request DPoP transport authentication and remove central token schema projection and argument injection | N6-I2 | N6-T5 passes |
+| N6-I3 | Central REST | Add the issuance proof to verification and DPoP authentication to polling and other protected REST routes | N6-I2, accepted fixture contract; N6-S1 for live qualification | N6-T4 passes |
+| N6-I4 | Central MCP | Add per-request DPoP transport authentication and remove central token schema projection and argument injection | N6-I2, accepted fixture contract; N6-S1 for live qualification | N6-T5 passes |
 | N6-E1 | Fresh enrollment | Exercise first version 2 issuance, same-key reissue, and email-control recovery for a dedicated fresh identity | N6-I3, N6-I4 | Restarted gateway uses only the current bound version 2 token and key |
 | N6-S2 | Central service | Enable enforcement only for dedicated fresh version 2 identities after the development gate passes | N6-E1 | Bearer use of every DPoP-bound token fails before application dispatch |
 | N6-DOC | Documentation | Update accepted architecture, protocol, security model, runbook, and central integration guide | N6-S2 | Shipped behavior and remaining limitations are accurate |
@@ -639,6 +643,8 @@ inventory. This completes the gateway side of the review only. Gate A remains
 open until the external central owner publishes and accepts S01. N2 server
 operations use N6 protected transport. Gateway changes overlap in the MCP
 catalog, central clients, credential store, fixtures, application assembly,
-and product documentation, so G01 through G04 stay serialized and blocked by
-Gate A. ADR 0024's boundary and D05 are accepted. N3 remains blocked by G04.
-N4 and N5 additionally retain provider-specific and distribution gates.
+and product documentation, so G01 through G04 stay serialized. ADR 0032 lets
+that local sequence proceed against fixtures before Gate A. ADR 0024's
+boundary and D05 are accepted, so N3 fixture and red-test work may proceed
+against the accepted G04 contract. N4 and N5 retain provider-specific and
+distribution gates.

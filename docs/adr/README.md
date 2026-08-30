@@ -33,8 +33,15 @@ ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. They fix
 the startup and retirement interface, encrypted content-free state, execution
 and recovery contract, fixed limits, runtime, dependency scope, private
 package layout, platform qualification, installation model, and later
-publishing gates. K01 remains blocked by G04. Provider interfaces and public
-distribution remain behind their separate ADR and release gates.
+publishing gates. ADR 0032 permits K01 against the accepted G04 fixture
+contract. Provider interfaces and public distribution remain behind their
+separate ADR and release gates.
+
+ADR 0032 was accepted on 2026-08-30. It permits contract-first local gateway,
+connector, and provider implementation against the accepted independent
+fixtures before the external central service is ready. Gate A, S07, combined
+qualification, production activation, support claims, and publishing remain
+blocked on their real evidence and approvals.
 
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and
