@@ -33,7 +33,11 @@ export function t04JsonResponse(
  */
 export function installT04FetchInterceptor(
   t: TestContext,
-  handler: (request: Request, call: T04ObservedRequest) => Promise<Response | undefined>,
+  handler: (
+    request: Request,
+    call: T04ObservedRequest,
+    forward: () => Promise<Response>,
+  ) => Promise<Response | undefined>,
 ): T04FetchInterceptor {
   const originalFetch = globalThis.fetch;
   const calls: T04ObservedRequest[] = [];
@@ -47,7 +51,7 @@ export function installT04FetchInterceptor(
       search: url.search,
     };
     calls.push(call);
-    const synthetic = await handler(request, call);
+    const synthetic = await handler(request, call, async () => await originalFetch(request));
     return synthetic ?? (await originalFetch(request));
   };
   globalThis.fetch = interceptedFetch;

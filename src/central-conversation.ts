@@ -951,10 +951,10 @@ export class CentralConversationClient {
     };
     try {
       if (spec.inspectCredential === true) {
-        return await transport.fetchAndInspectCredential(
+        return await transport.fetchAndInspectCredentials(
           target,
           init,
-          async (response, accessToken) => await this.#response(spec, response, accessToken),
+          async (response, accessTokens) => await this.#response(spec, response, accessTokens),
         );
       }
       return await this.#response(spec, await transport.fetch(target, init));
@@ -981,13 +981,13 @@ export class CentralConversationClient {
   async #response(
     spec: RequestSpec,
     response: Response,
-    accessToken?: string,
+    accessTokens: readonly string[] = [],
   ): Promise<Record<string, unknown>> {
     try {
       assertSafeResponseHead(response);
       const bytes = await readBoundedBody(response, spec.responseLimit ?? RESPONSE_BODY_MAX_BYTES);
       const value = parseStrictJson(bytes);
-      if (accessToken !== undefined) assertSafeUpstreamResult(value, accessToken);
+      for (const accessToken of accessTokens) assertSafeUpstreamResult(value, accessToken);
       if (!spec.expectedStatus.includes(response.status)) throw applicationError(response, value);
       return value;
     } catch (error) {

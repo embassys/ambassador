@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { EncryptedFileCredentialStore } from "../src/credential-store.js";
+import { parseCentralCredentialV2 } from "../src/credential-v2.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 import { installT04FetchInterceptor, t04JsonResponse } from "./support/t04-fetch-interceptor.js";
 import {
@@ -491,10 +494,104 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
     payload: { text: T04_REPLY_TEXT },
   });
   await scenario.gateway.stop();
+  const oldAccessToken = scenario.central.currentV2Token(T04_USERNAME);
+  scenario.central.advanceClock(43_201);
+  t.mock.timers.enable({ apis: ["Date"], now: scenario.central.clock() * 1_000 });
+  let releaseReissue: (() => void) | undefined;
+  const reissueGate = new Promise<void>((resolve) => {
+    releaseReissue = resolve;
+  });
+  let markReissueStarted: (() => void) | undefined;
+  const reissueStarted = new Promise<void>((resolve) => {
+    markReissueStarted = resolve;
+  });
+  let releaseReceive: ((response: Response) => void) | undefined;
+  const heldReceive = new Promise<Response>((resolve) => {
+    releaseReceive = resolve;
+  });
+  let markReceiveStarted: (() => void) | undefined;
+  const receiveStarted = new Promise<void>((resolve) => {
+    markReceiveStarted = resolve;
+  });
+  installT04FetchInterceptor(t, async (_request, call, forward) => {
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "POST" &&
+      call.pathname === "/api/v2/token/reissue"
+    ) {
+      markReissueStarted?.();
+      await reissueGate;
+      return await forward();
+    }
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "GET" &&
+      call.pathname === "/api/v2/messages/receive"
+    ) {
+      markReceiveStarted?.();
+      return await heldReceive;
+    }
+    return undefined;
+  });
+  t.after(() => {
+    releaseReissue?.();
+    releaseReceive?.(t04JsonResponse(200, { messages: [] }));
+  });
+  const restarted = await restartT04Gateway(t, scenario);
+  await Promise.all([reissueStarted, receiveStarted]);
+  releaseReissue?.();
+  let newAccessToken = oldAccessToken;
+  for (let turn = 0; turn < 2_000 && newAccessToken === oldAccessToken; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    newAccessToken = scenario.central.currentV2Token(T04_USERNAME);
+  }
+  assert.equal(newAccessToken === oldAccessToken, false, "same-key reissue did not complete");
+  const persistedCredentialStore = new EncryptedFileCredentialStore(
+    join(scenario.gateway.stateRoot, "central-credential.json"),
+    T04_WEBHOOK_TOKEN,
+    JSON.stringify({
+      centralApiUrl: new URL(scenario.central.apiUrl).href,
+      centralMcpUrl: new URL(scenario.central.mcpUrl).href,
+    }),
+  );
+  let newCredentialPublished = false;
+  for (let turn = 0; turn < 2_000 && !newCredentialPublished; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const persisted = await persistedCredentialStore.loadCredential();
+    newCredentialPublished =
+      persisted?.version === 2 &&
+      parseCentralCredentialV2(persisted.plaintext).record.access_token === newAccessToken;
+  }
+  assert.equal(
+    newCredentialPublished,
+    true,
+    "same-key reissue was not published after persistence",
+  );
+  releaseReceive?.(
+    t04JsonResponse(200, {
+      messages: [
+        {
+          id: "t04_reissue_reflection_message",
+          conversation_id: "t04_reissue_reflection_conversation",
+          sender_agent_id: "fixture_sender_agent",
+          message_type: "conversation_turn",
+          in_reply_to_message_id: null,
+          payload: { text: newAccessToken },
+          created_at: new Date(scenario.central.clock() * 1_000).toISOString(),
+        },
+      ],
+    }),
+  );
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  const local = await restarted.client.callTool("poll_messages", { timeout: 0 });
+  assert.equal(Array.isArray(local.messages) ? local.messages.length : -1, 0);
+  await restarted.gateway.stop();
   await scanT04Artifacts({
     root: scenario.gateway.artifactRoot,
-    stdout: scenario.gateway.stdout(),
-    stderr: scenario.gateway.stderr(),
+    stdout: `${scenario.gateway.stdout()}${restarted.gateway.stdout()}`,
+    stderr: `${scenario.gateway.stderr()}${restarted.gateway.stderr()}`,
     markers: [
       { name: "webhook-token", value: T04_WEBHOOK_TOKEN },
       { name: "enrollment-email", value: T04_EMAIL },
@@ -502,6 +599,8 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
       { name: "legacy-code", value: "246810" },
       { name: "message-text", value: T04_MESSAGE_TEXT },
       { name: "reply-text", value: T04_REPLY_TEXT },
+      { name: "old-access-token", value: oldAccessToken },
+      { name: "new-access-token", value: newAccessToken },
     ],
   });
 });

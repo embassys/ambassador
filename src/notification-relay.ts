@@ -21,6 +21,7 @@ const MAX_JSON_DEPTH = 100;
 const MAX_JSON_STRUCTURAL_TOKENS = 16_384;
 const MAX_MESSAGES_PER_POLL = 256;
 const MAX_LOCAL_POLL_SECONDS = 30;
+const MAX_CONFIRMED_ACKNOWLEDGEMENTS = 1_024;
 
 export type NotificationFetch = (url: URL, init: RequestInit) => Promise<Response>;
 export type McpNotificationPoll = (signal: AbortSignal) => Promise<Record<string, unknown>>;
@@ -495,8 +496,12 @@ export class NotificationRelay {
     try {
       const confirmed = this.journal.confirmContentAcknowledgement(messageId);
       const recovered = this.recoverableAcknowledgements.delete(messageId);
-      if ((confirmed || recovered) && this.receiveMessagesThroughV2 !== undefined) {
-        this.confirmedAcknowledgements.add(messageId);
+      const alreadyConfirmed = this.confirmedAcknowledgements.has(messageId);
+      if (
+        (confirmed || recovered || alreadyConfirmed) &&
+        this.receiveMessagesThroughV2 !== undefined
+      ) {
+        this.rememberConfirmedAcknowledgement(messageId);
       }
       if (confirmed) {
         for (let index = this.inbox.length - 1; index >= 0; index -= 1) {
@@ -504,7 +509,7 @@ export class NotificationRelay {
         }
         this.notifyWork();
       }
-      return confirmed || recovered;
+      return confirmed || recovered || alreadyConfirmed;
     } catch {
       throw new NotificationRelayError("journal_failed", "Notification journal operation failed");
     }
@@ -520,7 +525,21 @@ export class NotificationRelay {
   }
 
   canAcknowledge(messageId: string): boolean {
-    return this.hasCurrentMessage(messageId) || this.recoverableAcknowledgements.has(messageId);
+    return (
+      this.hasCurrentMessage(messageId) ||
+      this.recoverableAcknowledgements.has(messageId) ||
+      this.confirmedAcknowledgements.has(messageId)
+    );
+  }
+
+  private rememberConfirmedAcknowledgement(messageId: string): void {
+    this.confirmedAcknowledgements.delete(messageId);
+    this.confirmedAcknowledgements.add(messageId);
+    while (this.confirmedAcknowledgements.size > MAX_CONFIRMED_ACKNOWLEDGEMENTS) {
+      const oldest = this.confirmedAcknowledgements.values().next().value;
+      if (oldest === undefined) break;
+      this.confirmedAcknowledgements.delete(oldest);
+    }
   }
 
   private async execute(
@@ -669,7 +688,6 @@ export class NotificationRelay {
         }
       }),
     };
-    this.confirmedAcknowledgements.clear();
     this.ingestPoll(poll);
     return poll.messages.length;
   }

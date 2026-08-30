@@ -180,16 +180,16 @@ export class CentralProtectedTransport {
   readonly fetch = async (url: string | URL, init?: RequestInit): Promise<Response> =>
     await this.#fetch(url, init, async (response) => response);
 
-  readonly fetchAndInspectCredential = async <T>(
+  readonly fetchAndInspectCredentials = async <T>(
     url: string | URL,
     init: RequestInit | undefined,
-    inspect: (response: Response, accessToken: string) => Promise<T>,
+    inspect: (response: Response, accessTokens: readonly string[]) => Promise<T>,
   ): Promise<T> => await this.#fetch(url, init, inspect);
 
   async #fetch<T>(
     url: string | URL,
     init: RequestInit | undefined,
-    inspect: (response: Response, accessToken: string) => Promise<T>,
+    inspect: (response: Response, accessTokens: readonly string[]) => Promise<T>,
   ): Promise<T> {
     const target = requestTarget(url);
     const method = requestMethod(init?.method);
@@ -356,7 +356,22 @@ export class CentralProtectedTransport {
         throw failure("central_protected_response_unsafe");
       }
       if (parsedNonce !== undefined) this.#nonceCache.set(this.#domain, parsedNonce);
-      return await inspect(response, credential.record.access_token);
+      let currentCredential: LoadedCentralCredentialV2;
+      try {
+        currentCredential = this.#credential();
+      } catch {
+        await cancelBody(response);
+        throw failure("central_protected_response_unsafe");
+      }
+      if (!validCredential(currentCredential)) {
+        await cancelBody(response);
+        throw failure("central_protected_response_unsafe");
+      }
+      const accessTokens = [
+        ...new Set([credential.record.access_token, currentCredential.record.access_token]),
+      ];
+      for (const accessToken of accessTokens) this.#verboseTranscript?.addSecret(accessToken);
+      return await inspect(response, accessTokens);
     }
     throw failure("central_dpop_nonce_retry_exhausted");
   }
