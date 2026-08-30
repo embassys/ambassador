@@ -330,6 +330,8 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
     );
     assert.equal(central.calls.length, callsBefore, "an invalid timeout reached central MCP");
   }
+  const v1MaximumPoll = await client.callTool("poll_messages", { timeout: 60 });
+  assert.ok(Array.isArray(v1MaximumPoll.messages));
 
   central.setMcpAvailable(false);
   const polled = await client.callTool("poll_messages", { timeout: 0 });

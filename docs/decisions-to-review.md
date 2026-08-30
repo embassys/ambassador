@@ -1,5 +1,26 @@
 # Decisions to review
 
+## 2026-08-30: Version 2 gateway recovery boundaries used by G04
+
+- An acknowledgement whose successful response is lost is recoverable after a
+  restart from the existing journal's opaque message ID only. Startup suppresses
+  the stale webhook wake but retains that ID until either central redelivers the
+  immutable body or the repeated idempotent acknowledgement returns the exact
+  `acked` result. Only then does the gateway delete the row. No body, outcome,
+  reply, or tool argument is added to durable state.
+- A terminal receive-contract failure stops the version 2 receive loop without
+  tearing down content-free outcome, start-lookup, or acknowledgement recovery
+  tools. Authentication failures still disable authenticated work. This keeps a
+  malformed batch from being retried while preserving the caller's safe recovery
+  operations.
+- The T04 fixed-route assertion permits protected `/mcp` catalog traffic from
+  G03, but still proves that receive and all conversation lifecycle operations
+  use only their fixed REST routes and never call the central MCP message tools.
+- T04 explicitly selects the accepted version 2 process fixture. When the test
+  clock is advanced to the host wall clock, the fixture reissues its seeded,
+  fixture-only credentials at that deterministic time so a calendar-day shift
+  cannot turn conversation tests into unrelated token-expiry failures.
+
 Updated: 2026-08-30
 
 ## Accepted on 2026-08-29

@@ -172,12 +172,25 @@ export class CentralProtectedTransport {
     this.#credential = options.credential;
     this.#nonceCache = options.nonceCache;
     this.#verboseTranscript = options.verboseTranscript;
-    this.#request = options.fetch ?? globalThis.fetch;
+    this.#request = options.fetch ?? (async (input, init) => await globalThis.fetch(input, init));
     this.#deadlineMs = deadlineMs;
     this.#deadlineSignal = options.deadlineSignal ?? ((value) => AbortSignal.timeout(value));
   }
 
-  readonly fetch = async (url: string | URL, init?: RequestInit): Promise<Response> => {
+  readonly fetch = async (url: string | URL, init?: RequestInit): Promise<Response> =>
+    await this.#fetch(url, init, async (response) => response);
+
+  readonly fetchAndInspectCredential = async <T>(
+    url: string | URL,
+    init: RequestInit | undefined,
+    inspect: (response: Response, accessToken: string) => Promise<T>,
+  ): Promise<T> => await this.#fetch(url, init, inspect);
+
+  async #fetch<T>(
+    url: string | URL,
+    init: RequestInit | undefined,
+    inspect: (response: Response, accessToken: string) => Promise<T>,
+  ): Promise<T> {
     const target = requestTarget(url);
     const method = requestMethod(init?.method);
     if (
@@ -343,8 +356,8 @@ export class CentralProtectedTransport {
         throw failure("central_protected_response_unsafe");
       }
       if (parsedNonce !== undefined) this.#nonceCache.set(this.#domain, parsedNonce);
-      return response;
+      return await inspect(response, credential.record.access_token);
     }
     throw failure("central_dpop_nonce_retry_exhausted");
-  };
+  }
 }

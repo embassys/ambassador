@@ -715,6 +715,7 @@ export interface FakeCentral {
   advanceClock: (seconds: number) => void;
   clock: () => number;
   resetV2: () => void;
+  refreshSeedCredentials: () => void;
   failNextV2: (operation: V2FaultOperation, fault: V2Fault) => void;
   setV1MigrationBlocked: (username: string, blocked: boolean) => void;
   setConversationGrant: (
@@ -757,7 +758,7 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
   const permissionsV2 = new Map<string, PermissionRecordV2>();
   const replayClaims = new Map<string, ReplayRecord>();
   const seedClients = new Map<string, FixtureDpopClientImpl>();
-  const nextFaults = new Map<V2FaultOperation, V2Fault>();
+  const nextFaults = new Map<V2FaultOperation, V2Fault[]>();
   let now = V2_INITIAL_TIME;
   let agentSequence = 1;
   let conversationSequence = 1;
@@ -1813,8 +1814,9 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
     response: ServerResponse,
     protectedApplication: boolean,
   ): { dropAfterCommit: boolean } | undefined {
-    const fault = nextFaults.get(operation);
-    nextFaults.delete(operation);
+    const faults = nextFaults.get(operation);
+    const fault = faults?.shift();
+    if (faults?.length === 0) nextFaults.delete(operation);
     if (fault === "temporarily_unavailable") {
       const body = protectedApplication
         ? { error: { code: "temporarily_unavailable", retry_after_ms: null } }
@@ -2793,9 +2795,17 @@ export async function startFakeCentral(t: TestContext): Promise<FakeCentral> {
     resetV2() {
       resetV2State();
     },
+    refreshSeedCredentials() {
+      for (const [username, client] of seedClients) {
+        const agent = agentsByUsername.get(username);
+        assert.ok(agent !== undefined);
+        client.setAccessToken(issueToken(agent, client.jkt));
+      }
+    },
     failNextV2(operation, fault) {
-      assert.ok(!nextFaults.has(operation));
-      nextFaults.set(operation, fault);
+      const queued = nextFaults.get(operation) ?? [];
+      queued.push(fault);
+      nextFaults.set(operation, queued);
     },
     setV1MigrationBlocked(username, blocked) {
       const agent = agentsByUsername.get(username);

@@ -623,8 +623,59 @@ export class NotificationJournal {
 
   /** Remove wakes whose message bodies were consumed by central but lost with the prior process. */
   discardUnrecoverable(): number {
-    const result = resourcesFor(this).database.prepare("DELETE FROM notification_relay").run();
-    return changes(result.changes, "unrecoverable notification discard");
+    return this.discardUnrecoverableMessageIds().length;
+  }
+
+  /**
+   * Clear stale wake state while returning only the opaque IDs that may still
+   * need an idempotent version 2 acknowledgement retry.
+   */
+  discardUnrecoverableMessageIds(): string[] {
+    const { database } = resourcesFor(this);
+    return database
+      .transaction(() => {
+        const rows = database
+          .prepare<[], { message_id: string }>(`
+            SELECT message_id
+            FROM notification_relay
+            ORDER BY message_id
+          `)
+          .all();
+        const result = database.prepare("DELETE FROM notification_relay").run();
+        if (changes(result.changes, "unrecoverable notification discard") !== rows.length) {
+          throw new Error("failed to clear unrecoverable notifications");
+        }
+        return rows.map((row) => validateNotificationId(row.message_id));
+      })
+      .immediate();
+  }
+
+  /**
+   * Keep only opaque IDs across a version 2 restart and suppress stale wakes
+   * until central either accepts an acknowledgement retry or redelivers the
+   * immutable message body.
+   */
+  prepareVersionTwoRecoveryIds(): string[] {
+    const { database } = resourcesFor(this);
+    return database
+      .transaction(() => {
+        const rows = database
+          .prepare<[], { message_id: string }>(`
+            SELECT message_id
+            FROM notification_relay
+            ORDER BY message_id
+          `)
+          .all();
+        database
+          .prepare(`
+            UPDATE notification_relay
+            SET wake_state = 'content_acknowledged',
+                wake_next_attempt_at_ms = NULL
+          `)
+          .run();
+        return rows.map((row) => validateNotificationId(row.message_id));
+      })
+      .immediate();
   }
 
   recoverInFlight(
