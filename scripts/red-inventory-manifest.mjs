@@ -26,7 +26,7 @@ const t03 = [
   ...fail(
     "t03-dpop-transport-negatives.test.js",
     0,
-    "544dfc1965848348197a8c5deeb236f2beb14bbc96e92fbdddbe19cc3a27e479",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     [
       "T03-P01 MCP initialize, catalog, reconnect, call cancellation, and close each use fresh DPoP",
     ],
@@ -34,7 +34,7 @@ const t03 = [
   ...fail(
     "t03-dpop-transport-negatives.test.js",
     0,
-    "49435f236fb810c4ccfcd6ebbe33c62b328a8c4f72c57291c89999d83c6cde79",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     ["T03-P02 protected proof rejection never triggers refresh, reissue, or bearer fallback"],
   ),
   ...fail(
@@ -137,7 +137,7 @@ const t03 = [
   ...fail(
     "t03-reissue-lifecycle.test.js",
     0,
-    "c57135c5a2095ca9c63d8eb5e5cfc3832644f80445f2982cb891afb976a3fbf6",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     [
       "T03-U01 lost reissue response retries with one idempotency key and fresh proofs",
       "T03-U02 reissue persistence failure retains and continues with the old credential",
@@ -146,7 +146,7 @@ const t03 = [
   ...fail(
     "t03-reissue-lifecycle.test.js",
     0,
-    "544dfc1965848348197a8c5deeb236f2beb14bbc96e92fbdddbe19cc3a27e479",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     ["T03-U03 an expired credential disables protected work without network refresh"],
   ),
   ...fail(
@@ -164,7 +164,7 @@ const t03 = [
   ...fail(
     "t03-reissue-lifecycle.test.js",
     1,
-    "fe752778e7aa8a3f351d4df132219c2133f48d6424aa2f198b31fd6fb2b9ed8b",
+    "c6db406694051321561e613f194d5b33a95f4682b0ecffb9ee917d1e8e3be0c6",
     [
       "issuer changed",
       "subject changed",
@@ -185,7 +185,7 @@ const t03 = [
   ...fail(
     "t03-reissue-lifecycle.test.js",
     1,
-    "fd3a35cd7ba5666ec9a92d59a900c0dd2da90ff3f8703baf2b6469ff907c61b5",
+    "18da142276dd1bc964a07e8f96328e47753839c7f591d796f2ff211ea369f35b",
     [
       "missing no-store",
       "wrong token type",
@@ -390,7 +390,7 @@ const t03 = [
   ...fail(
     "t03-rest-dpop-gateway.test.js",
     0,
-    "544dfc1965848348197a8c5deeb236f2beb14bbc96e92fbdddbe19cc3a27e479",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     ["T03-R07 restart loads the bound key and uses fresh DPoP on repeated central MCP calls"],
   ),
   ...fail(
@@ -399,43 +399,35 @@ const t03 = [
     "d888ad889009cd267c36fd65633c6dd275b1af5f3d85a57712c2b785ac833ef6",
     ["T03-S01 enrollment uses fresh bound P-256 proofs and persists one JSON credential"],
   ),
-  ...fail(
-    "t03-security-lifecycle.test.js",
-    1,
-    "240c3da00c624afcbefbe65918f63e0e2adc1e8849cb03c516852c6e813ae84a",
-    [
-      "invalid JSON",
-      "duplicate credential field",
-      "missing credential version",
-      "wrong credential version",
-      "wrong credential token type",
-      "unknown field",
-      "unsupported DPoP algorithm",
-      "token and key mismatch",
-      "malformed token",
-      "invalid private-key base64url",
-      "malformed private-key DER",
-      "non-P-256 private key",
-      "missing token confirmation",
-      "malformed token thumbprint",
-    ],
-  ),
-  ...fail(
-    "t03-security-lifecycle.test.js",
-    0,
-    "05dc5c719a91f0a7a2bb2ca70816e7fbff0ab0553d00948035eb7f5508c66238",
-    ["T03-S02 malformed fresh-install version 2 records fail before central dispatch"],
-  ),
+  ...pass("t03-security-lifecycle.test.js", 1, [
+    "invalid JSON",
+    "duplicate credential field",
+    "missing credential version",
+    "wrong credential version",
+    "wrong credential token type",
+    "unknown field",
+    "unsupported DPoP algorithm",
+    "token and key mismatch",
+    "malformed token",
+    "invalid private-key base64url",
+    "malformed private-key DER",
+    "non-P-256 private key",
+    "missing token confirmation",
+    "malformed token thumbprint",
+  ]),
+  ...pass("t03-security-lifecycle.test.js", 0, [
+    "T03-S02 malformed fresh-install version 2 records fail before central dispatch",
+  ]),
   ...fail(
     "t03-security-lifecycle.test.js",
     0,
-    "544dfc1965848348197a8c5deeb236f2beb14bbc96e92fbdddbe19cc3a27e479",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     ["T03-S03 protected REST and MCP use fresh token-free DPoP transport requests"],
   ),
   ...fail(
     "t03-security-lifecycle.test.js",
     0,
-    "c57135c5a2095ca9c63d8eb5e5cfc3832644f80445f2982cb891afb976a3fbf6",
+    "6739dfd709f013a0ebf6de461d5dcabb259b715110d1d1a3d0e64d7e4be74e27",
     ["T03-S04 scheduled same-key reissue keeps one idempotency key and atomically replaces JSON"],
   ),
   ...fail(
@@ -447,25 +439,20 @@ const t03 = [
   ...fail(
     "t03-size-boundaries.test.js",
     1,
-    "2db04f53f64aa561e408e2e6a4dbdbb999edcfcc46cdf4b51f66452c056d8b36",
+    "25fb9bf5bf0983d07cca779217e38e38232dec74511dd99385bab0cfd404b031",
     ["token 4096", "private key 1024", "plaintext 8192"],
   ),
-  ...fail(
-    "t03-size-boundaries.test.js",
-    1,
-    "72e7d06114d825b1e2712bff575a5aeed3a870b92d88725493f8bc997fe1e533",
-    [
-      "token 4097",
-      "smallest canonical token over limit",
-      "private key 1025",
-      "smallest valid private key over limit",
-      "plaintext 8193",
-    ],
-  ),
+  ...pass("t03-size-boundaries.test.js", 1, [
+    "token 4097",
+    "smallest canonical token over limit",
+    "private key 1025",
+    "smallest valid private key over limit",
+    "plaintext 8193",
+  ]),
   ...fail(
     "t03-size-boundaries.test.js",
     0,
-    "8dd57dc6cc0841b01691f37eaa7db75be5d54fca8a309288382502598c067296",
+    "42fda1c3fcfbd127de5bb8e9da9e41a72f9e6405c0b443f221d344b184fd11a6",
     ["T03-L01 exact credential token, key, and plaintext boundaries are enforced"],
   ),
 ];

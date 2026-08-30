@@ -1,11 +1,18 @@
 import { execFile } from "node:child_process";
-import { createCipheriv, createDecipheriv, randomBytes, scrypt } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
 import { type FileHandle, link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
-const FILE_VERSION = 1;
+import {
+  assertSameKeyCredentialReplacement,
+  type LoadedCentralCredentialV2,
+  parseCentralCredentialV2,
+} from "./credential-v2.js";
+
+const LEGACY_FILE_VERSION = 1;
+const V2_FILE_VERSION = 2;
 const SCRYPT_N = 131_072;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
@@ -32,7 +39,6 @@ const ENVELOPE_KEYS = [
   "version",
 ] as const;
 const AAD_METADATA = {
-  version: FILE_VERSION,
   kdf: "scrypt",
   n: SCRYPT_N,
   r: SCRYPT_R,
@@ -42,7 +48,7 @@ const AAD_METADATA = {
 const savingPaths = new Set<string>();
 
 interface CredentialEnvelope {
-  version: typeof FILE_VERSION;
+  version: typeof LEGACY_FILE_VERSION | typeof V2_FILE_VERSION;
   kdf: "scrypt";
   n: typeof SCRYPT_N;
   r: typeof SCRYPT_R;
@@ -57,6 +63,15 @@ interface CredentialEnvelope {
 export interface CredentialStore {
   load(): Promise<string | undefined>;
   save(jwt: string): Promise<void>;
+}
+
+export type StoredCredential =
+  | { readonly version: 1; readonly plaintext: string }
+  | { readonly version: 2; readonly plaintext: string };
+
+export interface VersionedCredentialStore {
+  loadCredential(): Promise<StoredCredential | undefined>;
+  saveCredential(credential: StoredCredential): Promise<void>;
 }
 
 export type CredentialArtifactKind = "directory" | "file";
@@ -106,6 +121,7 @@ function decodeBase64(value: unknown, expectedBytes?: number): Buffer {
 }
 
 function parseEnvelope(bytes: Buffer): {
+  version: CredentialEnvelope["version"];
   salt: Buffer;
   iv: Buffer;
   tag: Buffer;
@@ -126,7 +142,7 @@ function parseEnvelope(bytes: Buffer): {
     throw invalidCredential();
   }
   if (
-    value.version !== FILE_VERSION ||
+    (value.version !== LEGACY_FILE_VERSION && value.version !== V2_FILE_VERSION) ||
     value.kdf !== "scrypt" ||
     value.n !== SCRYPT_N ||
     value.r !== SCRYPT_R ||
@@ -136,8 +152,10 @@ function parseEnvelope(bytes: Buffer): {
     throw invalidCredential();
   }
   const ciphertext = decodeBase64(value.ciphertext);
-  if (ciphertext.length === 0 || ciphertext.length > MAX_JWT_BYTES) throw invalidCredential();
+  const maximumPlaintext = value.version === V2_FILE_VERSION ? 8_192 : MAX_JWT_BYTES;
+  if (ciphertext.length === 0 || ciphertext.length > maximumPlaintext) throw invalidCredential();
   return {
+    version: value.version,
     salt: decodeBase64(value.salt, SALT_BYTES),
     iv: decodeBase64(value.iv, IV_BYTES),
     tag: decodeBase64(value.tag, TAG_BYTES),
@@ -280,14 +298,13 @@ class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessCo
   }
 }
 
-export class EncryptedFileCredentialStore implements CredentialStore {
+export class EncryptedFileCredentialStore implements CredentialStore, VersionedCredentialStore {
   private readonly path: string;
   private readonly directoryPath: string;
   private readonly hookToken: Buffer;
-  private readonly additionalData: Buffer;
+  private readonly credentialScope: string;
   private readonly platform: NodeJS.Platform;
   private readonly windowsAccessControl?: WindowsCredentialAccessControl;
-  private saved = false;
 
   constructor(
     path: string,
@@ -304,7 +321,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
     this.path = resolve(path);
     this.directoryPath = dirname(this.path);
     this.hookToken = Buffer.from(hookToken, "hex");
-    this.additionalData = Buffer.from(JSON.stringify({ ...AAD_METADATA, credentialScope }), "utf8");
+    this.credentialScope = credentialScope;
     this.platform = options.platform ?? process.platform;
     if (this.platform === "win32") {
       this.windowsAccessControl =
@@ -313,12 +330,26 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   }
 
   async load(): Promise<string | undefined> {
+    const credential = await this.loadCredential();
+    if (credential === undefined) return undefined;
+    if (credential.version !== LEGACY_FILE_VERSION) throw invalidCredential();
+    return credential.plaintext;
+  }
+
+  async loadCredential(): Promise<StoredCredential | undefined> {
     const directory = await this.openDirectory(false);
     if (directory === undefined) return undefined;
     try {
-      let file: FileHandle | undefined;
       try {
-        file = await this.openExistingFile(this.path, false);
+        const stored = await this.readCredentialPath(this.path);
+        await this.verifyDirectory(directory);
+        if (
+          stored.version === LEGACY_FILE_VERSION &&
+          stored.plaintext.trimStart().startsWith("{")
+        ) {
+          throw invalidCredential();
+        }
+        return { version: stored.version, plaintext: stored.plaintext };
       } catch (error) {
         if (errorCode(error) === "ENOENT") {
           await this.verifyDirectory(directory);
@@ -326,59 +357,64 @@ export class EncryptedFileCredentialStore implements CredentialStore {
         }
         throw error;
       }
-
-      try {
-        const stats = await file.stat({ bigint: true });
-        if (stats.size <= 0n || stats.size > BigInt(MAX_FILE_BYTES)) throw invalidCredential();
-        const bytes = await file.readFile();
-        const currentStats = await file.stat({ bigint: true });
-        if (bytes.length !== Number(stats.size) || !sameArtifact(stats, currentStats)) {
-          throw invalidCredential();
-        }
-        const envelope = parseEnvelope(bytes);
-        let key: Buffer | undefined;
-        let plaintext: Buffer | undefined;
-        try {
-          key = await deriveKey(this.hookToken, envelope.salt);
-          const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
-            authTagLength: TAG_BYTES,
-          });
-          decipher.setAAD(this.additionalData);
-          decipher.setAuthTag(envelope.tag);
-          plaintext = Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
-          const jwt = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-          if (jwt.length === 0) throw invalidCredential();
-          return jwt;
-        } catch {
-          throw invalidCredential();
-        } finally {
-          key?.fill(0);
-          plaintext?.fill(0);
-        }
-      } finally {
-        await file.close();
-      }
     } finally {
       await directory.handle?.close();
     }
   }
 
-  async save(jwt: string): Promise<void> {
-    if (typeof jwt !== "string" || jwt.length === 0 || Buffer.byteLength(jwt) > MAX_JWT_BYTES) {
+  async save(plaintext: string): Promise<void> {
+    if (typeof plaintext !== "string") throw new Error("The central credential is invalid");
+    if (plaintext.trimStart().startsWith("{")) throw new Error("The central credential is invalid");
+    await this.saveCredential({ version: LEGACY_FILE_VERSION, plaintext });
+  }
+
+  async saveCredential(credential: StoredCredential): Promise<void> {
+    const { plaintext, version } = credential;
+    if (version !== LEGACY_FILE_VERSION && version !== V2_FILE_VERSION) {
       throw new Error("The central credential is invalid");
     }
-    if (this.saved || savingPaths.has(this.path)) throw credentialExists();
+    if (
+      typeof plaintext !== "string" ||
+      plaintext.length === 0 ||
+      Buffer.byteLength(plaintext) > MAX_JWT_BYTES
+    ) {
+      throw new Error("The central credential is invalid");
+    }
+    if (version === LEGACY_FILE_VERSION && plaintext.trimStart().startsWith("{")) {
+      throw new Error("The central credential is invalid");
+    }
+    const replacement =
+      version === V2_FILE_VERSION ? parseCentralCredentialV2(plaintext) : undefined;
+    if (savingPaths.has(this.path)) throw credentialExists();
     savingPaths.add(this.path);
     let directory: SecuredDirectory | undefined;
     let temporaryPath: string | undefined;
     let temporaryFile: FileHandle | undefined;
     let temporaryCreated = false;
     let published = false;
+    let current:
+      | {
+          readonly bytes: Buffer;
+        }
+      | undefined;
 
     try {
       directory = await this.openDirectory(true);
       if (directory === undefined) throw new Error("The credential directory is unavailable");
-      await this.assertCredentialAbsent();
+      try {
+        const stored = await this.readCredentialPath(this.path);
+        if (stored.version !== V2_FILE_VERSION || replacement === undefined) {
+          throw credentialExists();
+        }
+        const credential = parseCentralCredentialV2(stored.plaintext);
+        assertSameKeyCredentialReplacement(credential, replacement);
+        if (this.platform === "win32") {
+          throw new Error("Windows credential replacement is not qualified");
+        }
+        current = { bytes: stored.bytes };
+      } catch (error) {
+        if (errorCode(error) !== "ENOENT") throw error;
+      }
 
       const salt = randomBytes(SALT_BYTES);
       const iv = randomBytes(IV_BYTES);
@@ -388,14 +424,14 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       try {
         key = await deriveKey(this.hookToken, salt);
         const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
-        cipher.setAAD(this.additionalData);
-        ciphertext = Buffer.concat([cipher.update(jwt, "utf8"), cipher.final()]);
+        cipher.setAAD(this.additionalData(version));
+        ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
         tag = cipher.getAuthTag();
       } finally {
         key?.fill(0);
       }
       const envelope: CredentialEnvelope = {
-        version: FILE_VERSION,
+        version,
         kdf: "scrypt",
         n: SCRYPT_N,
         r: SCRYPT_R,
@@ -409,7 +445,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       const serialized = Buffer.from(JSON.stringify(envelope), "ascii");
 
       await this.verifyDirectory(directory);
-      await this.assertCredentialAbsent();
+      if (current === undefined) await this.assertCredentialAbsent();
       temporaryPath = `${this.path}.tmp-${process.pid}-${randomBytes(16).toString("hex")}`;
       const noFollow = this.platform === "win32" ? 0 : constants.O_NOFOLLOW;
       temporaryFile = await open(
@@ -430,11 +466,28 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       await temporaryFile.close();
       temporaryFile = undefined;
 
+      const staged = await this.readCredentialPath(temporaryPath);
+      if (staged.version !== version || staged.plaintext !== plaintext) throw invalidCredential();
+
       await this.verifyDirectory(directory);
-      await this.assertCredentialAbsent();
-      if (this.platform === "win32") {
+      if (current !== undefined) {
+        const latest = await this.readCredentialPath(this.path);
+        const expectedDigest = createHash("sha256").update(current.bytes).digest();
+        const latestDigest = createHash("sha256").update(latest.bytes).digest();
+        if (!expectedDigest.equals(latestDigest)) throw invalidCredential();
+        const latestCredential = parseCentralCredentialV2(latest.plaintext);
+        assertSameKeyCredentialReplacement(
+          latestCredential,
+          replacement as LoadedCentralCredentialV2,
+        );
         await rename(temporaryPath, this.path);
+        temporaryCreated = false;
+      } else if (this.platform === "win32") {
+        await this.assertCredentialAbsent();
+        await rename(temporaryPath, this.path);
+        temporaryCreated = false;
       } else {
+        await this.assertCredentialAbsent();
         await link(temporaryPath, this.path);
         published = true;
         try {
@@ -450,15 +503,23 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       }
       published = true;
 
-      const finalFile = await this.openExistingFile(this.path, true);
       try {
-        await finalFile.sync();
-      } finally {
-        await finalFile.close();
+        const finalFile = await this.openExistingFile(this.path, true);
+        try {
+          await finalFile.sync();
+        } finally {
+          await finalFile.close();
+        }
+        await this.verifyDirectory(directory);
+        if (directory.handle !== undefined) await directory.handle.sync();
+        const stored = await this.readCredentialPath(this.path);
+        if (stored.version !== version || stored.plaintext !== plaintext) throw invalidCredential();
+      } catch {
+        const recovered = await this.loadCredential().catch(() => undefined);
+        if (recovered?.version !== version || recovered.plaintext !== plaintext) {
+          throw invalidCredential();
+        }
       }
-      await this.verifyDirectory(directory);
-      if (directory.handle !== undefined) await directory.handle.sync();
-      this.saved = true;
     } finally {
       savingPaths.delete(this.path);
       if (temporaryFile !== undefined) await temporaryFile.close().catch(() => undefined);
@@ -466,6 +527,53 @@ export class EncryptedFileCredentialStore implements CredentialStore {
         await unlink(temporaryPath).catch(() => undefined);
       }
       await directory?.handle?.close().catch(() => undefined);
+    }
+  }
+
+  private additionalData(version: CredentialEnvelope["version"]): Buffer {
+    return Buffer.from(
+      JSON.stringify({ version, ...AAD_METADATA, credentialScope: this.credentialScope }),
+      "utf8",
+    );
+  }
+
+  private async readCredentialPath(path: string): Promise<{
+    readonly bytes: Buffer;
+    readonly plaintext: string;
+    readonly version: CredentialEnvelope["version"];
+  }> {
+    const file = await this.openExistingFile(path, false);
+    try {
+      const stats = await file.stat({ bigint: true });
+      if (stats.size <= 0n || stats.size > BigInt(MAX_FILE_BYTES)) throw invalidCredential();
+      const bytes = await file.readFile();
+      const currentStats = await file.stat({ bigint: true });
+      if (bytes.length !== Number(stats.size) || !sameArtifact(stats, currentStats)) {
+        throw invalidCredential();
+      }
+      const envelope = parseEnvelope(bytes);
+      let key: Buffer | undefined;
+      let decoded: Buffer | undefined;
+      try {
+        key = await deriveKey(this.hookToken, envelope.salt);
+        const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
+          authTagLength: TAG_BYTES,
+        });
+        decipher.setAAD(this.additionalData(envelope.version));
+        decipher.setAuthTag(envelope.tag);
+        decoded = Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
+        const plaintext = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+        if (plaintext.length === 0) throw invalidCredential();
+        if (envelope.version === V2_FILE_VERSION) parseCentralCredentialV2(plaintext);
+        return { bytes, plaintext, version: envelope.version };
+      } catch {
+        throw invalidCredential();
+      } finally {
+        key?.fill(0);
+        decoded?.fill(0);
+      }
+    } finally {
+      await file.close();
     }
   }
 

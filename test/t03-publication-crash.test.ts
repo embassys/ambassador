@@ -107,7 +107,7 @@ async function publicationFixture(t: TestContext): Promise<PublicationFixture> {
   });
   const credentialPath = join(artifactRoot, "state", "a2a-gateway", "central-credential.json");
   const store = new EncryptedFileCredentialStore(credentialPath, T03_WEBHOOK_TOKEN, scope);
-  await store.save(JSON.stringify(original));
+  await store.saveCredential({ version: 2, plaintext: JSON.stringify(original) });
   const originalDigest = createHash("sha256")
     .update(await readFile(credentialPath))
     .digest("hex");
@@ -210,22 +210,26 @@ test("T03-C01 a full-process crash during pre-response uncertainty retains the o
   await crashed.stop();
   fixture.releaseFirstResponse();
 
-  const beforeRecovery = await new EncryptedFileCredentialStore(
+  const beforeRecoveryStored = await new EncryptedFileCredentialStore(
     fixture.credentialPath,
     T03_WEBHOOK_TOKEN,
     fixture.scope,
-  ).load();
+  ).loadCredential();
+  assert.equal(beforeRecoveryStored?.version, 2);
+  const beforeRecovery = beforeRecoveryStored?.plaintext;
   assert.equal(beforeRecovery, JSON.stringify(fixture.original));
 
   const recovery = startWorker(t, fixture, true);
   await reachOperation(recovery);
   await waitForT03Observation(() => reissueCount(fixture) === 4);
   await finishWorker(recovery);
-  const afterRecovery = await new EncryptedFileCredentialStore(
+  const afterRecoveryStored = await new EncryptedFileCredentialStore(
     fixture.credentialPath,
     T03_WEBHOOK_TOKEN,
     fixture.scope,
-  ).load();
+  ).loadCredential();
+  assert.equal(afterRecoveryStored?.version, 2);
+  const afterRecovery = afterRecoveryStored?.plaintext;
   assert.equal(afterRecovery, JSON.stringify(fixture.replacement));
   await scanPublicationArtifacts(fixture, [
     { name: "crash-stdout", value: crashed.stdout() },
@@ -249,11 +253,13 @@ test("T03-C02 a full-process crash after publication reloads one complete replac
   assert.notEqual(publishedDigest, fixture.originalDigest);
   await crashed.stop();
 
-  const stored = await new EncryptedFileCredentialStore(
+  const storedCredential = await new EncryptedFileCredentialStore(
     fixture.credentialPath,
     T03_WEBHOOK_TOKEN,
     fixture.scope,
-  ).load();
+  ).loadCredential();
+  assert.equal(storedCredential?.version, 2);
+  const stored = storedCredential?.plaintext;
   assert.equal(stored, JSON.stringify(fixture.replacement));
   const envelope = JSON.parse(await readFile(fixture.credentialPath, "utf8")) as Record<
     string,
