@@ -1759,6 +1759,7 @@ const FORBIDDEN_PACKAGED_CONTROLS = [
   "proveNoProviderDispatch",
   "stallWebhookResponseAfterCommit",
   "providerDispatchDelayMsForTest",
+  "processBarrierForTest",
   "stateActionObserverForTest",
   "filesystemQualification",
 ] as const;

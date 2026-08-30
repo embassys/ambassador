@@ -65,6 +65,9 @@ export interface ConnectorFoundationOptions {
   proveNoProviderDispatch?: boolean;
   stallWebhookResponseAfterCommit?: boolean;
   providerDispatchDelayMsForTest?: number;
+  processBarrierForTest?: (
+    event: "binding_published" | "turn_published" | "provider_terminal_received" | "reply_accepted",
+  ) => Promise<void>;
   stateActionObserverForTest?: {
     observe(event: Readonly<Record<string, unknown>>): void;
   };
