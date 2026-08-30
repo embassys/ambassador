@@ -737,4 +737,17 @@ const k02 = [
   ]),
 ];
 
-export const reviewedRedInventory = { t03, t04, k02, "packaged-docker": packagedDocker };
+const cx02 = [
+  ...pass("cx02-fixture-integrity.test.js", 0, [
+    "CX02 support pins the exact stable Codex 0.149.0 schema and source notice",
+    "CX02 support runs a full-process fake Codex handshake, session, and turn over JSONL stdio",
+  ]),
+  ...pass("cx02-loader-boundary.test.js", 0, [
+    "CX02 support classifies only the exact absent CX03 adapter entry as reviewed red",
+  ]),
+  ...fail("cx02-loader-boundary.test.js", 0, "CX02-CX03:X26", [
+    "CX02-X26 rejects partial adapter modules and reviews only the exact absent entry",
+  ]),
+];
+
+export const reviewedRedInventory = { t03, t04, k02, cx02, "packaged-docker": packagedDocker };
