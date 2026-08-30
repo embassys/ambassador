@@ -467,7 +467,7 @@ class ConnectorRuntime implements ConnectorHandle {
     if (this.#queue.length >= CONNECTOR_LIMITS.waitingWakeIds) return "full";
     this.#queue.push(id);
     this.#queued.add(id);
-    queueMicrotask(() => this.#pump());
+    setImmediate(() => this.#pump());
     return "accepted";
   }
 
