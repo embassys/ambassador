@@ -24,6 +24,7 @@ import {
   K04_VERIFICATION_CODE,
   K04_WEBHOOK_TOKEN,
 } from "./k04-constants.js";
+import { parseK04IpcEnvelope } from "./k04-ipc.js";
 
 export {
   K04_CONTENT_PREFIX,
@@ -61,6 +62,7 @@ export type K04ConnectorCrashBarrier =
   | "reply_accepted";
 
 export interface K04ConnectorControl {
+  assertProtocol(): void;
   providerRequests(): readonly K04ProviderRequestRecord[];
   providerSpawnSha256(): string;
   fatalCode(): string | undefined;
@@ -87,6 +89,7 @@ export type K04GatewayFetchBarrier =
 export type K04GatewayOperation = "receive" | "wake" | "reply" | "complete" | "outcome" | "ack";
 
 export interface K04GatewayControl {
+  assertProtocol(): void;
   operations(): readonly K04GatewayOperation[];
   completionRequests(): readonly {
     outcome: "failed";
@@ -168,8 +171,16 @@ function connectorControl(process: V2ManagedProcess): K04ConnectorControl {
     protocolError ??= new Error(`K04 connector IPC protocol violation: ${detail}`);
     settleWaiters();
   };
-  process.child.on("message", (message: unknown) => {
-    if (!isRecord(message) || message.channel !== "k04") return;
+  process.child.on("message", (value: unknown) => {
+    let envelope: ReturnType<typeof parseK04IpcEnvelope>;
+    try {
+      envelope = parseK04IpcEnvelope("connector_parent", value);
+    } catch {
+      failProtocol("unexpected envelope or channel");
+      return;
+    }
+    if (envelope.kind === "shared") return;
+    const { message } = envelope;
     if (
       hasExactKeys(message, ["channel", "event", "code"]) &&
       message.event === "fatal" &&
@@ -303,6 +314,7 @@ function connectorControl(process: V2ManagedProcess): K04ConnectorControl {
     });
   };
   return {
+    assertProtocol,
     providerRequests: () => {
       assertProtocol();
       return records.map((record) => ({ ...record }));
@@ -384,8 +396,16 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
     }
     waiters.clear();
   };
-  process.child.on("message", (message: unknown) => {
-    if (!isRecord(message) || message.channel !== "k04_gateway_fetch") return;
+  process.child.on("message", (value: unknown) => {
+    let envelope: ReturnType<typeof parseK04IpcEnvelope>;
+    try {
+      envelope = parseK04IpcEnvelope("gateway_parent", value);
+    } catch {
+      failProtocol("unexpected envelope or channel");
+      return;
+    }
+    if (envelope.kind === "shared") return;
+    const { message } = envelope;
     if (
       hasExactKeys(message, ["channel", "event", "operation"]) &&
       message.event === "request" &&
@@ -437,6 +457,7 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
     arrivals.set(barrier, queued);
   });
   return {
+    assertProtocol,
     operations: () => {
       assertProtocol();
       return [...operations];
@@ -569,6 +590,7 @@ export async function startK04ConnectorProcess(
   assert.equal(managed.stderr(), "");
   await control.waitForProviderSpawnProof();
   assert.equal(control.providerSpawnSha256(), expectedK04ProviderSpawnSha256());
+  t.after(() => control.assertProtocol());
   return { process: managed, control, webhookUrl };
 }
 
@@ -623,6 +645,8 @@ export async function startK04GatewayProcess(
     );
   }
   assert.equal(managed.stderr(), "");
+  control.assertProtocol();
+  t.after(() => control.assertProtocol());
   return { process: managed, control, endpoint };
 }
 

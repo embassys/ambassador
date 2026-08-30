@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import { type K04IpcBoundary, parseK04IpcEnvelope } from "./support/connector/k04-ipc.js";
 import {
   enrollK04Gateway,
   K04_CONTENT_PREFIX,
@@ -18,6 +18,49 @@ import {
   stopK04ConnectorProcess,
   waitForK04Acknowledgement,
 } from "./support/connector/k04-process-harness.js";
+
+test("K04 rejects primitive and content-bearing foreign IPC envelopes", () => {
+  const boundaries: readonly K04IpcBoundary[] = [
+    "connector_parent",
+    "gateway_parent",
+    "connector_child",
+    "gateway_child",
+  ];
+  for (const boundary of boundaries) {
+    assert.throws(
+      () => parseK04IpcEnvelope(boundary, `${K04_CONTENT_PREFIX}foreign-ipc-payload`),
+      /unexpected K04 IPC envelope or channel/u,
+    );
+    assert.throws(
+      () =>
+        parseK04IpcEnvelope(boundary, {
+          channel: "foreign",
+          payload: `${K04_CONTENT_PREFIX}foreign-ipc-payload`,
+        }),
+      /unexpected K04 IPC envelope or channel/u,
+    );
+  }
+  for (const boundary of ["connector_parent", "gateway_parent"] as const) {
+    assert.deepEqual(
+      parseK04IpcEnvelope(boundary, {
+        kind: "a2a-t02-barrier-arrival",
+        name: "commit",
+        sequence: 1,
+      }),
+      { kind: "shared" },
+    );
+  }
+  for (const boundary of ["connector_child", "gateway_child"] as const) {
+    assert.deepEqual(
+      parseK04IpcEnvelope(boundary, {
+        kind: "a2a-t02-barrier-release",
+        name: "commit",
+        sequence: 1,
+      }),
+      { kind: "shared" },
+    );
+  }
+});
 
 test("K04-E01 runs one message through the normal gateway and connector processes", async (t) => {
   const fixture = await startK04Fixture(t);
