@@ -737,4 +737,98 @@ const k02 = [
   ]),
 ];
 
-export const reviewedRedInventory = { t03, t04, k02, "packaged-docker": packagedDocker };
+const cx02 = [
+  ...fail("cx02-cancellation-recovery.test.js", 0, "CX02-CX03:X16", [
+    "CX02-X16 interrupts only a bound exact turn and never extends cancellation grace",
+  ]),
+  ...fail("cx02-cancellation-recovery.test.js", 0, "CX02-CX03:X17", [
+    "CX02-X17 recovers only one exact stored turn and makes every ambiguous thread read uncertain",
+  ]),
+  ...fail("cx02-cancellation-recovery.test.js", 0, "CX02-CX03:X18", [
+    "CX02-X18 makes null-turn recovery uncertain before any App Server request",
+  ]),
+  ...fail("cx02-cancellation-recovery.test.js", 0, "CX02-CX03:X19", [
+    "CX02-X19 keeps large unrelated history content memory-only while selecting the exact turn",
+  ]),
+  ...pass("cx02-fixture-integrity.test.js", 0, [
+    "CX02 support pins the exact stable Codex 0.149.0 schema and source notice",
+    "CX02 support runs a full-process fake Codex handshake, session, and turn over JSONL stdio",
+  ]),
+  ...pass("cx02-loader-boundary.test.js", 0, [
+    "CX02 support classifies only the exact absent CX03 adapter entry as reviewed red",
+  ]),
+  ...fail("cx02-loader-boundary.test.js", 0, "CX02-CX03:X26", [
+    "CX02-X26 rejects partial adapter modules and reviews only the exact absent entry",
+  ]),
+  ...fail("cx02-process-e2e.test.js", 0, "CX02-CX03:X24", [
+    "CX02-X24 hard owner death closes the attached fake App Server unit",
+  ]),
+  ...fail("cx02-process-e2e.test.js", 0, "CX02-CX03:X25", [
+    "CX02-X25 runs two turns in one thread and two conversations through the foundation",
+  ]),
+  ...fail("cx02-process-e2e.test.js", 0, "CX02-CX03:X27", [
+    "CX02-X27 proves child and descendant teardown before releasing any terminal",
+  ]),
+  ...fail("cx02-raw-security.test.js", 0, "CX02-CX03:X20", [
+    "CX02-X20 enforces UTF-8 JSONL record byte and depth boundaries before normalization",
+  ]),
+  ...fail("cx02-raw-security.test.js", 0, "CX02-CX03:X21", [
+    "CX02-X21 preserves every common exact limit through valid App Server envelopes",
+  ]),
+  ...fail("cx02-raw-security.test.js", 0, "CX02-CX03:X22", [
+    "CX02-X22 never replaces a missing mutated or unavailable stored thread",
+  ]),
+  ...fail("cx02-raw-security.test.js", 0, "CX02-CX03:X23", [
+    "CX02-X23 excludes content auth schemas and test controls from state and staged packages",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X01", [
+    "CX02-X01 pins executable identity and rejects every unavailable version preflight",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X02", [
+    "CX02-X02 launches one exact direct App Server child with scrubbed sealed settings",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X03", [
+    "CX02-X03 keeps the pinned stable schema test-only and out of production package surfaces",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X04", [
+    "CX02-X04 enforces the exact initialize ordering and warning opt-out matrix",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X05", [
+    "CX02-X05 binds one response-first or notification-first thread before turn input",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X06", [
+    "CX02-X06 never writes input before session publication or replays after either crash side",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X07", [
+    "CX02-X07 resumes only the stored thread and rejects missing mismatched or broader responses",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X08a", [
+    "CX02-X08a sends only exact coarse thread and turn authority under both policies",
+  ]),
+  ...fail("cx02-startup-handshake.test.js", 0, "CX02-CX03:X08b", [
+    "CX02-X08b validates every observable thread response without inventing turn sandbox evidence",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X09", [
+    "CX02-X09 preserves adversarial A2A bytes only in one structured text input item",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X10", [
+    "CX02-X10 emits one exact turn binding across ordering duplicates mismatches and crashes",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X11", [
+    "CX02-X11 treats deltas as progress and the corroborated full terminal snapshot as authoritative",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X12", [
+    "CX02-X12 selects one final_answer before phase-null and rejects remaining ambiguities",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X13", [
+    "CX02-X13 maps only an exact failed turn definitely and every executed unknown to uncertainty",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X14", [
+    "CX02-X14 normalizes only three supported approval requests and sends no response or grant",
+  ]),
+  ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X15", [
+    "CX02-X15 never invents approval resolution and rejects every unsupported server control",
+  ]),
+];
+
+export const reviewedRedInventory = { t03, t04, k02, cx02, "packaged-docker": packagedDocker };
