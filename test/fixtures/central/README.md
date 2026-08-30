@@ -119,19 +119,16 @@ code `123456`. Reset restores these seeded identities:
 | `fixture_sender` | `fixture_sender@fixture.invalid` | v2 active |
 | `fixture_recipient` | `fixture_recipient@fixture.invalid` | v2 active, permits starts from `fixture_sender` |
 | `fixture_denied` | `fixture_denied@fixture.invalid` | v2 active, no sender grant |
-| `fixture_legacy` | `fixture_legacy@fixture.invalid` | v1 with a blocking legacy row and a seeded v1 verification record |
+| `fixture_legacy` | `fixture_legacy@fixture.invalid` | v1 with a blocking legacy row; historical self-test only, excluded from the future v2 target |
 
-The four v2 identity records are verified but have no exposed credential.
+The three v2-active identities are verified but have no exposed credential.
 Tests request a recovery code through `resend_verification`, read it through
 the protected control route, and run normal DPoP verification with their own
-P-256 key. The `fixture_legacy` v1 companion starts unverified at the same
-email. Tests can obtain its bearer through the normal v1 verification flow.
-That bearer is an ES256 JWT with the fixture issuer, identity subject, ordered
-v2 audiences, and no DPoP confirmation claim. Recovery preserves its issuer,
-subject, and audience identity while adding the new key binding.
-Completing v2 email recovery invalidates that bearer and every older DPoP
-credential for the central identity; its blocking legacy row still prevents v2
-delivery activation.
+P-256 key. The `fixture_legacy` companion retains self-tests for the earlier
+migration proposal that ADR 0027 superseded. T03, T04, S01, and future gateway
+work must not convert it or treat its mailbox as a v2 activation prerequisite.
+The fixture's separate v1 catalog, bearer poll, and acknowledgement paths
+protect the shipped regression baseline.
 
 ## Test controls
 

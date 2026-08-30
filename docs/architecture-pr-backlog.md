@@ -2,15 +2,15 @@
 
 Status: active implementation backlog for the accepted version 2 architecture
 
-Date: 2026-08-29
+Date: 2026-08-30
 
-This document turns the accepted architecture in ADRs 0023, 0025, and 0026,
-plus the proposed connector boundary in ADR 0024, into reviewable tasks and
-pull requests. It covers central REST enrollment, DPoP,
+This document turns the accepted architecture in ADRs 0023, 0025, 0026, and
+0027, plus the proposed connector boundary in ADR 0024, into reviewable tasks
+and pull requests. It covers central REST enrollment, DPoP,
 recoverable conversations and replies, provider connectors, provider adapters,
 end-to-end tests, compatibility cleanup, and release qualification.
 
-The user accepted ADRs 0023, 0025, and 0026 on 2026-08-29. The user also
+The user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29. The user also
 completed D06 by approving the exact test-only fixture dependency in ADR 0020.
 This backlog does not approve ADR 0024, another dependency, a connector CLI,
 package layout, provider interface, installation, or publishing change. The
@@ -88,17 +88,20 @@ work.
 D01 REST contract ---------\
 D02 message contract -------+--> D04 accepted plan, complete
 D03 DPoP contract ---------/          |
-D06 fixture dependency, complete -----+--> T01/T02 fixtures and E2E harness
+D06 fixture dependency, complete -----+--> T01/T02 fixtures and E2E support
                                        +--> T03/T04 red gateway specifications
                                        +--> S01 red central specification
 
-S01 -> S02 REST/native results -> S03 DPoP enforcement
+T03/T04 user acceptance --------\
+                                 +--> Gate A -> S02 REST/native results -> S03 DPoP enforcement
+S01 central-owner acceptance ---/
+
 S03 -> S04 recovery and acknowledgement
 S04 -> S05 idempotent reply and terminal outcomes
-S03 -> S06 token lifecycle and migration
+S03 -> S06 token lifecycle and recovery
 S02/S03/S04/S05/S06 -> S07 staging contract gate
 
-T03 + S03 development deployment -> G01 -> G02 -> G03
+Gate A + S03 development enforcement -> G01 -> G02 -> G03
 T04 + S04/S05 + G03 -> G04
 S07 + G04 -> E01/E02/E03 gateway qualification
 
@@ -121,7 +124,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | --- | --- | --- | --- | --- | --- |
 | D01 | Complete | Gateway docs and central API docs | `docs: freeze REST enrollment and stable endpoint contract` | None | ADR 0023 fixes one registration path, bootstrap schemas, errors, limits, deadlines, recovery, and polling compatibility |
 | D02 | Complete | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 fixes messages, leased recovery, replies, acknowledgement, idempotency, terminal status, bounds, and activation |
-| D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and legacy migration |
+| D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and recovery; ADR 0027 removes migration from the target |
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
 | D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and proposed ADR 0024 | Separate ADRs fix the connector command, working directory input, state format, access control, deletion, runtime, dependencies, concurrency, timeouts, approvals, terminal outcomes, installation, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
@@ -137,14 +140,18 @@ SQLite.
 
 | ID | Type | Proposed PR title | Depends on | Scope and completion evidence |
 | --- | --- | --- | --- | --- |
-| T01 | Green fixture PR | `test: add versioned central contract fixtures` | D04, D06 | Extend the Node fake central service and independent Python fixture with REST enrollment, DPoP issuance and protected requests, conversation IDs, accepted lease recovery, idempotent reply, terminal outcomes, native MCP results, and fault controls. Both fixtures pass their own contract tests without production gateway changes. This proves fixture interoperability, not production central behavior. |
-| T02 | Green harness PR | `test: add full-process fault and artifact-scan harness` | T01 | Add process barriers, an independently implemented second test identity client, trusted-proxy simulation, deterministic clocks and keys where permitted, crash controls, readiness checks, cleanup, and scans of stdout, stderr, state directories, SQLite, WAL, SHM, temporary paths, provider argv, and provider environment. Use Node core and the accepted Docker fixture only. |
-| T03 | Draft red PR | `test: specify REST enrollment and DPoP gateway behavior` | T01, T02 | Add unit, integration, local process, Docker, restart, nonce, replay, transport, credential version 2, and migration cases from N1 and N6. Publish the exact failure inventory for user review. |
-| T04 | Draft red PR | `test: specify conversation recovery and reply behavior` | T01, T02 | Add message correlation, chosen recovery, idempotent reply, conflict, crash-window, acknowledgement, content-boundary, and Docker E2E cases from N2. Publish the exact failure inventory for user review. |
+| T01 | Merged green fixture | `test: add versioned central contract fixtures` | D04, D06 | The Node fake central service and independent Python fixture implement the accepted test contract and pass their own contract tests without production gateway changes. This proves fixture interoperability, not production central behavior. |
+| T02 | Merged green test support | `test: add full-process fault and artifact-scan support` | T01 | Process barriers, a separate sender, trusted-proxy simulation, deterministic clocks, crash controls, cleanup, and bounded artifact scans pass on their intended platforms. |
+| T03 | Merged red specification | `test: specify REST enrollment and DPoP gateway behavior` | T01, T02 | Unit, integration, local process, Docker, restart, nonce, replay, transport, and fresh-install credential version 2 cases have an accepted exact failure inventory. |
+| T04 | Merged red specification | `test: specify conversation recovery and reply behavior` | T01, T02 | Message correlation, lease recovery, idempotent reply, conflict, crash-window, acknowledgement, content-boundary, and Docker cases have an accepted exact failure inventory. |
 
-T03 and T04 should be separate draft branches because both are large and they
-test different failure domains. T03 owns credential and authentication
-failures. T04 owns custody, correlation, and message lifecycle failures.
+T03 and T04 used separate draft branches because they test different failure
+domains. T03 owns credential and authentication failures. T04 owns custody,
+correlation, and message lifecycle failures.
+
+PR `#28` merged T03, T04, and C01 after the user accepted the gateway failure
+inventory on 2026-08-30. This completes the gateway review input only. S01 and
+central-owner review still block Gate A and every production gateway PR.
 
 ### Central repository, external ownership
 
@@ -173,12 +180,12 @@ configuration and does not change the public gateway CLI.
 
 | ID | Proposed PR title | Depends on | Scope | Completion evidence |
 | --- | --- | --- | --- | --- |
-| S02 | `feat: publish exact REST enrollment and native MCP results` | Gate A, S01 | Canonical registration, verification, resend, stable routes, fixed errors and limits, native structured MCP results, and no-store verification responses | D01 cases pass; compatibility or migration behavior matches the approved D01 contract |
-| S03 | `security: issue and enforce DPoP-bound central tokens` | S02, S01 | Verify-time proof validation, `cnf.jkt`, `token_type: DPoP`, protected REST and MCP middleware, removal of MCP token arguments in the new contract, nonce challenges, replay protection, trusted-proxy URI reconstruction, and legacy token isolation | DPoP conformance passes, including bearer rejection and replay on two replicas |
+| S02 | `feat: publish exact REST enrollment and native MCP results` | Gate A, S01 | Canonical registration, verification, resend, stable routes, fixed errors and limits, native structured MCP results, and no-store verification responses | D01 fresh-install cases pass with the exact accepted response contract |
+| S03 | `security: issue and enforce DPoP-bound central tokens` | S02, S01 | Verify-time proof validation, `cnf.jkt`, `token_type: DPoP`, protected REST and MCP middleware, removal of MCP token arguments in the new contract, nonce challenges, replay protection, trusted-proxy URI reconstruction, and isolation of DPoP-bound tokens from bearer validation | DPoP conformance passes, including bearer rejection and replay on two replicas |
 | S04 | `feat: add recoverable delivery and idempotent acknowledgement` | S03 | Stable immutable IDs, conversation fields, lease redelivery, authorization, acknowledgement semantics, quotas, retention, and machine-readable errors | A crash after delivery receives the same logical message after lease expiry; repeated acknowledgement has one result |
 | S05 | `feat: add idempotent replies and terminal outcome states` | S04 | Server-derived routing from the inbound message, identity-scoped idempotency, reply conflicts, same-conversation response, terminal no-reply states, and separate acknowledgement | Repeating a reply after a lost response creates one outbound message and returns the original result |
-| S06 | `security: add token reissue, revocation, rotation, and legacy migration` | S03 | Independently protected reissue or re-verification, atomic key rotation, revoked-token rejection, key-loss recovery, lost-response behavior, and legacy bearer retirement | An existing identity reaches credential version 2 without letting a stolen bearer token claim the replacement key |
-| S07 | `test: run the central staging contract and migration gate` | S02, S03, S04, S05, S06 | Deploy the disabled contract to staging, run black-box HTTPS tests through the real proxy and shared replay state, migrate dedicated test identities, then enable it only for those identities | Staging matches the approved OpenAPI, MCP, DPoP, recovery, reply, and migration contract with no credential-bearing logs |
+| S06 | `security: add token reissue, revocation, rotation, and recovery` | S03 | Independently protected same-key reissue and email-control re-verification, atomic key rotation, revoked-token rejection, key-loss recovery, and lost-response behavior for a fresh version 2 identity | A fresh version 2 identity recovers without letting a stolen token claim the replacement key |
+| S07 | `test: run the central staging contract gate` | S02, S03, S04, S05, S06 | Deploy the disabled contract to staging, run black-box HTTPS tests through the real proxy and shared replay state, enroll dedicated fresh identities, then enable it only for those identities | Staging matches the accepted REST schemas and routes plus the MCP, DPoP, recovery, and reply contracts with no credential-bearing logs |
 
 S03 must authenticate and reserve a replay key before central parses or
 dispatches a protected application body. S04 and S05 must use that middleware.
@@ -188,11 +195,11 @@ release.
 S03 completion includes a disabled development deployment for dedicated test
 identities. This gives G01 a real enforcing issuer and resource server without
 enabling the contract for ordinary identities. S07 remains the full staging
-and migration gate.
+and deployment gate.
 
-The central staging suite needs an approved test identity and an email-code
-delivery mechanism owned by the central test environment. Do not add a
-production endpoint that returns verification codes.
+The central staging suite needs an approved fresh test identity and an
+email-code delivery mechanism owned by the central test environment. Do not
+add a production endpoint that returns verification codes.
 
 ## Wave 3: implement the gateway
 
@@ -201,7 +208,7 @@ the full chain through G04 and E01 passes.
 
 | ID | Proposed PR title | Depends on | Primary ownership | Completion evidence |
 | --- | --- | --- | --- | --- |
-| G01 | `security: add DPoP proofs and encrypted credential version 2` | Gate A, S03 deployed to staging | New DPoP module, `src/credential-store.ts`, `src/identity.ts` | Independent proof vectors pass; token and PKCS#8 key persist atomically; restart, corruption, mismatch, version 1, and artifact scans pass |
+| G01 | `security: add DPoP proofs and encrypted credential version 2` | Gate A, S03 enforcing in development for dedicated identities | New DPoP module, `src/credential-store.ts`, `src/identity.ts` | Independent proof vectors pass; token and PKCS#8 key persist atomically; restart, corruption, mismatch, and artifact scans pass from a fresh install |
 | G02 | `feat: move enrollment bootstrap calls to central REST` | G01, S02, S03 | New central REST client, `src/gateway-application.ts`, bootstrap parts of `src/mcp-contract.ts` | Local bootstrap tools work without central MCP discovery; verification uses an issuance proof, validates binding, persists before success, and never exposes the credential |
 | G03 | `security: authenticate protected central REST and MCP with DPoP` | G02, S03 | `src/central-mcp.ts`, `src/notification-relay.ts`, authenticated parts of `src/mcp-contract.ts` | Every protected HTTP request has a fresh proof; nonce retry is bounded; MCP tool arguments contain no token; bearer fallback fails closed |
 | G04 | `feat: add recoverable conversations and idempotent replies` | G03, S04, S05, T04 approval | `src/notification-relay.ts`, `src/notification-journal.ts`, `src/local-mcp.ts`, `src/gateway-application.ts` | The gateway validates conversation fields, recovers bodies only from central, exposes token-free `reply_message`, retains content through reply acceptance, and acknowledges at the approved terminal point |
@@ -222,7 +229,7 @@ them in that order. Do not ask parallel agents to edit
 | --- | --- | --- | --- | --- |
 | E01 | Green E2E PR | `test: qualify REST enrollment and DPoP end to end` | G01, G02, G03, S07 | T03 is green against the Node fixture and Docker fixture; staging smoke covers HTTPS, real proxy URI handling, nonce, restart, reissue, and bearer rejection |
 | E02 | Green E2E PR | `test: qualify recovery and reply crash windows end to end` | G04, S07 | T04 is green against both fixtures; deterministic process kills prove recovery after poll, one reply after lost acceptance, and one terminal acknowledgement |
-| E03 | Qualification task | `record gateway soak, outage, migration, and artifact-scan evidence` | E01, E02 | A bounded soak covers poll outages, nonce rotation, central restart, gateway restart, rate limits, mailbox pressure, reply conflicts, cancellation, and clean shutdown without content or credential artifacts |
+| E03 | Qualification task | `record gateway soak, outage, recovery, and artifact-scan evidence` | E01, E02 | A bounded soak covers poll outages, nonce rotation, central restart, gateway restart, rate limits, mailbox pressure, reply conflicts, cancellation, recovery, and clean shutdown without content or credential artifacts |
 | W01 | Gateway PR | `fix: qualify credential version 2 and packed install on Windows` | G01 | Strict user and SYSTEM DACL tests pass on Windows; the packed package installs, enrolls, restarts, polls, replies, and acknowledges through the Node fixture |
 
 The Docker fixture runs on Ubuntu. Node fixture and unit coverage run on Linux,
@@ -319,7 +326,7 @@ message recovery from being blocked by provider integration work.
 | Protocol vectors | Linux, macOS, Windows | Deterministic Node tests | JOSE, JWK thumbprint, `ath`, URI projection, schemas, bounds, duplicate keys, safe errors, and state transitions |
 | Node integration | Linux, macOS, Windows | `test/support/fake-central.ts`, raw MCP client, fake webhook | Fast gateway behavior, injected faults, cancellation, restart, local authentication, and artifact scans |
 | Independent Docker E2E | Ubuntu CI | Pinned Python/FastAPI/FastMCP fixture and packaged gateway | Cross-language REST and MCP interoperability through a real gateway process |
-| Central service E2E | Central CI | Real database, two service replicas, shared nonce and replay state, trusted proxy | Transactions, cross-replica replay, quotas, retention, migration, and server logs |
+| Central service E2E | Central CI | Real database, two service replicas, shared nonce and replay state, trusted proxy | Transactions, cross-replica replay, quotas, retention, fresh enrollment, recovery, and server logs |
 | Staging smoke | Central deployment gate | Canonical HTTPS URLs and dedicated test identities | Proxy `htu`, TLS, email delivery path, rollout gates, DPoP enforcement, and deployed schemas |
 | Fake-provider system E2E | Ubuntu CI and supported Node lanes | Central fixture, gateway, connector, fake provider | Complete delivery, provider turn, reply, acknowledgement, crash, resume, and deduplication chain |
 | Real-provider qualification | Manual and opt-in | Existing authenticated provider installation | Actual provider protocol, session continuity, permissions, sandbox, history, cancellation, and packaging |
@@ -423,11 +430,9 @@ expose a crash barrier.
 
 These groups may run in parallel after their dependencies are green:
 
-- D05 decision work and T01 fixture work;
-- T02 and the external S01 work after T01 is green;
-- T03 and T04 after T01 and T02;
+- D05 decision work and the external S01 red specification;
 - S04 and S06 after S03;
-- D05 while G01 through G04 proceed;
+- D05 decision work while later G01 through G04 proceed;
 - the Codex, Claude Code, and Gemini tracks after K03; and
 - G05, G06, and G07 after their separate staging gates.
 
@@ -435,8 +440,7 @@ Serialize these areas:
 
 - any later amendment that changes accepted architecture and the active plan;
 - G01 through G04 where they share identity, application, MCP, and relay code;
-- central schema and migration changes that touch the same token or message
-  tables; and
+- central schema changes that touch the same token or message tables; and
 - connector state and provider-port changes until K03 freezes both contracts.
 
 ## Definition of complete

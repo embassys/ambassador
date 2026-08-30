@@ -76,10 +76,15 @@ The reset seed contains:
 | `fixture_sender` | Version 2 active | Inbound enabled |
 | `fixture_recipient` | Version 2 active | Inbound enabled, active `conversation.start` grant for `fixture_sender` |
 | `fixture_denied` | Version 2 active | Inbound enabled, no grant for `fixture_sender` |
-| `fixture_legacy` | Version 1 | No version 2 opt-in |
+| `fixture_legacy` | Version 1 with a blocking legacy row; historical self-test only | Excluded from the version 2 target |
 
 Tests may register more identities through the accepted enrollment API. Seeded
 identities are fixture state, not production bootstrap accounts.
+
+`fixture_legacy` retains fixture self-tests for an earlier migration proposal.
+ADR 0027 superseded that proposal and forbids using this seed as a T03, T04,
+S01, or future-gateway requirement. Separate fixture paths protect the shipped
+version 1 MCP, consuming poll, and acknowledgement regression contract.
 
 ## In-memory state
 
