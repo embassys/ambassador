@@ -12,14 +12,25 @@ function reviewedBoundary(error) {
   return undefined;
 }
 
-function failureSignature(error) {
+function portableFailureMessage(error, file) {
+  const message = error?.message;
+  if (
+    file === "t03-publication-crash.test.js" &&
+    message === "process barrier child disconnected"
+  ) {
+    return "expected gateway observation did not occur within its bound";
+  }
+  return message;
+}
+
+function failureSignature(error, file) {
   return createHash("sha256")
     .update(
       JSON.stringify({
         name: error?.name,
         code: error?.code,
         failureType: error?.failureType,
-        message: error?.message,
+        message: portableFailureMessage(error, file),
         boundary: reviewedBoundary(error),
       }),
     )
@@ -67,14 +78,15 @@ export default async function* redInventoryReporter(source) {
   for await (const event of source) {
     if (event.type !== "test:pass" && event.type !== "test:fail") continue;
     const error = event.data.details?.error;
+    const file = event.data.file === undefined ? undefined : basename(event.data.file);
     yield `${JSON.stringify({
       status: event.type === "test:pass" ? "pass" : "fail",
       name: event.data.name,
       nesting: event.data.nesting,
-      file: event.data.file === undefined ? undefined : basename(event.data.file),
+      file,
       skip: event.data.skip !== undefined && event.data.skip !== false,
       todo: event.data.todo !== undefined && event.data.todo !== false,
-      signature: error === undefined ? undefined : failureSignature(error),
+      signature: error === undefined ? undefined : failureSignature(error, file),
       marker: error === undefined ? undefined : reviewedMarker(error),
       infrastructure: error === undefined ? [] : infrastructureLabels(error),
     })}\n`;

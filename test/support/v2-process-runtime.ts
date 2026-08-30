@@ -1,4 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import type { Dirent } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import { StringDecoder } from "node:string_decoder";
 import type { TestContext } from "node:test";
 
@@ -146,7 +148,38 @@ function signalPosixProcessGroup(groupId: number, signal: NodeJS.Signals): boole
   }
 }
 
-function posixProcessGroupExists(groupId: number): boolean {
+async function linuxProcessGroupHasLiveMember(groupId: number): Promise<boolean | undefined> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir("/proc", { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
+    let stat: string;
+    try {
+      stat = await readFile(`/proc/${entry.name}/stat`, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      return undefined;
+    }
+    const commandEnd = stat.lastIndexOf(")");
+    if (commandEnd < 0) return undefined;
+    const fields = stat.slice(commandEnd + 2).split(" ");
+    const state = fields[0];
+    const processGroup = Number(fields[2]);
+    if (!Number.isSafeInteger(processGroup)) return undefined;
+    if (processGroup === groupId && state !== "Z" && state !== "X") return true;
+  }
+  return false;
+}
+
+async function posixProcessGroupExists(groupId: number): Promise<boolean> {
+  if (process.platform === "linux") {
+    const hasLiveMember = await linuxProcessGroupHasLiveMember(groupId);
+    if (hasLiveMember !== undefined) return hasLiveMember;
+  }
   try {
     process.kill(-groupId, 0);
     return true;
@@ -163,7 +196,7 @@ function posixProcessGroupExists(groupId: number): boolean {
 
 async function waitForPosixProcessGroupExit(groupId: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (posixProcessGroupExists(groupId)) {
+  while (await posixProcessGroupExists(groupId)) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) return false;
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(10, remaining)));
