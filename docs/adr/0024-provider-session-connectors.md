@@ -1,6 +1,6 @@
 # 0024 Provider session connectors
 
-Status: proposed
+Status: accepted
 
 Date: 2026-08-29
 
@@ -42,11 +42,40 @@ These interfaces make the shared conversation-to-session mapping feasible.
 They do not provide a common protocol, a central A2A reply operation, or common
 crash semantics.
 
-## Proposed decision
+## Decision
 
-Keep the gateway provider-neutral. Add separately launched, loopback-only
-provider connectors. One connector is the gateway's one configured webhook
-target. The connector, not the gateway, knows which provider it controls.
+### Accepted boundary
+
+Acceptance of this ADR freezes only these invariants:
+
+- Provider control belongs in a separately launched foreground connector, not
+  in the gateway. The gateway remains provider-neutral and its CLI is
+  unchanged.
+- One gateway, one connector, and one provider runtime form one pair. The
+  connector is that gateway's one configured webhook target.
+- The connector receives the existing loopback webhook wake and retrieves A2A
+  content through the gateway's authenticated local MCP endpoint. Content does
+  not move into the wake body.
+- The connector owns correlation between an A2A conversation and a provider
+  session. Any durable correlation remains content-free and separate from the
+  gateway journal.
+- The central credential stays in the gateway. Provider credentials stay in
+  the provider runtime. The connector transfers neither credential.
+- When provider work may have occurred and the exact outcome cannot be
+  recovered, the connector fails closed as uncertain and never replays the
+  provider turn blindly.
+
+This acceptance does not fix a connector command, configuration interface,
+state schema or mechanism, cryptography, numeric limit, process protocol,
+working-directory or approval policy, runtime dependency, provider interface,
+transport, package, platform, installation method, or publishing path. D05
+must approve the connector-wide choices. Each provider-specific ADR must
+approve its own interface and dependency choices.
+
+### Conceptual boundary
+
+The following diagram is explanatory, not an accepted process or provider
+protocol:
 
 ```text
 Central A2A service
@@ -64,7 +93,7 @@ Codex, Claude Code, or Gemini CLI
 User-approved local and remote capabilities
 ```
 
-The connector flow is:
+A possible process for D05 to review is:
 
 1. Receive the existing signed webhook wake on a literal-loopback listener.
 2. Authenticate the bearer, timestamp, HMAC signature, `Host`, and optional
@@ -80,25 +109,22 @@ The connector flow is:
    provider command, model, working directory, session ID, system prompt,
    sandbox, approval mode, tool list, MCP configuration, or environment.
 8. Capture one bounded terminal response or a fixed failure state.
-9. Send the response through the gateway's proposed `reply_message` tool.
+9. Send the response through the gateway's accepted `reply_message` tool.
 10. Call `ack_message` only after the central service accepts that idempotent
     reply, or after the reviewed protocol says a terminal no-reply outcome may
     be acknowledged.
 
 One gateway still owns one webhook target and one central identity. Supporting
-more than one provider at once means running independent gateway and connector
-pairs. This proposal does not add bindings, runtime discovery, configured
-runtime agent IDs, or runtime selection to the gateway CLI.
-
-Accepting this ADR would add companion connector products to the repository;
-it would not turn the gateway itself into a runtime host. Update the product
-boundary and implementation plan only after approval, with separate ownership
-for gateway core, connector foundation, and each provider adapter.
+more than one provider means running independent gateway and connector pairs.
+This boundary adds no bindings, runtime discovery, configured runtime agent
+IDs, or runtime selection to the gateway CLI. Gateway core, the connector
+foundation, and each provider adapter remain separate ownership areas.
 
 ## Gateway boundary
 
-The gateway changes only where a provider-neutral conversation protocol needs
-support:
+This approval authorizes no provider-specific gateway behavior or gateway CLI
+change. ADR 0025 and G04 already own the provider-neutral gateway work on which
+a connector would rely:
 
 - validate and retain the new central correlation fields in its bounded
   in-memory inbox;
@@ -122,9 +148,10 @@ delivery.
 
 ## Connector state boundary
 
-The connector needs durable correlation state so a process restart does not
-silently attach an existing A2A conversation to a new provider session. Its
-store may contain only:
+The accepted invariant is a separate, content-free correlation store owned by
+the connector. D05 must approve the exact technology, schema, cryptography,
+locking, access control, lifecycle, deletion, and fresh-install behavior. A
+later state proposal may need field categories such as:
 
 - schema version;
 - opaque A2A `conversation_id`;
@@ -136,16 +163,15 @@ store may contain only:
 - bounded retry timing for operations that the central protocol declares
   idempotent.
 
-It must not contain prompts, message payloads, attachments, responses, tool
-arguments, tool results, provider credentials, central credentials, webhook
-tokens, email addresses, verification codes, permission details, working
-directory paths, or provider transcripts. It must be separate from the
-gateway notification journal.
+Regardless of mechanism, connector durability must not contain prompts,
+message payloads, attachments, responses, tool arguments, tool results,
+provider credentials, central credentials, webhook tokens, email addresses,
+verification codes, permission details, working directory paths, or provider
+transcripts. It must remain separate from the gateway notification journal.
 
-Treat provider session and turn IDs as sensitive local metadata. The exact
-store format, access controls, encryption choice, deletion behavior, and
-dependency choice require another ADR and user approval before production
-implementation.
+Provider session and turn IDs are sensitive local metadata. D05 must decide how
+to protect them and must approve any storage dependency before connector tests
+or production implementation.
 
 Provider-native session history is a separate boundary. Persistent multi-turn
 resume normally causes Codex, Claude Code, or Gemini CLI to store conversation
@@ -154,89 +180,96 @@ not copy that content, but setup documentation must disclose the provider's
 storage and deletion behavior. A no-persistence mode may offer one-shot turns;
 it must not claim multi-turn continuity.
 
-## Execution and security rules
+## Security questions for D05
 
-- Bind the connector webhook only to literal loopback and apply the gateway's
-  existing header, body, timestamp, replay, and authentication limits.
-- Never put A2A content in the wake body. Retrieve it through authenticated
-  loopback MCP after the wake.
-- Start provider processes without a shell. Send prompts through stdio or the
-  provider's structured protocol, not command arguments, environment
-  variables, temporary files, or generated scripts.
-- Use the user's existing provider authentication. The gateway and connector
-  must not request, copy, log, persist, or proxy model-provider credentials.
-- Bind each connector to a user-approved working directory and security policy
-  outside the gateway CLI. Remote A2A data cannot change either value.
-- Preserve provider-native sandboxing, deny rules, MCP approvals, and local
-  approval requirements. The connector cannot select a bypass or unrestricted
-  mode merely because execution is headless.
-- Treat every inbound message as hostile prompt content. Fixed connector
-  instructions and provider policy stay outside sender-controlled fields.
-- Bound provider stdout, stderr, JSON nesting, event count, response size,
-  execution time, child count, and concurrency. Do not place provider streams
-  in normal logs or diagnostics.
-- Redact safe errors and terminate the complete child process group on timeout
-  or cancellation.
-- A repeated wake for a running message returns success without starting a
-  second provider turn.
-- A missing or invalid mapped provider session fails safe. Do not silently
-  create a replacement session with partial context.
+The accepted boundary requires loopback wake delivery, MCP content retrieval,
+credential separation, content-free durability, and fail-closed uncertainty.
+D05 must turn the following candidates into an exact security and process
+policy before tests or code:
+
+- define webhook header, body, timestamp, replay, authentication, and deadline
+  limits for the literal-loopback listener;
+- choose a prompt transport that keeps A2A content out of command arguments,
+  environment variables, temporary files, and generated scripts, and decide
+  whether every provider process can start without a shell;
+- define how the user selects a working directory and security policy outside
+  the gateway CLI, and how the connector prevents remote A2A data from
+  changing either value;
+- define how provider sandboxing, deny rules, MCP approvals, and local approval
+  requirements work in headless execution without selecting a bypass mode;
+- define fixed bounds for provider stdout, stderr, JSON nesting, event count,
+  response size, execution time, child processes, and concurrency;
+- define safe error redaction, timeout and cancellation cleanup, repeated-wake
+  handling, and behavior for a missing or invalid mapped provider session; and
+- define fixed connector instructions that keep sender-controlled content from
+  becoming a command, model, session, system prompt, tool, sandbox, approval,
+  MCP, or environment setting.
 
 ## Crash and uncertainty rules
 
-The connector records the conversation-to-session mapping before it permits a
-new provider turn to perform stateful work. It records an opaque provider turn
-ID as soon as the provider supplies one.
+The accepted result is fail-closed uncertainty with no blind provider-turn
+replay. D05 must decide the exact persistence ordering and common recovery
+protocol. Each provider-specific ADR must then prove when its session and turn
+IDs become available and whether it can read an exact prior turn without
+starting another one.
 
-A provider qualifies for stateful autonomous turns only if it exposes the new
-session ID before any model tool can run. If its event ordering cannot
-guarantee that, the first release must restrict that provider to non-stateful
-work or another reviewed recovery design.
-
-After a crash, the connector may recover a completed response only when the
-approved provider interface can read that exact prior turn without starting a
-new turn. If it cannot distinguish not-started, running, and completed, it
-marks the inbound message `uncertain` and does not replay it automatically.
-This avoids repeating tool calls or external side effects.
+A candidate design would publish the conversation-to-session mapping before a
+new provider turn can perform stateful work and publish the opaque turn ID as
+soon as the provider supplies it. This ordering is not accepted by this ADR.
+If a later approved design cannot distinguish not-started, running, and
+completed work after a crash, the connector must mark the inbound message
+`uncertain` and must not replay it automatically.
 
 The central reply operation must be idempotent by inbound message ID. A crash
 after central reply acceptance but before `ack_message` may therefore repeat
 the reply request, but it must not create a second remote message. ADR 0025
 defines that required contract.
 
-## Provider-specific direction
+## Unaccepted provider-specific candidates
+
+The feasibility evidence above does not select an interface, transport,
+executable or SDK version, event schema, dependency, sandbox, approval mode,
+history policy, or recovery mechanism. CX01, CL01, and GM01 own those later
+decisions.
 
 ### Codex
 
-Use App Server as the first interface to qualify because it exposes persistent
-threads, structured turns, streamed events, cancellation, and approval
-requests. Prefer local stdio for the connector. Do not open an unauthenticated
-WebSocket listener. Record `thread.id` for `thread/resume`; do not infer it from
-another field. Pinning a Codex version and its generated protocol schema needs
-a provider-specific ADR.
+Codex App Server is one candidate to qualify because the checked interface
+exposes persistent threads, structured turns, streamed events, cancellation,
+and approval requests. CX01 must decide whether to use it, pin an exact Codex
+version and generated schema, and test whether `thread.id` arrives early enough
+for safe stateful work and supports exact-turn recovery. Local stdio is one
+transport candidate. Unix sockets or authenticated WebSockets require their
+own transport review; no transport is selected here.
 
 ### Claude Code
 
-Qualify the Agent SDK and headless CLI before selecting one. The Agent SDK has
-structured session resume and permission callbacks but adds a production
-dependency. The CLI offers structured output and session metadata but has a
-subprocess contract. No SDK, package, or version may be selected or installed
-without an approved dependency ADR.
+The Agent SDK and headless CLI are candidates for comparison. The checked SDK
+interface has structured session resume and permission callbacks but would add
+a production dependency. The checked CLI offers structured output and session
+metadata but would add a subprocess protocol. CL01 must determine which, if
+either, exposes the session early enough, preserves the approved permission
+policy, supports cancellation and exact-turn recovery, and has an acceptable
+dependency and history boundary. No interface, package, or version is selected
+here.
 
 ### Gemini CLI
 
-Qualify stable headless mode with `stream-json`, capture the session UUID from
-the initialization event, and resume by the exact UUID. Do not base the first
-connector on experimental ACP mode. Pinning the Gemini CLI version and exact
-event schema needs a provider-specific ADR.
+Gemini CLI headless mode with `stream-json` is one candidate because the
+checked interface emits structured events and a session UUID that later work
+could test for exact resume. GM01 must pin and qualify a candidate CLI version,
+decide the accepted event subset and prompt transport, and prove UUID timing,
+sandbox and approval behavior, cancellation, retention, and crash recovery.
+Experimental ACP is not selected and would require separate review. No Gemini
+interface or event schema is accepted here.
 
 ## Packaging and platform impact
 
-This proposal does not add a provider package to the gateway artifact. Each
-connector is a separate executable or package whose installation and release
-model needs user approval. Its supported operating systems cannot exceed both
-the gateway's qualified matrix and the selected provider runtime's qualified
-matrix.
+The accepted boundary keeps connector code and provider dependencies out of
+the gateway artifact. D05 must decide the connector package or executable
+layout, installation and release model, and initial platform claims. A later
+platform claim cannot exceed both the gateway's qualified matrix and the
+selected provider runtime's qualified matrix.
 
 No SDK, library, executable version, license, or maintenance commitment is
 selected by this record. Each provider-specific ADR must record version,
@@ -258,22 +291,33 @@ production code.
 - Start a fresh provider session for every message. This loses the multi-turn
   context required by the shared design.
 
-## Approval gates
+## Remaining approval gates
 
-Production work is blocked until:
+Connector tests and production work remain blocked until D05 approves:
 
-1. ADR 0025's central conversation, recovery, and idempotent reply contract is
-   complete and approved;
-2. the user approves this connector boundary;
-3. a connector-state storage ADR is approved;
-4. the CLI or configuration interface for each separate connector is approved;
-5. each provider dependency, executable version, and protocol schema is
-   approved in its own ADR; and
-6. publishing or installation changes are separately approved.
+1. the connector executable, CLI or configuration interface, working-directory
+   input, and local security-policy input;
+2. the correlation-store technology, schema, access control, encryption,
+   deletion, and fresh-install behavior;
+3. fixed concurrency, timeout, event, process, output, and response limits;
+4. the common runtime and dependencies, plus each provider interface,
+   executable or SDK version, and protocol schema;
+5. local approval behavior and the mapping from provider results to terminal
+   or uncertain outcomes; and
+6. packaging, installation, supported platforms, and publishing gates.
 
 ## Approval
 
-Not approved. The user requested a planning handoff for Codex, Claude, and
-Gemini support on 2026-08-29. This record proposes a boundary that preserves
-the accepted gateway constraints and needs review before tests or production
-code are written.
+Approved by the user on 2026-08-30. The accepted boundary is limited to
+separate foreground connector companions while the gateway and its CLI remain
+unchanged; one gateway, connector, and provider form one pair; the connector
+receives the loopback webhook wake and retrieves content through the local
+gateway MCP endpoint; the connector owns content-free correlation state; no
+central credential leaves the gateway, no provider credential leaves the
+provider runtime, and a provider turn with an uncertain outcome is never
+replayed blindly.
+
+This approval does not complete D05 or approve a connector command, storage
+technology or schema, cryptographic design, limit, dependency, provider
+interface, approval policy, package, installation method, platform claim, or
+publishing change.
