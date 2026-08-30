@@ -521,4 +521,216 @@ const packagedDocker = [
   },
 ];
 
-export const reviewedRedInventory = { t03, t04, "packaged-docker": packagedDocker };
+function k02Failure(file, boundary, name) {
+  return {
+    file,
+    nesting: 0,
+    status: "fail",
+    skip: false,
+    todo: false,
+    boundary,
+    name,
+  };
+}
+
+const k02Groups = {
+  "k02-correlation-state.test.js": [
+    ["K02-K03:A01", "K02-A01 creates the exact strict schema and fixed SQLite settings"],
+    [
+      "K02-K03:A02",
+      "K02-A02 derives full HMAC indexes and authenticates every AES-256-GCM envelope",
+    ],
+    ["K02-K03:A03", "K02-A03 rejects ciphertext transplanted across authenticated AAD parents"],
+    ["K02-K03:A04", "K02-A04 commits paired message and conversation transitions atomically"],
+    [
+      "K02-K03:A05",
+      "K02-A05 independently rejects ciphertext, GCM-tag, HMAC-index, and schema corruption",
+    ],
+    ["K02-K03:A06", "K02-A06 rejects token, provider, and canonical-directory scope changes"],
+    [
+      "K02-K03:A07",
+      "K02-A07 deletes only an acknowledged message and retains the conversation mapping",
+    ],
+    [
+      "K02-K03:A08",
+      "K02-A08 fails closed on unexpected artifacts, weak modes, and database damage",
+    ],
+    [
+      "K02-K03:S01-artifacts",
+      "K02-S01 keeps content, credentials, approvals, and execution options out of artifacts",
+    ],
+  ],
+  "k02-crash-matrix.test.js": [
+    [
+      "K02-K03:C01-matrix",
+      "K02-C01 recovers all eight content-free crash barriers without duplicate work",
+    ],
+    [
+      "K02-K03:C03",
+      "K02-C03 dispatches once only from received and never from binding or turn_starting",
+    ],
+    [
+      "K02-K03:C04",
+      "K02-C04 never restores a reply plan after the durable lost-open uncertain transition",
+    ],
+  ],
+  "k02-execution-boundaries.test.js": [
+    ["K02-K03:P04", "K02-P04 keeps sender text in input_text and out of execution settings"],
+    [
+      "K02-K03:S01",
+      "K02-S01 builds the exact child environment allowlist and removes credential names",
+    ],
+    ["K02-K03:P05", "K02-P05 preserves provider-owned approval and exposes no approval route"],
+    ["K02-K03:P05-policy", "K02-P05 enforces a local maximum policy and never widens it"],
+  ],
+  "k02-limits-timeouts.test.js": [
+    ["K02-K03:B00", "K02-B00 exports the accepted non-configurable connector limits"],
+    ["K02-K03:P06", "K02-P06 keeps one absolute deadline and cancels a proven safe wait"],
+    ["K02-K03:B01", "K02-B01 accepts 10000 normalized events and rejects event 10001"],
+    [
+      "K02-K03:B05",
+      "K02-B05 accepts an exact reply and rejects one-over without truncation or reflection",
+    ],
+    ["K02-K03:B02", "K02-B02 accepts 1024-byte provider IDs and rejects each 1025-byte field"],
+    [
+      "K02-K03:B03",
+      "K02-B03 accepts 262144-byte progress and rejects 262145 bytes without reflection",
+    ],
+    ["K02-K03:B04", "K02-B04 enforces independent 8 MiB stdout and stderr capture limits"],
+    ["K02-K03:L01", "K02-L01 cancels one local gateway MCP request at the fixed 35-second timeout"],
+    [
+      "K02-K03:P07-grace",
+      "K02-P07 waits one absolute grace then performs three-second qualified containment",
+    ],
+    ["K02-K03:SD01", "K02-SD01 bounds SIGINT and SIGTERM-style shutdown to one 15-second budget"],
+  ],
+  "k02-provider-automata.test.js": [
+    ["K02-K03:P01", "K02-P01 enforces every start first-event and binding transition edge"],
+    ["K02-K03:P02", "K02-P02 resumes only the stored session and rejects a second session binding"],
+    [
+      "K02-K03:P03",
+      "K02-P03 binds exact recovery before output and makes no-turn crashes uncertain",
+    ],
+    [
+      "K02-K03:P08",
+      "K02-P08 foundation crash seam makes no injected-port or central recovery call",
+    ],
+    ["K02-K03:P09", "K02-P09 stops pulling when durable publication fails at each binding barrier"],
+    [
+      "K02-K03:P10",
+      "K02-P10 rejects malformed, misordered, wrong-execution, and post-terminal events",
+    ],
+  ],
+  "k02-recovery-outcomes.test.js": [
+    ["K02-K03:O01", "K02-O01 sends every exact terminal mapping before one acknowledgement"],
+    [
+      "K02-K03:O02",
+      "K02-O02 maps an unrecoverable provider result to uncertain without redispatch",
+    ],
+    ["K02-K03:C02", "K02-C02 recovers only the exact durable turn after a crash"],
+    ["K02-K03:C01", "K02-C01 resolves a committed lost reply through outcome lookup and one ack"],
+    [
+      "K02-K03:P07",
+      "K02-P07 blocks terminal reporting when qualified containment cannot prove cleanup",
+    ],
+    [
+      "K02-K03:O03",
+      "K02-O03 converts a lost open reply to uncertain after exact recovery cannot restore bytes",
+    ],
+    [
+      "K02-K03:O04",
+      "K02-O04 retains one mailbox-full reply in memory and retries no provider turn",
+    ],
+    ["K02-K03:O05", "K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule"],
+    ["K02-K03:O06", "K02-O06 blocks every permanent, authentication, and malformed gateway result"],
+  ],
+  "k02-state-scheduling.test.js": [
+    [
+      "K02-K03:S04",
+      "K02-S04 persists only encrypted opaque mapping and content-free lifecycle data",
+    ],
+    [
+      "K02-K03:Q02-conversation",
+      "K02-Q02 serializes one conversation and resumes its exact mapped session",
+    ],
+    [
+      "K02-K03:Q02-global",
+      "K02-Q02 holds at most two global turns and queues a third conversation",
+    ],
+    ["K02-K03:Q01", "K02-Q01 retains 100 queued opaque IDs and rejects entry 101 without eviction"],
+    [
+      "K02-K03:Q03-closed",
+      "K02-Q03 stops independently when later work targets a closed conversation",
+    ],
+    [
+      "K02-K03:Q03-uncertain",
+      "K02-Q03 stops independently when later work targets an uncertain conversation",
+    ],
+  ],
+  "k02-startup-state-package.test.js": [
+    [
+      "K02-K03:D01-cli",
+      "K02-D01 exposes only the exact public start and retire-state command grammar",
+    ],
+    [
+      "K02-K03:D02-startup",
+      "K02-D02 starts each exact foreground entrypoint with ordered fixed errors",
+    ],
+    [
+      "K02-K03:S09",
+      "K02-S09 initializes once and fails closed at every owner/correlation crash boundary",
+    ],
+    [
+      "K02-K03:S10",
+      "K02-S10 rejects correlation-only rollback and documents mutually valid rollback residual risk",
+    ],
+    ["K02-K03:S11", "K02-S11 refuses only conversation 100001 and admits a mapped continuation"],
+    [
+      "K02-K03:S12",
+      "K02-S12 opens no state until the injected filesystem qualification proves local",
+    ],
+    [
+      "K02-K03:S13",
+      "K02-S13 resumes every retirement marker prefix, sync, and allowlisted deletion crash",
+    ],
+    [
+      "K02-K03:D03-manifests",
+      "K02-D03 keeps connector-core unpackaged and fixes every private provider manifest",
+    ],
+    [
+      "K02-K03:D04-build-stage",
+      "K02-D04 runs the closed-provider build and stage gate without stale or linked output",
+    ],
+    [
+      "K02-K03:D05-package",
+      "K02-D05 gates the exact private packed and clean-installed command artifacts",
+    ],
+  ],
+  "k02-webhook-admission.test.js": [
+    ["K02-K03:W01", "K02-W01 enforces exact request-line and header-block byte boundaries"],
+    ["K02-K03:W02", "K02-W02 enforces timestamp syntax and exact past and future windows"],
+    ["K02-K03:W03", "K02-W03 rejects an exact live signature replay before parsing or dispatch"],
+    ["K02-K03:W04", "K02-W04 retains 4096 replay pairs and admits a new pair only after expiry"],
+    [
+      "K02-K03:W05",
+      "K02-W05 accepts exactly 1 MiB and rejects a declared one-over body before reading",
+    ],
+    ["K02-K03:W06", "K02-W06 verifies HMAC before strict JSON and correlation validation"],
+    ["K02-K03:W07", "K02-W07 coalesces both queued and active repeats without duplicate turns"],
+    ["K02-K03:W08", "K02-W08 applies non-resetting header and request deadlines to stalls"],
+    ["K02-K03:W09", "K02-W09 enforces 32 socket and 16 parsed-request capacity limits"],
+    ["K02-K03:W10", "K02-W10 rejects ambiguous framing, buffered surplus, and pipelining"],
+    ["K02-K03:W11", "K02-W11 validates method, Host, Origin, media, bearer, and HMAC before body"],
+  ],
+};
+
+const k02 = [
+  ...Object.entries(k02Groups).flatMap(([file, cases]) =>
+    cases.map(([boundary, name]) => k02Failure(file, boundary, name)),
+  ),
+  ...pass("k02-loader-boundary.test.js", 0, [
+    "K02 support classifies only the exact absent K03 entry as reviewed red",
+  ]),
+];
+
+export const reviewedRedInventory = { t03, t04, k02, "packaged-docker": packagedDocker };
