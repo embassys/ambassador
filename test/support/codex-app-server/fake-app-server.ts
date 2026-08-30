@@ -11,10 +11,14 @@ import { fileURLToPath } from "node:url";
 import type { FakeCodexLaunchRecord, FakeCodexProcessPlan } from "./types.js";
 
 interface MutableLaunchRecord {
+  executable: string;
   mode: "version" | "app-server" | "invalid";
   arguments: string[];
   cwd: string;
   environment: Record<string, string>;
+  shell: false;
+  pid: number;
+  containmentForTest: "kill" | "fail";
   requests: Readonly<Record<string, unknown>>[];
   stdinClosed: boolean;
   descendantPid: number | undefined;
@@ -23,10 +27,13 @@ interface MutableLaunchRecord {
 
 interface HelloMessage {
   readonly channel: "hello";
+  readonly executable: string;
   readonly mode: "version" | "app-server" | "invalid";
   readonly arguments: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
+  readonly shell: false;
+  readonly pid: number;
 }
 
 type WorkerMessage =
@@ -48,6 +55,8 @@ export interface FakeCodexAppServer {
   waitForRequests(count: number): Promise<void>;
   waitForStdinClosed(count: number): Promise<void>;
   waitForDescendants(count: number): Promise<void>;
+  containLatestUnit(): Promise<boolean>;
+  isLatestUnitEmpty(): boolean;
   readConfigSentinel(): Promise<Buffer>;
   spawnForFixture(
     arguments_: readonly string[],
@@ -68,10 +77,13 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 function immutable(record: MutableLaunchRecord): FakeCodexLaunchRecord {
   return {
+    executable: record.executable,
     mode: record.mode,
     arguments: [...record.arguments],
     cwd: record.cwd,
     environment: { ...record.environment },
+    shell: record.shell,
+    pid: record.pid,
     requests: record.requests.map((request) => structuredClone(request)),
     stdinClosed: record.stdinClosed,
     descendantPid: record.descendantPid,
@@ -109,6 +121,30 @@ function signalRecordedDescendant(pid: number, signal: NodeJS.Signals): boolean 
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
     throw error;
   }
+}
+
+function processExists(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+function unitIsEmpty(record: MutableLaunchRecord): boolean {
+  return !processExists(record.pid) && !processExists(record.descendantPid);
+}
+
+async function waitForUnitEmpty(record: MutableLaunchRecord): Promise<boolean> {
+  const deadline = Date.now() + CLEANUP_MS;
+  while (!unitIsEmpty(record)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  return true;
 }
 
 async function cleanRecordedDescendant(pid: number): Promise<void> {
@@ -175,10 +211,15 @@ export async function startFakeCodexAppServer(
           return;
         }
         record = {
+          executable: message.executable,
           mode: message.mode,
           arguments: [...message.arguments],
           cwd: message.cwd,
           environment: { ...message.environment },
+          shell: message.shell,
+          pid: message.pid,
+          containmentForTest:
+            plan.kind === "app-server" ? (plan.containmentForTest ?? "kill") : "kill",
           requests: [],
           stdinClosed: false,
           descendantPid: undefined,
@@ -222,6 +263,9 @@ export async function startFakeCodexAppServer(
 
   t.after(async () => {
     for (const [child, completion] of children) await waitForChildExit(child, completion);
+    for (const record of records) {
+      if (processExists(record.pid)) signalRecordedDescendant(record.pid, "SIGKILL");
+    }
     for (const pid of new Set(records.flatMap((record) => record.descendantPid ?? []))) {
       await cleanRecordedDescendant(pid);
     }
@@ -282,6 +326,27 @@ export async function startFakeCodexAppServer(
           fixtureErrors.length > 0,
       );
       assert.deepEqual(fixtureErrors, []);
+    },
+    async containLatestUnit() {
+      const record = records.findLast((candidate) => candidate.mode === "app-server");
+      assert.ok(record !== undefined, "no fake Codex App Server unit exists");
+      if (record.containmentForTest === "fail") return false;
+      if (processExists(record.descendantPid)) {
+        assert.ok(record.descendantPid !== undefined);
+        signalRecordedDescendant(record.descendantPid, "SIGTERM");
+      }
+      if (processExists(record.pid)) signalRecordedDescendant(record.pid, "SIGTERM");
+      if (await waitForUnitEmpty(record)) return true;
+      if (processExists(record.descendantPid)) {
+        assert.ok(record.descendantPid !== undefined);
+        signalRecordedDescendant(record.descendantPid, "SIGKILL");
+      }
+      if (processExists(record.pid)) signalRecordedDescendant(record.pid, "SIGKILL");
+      return await waitForUnitEmpty(record);
+    },
+    isLatestUnitEmpty() {
+      const record = records.findLast((candidate) => candidate.mode === "app-server");
+      return record === undefined || unitIsEmpty(record);
     },
     async readConfigSentinel() {
       return await readFile(configSentinelPath);

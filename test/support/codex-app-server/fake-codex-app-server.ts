@@ -188,10 +188,13 @@ messages.on("line", (line) => {
 control.once("connect", () => {
   send({
     channel: "hello",
+    executable,
     mode: mode(),
     arguments: arguments_,
     cwd: process.cwd(),
     environment: environmentRecord(),
+    shell: false,
+    pid: process.pid,
   });
 });
 control.once("error", () => process.exit(92));

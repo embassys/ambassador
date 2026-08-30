@@ -23,6 +23,7 @@ export {
   recoverRequest,
   resumeRequest,
   startRequest,
+  syntheticCx02Environment,
   threadSettingsResponse,
   validThread,
   validTurn,

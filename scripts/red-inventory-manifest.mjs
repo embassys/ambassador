@@ -818,7 +818,7 @@ const cx02 = [
     "CX02-X11 treats deltas as progress and the corroborated full terminal snapshot as authoritative",
   ]),
   ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X12", [
-    "CX02-X12 accepts only one nonempty final or phase-null candidate and rejects every ambiguity",
+    "CX02-X12 selects one final_answer before phase-null and rejects remaining ambiguities",
   ]),
   ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X13", [
     "CX02-X13 maps only an exact failed turn definitely and every executed unknown to uncertainty",

@@ -8,6 +8,7 @@ import {
   CODEX_FIXTURE_SCHEMA_SHA256,
   initializeRequest,
   startFakeCodexAppServer,
+  syntheticCx02Environment,
   threadSettingsResponse,
   validThread,
   validTurn,
@@ -131,7 +132,7 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
 
   const version = fake.spawnForFixture(["--version"], {
     cwd,
-    environment: { PATH: process.env.PATH ?? "" },
+    environment: syntheticCx02Environment("fixture-version"),
   });
   let versionStdout = "";
   version.stdout.setEncoding("utf8");
@@ -143,7 +144,7 @@ test("CX02 support runs a full-process fake Codex handshake, session, and turn o
 
   const server = fake.spawnForFixture(["app-server", "--listen", "stdio://", "--strict-config"], {
     cwd,
-    environment: { PATH: process.env.PATH ?? "" },
+    environment: syntheticCx02Environment("fixture-app-server"),
   });
   const received: Readonly<Record<string, unknown>>[] = [];
   const lines = server.stdout.setEncoding("utf8");

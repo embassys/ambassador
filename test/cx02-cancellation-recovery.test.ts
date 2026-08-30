@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { dirname } from "node:path";
 import test from "node:test";
-
 import {
+  CX02_DEADLINE_MS,
   CX02_EXECUTION_ID,
   CX02_THREAD_ID,
   CX02_TURN_ID,
@@ -19,6 +19,7 @@ import {
   validThread,
   validTurn,
 } from "./support/codex-app-server/index.js";
+import { ManualK02Clock } from "./support/connector/k02-production.js";
 
 function eventName(value: unknown): unknown {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -120,6 +121,169 @@ test("CX02-X16 interrupts only a bound exact turn and never extends cancellation
   });
   assert.deepEqual(await unbound.adapter.cancel(cancelRequest(null)), { status: "not_found" });
   assert.equal(unbound.fake.launches.filter((launch) => launch.mode === "app-server").length, 0);
+
+  const preTurn = await createCx02Adapter(t, "CX02-CX03:X16", {
+    appPlan: { kind: "app-server", exchanges: activeStartExchanges(cwd, []) },
+  });
+  const preTurnIterator = preTurn.adapter.start(startRequest())[Symbol.asyncIterator]();
+  assert.equal(eventName((await preTurnIterator.next()).value), "session_bound");
+  assert.deepEqual(await preTurn.adapter.cancel(cancelRequest()), { status: "not_found" });
+  assert.equal(
+    preTurn.fake.launches.at(-1)?.requests.some((request) => request.method === "turn/interrupt"),
+    false,
+  );
+  await preTurnIterator.return?.();
+
+  const approvalRequest = {
+    id: "approval_waiting",
+    method: "item/commandExecution/requestApproval",
+    params: {
+      threadId: CX02_THREAD_ID,
+      turnId: CX02_TURN_ID,
+      itemId: "approval_item",
+      reason: "private",
+    },
+  };
+  const waiting = await createCx02Adapter(t, "CX02-CX03:X16", {
+    appPlan: {
+      kind: "app-server",
+      exchanges: activeStartExchanges(
+        cwd,
+        [
+          { kind: "json", value: approvalRequest },
+          { kind: "json", value: turnCompleted("interrupted"), gate: "waiting_interrupted" },
+        ],
+        [
+          {
+            expectMethod: "turn/interrupt",
+            expectRequest: {
+              id: 4,
+              method: "turn/interrupt",
+              params: { threadId: CX02_THREAD_ID, turnId: CX02_TURN_ID },
+            },
+            result: {},
+          },
+        ],
+      ),
+    },
+  });
+  const waitingIterator = waiting.adapter.start(startRequest())[Symbol.asyncIterator]();
+  assert.equal(eventName((await waitingIterator.next()).value), "session_bound");
+  assert.equal(eventName((await waitingIterator.next()).value), "turn_bound");
+  assert.equal(eventName((await waitingIterator.next()).value), "approval_required");
+  const waitingTerminal = waitingIterator.next();
+  assert.deepEqual(await waiting.adapter.cancel(cancelRequest()), { status: "cancel_requested" });
+  await waiting.fake.waitForRequests(5);
+  waiting.fake.release("waiting_interrupted");
+  assert.equal(eventName((await waitingTerminal).value), "uncertain");
+
+  const terminal = await createCx02Adapter(t, "CX02-CX03:X16", {
+    appPlan: {
+      kind: "app-server",
+      exchanges: activeStartExchanges(cwd, [
+        { kind: "json", value: turnCompleted("completed", "terminal reply") },
+      ]),
+    },
+  });
+  assert.equal(
+    eventName((await collectEvents(terminal.adapter.start(startRequest()))).at(-1)),
+    "reply",
+  );
+  assert.deepEqual(await terminal.adapter.cancel(cancelRequest()), { status: "already_terminal" });
+
+  for (const vector of [
+    {
+      name: "malformed interrupt result",
+      interrupt: {
+        expectMethod: "turn/interrupt",
+        result: { unexpected: true },
+        exitCodeAfter: 0,
+      } satisfies FakeCodexExchange,
+    },
+    {
+      name: "mismatched interrupt response",
+      interrupt: {
+        expectMethod: "turn/interrupt",
+        beforeResponse: [{ kind: "json" as const, value: { id: 99, result: {} } }],
+        exitCodeAfter: 0,
+      } satisfies FakeCodexExchange,
+    },
+  ]) {
+    const malformed = await createCx02Adapter(t, "CX02-CX03:X16", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: activeStartExchanges(cwd, [], [vector.interrupt]),
+      },
+    });
+    const malformedIterator = malformed.adapter.start(startRequest())[Symbol.asyncIterator]();
+    assert.equal(eventName((await malformedIterator.next()).value), "session_bound");
+    assert.equal(eventName((await malformedIterator.next()).value), "turn_bound");
+    const malformedTerminal = malformedIterator.next();
+    assert.deepEqual(await malformed.adapter.cancel(cancelRequest()), {
+      status: "cancel_requested",
+    });
+    assert.equal(eventName((await malformedTerminal).value), "uncertain", vector.name);
+  }
+
+  const graceClock = new ManualK02Clock(CX02_DEADLINE_MS - 1);
+  let graceFake: Awaited<ReturnType<typeof createCx02Adapter>>["fake"] | undefined;
+  let containmentCalls = 0;
+  const grace = await createCx02Adapter(t, "CX02-CX03:X16", {
+    clock: graceClock,
+    containmentForTest: {
+      async contain() {
+        containmentCalls += 1;
+        assert.ok(graceFake !== undefined);
+        return await graceFake.containLatestUnit();
+      },
+      isEmpty() {
+        return graceFake?.isLatestUnitEmpty() ?? false;
+      },
+    },
+    appPlan: {
+      kind: "app-server",
+      exchanges: activeStartExchanges(
+        cwd,
+        [],
+        [
+          {
+            expectMethod: "turn/interrupt",
+            beforeResponse: [
+              {
+                kind: "json",
+                value: { method: "warning", params: { message: "slow interrupt" } },
+                gate: "never_release_interrupt",
+              },
+            ],
+          },
+        ],
+      ),
+    },
+  });
+  graceFake = grace.fake;
+  const graceIterator = grace.adapter.start(startRequest())[Symbol.asyncIterator]();
+  assert.equal(eventName((await graceIterator.next()).value), "session_bound");
+  assert.equal(eventName((await graceIterator.next()).value), "turn_bound");
+  let graceSettled = false;
+  const graceTerminal = graceIterator.next().then((result) => {
+    graceSettled = true;
+    return result;
+  });
+  graceClock.advance(1);
+  assert.deepEqual(await grace.adapter.cancel(cancelRequest()), { status: "cancel_requested" });
+  await grace.fake.waitForRequests(5);
+  graceClock.advance(9_999);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(containmentCalls, 0);
+  assert.equal(graceSettled, false);
+  graceClock.advance(1);
+  assert.equal(eventName((await graceTerminal).value), "uncertain");
+  assert.equal(containmentCalls, 1);
+  assert.equal(
+    grace.fake.launches.at(-1)?.requests.filter((request) => request.method === "turn/interrupt")
+      .length,
+    1,
+  );
 });
 
 test("CX02-X17 recovers only one exact stored turn and makes every ambiguous thread read uncertain", async (t) => {

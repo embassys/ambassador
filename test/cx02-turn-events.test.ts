@@ -131,6 +131,7 @@ test("CX02-X10 emits one exact turn binding across ordering duplicates mismatche
     before?: readonly FakeCodexWireWrite[];
     after: readonly FakeCodexWireWrite[];
     valid: boolean;
+    expectedBindings?: number;
   }[] = [
     {
       name: "response then notification",
@@ -160,6 +161,7 @@ test("CX02-X10 emits one exact turn binding across ordering duplicates mismatche
       before: [{ kind: "json", value: turnStarted() }],
       after: [{ kind: "json", value: turnStarted("different_turn") }],
       valid: false,
+      expectedBindings: 1,
     },
     {
       name: "output before binding",
@@ -196,13 +198,18 @@ test("CX02-X10 emits one exact turn binding across ordering duplicates mismatche
     const events = await collectEvents(adapter.start(startRequest()));
     assert.equal(
       events.filter((event) => eventName(event) === "turn_bound").length,
-      vector.valid ? 1 : 0,
+      vector.expectedBindings ?? (vector.valid ? 1 : 0),
     );
     assert.equal(eventName(events.at(-1)), vector.valid ? "reply" : "uncertain", vector.name);
     assert.equal(
       fake.launches.at(-1)?.requests.filter((request) => request.method === "turn/start").length,
       1,
     );
+    if (vector.name === "output before binding") {
+      const bindingIndex = events.findIndex((event) => eventName(event) === "turn_bound");
+      const progressIndex = events.findIndex((event) => eventName(event) === "progress");
+      assert.ok(bindingIndex >= 0 && progressIndex > bindingIndex);
+    }
   }
 });
 
@@ -328,7 +335,7 @@ test("CX02-X11 treats deltas as progress and the corroborated full terminal snap
   }
 });
 
-test("CX02-X12 accepts only one nonempty final or phase-null candidate and rejects every ambiguity", async (t) => {
+test("CX02-X12 selects one final_answer before phase-null and rejects remaining ambiguities", async (t) => {
   const cwd = process.cwd();
   const cases: readonly {
     name: string;
@@ -349,6 +356,7 @@ test("CX02-X12 accepts only one nonempty final or phase-null candidate and rejec
     {
       name: "final plus phase-null",
       items: [agentMessage("one"), agentMessage("legacy", null, "two")],
+      reply: "one",
     },
     {
       name: "malformed",
@@ -543,20 +551,57 @@ test("CX02-X15 never invents approval resolution and rejects every unsupported s
     );
   }
 
-  const resolved = {
-    method: "serverRequest/resolved",
-    params: { threadId: CX02_THREAD_ID, requestId: 42 },
-  };
-  const { adapter } = await createCx02Adapter(t, "CX02-CX03:X15", {
-    appPlan: {
-      kind: "app-server",
-      exchanges: startExchanges(cwd, [{ kind: "json", value: resolved }]),
+  const approval = {
+    id: 42,
+    method: "item/commandExecution/requestApproval",
+    params: {
+      threadId: CX02_THREAD_ID,
+      turnId: CX02_TURN_ID,
+      itemId: "pending_approval",
+      reason: "private pending detail",
     },
-  });
-  const events = await collectEvents(adapter.start(startRequest()));
-  assert.equal(
-    events.some((event) => eventName(event) === "approval_resolved"),
-    false,
-  );
-  assert.equal(eventName(events.at(-1)), "uncertain");
+  };
+  for (const vector of [
+    {
+      name: "matching resolution without decision",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+      ],
+    },
+    {
+      name: "repeated resolution",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 42 } },
+      ],
+    },
+    {
+      name: "mismatched resolution",
+      resolutions: [
+        { method: "serverRequest/resolved", params: { threadId: CX02_THREAD_ID, requestId: 43 } },
+      ],
+    },
+  ]) {
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X15", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          { kind: "json", value: approval },
+          ...vector.resolutions.map((value) => ({ kind: "json" as const, value })),
+        ]),
+      },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_required"),
+      true,
+      vector.name,
+    );
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_resolved"),
+      false,
+      vector.name,
+    );
+    assert.equal(eventName(events.at(-1)), "uncertain", vector.name);
+  }
 });

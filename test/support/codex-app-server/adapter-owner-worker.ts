@@ -1,5 +1,5 @@
 import { loadCx03Production } from "./cx03-production.js";
-import { startRequest } from "./scenarios.js";
+import { startRequest, syntheticCx02Environment } from "./scenarios.js";
 
 const executablePath = process.argv[2];
 const workingDirectory = process.argv[3];
@@ -9,7 +9,7 @@ const module = await loadCx03Production("CX02-CX03:X24-worker");
 const adapter = await module.createCodexAppServerAdapterForTest({
   workingDirectory,
   policy: "read-only",
-  inheritedEnvironment: process.env,
+  inheritedEnvironment: syntheticCx02Environment("owner-worker"),
   webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
   connectorPackageVersion: "0.0.0-private",
   fixtureExecutablePath: executablePath,
