@@ -47,7 +47,13 @@ export interface ConnectorFoundationOptions {
   clock?: ConnectorClock;
   crashAfter?: string;
   failStateAfter?: string;
-  failPairedStateWriteAfter?: "conversation_update";
+  failPairedStateWriteAfter?:
+    | "conversation_update"
+    | "uncertain_after_message_update"
+    | "lost_reply_after_message_update"
+    | "completion_after_conversation_update"
+    | "reply_ack_after_conversation_update"
+    | "completion_ack_after_conversation_update";
   crashAtUnboundState?: "turn_running" | "waiting_for_approval";
   crashAfterCancellation?: boolean;
   crashAfterLostReplyUncertain?: boolean;
@@ -56,6 +62,10 @@ export interface ConnectorFoundationOptions {
   crashAfterTurnStarting?: boolean;
   proveNoProviderDispatch?: boolean;
   stallWebhookResponseAfterCommit?: boolean;
+  providerDispatchDelayMsForTest?: number;
+  stateActionObserverForTest?: {
+    observe(event: Readonly<Record<string, unknown>>): void;
+  };
 }
 
 export const SYSTEM_CLOCK: ConnectorClock = {

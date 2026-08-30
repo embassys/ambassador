@@ -18,10 +18,12 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  statfsSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 import Database from "better-sqlite3";
 
@@ -47,6 +49,16 @@ const CORRELATION_LEAVES = new Set([
   "retired.v1",
 ]);
 const LIVE_STATES = new Map<string, { correlation: Database.Database; owner: Database.Database }>();
+const WAL_TARGET_BYTES = 4 * 1_024 * 1_024;
+const WAL_HARD_BYTES = 16 * 1_024 * 1_024;
+
+export type PairedStateFaultBarrier =
+  | "conversation_update"
+  | "uncertain_after_message_update"
+  | "lost_reply_after_message_update"
+  | "completion_after_conversation_update"
+  | "reply_ack_after_conversation_update"
+  | "completion_ack_after_conversation_update";
 
 export interface StateOptions {
   stateDirectory: string;
@@ -55,6 +67,9 @@ export interface StateOptions {
   workingDirectory: string;
   nowMs?: number;
   filesystemQualification?: "proven_local" | "network" | "unproven";
+  stateActionObserverForTest?: {
+    observe(event: Readonly<Record<string, unknown>>): void;
+  };
 }
 
 interface Keys {
@@ -104,8 +119,11 @@ function validatePrivateDirectory(path: string): void {
   const metadata = lstatSync(path);
   if (!metadata.isDirectory() || metadata.isSymbolicLink())
     connectorError("connector_state_unavailable");
-  if (process.platform !== "win32" && (metadata.mode & 0o777) !== 0o700) {
-    connectorError("connector_state_unavailable");
+  if (process.platform !== "win32") {
+    if ((metadata.mode & 0o777) !== 0o700) connectorError("connector_state_unavailable");
+    const effectiveUid = process.geteuid?.();
+    if (effectiveUid === undefined || metadata.uid !== effectiveUid)
+      connectorError("connector_state_unavailable");
   }
 }
 
@@ -114,8 +132,11 @@ function validatePrivateFile(path: string): void {
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
     connectorError("connector_state_unavailable");
   }
-  if (process.platform !== "win32" && (metadata.mode & 0o777) !== 0o600) {
-    connectorError("connector_state_unavailable");
+  if (process.platform !== "win32") {
+    if ((metadata.mode & 0o777) !== 0o600) connectorError("connector_state_unavailable");
+    const effectiveUid = process.geteuid?.();
+    if (effectiveUid === undefined || metadata.uid !== effectiveUid)
+      connectorError("connector_state_unavailable");
   }
 }
 
@@ -126,11 +147,20 @@ function validateLeaves(stateDirectory: string, retirement = false): void {
     }
     const path = join(stateDirectory, leaf);
     const metadata = lstatSync(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
       connectorError(retirement ? "connector_state_retire_refused" : "connector_state_unavailable");
     }
-    if (process.platform !== "win32" && (metadata.mode & 0o777) !== 0o600) {
-      connectorError(retirement ? "connector_state_retire_refused" : "connector_state_unavailable");
+    if (process.platform !== "win32") {
+      const effectiveUid = process.geteuid?.();
+      if (
+        (metadata.mode & 0o777) !== 0o600 ||
+        effectiveUid === undefined ||
+        metadata.uid !== effectiveUid
+      ) {
+        connectorError(
+          retirement ? "connector_state_retire_refused" : "connector_state_unavailable",
+        );
+      }
     }
   }
 }
@@ -140,6 +170,40 @@ function ensureDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   chmodSync(path, 0o700);
   validatePrivateDirectory(path);
+}
+
+function qualifyLocalAccountHome(path: string): void {
+  validatePrivateDirectory(path);
+  let type: number;
+  try {
+    type = Number(statfsSync(path).type);
+  } catch {
+    connectorError("connector_state_unavailable");
+  }
+  const localTypes =
+    process.platform === "darwin"
+      ? new Set([17, 23, 26])
+      : new Set([0xef53, 0x0102_1994, 0x794c_7630, 0x5846_5342, 0x9123_683e, 0x2fc1_2fc1]);
+  if (!localTypes.has(type)) connectorError("connector_state_unavailable");
+}
+
+function ensureProtectedStateDirectory(path: string): void {
+  if (!isAbsolute(path)) connectorError("connector_state_unavailable");
+  const accountHome = dirname(dirname(dirname(dirname(path))));
+  validatePrivateDirectory(accountHome);
+  const chain: string[] = [];
+  let current = path;
+  while (current !== accountHome) {
+    chain.push(current);
+    current = dirname(current);
+  }
+  for (const directory of chain.reverse()) {
+    if (!existsSync(directory)) {
+      mkdirSync(directory, { mode: 0o700 });
+      chmodSync(directory, 0o700);
+    }
+    validatePrivateDirectory(directory);
+  }
 }
 
 function configureOwner(database: Database.Database): void {
@@ -176,6 +240,8 @@ function createOwner(path: string): void {
     database.close();
   }
   chmodSync(path, 0o600);
+  syncFile(path);
+  syncFile(dirname(path));
 }
 
 function validateOwnerDatabase(database: Database.Database): void {
@@ -348,6 +414,8 @@ function createCorrelation(path: string, options: StateOptions, nowMs: number): 
     const leaf = `${path}${suffix}`;
     if (existsSync(leaf)) chmodSync(leaf, 0o600);
   }
+  syncFile(path);
+  syncFile(dirname(path));
 }
 
 function expectedCorrelationObjects(): Map<string, { type: string; sql: string }> {
@@ -368,6 +436,47 @@ function expectedCorrelationObjects(): Map<string, { type: string; sql: string }
 }
 
 const EXPECTED_CORRELATION_OBJECTS = expectedCorrelationObjects();
+
+interface LifecyclePairRow {
+  conversation_lifecycle: string;
+  message_lifecycle: string;
+  terminal_operation: string | null;
+  blocked_class: string | null;
+  provider_session_hmac: Buffer | null;
+  provider_turn_hmac: Buffer | null;
+}
+
+function allowedLifecyclePair(row: LifecyclePairRow): boolean {
+  const conversation = row.conversation_lifecycle;
+  const message = row.message_lifecycle;
+  const terminal = row.terminal_operation;
+  let allowed: readonly string[];
+  if (message === "received") allowed = ["binding", "active"];
+  else if (message === "binding") allowed = ["binding"];
+  else if (["turn_starting", "turn_running", "waiting_for_approval"].includes(message))
+    allowed = ["active"];
+  else if (message === "uncertain") allowed = ["uncertain"];
+  else if (message === "central_pending" || message === "ack_pending" || message === "closed") {
+    if (terminal === "reply") {
+      allowed = message === "closed" ? ["active"] : ["active", "uncertain"];
+    } else if (terminal === "complete") {
+      allowed = message === "central_pending" ? ["binding", "active", "uncertain"] : ["closed"];
+    } else return false;
+  } else if (message === "blocked") {
+    if (row.blocked_class === null) return false;
+    if (terminal === null) allowed = ["binding", "active", "uncertain"];
+    else if (terminal === "reply") allowed = ["active", "uncertain"];
+    else if (terminal === "complete") allowed = ["binding", "active", "uncertain", "closed"];
+    else return false;
+  } else return false;
+  if (!allowed.includes(conversation)) return false;
+  if (
+    (row.provider_turn_hmac !== null || terminal === "reply") &&
+    row.provider_session_hmac === null
+  )
+    return false;
+  return true;
+}
 
 function openCorrelation(
   path: string,
@@ -446,6 +555,8 @@ function openCorrelation(
 }
 
 export class ConnectorState {
+  #deferStorageBoundaryForTest = false;
+
   constructor(
     private readonly stateDirectory: string,
     readonly database: Database.Database,
@@ -453,7 +564,63 @@ export class ConnectorState {
     private readonly keys: Keys,
     private readonly provider: Buffer,
     private readonly directory: Buffer,
+    private readonly actionObserver?: {
+      observe(event: Readonly<Record<string, unknown>>): void;
+    },
   ) {}
+
+  beforeExternalEffect(): void {
+    this.#checkStorageBoundary();
+    this.actionObserver?.observe({ kind: "external_effect" });
+  }
+
+  runSeedTransactionForTest(operation: () => void): void {
+    this.#deferStorageBoundaryForTest = true;
+    try {
+      this.database.transaction(operation)();
+    } finally {
+      this.#deferStorageBoundaryForTest = false;
+    }
+    this.#afterWrite();
+  }
+
+  #afterWrite(): void {
+    const pages = Number(this.database.pragma("page_count", { simple: true }));
+    if (!Number.isSafeInteger(pages) || pages < 0 || pages > 65_536)
+      connectorError("connector_state_unavailable");
+    if (!this.#deferStorageBoundaryForTest) this.#checkStorageBoundary();
+  }
+
+  #walBytes(): number {
+    try {
+      return statSync(join(this.stateDirectory, "correlation.sqlite3-wal")).size;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+      connectorError("connector_state_unavailable");
+    }
+  }
+
+  #checkpoint(mode: "PASSIVE" | "TRUNCATE"): void {
+    this.actionObserver?.observe({ kind: "wal_checkpoint", mode });
+    try {
+      this.database.pragma(`wal_checkpoint(${mode})`);
+    } catch {
+      if (mode === "PASSIVE") connectorError("connector_state_unavailable");
+    }
+  }
+
+  #checkStorageBoundary(): void {
+    let bytes = this.#walBytes();
+    if (bytes > WAL_TARGET_BYTES) {
+      this.#checkpoint("PASSIVE");
+      bytes = this.#walBytes();
+    }
+    if (bytes > WAL_HARD_BYTES) {
+      this.#checkpoint("TRUNCATE");
+      bytes = this.#walBytes();
+    }
+    if (bytes > WAL_HARD_BYTES) connectorError("connector_state_unavailable");
+  }
 
   close(): void {
     LIVE_STATES.delete(this.stateDirectory);
@@ -466,6 +633,149 @@ export class ConnectorState {
       } catch {}
       this.owner.close();
     }
+  }
+
+  validateStartupState(): void {
+    const messageCount = this.database
+      .prepare<[], { count: number }>("SELECT count(*) AS count FROM messages")
+      .get()?.count;
+    const pairs = this.database
+      .prepare<[], LifecyclePairRow & { conversation_hmac: Buffer }>(
+        `SELECT c.conversation_hmac,
+          c.lifecycle AS conversation_lifecycle,
+          m.lifecycle AS message_lifecycle,
+          m.terminal_operation,
+          m.blocked_class,
+          c.provider_session_hmac,
+          m.provider_turn_hmac
+        FROM messages m JOIN conversations c USING(conversation_hmac)`,
+      )
+      .all();
+    if (messageCount !== pairs.length || pairs.some((row) => !allowedLifecyclePair(row)))
+      connectorError("connector_state_unavailable");
+    const invalidParent = this.database
+      .prepare<[], { lifecycle: string; message_count: number }>(
+        `SELECT c.lifecycle, count(m.message_hmac) AS message_count
+         FROM conversations c LEFT JOIN messages m USING(conversation_hmac)
+         GROUP BY c.conversation_hmac
+         HAVING (c.lifecycle IN ('binding','uncertain') AND count(m.message_hmac) != 1)
+            OR count(m.message_hmac) > 1`,
+      )
+      .get();
+    if (invalidParent !== undefined) connectorError("connector_state_unavailable");
+    this.#checkStorageBoundary();
+  }
+
+  transitionPair(options: {
+    conversationId: string;
+    messageId: string;
+    fromConversation: string | readonly string[];
+    fromMessage: string | readonly string[];
+    toConversation: string;
+    toMessage: string;
+    nowMs: number;
+    messageValues?: Readonly<Record<string, unknown>>;
+    failAfter?: PairedStateFaultBarrier;
+  }): void {
+    const time = validateTime(options.nowMs);
+    const conversationHmac = this.conversationIndex(options.conversationId);
+    const messageHmac = this.messageIndex(options.messageId);
+    const fromConversation = Array.isArray(options.fromConversation)
+      ? options.fromConversation
+      : [options.fromConversation];
+    const fromMessage = Array.isArray(options.fromMessage)
+      ? options.fromMessage
+      : [options.fromMessage];
+    const values = options.messageValues ?? {};
+    const permittedColumns = new Set([
+      "blocked_class",
+      "terminal_operation",
+      "completion_outcome",
+      "completion_reason",
+      "retry_kind",
+      "retry_not_before_ms",
+      "retry_attempt_count",
+      "turn_started_at_ms",
+      "turn_deadline_ms",
+    ]);
+    if (Object.keys(values).some((key) => !permittedColumns.has(key)))
+      connectorError("connector_state_unavailable");
+    const readPair = () =>
+      this.database
+        .prepare<[Buffer, Buffer], LifecyclePairRow>(
+          `SELECT c.lifecycle AS conversation_lifecycle,
+            m.lifecycle AS message_lifecycle,
+            m.terminal_operation,
+            m.blocked_class,
+            c.provider_session_hmac,
+            m.provider_turn_hmac
+           FROM messages m JOIN conversations c USING(conversation_hmac)
+           WHERE c.conversation_hmac=? AND m.message_hmac=?`,
+        )
+        .get(conversationHmac, messageHmac);
+    this.database.transaction(() => {
+      const old = readPair();
+      if (
+        old === undefined ||
+        !fromConversation.includes(old.conversation_lifecycle) ||
+        !fromMessage.includes(old.message_lifecycle) ||
+        !allowedLifecyclePair(old)
+      )
+        connectorError("connector_state_unavailable");
+      const updateConversation = () => {
+        const placeholders = fromConversation.map(() => "?").join(",");
+        const result = this.database
+          .prepare(
+            `UPDATE conversations SET lifecycle=?, updated_at_ms=? WHERE conversation_hmac=? AND lifecycle IN (${placeholders})`,
+          )
+          .run(options.toConversation, time, conversationHmac, ...fromConversation);
+        if (result.changes !== 1) connectorError("connector_state_unavailable");
+      };
+      const updateMessage = () => {
+        const assignments = [
+          "lifecycle=@to",
+          "updated_at_ms=@now",
+          ...Object.keys(values).map((name) => `${name}=@${name}`),
+        ];
+        const placeholders = fromMessage.map((_, index) => `@from${index}`).join(",");
+        const fromValues = Object.fromEntries(
+          fromMessage.map((value, index) => [`from${index}`, value]),
+        );
+        const result = this.database
+          .prepare(
+            `UPDATE messages SET ${assignments.join(",")} WHERE message_hmac=@message AND lifecycle IN (${placeholders})`,
+          )
+          .run({
+            to: options.toMessage,
+            now: time,
+            message: messageHmac,
+            ...values,
+            ...fromValues,
+          });
+        if (result.changes !== 1) connectorError("connector_state_unavailable");
+      };
+      const messageFirst =
+        options.failAfter === "uncertain_after_message_update" ||
+        options.failAfter === "lost_reply_after_message_update";
+      if (messageFirst) {
+        updateMessage();
+        if (options.failAfter !== undefined) connectorError("connector_state_unavailable");
+        updateConversation();
+      } else {
+        updateConversation();
+        if (options.failAfter !== undefined) connectorError("connector_state_unavailable");
+        updateMessage();
+      }
+      const current = readPair();
+      if (
+        current === undefined ||
+        current.conversation_lifecycle !== options.toConversation ||
+        current.message_lifecycle !== options.toMessage ||
+        !allowedLifecyclePair(current)
+      )
+        connectorError("connector_state_unavailable");
+    })();
+    this.#afterWrite();
   }
 
   conversationIndex(id: string): Buffer {
@@ -532,6 +842,14 @@ export class ConnectorState {
       frame(0x12, [this.provider, this.directory, conversationHmac, messageHmac]),
     );
     this.database.transaction(() => {
+      if (
+        this.database
+          .prepare("SELECT 1 FROM conversations WHERE rowid >= 100000 ORDER BY rowid LIMIT 1")
+          .get() !== undefined ||
+        this.database.prepare("SELECT 1 FROM messages ORDER BY rowid LIMIT 1 OFFSET 1").get() !==
+          undefined
+      )
+        connectorError("connector_state_capacity");
       this.database
         .prepare(
           "INSERT INTO conversations(conversation_hmac, conversation_iv, conversation_ciphertext, conversation_tag, lifecycle, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, 'binding', ?, ?)",
@@ -558,6 +876,7 @@ export class ConnectorState {
           time,
         );
     })();
+    this.#afterWrite();
     return {
       conversation: this.readConversation(conversationId) as StoredConversation,
       message: this.readMessage(messageId) as StoredMessage,
@@ -576,35 +895,58 @@ export class ConnectorState {
       raw,
       frame(0x12, [this.provider, this.directory, conversation.conversationHmac, messageHmac]),
     );
-    this.database
-      .prepare(
-        "INSERT INTO messages(message_hmac, message_iv, message_ciphertext, message_tag, conversation_hmac, lifecycle, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, 'received', ?, ?)",
+    this.database.transaction(() => {
+      if (
+        this.database.prepare("SELECT 1 FROM messages ORDER BY rowid LIMIT 1 OFFSET 1").get() !==
+        undefined
       )
-      .run(
-        messageHmac,
-        envelope.iv,
-        envelope.ciphertext,
-        envelope.tag,
-        conversation.conversationHmac,
-        time,
-        time,
-      );
+        connectorError("connector_state_capacity");
+      const current = this.database
+        .prepare<[Buffer], { lifecycle: string }>(
+          "SELECT lifecycle FROM conversations WHERE conversation_hmac=?",
+        )
+        .get(conversation.conversationHmac);
+      if (current?.lifecycle !== "active") connectorError("connector_conversation_unavailable");
+      this.database
+        .prepare(
+          "INSERT INTO messages(message_hmac, message_iv, message_ciphertext, message_tag, conversation_hmac, lifecycle, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, 'received', ?, ?)",
+        )
+        .run(
+          messageHmac,
+          envelope.iv,
+          envelope.ciphertext,
+          envelope.tag,
+          conversation.conversationHmac,
+          time,
+          time,
+        );
+    })();
+    this.#afterWrite();
     return this.readMessage(messageId) as StoredMessage;
   }
 
-  dispatch(messageId: string, continuation: boolean, nowMs: number): void {
+  dispatch(messageId: string, continuation: boolean, nowMs: number): StoredMessage {
     const time = validateTime(nowMs);
-    this.database
-      .prepare(
-        `UPDATE messages SET lifecycle=?, turn_started_at_ms=?, turn_deadline_ms=?, updated_at_ms=? WHERE message_hmac=? AND lifecycle='received'`,
-      )
-      .run(
-        continuation ? "turn_starting" : "binding",
-        time,
-        time + 900_000,
-        time,
-        this.messageIndex(messageId),
-      );
+    const existing = this.readMessage(messageId);
+    if (existing === undefined) connectorError("connector_state_unavailable");
+    const conversation = this.readConversationByHmac(existing.conversationHmac);
+    if (conversation === undefined) connectorError("connector_state_unavailable");
+    this.transitionPair({
+      conversationId: conversation.conversationId,
+      messageId,
+      fromConversation: continuation ? "active" : "binding",
+      fromMessage: "received",
+      toConversation: continuation ? "active" : "binding",
+      toMessage: continuation ? "turn_starting" : "binding",
+      nowMs: time,
+      messageValues: {
+        turn_started_at_ms: time,
+        turn_deadline_ms: time + 900_000,
+      },
+    });
+    const stored = this.readMessage(messageId);
+    if (stored === undefined) connectorError("connector_state_unavailable");
+    return stored;
   }
 
   bindSession(
@@ -625,7 +967,7 @@ export class ConnectorState {
       frame(0x13, [this.provider, this.directory, conversation.conversationHmac, sessionHmac]),
     );
     this.database.transaction(() => {
-      this.database
+      const conversationResult = this.database
         .prepare(
           "UPDATE conversations SET provider_session_hmac=?, provider_session_iv=?, provider_session_ciphertext=?, provider_session_tag=?, lifecycle='active', updated_at_ms=? WHERE conversation_hmac=? AND lifecycle='binding'",
         )
@@ -637,13 +979,16 @@ export class ConnectorState {
           time,
           conversation.conversationHmac,
         );
+      if (conversationResult.changes !== 1) connectorError("connector_state_unavailable");
       if (failAfterConversation) connectorError("connector_state_unavailable");
-      this.database
+      const messageResult = this.database
         .prepare(
           "UPDATE messages SET lifecycle='turn_starting', updated_at_ms=? WHERE message_hmac=? AND lifecycle='binding'",
         )
         .run(time, this.messageIndex(messageId));
+      if (messageResult.changes !== 1) connectorError("connector_state_unavailable");
     })();
+    this.#afterWrite();
   }
 
   bindTurn(messageId: string, sessionId: string, turnId: string, nowMs: number): void {
@@ -665,11 +1010,13 @@ export class ConnectorState {
         turnHmac,
       ]),
     );
-    this.database
+    const result = this.database
       .prepare(
         "UPDATE messages SET provider_turn_hmac=?, provider_turn_iv=?, provider_turn_ciphertext=?, provider_turn_tag=?, lifecycle='turn_running', updated_at_ms=? WHERE message_hmac=? AND lifecycle='turn_starting'",
       )
       .run(turnHmac, envelope.iv, envelope.ciphertext, envelope.tag, nowMs, message.messageHmac);
+    if (result.changes !== 1) connectorError("connector_state_unavailable");
+    this.#afterWrite();
   }
 
   transitionMessage(
@@ -693,6 +1040,7 @@ export class ConnectorState {
       )
       .run({ to, now: nowMs, message: this.messageIndex(messageId), ...values, ...fromValues });
     if (result.changes !== 1) connectorError("connector_state_unavailable");
+    this.#afterWrite();
   }
 
   transitionConversation(
@@ -709,12 +1057,15 @@ export class ConnectorState {
       )
       .run(to, nowMs, this.conversationIndex(conversationId), ...allowed);
     if (result.changes !== 1) connectorError("connector_state_unavailable");
+    this.#afterWrite();
   }
 
   deleteClosedMessage(messageId: string): void {
-    this.database
+    const result = this.database
       .prepare("DELETE FROM messages WHERE message_hmac=? AND lifecycle='closed'")
       .run(this.messageIndex(messageId));
+    if (result.changes !== 1) connectorError("connector_state_unavailable");
+    this.#afterWrite();
   }
 
   decodeConversation(row: Record<string, unknown>): StoredConversation {
@@ -856,6 +1207,7 @@ export function openConnectorState(options: StateOptions): ConnectorState {
       opened.keys,
       opened.provider,
       opened.directory,
+      options.stateActionObserverForTest,
     );
     for (const conversation of opened.database
       .prepare<[], Record<string, unknown>>("SELECT * FROM conversations")
@@ -865,6 +1217,7 @@ export function openConnectorState(options: StateOptions): ConnectorState {
       .prepare<[], Record<string, unknown>>("SELECT * FROM messages")
       .all())
       state.decodeMessage(message);
+    state.validateStartupState();
     const newest = opened.database
       .prepare<[], { newest: number | null }>(
         `SELECT MAX(value) AS newest FROM (
@@ -1038,27 +1391,41 @@ export async function seedConnectorConversationsForTest(
     count: number;
     activeConversationId: string;
     activeProviderSessionId: string;
+    openMessageCount?: number;
   },
 ): Promise<void> {
   const state = openConnectorState(options);
   try {
-    const insert = state.database.transaction(() => {
+    state.runSeedTransactionForTest(() => {
       for (let index = 0; index < options.count; index += 1) {
         const id = index === 0 ? options.activeConversationId : `seed_${index}`;
         const session = index === 0 ? options.activeProviderSessionId : `seed_session_${index}`;
+        const messageId = `seed_message_${index}`;
         const now = Date.now();
-        state.insertConversationAndMessage(id, `seed_message_${index}`, now);
-        state.dispatch(`seed_message_${index}`, false, now);
-        state.bindSession(id, `seed_message_${index}`, session, now);
-        state.transitionMessage(`seed_message_${index}`, "turn_starting", "central_pending", now, {
-          terminal_operation: "reply",
-        });
-        state.transitionMessage(`seed_message_${index}`, "central_pending", "ack_pending", now);
-        state.transitionMessage(`seed_message_${index}`, "ack_pending", "closed", now);
-        state.deleteClosedMessage(`seed_message_${index}`);
+        state.insertConversationAndMessage(id, messageId, now);
+        state.dispatch(messageId, false, now);
+        state.bindSession(id, messageId, session, now);
+        if (index < (options.openMessageCount ?? 0)) {
+          const result = state.database
+            .prepare(
+              "UPDATE messages SET lifecycle='received', turn_started_at_ms=NULL, turn_deadline_ms=NULL, updated_at_ms=? WHERE message_hmac=? AND lifecycle='turn_starting'",
+            )
+            .run(now, state.messageIndex(messageId));
+          if (result.changes !== 1) connectorError("connector_state_unavailable");
+        } else {
+          state.transitionMessage(
+            `seed_message_${index}`,
+            "turn_starting",
+            "central_pending",
+            now,
+            { terminal_operation: "reply" },
+          );
+          state.transitionMessage(`seed_message_${index}`, "central_pending", "ack_pending", now);
+          state.transitionMessage(`seed_message_${index}`, "ack_pending", "closed", now);
+          state.deleteClosedMessage(`seed_message_${index}`);
+        }
       }
     });
-    insert();
   } finally {
     state.close();
   }
@@ -1153,8 +1520,13 @@ export async function retireConnectorStateForTest(options: {
 }
 
 export function accountStateDirectory(accountHome: string, provider: ProviderKind): string {
-  const canonical = realpathSync.native(accountHome);
-  validatePrivateDirectory(canonical);
+  let canonical: string;
+  try {
+    canonical = realpathSync.native(accountHome);
+  } catch {
+    connectorError("connector_state_unavailable");
+  }
+  qualifyLocalAccountHome(canonical);
   if (process.platform === "linux")
     return join(canonical, ".local", "state", "a2a-connectors", provider);
   if (process.platform === "darwin")
@@ -1163,7 +1535,7 @@ export function accountStateDirectory(accountHome: string, provider: ProviderKin
 }
 
 export function ensureOwnerBeforeToken(stateDirectory: string): void {
-  ensureDirectory(stateDirectory);
+  ensureProtectedStateDirectory(stateDirectory);
   validateLeaves(stateDirectory);
   const owner = openOwnerForExclusiveCheck(stateDirectory);
   try {
