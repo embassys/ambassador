@@ -1444,16 +1444,23 @@ class ConnectorRuntime implements ConnectorHandle {
 
   async #containWithinBound(work: Work): Promise<boolean> {
     let timedOut = false;
-    const timeout = sleep(this.#clock, CONNECTOR_LIMITS.containmentCleanupMs).then(() => {
-      timedOut = true;
-      return false;
+    let timeoutTimer: unknown;
+    const timeout = new Promise<false>((resolve) => {
+      timeoutTimer = this.#clock.setTimer(() => {
+        timedOut = true;
+        resolve(false);
+      }, CONNECTOR_LIMITS.containmentCleanupMs);
     });
     this.#state.beforeExternalEffect();
-    const result = await Promise.race([
-      this.options.provider.contain(work.executionId).catch(() => false),
-      timeout,
-    ]);
-    return result === true && !timedOut;
+    try {
+      const result = await Promise.race([
+        this.options.provider.contain(work.executionId).catch(() => false),
+        timeout,
+      ]);
+      return result === true && !timedOut;
+    } finally {
+      this.#clock.clearTimer(timeoutTimer);
+    }
   }
 
   async #deadline(work: Work): Promise<void> {
@@ -1706,6 +1713,7 @@ class ConnectorRuntime implements ConnectorHandle {
     };
     const deadline = work.stored.turnDeadlineMs;
     if (deadline === null) throw new ConnectorError("connector_state_unavailable");
+    this.#clock.clearTimer(work.deadlineTimer);
     work.deadlineTimer = this.#clock.setTimer(
       () => {
         void this.#deadline(work);
