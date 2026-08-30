@@ -691,7 +691,7 @@ const k02Groups = {
     ],
     [
       "K02-K03:S13",
-      "K02-S13 resumes every retirement marker prefix, sync, and allowlisted deletion crash",
+      "K02-S13 distinguishes partial markers while retirement resumes every crash barrier",
     ],
     [
       "K02-K03:D03-manifests",
