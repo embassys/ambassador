@@ -797,6 +797,41 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
     lastWakeTimestamp = Math.max(Math.floor(clock.nowMs() / 1_000), lastWakeTimestamp + 1);
     return await scenario.wake(message.id, lastWakeTimestamp);
   };
+  const readLifetimeRetry = (): {
+    retry_attempt_count: number;
+    retry_kind: string | null;
+    retry_not_before_ms: number | null;
+  } => {
+    const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
+      readonly: true,
+    });
+    try {
+      return database
+        .prepare<
+          [],
+          {
+            retry_attempt_count: number;
+            retry_kind: string | null;
+            retry_not_before_ms: number | null;
+          }
+        >("SELECT retry_attempt_count, retry_kind, retry_not_before_ms FROM messages")
+        .get() as {
+        retry_attempt_count: number;
+        retry_kind: string | null;
+        retry_not_before_ms: number | null;
+      };
+    } finally {
+      database.close();
+    }
+  };
+  const lifetimeDelay = (count: number): number => {
+    if (count === 1) return 1_000;
+    if (count === 2) return 2_000;
+    if (count === 3) return 4_000;
+    if (count === 4) return 8_000;
+    if (count === 5) return 16_000;
+    return 30_000;
+  };
   scenario.enqueue(message);
   assert.equal((await sendDistinctWake()).status, 202);
   await waitFor(
@@ -810,6 +845,11 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
     clock.nowMs() + 1_000,
     "first central retry schedule",
   );
+  assert.deepEqual(readLifetimeRetry(), {
+    retry_attempt_count: 1,
+    retry_kind: "complete",
+    retry_not_before_ms: clock.nowMs() + 1_000,
+  });
   clock.advance(999);
   assert.equal((await sendDistinctWake()).status, 202);
   assert.equal(
@@ -826,42 +866,45 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
   );
   clock.advance(1);
 
-  for (let attempt = 2; attempt <= 255; attempt += 1) {
+  for (let completeCall = 2; completeCall <= 255; completeCall += 1) {
     await waitFor(
       () =>
         scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length ===
-        attempt,
-      `central attempt ${attempt}`,
+        completeCall,
+      `central complete call ${completeCall}`,
     );
-    const delay =
-      attempt === 2
-        ? 2_000
-        : attempt === 3
-          ? 4_000
-          : attempt === 4
-            ? 8_000
-            : attempt === 5
-              ? 16_000
-              : 30_000;
-    await waitForRetrySchedule(
-      scenario,
-      "complete",
-      clock.nowMs() + delay,
-      `central retry schedule ${attempt}`,
-    );
-    if (attempt < 255) {
+    const expectedLifetimeCount = Math.min(completeCall + 1, 255);
+    await waitFor(() => {
+      const retry = readLifetimeRetry();
+      return (
+        retry.retry_attempt_count === expectedLifetimeCount &&
+        retry.retry_kind === "complete" &&
+        retry.retry_not_before_ms !== null
+      );
+    }, `durable lifetime retry claim ${expectedLifetimeCount}`);
+    const durableRetry = readLifetimeRetry();
+    const delay = lifetimeDelay(durableRetry.retry_attempt_count);
+    assert.equal(durableRetry.retry_not_before_ms, clock.nowMs() + delay);
+    if (completeCall === 2) {
+      assert.deepEqual(
+        scenario.gatewayProxy?.calls
+          .filter((call) => call.tool === "complete_message" || call.tool === "get_message_outcome")
+          .slice(0, 3)
+          .map((call) => call.tool),
+        ["complete_message", "get_message_outcome", "complete_message"],
+      );
+    }
+    if (completeCall < 255) {
       clock.advance(delay - 1);
       assert.equal((await sendDistinctWake()).status, 202);
       assert.equal(
         scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length,
-        attempt,
+        completeCall,
       );
       clock.advance(1);
     }
   }
 
-  const Database = (await import("better-sqlite3")).default;
-  const { join } = await import("node:path");
   const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
     readonly: true,
   });
