@@ -707,21 +707,23 @@ test("K02-P10 rejects malformed, misordered, wrong-execution, and post-terminal 
       { kind: "close" },
     ],
   ];
-  for (const [index, script] of invalidScripts.entries()) {
-    const scenario = await startK02Scenario(t, "K02-K03:P10", {
-      scripts: [script],
-    });
-    const message = k02Message(`p10_message_${index}`, `p10_conversation_${index}`);
-    scenario.enqueue(message);
-    assert.equal((await scenario.wake(message.id)).status, 202);
-    await scenario.connector.waitForIdle();
-    assert.equal(scenario.provider.cancellations[0]?.reason, "contract_failure");
-    assert.equal(scenario.gateway.tombstone(message.id)?.outcome, "uncertain");
-    assert.deepEqual(scenario.gateway.calls.at(-2)?.arguments, {
-      message_id: message.id,
-      outcome: "uncertain",
-      reason_code: "provider_outcome_unknown",
-    });
+  for (let batchStart = 0; batchStart < invalidScripts.length; batchStart += 2) {
+    const scripts = invalidScripts.slice(batchStart, batchStart + 2);
+    const scenario = await startK02Scenario(t, "K02-K03:P10", { scripts });
+    for (const [batchIndex] of scripts.entries()) {
+      const index = batchStart + batchIndex;
+      const message = k02Message(`p10_message_${index}`, `p10_conversation_${index}`);
+      scenario.enqueue(message);
+      assert.equal((await scenario.wake(message.id)).status, 202);
+      await scenario.connector.waitForIdle();
+      assert.equal(scenario.provider.cancellations.at(-1)?.reason, "contract_failure");
+      assert.equal(scenario.gateway.tombstone(message.id)?.outcome, "uncertain");
+      assert.deepEqual(scenario.gateway.calls.at(-2)?.arguments, {
+        message_id: message.id,
+        outcome: "uncertain",
+        reason_code: "provider_outcome_unknown",
+      });
+    }
   }
 
   for (const [index, cancelResult] of [
