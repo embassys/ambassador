@@ -126,14 +126,39 @@ test("K02-P06 keeps one absolute deadline and cancels a proven safe wait", async
   await assert.rejects(grace.connector.waitForIdle(), /connector_test_crash/u);
   await grace.connector.crash();
   graceClock.set(graceStart + 909_999);
-  const restarted = await grace.restart([]);
+  const restarted = await grace.restart([[{ kind: "wait_for_cancel" }]], {
+    gatedEvents: ["cancelled"],
+    gateContainment: true,
+  });
+  await settleK02Tasks(8);
+  assert.equal(restarted.provider.requests.length, 1);
+  const expiredRecovery = restarted.provider.requests[0];
+  assert.equal(expiredRecovery?.kind, "recover");
+  if (expiredRecovery?.kind === "recover") {
+    assert.equal(expiredRecovery.provider_session_id, "session_restart_grace");
+    assert.equal(expiredRecovery.provider_turn_id, "turn_restart_grace");
+    assert.equal(expiredRecovery.deadline_unix_ms, graceStart + 900_000);
+    assert.ok(!("input_text" in expiredRecovery));
+  }
+  graceClock.advance(0);
+  await waitFor(() => restarted.provider.cancellations.length === 1, "expired-turn cancellation");
+  assert.deepEqual(restarted.provider.cancellations[0], {
+    kind: "cancel",
+    execution_id: expiredRecovery?.execution_id,
+    provider_session_id: "session_restart_grace",
+    provider_turn_id: "turn_restart_grace",
+    reason: "deadline",
+  });
   assert.equal(restarted.providerPort.containmentAttempts, 0);
   graceClock.advance(1);
-  await restarted.connector.waitForIdle();
+  await settleK02Tasks();
   assert.equal(restarted.providerPort.containmentAttempts, 1);
+  restarted.releaseContainment();
+  restarted.releaseProviderEvent("cancelled");
+  await restarted.connector.waitForIdle();
   graceClock.advance(1);
   assert.equal(restarted.providerPort.containmentAttempts, 1);
-  assert.equal(restarted.provider.requests.length, 0);
+  assert.equal(restarted.provider.requests.length, 1);
 
   const strengthenedFailures: string[] = [];
   const check = async (label: string, operation: () => Promise<void>): Promise<void> => {

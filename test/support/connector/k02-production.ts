@@ -225,6 +225,8 @@ export interface K02Scenario {
     scripts: readonly (readonly K02ProviderStep[])[],
     options?: {
       contained?: boolean;
+      gatedEvents?: readonly string[];
+      gateContainment?: boolean;
       crashAfter?: K02CrashBarrier;
       webhookToken?: string;
       workingDirectory?: string;
@@ -238,6 +240,8 @@ export interface K02Scenario {
     connector: K02ConnectorHandle;
     provider: ScriptedFakeProvider;
     providerPort: K02ProviderPort;
+    releaseProviderEvent(event: string): void;
+    releaseContainment(): void;
   }>;
 }
 
@@ -369,7 +373,14 @@ export class K02GatewayFaultProxy {
     }
     if (fault?.kind === "structured_result") {
       const bytes = Buffer.from(
-        JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: fault.value }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: parsed.id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(fault.value) }],
+            structuredContent: fault.value,
+          },
+        }),
       );
       response.writeHead(200, {
         "cache-control": "no-store",
@@ -942,9 +953,9 @@ export async function startK02Scenario(
         restartedProvider,
         scripts,
         restartOptions.contained ?? true,
-        [],
+        restartOptions.gatedEvents ?? [],
         undefined,
-        false,
+        restartOptions.gateContainment ?? false,
         restartOptions.cancelResult,
       );
       const restartedConnector = await module.startConnectorFoundation({
@@ -975,6 +986,12 @@ export async function startK02Scenario(
         connector: restartedConnector,
         provider: restartedProvider,
         providerPort: restartedProviderPort,
+        releaseProviderEvent(event) {
+          restartedProviderPort.release(event);
+        },
+        releaseContainment() {
+          restartedProviderPort.releaseContainment();
+        },
       };
     },
   };

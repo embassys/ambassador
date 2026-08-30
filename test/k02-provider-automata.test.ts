@@ -649,6 +649,9 @@ test("K02-P10 rejects malformed, misordered, wrong-execution, and post-terminal 
   }
   const invalidScripts: readonly (readonly K02ProviderStep[])[] = [
     ...malformedSchemaScripts,
+    [{ kind: "no_reply" }],
+    [{ kind: "failed", reason_code: "provider_execution_failed" }],
+    [{ kind: "failed", reason_code: "provider_result_invalid" }],
     [
       { kind: "session", provider_session_id: "duplicate_session" },
       { kind: "session", provider_session_id: "duplicate_session" },
