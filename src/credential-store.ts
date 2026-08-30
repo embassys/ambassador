@@ -109,6 +109,8 @@ interface SecuredDirectory {
   handle?: FileHandle;
 }
 
+class WindowsCredentialOperationError extends Error {}
+
 function invalidCredential(): Error {
   return new Error("The credential store is invalid or cannot be decrypted");
 }
@@ -247,7 +249,14 @@ function runWindowsPowerShell(
       },
       (error, stdout, stderr) => {
         if (error || stderr.length !== 0 || stdout !== expectedOutput) {
-          reject(new Error("Windows credential operation failed"));
+          const status = /^A2A_REPLACE_ERROR_([0-9]+)$/u.exec(stdout)?.[1];
+          reject(
+            new WindowsCredentialOperationError(
+              status === undefined
+                ? "Windows credential operation failed"
+                : `Windows credential operation failed (native status ${status})`,
+            ),
+          );
           return;
         }
         resolveOutput();
@@ -353,7 +362,13 @@ if (($sourceAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exi
 if (($destinationAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exit 75 }
 if (($sourceAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 76 }
 if (($destinationAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 77 }
-[System.IO.File]::Replace($source, $destination, $null, $true)
+try {
+  [System.IO.File]::Replace($source, $destination, $null, $true)
+} catch {
+  $nativeStatus = $_.Exception.HResult -band 65535
+  [Console]::Out.Write("A2A_REPLACE_ERROR_$nativeStatus")
+  exit 81
+}
 if ([System.IO.File]::Exists($source) -or [System.IO.Directory]::Exists($source)) { exit 78 }
 $publishedAttributes = [System.IO.File]::GetAttributes($destination)
 if (($publishedAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exit 79 }
@@ -575,9 +590,10 @@ export class EncryptedFileCredentialStore implements CredentialStore, VersionedC
           try {
             await windowsFileReplacement.replace(temporaryPath, this.path);
             temporaryCreated = false;
-          } catch {
+          } catch (error) {
             const recovered = await this.loadCredential().catch(() => undefined);
             if (recovered?.version !== version || recovered.plaintext !== plaintext) {
+              if (error instanceof WindowsCredentialOperationError) throw error;
               throw invalidCredential();
             }
             try {
