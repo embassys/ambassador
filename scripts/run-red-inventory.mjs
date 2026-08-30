@@ -86,11 +86,15 @@ if (requested.length === 0) {
   const key = requested[0].slice("--suite=".length);
   const definition = definitions[key];
   if (definition === undefined) {
-    throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|packaged-docker]");
+    throw new Error(
+      "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|packaged-docker]",
+    );
   }
   selected = [definition];
 } else {
-  throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|packaged-docker]");
+  throw new Error(
+    "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|packaged-docker]",
+  );
 }
 
 const root = join(process.cwd(), ".test-dist", "test");
