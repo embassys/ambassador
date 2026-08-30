@@ -1,3 +1,5 @@
+import { parseK04IpcEnvelope } from "./k04-ipc.js";
+
 type K04GatewayFetchBarrier =
   | "receive_selected"
   | "wake_before_request"
@@ -6,20 +8,12 @@ type K04GatewayFetchBarrier =
 
 type K04GatewayOperation = "receive" | "wake" | "reply" | "complete" | "outcome" | "ack" | "other";
 
-interface BarrierReleaseMessage {
-  readonly channel: "k04_gateway_fetch_control";
-  readonly command: "release";
-  readonly barrier: K04GatewayFetchBarrier;
-  readonly sequence: number;
-}
-
 const BARRIER_NAMES = new Set<K04GatewayFetchBarrier>([
   "receive_selected",
   "wake_before_request",
   "reply_accepted_unobserved",
   "ack_accepted_unobserved",
 ]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -101,6 +95,43 @@ function installK04GatewayFetchPreload(): void {
   const originalFetch = globalThis.fetch;
   let sequence = 0;
   let barrierUsed = false;
+  let pending:
+    | {
+        readonly name: K04GatewayFetchBarrier;
+        readonly sequence: number;
+        readonly resolve: () => void;
+        readonly reject: (error: Error) => void;
+        readonly timer: NodeJS.Timeout;
+      }
+    | undefined;
+
+  const clearPending = (): typeof pending => {
+    const current = pending;
+    if (current !== undefined) clearTimeout(current.timer);
+    pending = undefined;
+    return current;
+  };
+  process.on("message", (value: unknown) => {
+    const envelope = parseK04IpcEnvelope("gateway_child", value);
+    if (envelope.kind === "shared") return;
+    const { message } = envelope;
+    if (
+      !hasExactKeys(message, ["channel", "command", "barrier", "sequence"]) ||
+      message.command !== "release" ||
+      pending === undefined ||
+      message.barrier !== pending.name ||
+      message.sequence !== pending.sequence
+    ) {
+      const current = clearPending();
+      current?.reject(new Error("unexpected K04 gateway fetch control IPC"));
+      throw new Error("unexpected K04 gateway fetch control IPC");
+    }
+    clearPending()?.resolve();
+  });
+  process.channel?.unref();
+  process.once("disconnect", () => {
+    clearPending()?.reject(new Error("K04 gateway fetch barrier parent disconnected"));
+  });
 
   const arrive = async (name: K04GatewayFetchBarrier): Promise<void> => {
     if (barrierUsed) return;
@@ -108,40 +139,12 @@ function installK04GatewayFetchPreload(): void {
     sequence += 1;
     const arrivalSequence = sequence;
     await new Promise<void>((resolve, reject) => {
-      const cleanup = (): void => {
-        clearTimeout(timer);
-        process.off("message", onMessage);
-        process.off("disconnect", onDisconnect);
-      };
-      const onMessage = (message: unknown): void => {
-        if (!isRecord(message) || message.channel !== "k04_gateway_fetch_control") return;
-        const candidate = message as Partial<BarrierReleaseMessage>;
-        if (
-          !hasExactKeys(message, ["channel", "command", "barrier", "sequence"]) ||
-          candidate.channel !== "k04_gateway_fetch_control" ||
-          candidate.command !== "release" ||
-          candidate.barrier !== name ||
-          candidate.sequence !== arrivalSequence
-        ) {
-          cleanup();
-          reject(new Error("invalid K04 gateway fetch barrier control IPC"));
-          return;
-        }
-        cleanup();
-        resolve();
-      };
-      const onDisconnect = (): void => {
-        cleanup();
-        reject(new Error("K04 gateway fetch barrier parent disconnected"));
-      };
       const timer = setTimeout(() => {
-        process.off("message", onMessage);
-        process.off("disconnect", onDisconnect);
+        if (pending?.sequence === arrivalSequence) pending = undefined;
         reject(new Error("K04 gateway fetch barrier timed out"));
       }, 30_000);
       timer.unref();
-      process.on("message", onMessage);
-      process.once("disconnect", onDisconnect);
+      pending = { name, sequence: arrivalSequence, resolve, reject, timer };
       send({
         channel: "k04_gateway_fetch",
         event: "barrier",

@@ -26,6 +26,7 @@ import {
   K04_VERIFICATION_CODE,
   K04_WEBHOOK_TOKEN,
 } from "./k04-constants.js";
+import { parseK04IpcEnvelope } from "./k04-ipc.js";
 
 type K04Plan = "reply" | "safe-wait";
 type K04ProviderGate = "reply";
@@ -59,10 +60,6 @@ interface K04Configuration {
   readonly crashBarrier: K04CrashBarrier | undefined;
   readonly clockOffsetMs: number;
   readonly proveNoProviderDispatch: boolean;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -352,8 +349,10 @@ async function main(): Promise<void> {
   process.stdout.write(`Connector webhook: ${connector.webhookUrl}\n`);
 
   let idleSequence = 0;
-  process.on("message", (message: unknown) => {
-    if (!isRecord(message) || message.channel !== "k04_control") return;
+  process.on("message", (value: unknown) => {
+    const envelope = parseK04IpcEnvelope("connector_child", value);
+    if (envelope.kind === "shared") return;
+    const { message } = envelope;
     if (providerPort.handleControl(message)) return;
     if (hasExactKeys(message, ["channel", "command"]) && message.command === "shutdown") {
       resolveTermination?.("SIGTERM");
