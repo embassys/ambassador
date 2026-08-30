@@ -131,6 +131,11 @@ async function main() {
     [tsc, "-p", configuration, "--outDir", temporaryRoot],
     repositoryRoot,
   );
+  await run(
+    process.execPath,
+    [join(repositoryRoot, "scripts", "strip-connector-test-controls.mjs"), temporaryRoot],
+    repositoryRoot,
+  );
 
   const expectedFiles = await expectedOutputs(provider);
   const actual = await inventory(temporaryRoot);

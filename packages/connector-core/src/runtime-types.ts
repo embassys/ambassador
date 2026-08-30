@@ -1,4 +1,5 @@
 import type { ConnectorPolicy, ProviderKind } from "./constants.js";
+import type { ConnectorStateReservation } from "./state.js";
 
 export interface ConnectorClock {
   nowMs(): number;
@@ -30,6 +31,7 @@ export interface ConnectorFoundationOptions {
   policy: ConnectorPolicy;
   gatewayEndpoint: string;
   stateDirectory: string;
+  stateReservation?: ConnectorStateReservation;
   provider: ProviderPort;
   providerProcessObserver?: {
     executable: string;
