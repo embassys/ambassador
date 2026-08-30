@@ -4,10 +4,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { startFakeWebhook } from "./support/fake-webhook.js";
+import { startGatewayProcess } from "./support/gateway-process.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 import { startGateway } from "./support/start-gateway.js";
 
 const FIXTURE_URL = process.env.A2A_FASTMCP_FIXTURE_URL;
+const PACKED_GATEWAY_CLI = process.env.A2A_PACKED_GATEWAY_CLI;
 const TEST_KEY = "central-fixture-control";
 const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const EMAIL = "fastmcp-agent@example.test";
@@ -45,12 +47,21 @@ test("enrolls and relays through the pinned FastMCP fixture", {
   assert.ok(FIXTURE_URL !== undefined);
   await control(FIXTURE_URL, "/__test/reset", {});
   const webhook = await startFakeWebhook(t);
-  const gateway = await startGateway(t, {
-    webhookUrl: webhook.url,
-    webhookToken: WEBHOOK_TOKEN,
-    centralApiUrl: FIXTURE_URL,
-    centralMcpUrl: new URL("/mcp", FIXTURE_URL).toString(),
-  });
+  const gateway =
+    PACKED_GATEWAY_CLI === undefined
+      ? await startGateway(t, {
+          webhookUrl: webhook.url,
+          webhookToken: WEBHOOK_TOKEN,
+          centralApiUrl: FIXTURE_URL,
+          centralMcpUrl: new URL("/mcp", FIXTURE_URL).toString(),
+        })
+      : await startGatewayProcess(t, {
+          webhookUrl: webhook.url,
+          webhookToken: WEBHOOK_TOKEN,
+          centralApiUrl: FIXTURE_URL,
+          centralMcpUrl: new URL("/mcp", FIXTURE_URL).toString(),
+          executable: PACKED_GATEWAY_CLI,
+        });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN);
   await client.initialize();
 
@@ -92,6 +103,11 @@ test("enrolls and relays through the pinned FastMCP fixture", {
     messages: Array<{ status: string }>;
   }>(FIXTURE_URL, "/__test/inspect", { message_id: MESSAGE_ID });
   assert.equal(inspection.messages[0]?.status, "acked");
-  assert.equal(await gateway.stop(), 0);
+  const stopped = await gateway.stop();
+  if (typeof stopped === "number") {
+    assert.equal(stopped, 0);
+  } else {
+    assert.deepEqual(stopped, { code: 0, signal: null });
+  }
   await assertFilesExclude(gateway.artifactRoot, [EMAIL, CODE, USERNAME, agentId, MESSAGE_CONTENT]);
 });

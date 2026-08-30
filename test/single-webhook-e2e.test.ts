@@ -8,6 +8,11 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import Database from "better-sqlite3";
 
+import {
+  type CredentialStore,
+  EncryptedFileCredentialStore,
+  type WindowsCredentialAccessControl,
+} from "../src/credential-store.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook, type WebhookWake } from "./support/fake-webhook.js";
 import { runSecondGateway, startGatewayProcess } from "./support/gateway-process.js";
@@ -20,6 +25,46 @@ const EMAIL = "fixture-agent@example.test";
 const CODE = "246810";
 const MESSAGE_ID = "message_fixture_01";
 const MESSAGE_CONTENT = "fixture message body must stay out of gateway state";
+const WINDOWS_CHILD_PROCESS_SKIP =
+  process.platform === "win32" ? "W01: full-process Windows qualification follows G01" : false;
+const SUCCESSFUL_WINDOWS_ACCESS_CONTROL: WindowsCredentialAccessControl = {
+  async secure() {},
+};
+
+function inMemoryCredentialStore(): CredentialStore {
+  let credential: string | undefined;
+  return {
+    async load() {
+      return credential;
+    },
+    async save(value) {
+      if (credential !== undefined) throw new Error("A central identity is already stored");
+      credential = value;
+    },
+  };
+}
+
+function windowsCredentialStoreOption(createStore: () => CredentialStore): {
+  credentialStore?: CredentialStore;
+} {
+  return process.platform === "win32" ? { credentialStore: createStore() } : {};
+}
+
+function scopedCredentialStore(
+  path: string,
+  centralApiUrl: string,
+  centralMcpUrl: string,
+): EncryptedFileCredentialStore {
+  return new EncryptedFileCredentialStore(
+    path,
+    WEBHOOK_TOKEN,
+    JSON.stringify({
+      centralApiUrl: new URL(centralApiUrl).href,
+      centralMcpUrl: new URL(centralMcpUrl).href,
+    }),
+    { windowsAccessControl: SUCCESSFUL_WINDOWS_ACCESS_CONTROL },
+  );
+}
 
 function assertWakeAuthentication(wake: WebhookWake, messageId: string): string {
   assert.equal(wake.headers.authorization, `Bearer ${WEBHOOK_TOKEN}`);
@@ -114,6 +159,7 @@ async function waitForWakeDeletion(stateRoot: string, messageId: string): Promis
 test("enrolls one identity, buffers a consumed message, and keeps bodies transient", async (t) => {
   const central = await startFakeCentral(t);
   const webhook = await startFakeWebhook(t);
+  const windowsCredentialStore = windowsCredentialStoreOption(inMemoryCredentialStore);
   central.injectMessage(MESSAGE_ID, MESSAGE_CONTENT);
 
   const gateway = await startGateway(t, {
@@ -121,6 +167,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    ...windowsCredentialStore,
   });
 
   const malformedMarker = "malformed-body-must-not-be-reflected";
@@ -336,6 +383,7 @@ test("enrolls one identity, buffers a consumed message, and keeps bodies transie
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
     artifactRoot: gateway.artifactRoot,
+    ...windowsCredentialStore,
   });
   const restartedClient = new TestMcpClient(restarted.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [central.jwt],
@@ -539,6 +587,7 @@ test("malformed verification output never activates polling or reaches the local
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    ...windowsCredentialStoreOption(inMemoryCredentialStore),
   });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [central.jwt, secondToken],
@@ -566,6 +615,7 @@ test("a strict Python-literal verification wrapper enrolls without exposing its 
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    ...windowsCredentialStoreOption(inMemoryCredentialStore),
   });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [central.jwt],
@@ -668,6 +718,7 @@ test("a failed webhook attempt retries the same opaque ID", async (t) => {
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    ...windowsCredentialStoreOption(inMemoryCredentialStore),
   });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [central.jwt],
@@ -693,12 +744,16 @@ test("a stored credential cannot move to different development central endpoints
   const originalCentral = await startFakeCentral(t);
   const replacementCentral = await startFakeCentral(t);
   const webhook = await startFakeWebhook(t);
+  const credentialPath = join(artifactRoot, "state", "a2a-gateway", "central-credential.json");
   const gateway = await startGateway(t, {
     artifactRoot,
     webhookUrl: webhook.url,
     webhookToken: WEBHOOK_TOKEN,
     centralApiUrl: originalCentral.apiUrl,
     centralMcpUrl: originalCentral.mcpUrl,
+    ...windowsCredentialStoreOption(() =>
+      scopedCredentialStore(credentialPath, originalCentral.apiUrl, originalCentral.mcpUrl),
+    ),
   });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [originalCentral.jwt],
@@ -714,6 +769,9 @@ test("a stored credential cannot move to different development central endpoints
       webhookToken: WEBHOOK_TOKEN,
       centralApiUrl: replacementCentral.apiUrl,
       centralMcpUrl: replacementCentral.mcpUrl,
+      ...windowsCredentialStoreOption(() =>
+        scopedCredentialStore(credentialPath, replacementCentral.apiUrl, replacementCentral.mcpUrl),
+      ),
     }),
     /gateway exited before startup with code 7/u,
   );
@@ -721,7 +779,9 @@ test("a stored credential cannot move to different development central endpoints
   assert.deepEqual(replacementCentral.calls, []);
 });
 
-test("the CLI completes the flow through development central URLs", async (t) => {
+test("the CLI completes the flow through development central URLs", {
+  skip: WINDOWS_CHILD_PROCESS_SKIP,
+}, async (t) => {
   const central = await startFakeCentral(t);
   central.setApiPollAvailable(false);
   const webhook = await startFakeWebhook(t);
@@ -788,6 +848,7 @@ test("development verbose mode prints bodies to stderr and redacts credentials a
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
     verbose: true,
+    ...windowsCredentialStoreOption(inMemoryCredentialStore),
   });
   const client = new TestMcpClient(gateway.endpoint, WEBHOOK_TOKEN, {
     forbiddenResponseValues: [central.jwt],
@@ -828,7 +889,9 @@ test("development verbose mode prints bodies to stderr and redacts credentials a
   await scanFiles(gateway.artifactRoot, [central.jwt, EMAIL, CODE, MESSAGE_CONTENT]);
 });
 
-test("the built CLI stays foreground, owns one instance, and stops on SIGTERM", async (t) => {
+test("the built CLI stays foreground, owns one instance, and stops on SIGTERM", {
+  skip: WINDOWS_CHILD_PROCESS_SKIP,
+}, async (t) => {
   const webhook = await startFakeWebhook(t);
   const token = "fedcba9876543210fedcba9876543210fedcba9876543210";
   const gateway = await startGatewayProcess(t, { webhookUrl: webhook.url, webhookToken: token });

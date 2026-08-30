@@ -30,6 +30,9 @@ const OTHER_CENTRAL_JWT = "other-header.other-payload.other-signature";
 const CREDENTIAL_SCOPE = "central:https://api.example.test|https://mcp.example.test/mcp";
 const OTHER_CREDENTIAL_SCOPE =
   "central:https://other-api.example.test|https://other-mcp.example.test/mcp";
+const SUCCESSFUL_WINDOWS_ACCESS_CONTROL: WindowsCredentialAccessControl = {
+  async secure() {},
+};
 const SECRET_MARKERS = [
   HOOK_TOKEN,
   OTHER_HOOK_TOKEN,
@@ -77,7 +80,9 @@ function credentialStore(
   path: string,
   token = HOOK_TOKEN,
   scope = CREDENTIAL_SCOPE,
-  options: EncryptedFileCredentialStoreOptions = {},
+  options: EncryptedFileCredentialStoreOptions = process.platform === "win32"
+    ? { windowsAccessControl: SUCCESSFUL_WINDOWS_ACCESS_CONTROL }
+    : {},
 ): EncryptedFileCredentialStore {
   return new EncryptedFileCredentialStore(path, token, scope, options);
 }
@@ -273,6 +278,12 @@ test("reports persistence failure without writing plaintext or a final file", as
   await expectSafeRejection(() => access(item.path));
   await assertNoSecretFiles(item.root);
 });
+
+if (process.platform === "win32") {
+  test("W01 qualifies native Windows DACL and atomic replacement", {
+    skip: "W01: native credential DACL and replacement are not qualified on Windows",
+  }, () => {});
+}
 
 test("fails closed when injected Windows DACL enforcement fails", async (t) => {
   const item = await fixture(t, "a2a-credential-windows-acl-test-");
