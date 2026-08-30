@@ -4,8 +4,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { EncryptedFileCredentialStore } from "../src/credential-store.js";
+import { defaultGatewayPaths } from "../src/gateway-paths.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import {
@@ -17,7 +19,6 @@ import {
   runT03ArtifactScan,
   startT03ScriptedCentralApi,
   type T03ResponsePlan,
-  waitForT03Observation,
 } from "./support/t03-observation.js";
 import { V2_PROCESS_BARRIER_NAMES } from "./support/v2-process-barriers.js";
 import { startV2ManagedProcess, v2NodeProcessEnvironment } from "./support/v2-process-runtime.js";
@@ -105,7 +106,11 @@ async function publicationFixture(t: TestContext): Promise<PublicationFixture> {
     centralApiUrl: new URL(api.url).href,
     centralMcpUrl: new URL(central.mcpUrl).href,
   });
-  const credentialPath = join(artifactRoot, "state", "a2a-gateway", "central-credential.json");
+  const credentialPath = defaultGatewayPaths(
+    process.platform,
+    { XDG_STATE_HOME: join(artifactRoot, "state") },
+    artifactRoot,
+  ).credentialPath;
   const store = new EncryptedFileCredentialStore(credentialPath, T03_WEBHOOK_TOKEN, scope);
   await store.saveCredential({ version: 2, plaintext: JSON.stringify(original) });
   const originalDigest = createHash("sha256")
@@ -138,6 +143,7 @@ function startWorker(t: TestContext, fixture: PublicationFixture, expectPublicat
       T03_WEBHOOK_URL: fixture.webhookUrl,
       T03_WEBHOOK_TOKEN,
       T03_CREDENTIAL_DIGEST: fixture.originalDigest,
+      T03_CREDENTIAL_PATH: fixture.credentialPath,
       ...(expectPublication ? { T03_EXPECT_PUBLICATION: "1" } : {}),
     }),
     gracefulStopMs: 500,
@@ -164,6 +170,14 @@ async function finishWorker(worker: ReturnType<typeof startWorker>): Promise<voi
 
 function reissueCount(fixture: PublicationFixture): number {
   return fixture.api.requests.filter((request) => request.path === "/api/v2/token/reissue").length;
+}
+
+async function waitForReissueCount(fixture: PublicationFixture, expected: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (reissueCount(fixture) !== expected && Date.now() < deadline) {
+    await delay(10);
+  }
+  assert.equal(reissueCount(fixture), expected, "reissue request count missed its bound");
 }
 
 async function scanPublicationArtifacts(
@@ -200,7 +214,7 @@ test("T03-C01 a full-process crash during pre-response uncertainty retains the o
   const fixture = await publicationFixture(t);
   const crashed = startWorker(t, fixture, true);
   await reachOperation(crashed);
-  await waitForT03Observation(() => reissueCount(fixture) === 2);
+  await waitForReissueCount(fixture, 2);
   assert.equal(
     createHash("sha256")
       .update(await readFile(fixture.credentialPath))
@@ -221,7 +235,7 @@ test("T03-C01 a full-process crash during pre-response uncertainty retains the o
 
   const recovery = startWorker(t, fixture, true);
   await reachOperation(recovery);
-  await waitForT03Observation(() => reissueCount(fixture) === 4);
+  await waitForReissueCount(fixture, 4);
   await finishWorker(recovery);
   const afterRecoveryStored = await new EncryptedFileCredentialStore(
     fixture.credentialPath,
@@ -243,7 +257,7 @@ test("T03-C02 a full-process crash after publication reloads one complete replac
   const fixture = await publicationFixture(t);
   const crashed = startWorker(t, fixture, true);
   await reachOperation(crashed);
-  await waitForT03Observation(() => reissueCount(fixture) === 2);
+  await waitForReissueCount(fixture, 2);
   fixture.releaseFirstResponse();
   crashed.barriers.release("operation");
   await crashed.barriers.waitFor("commit", 10_000);

@@ -101,6 +101,8 @@ async function recordScenario(
 }> {
   useT03FixtureClock(t);
   const central = await startFakeCentral(t);
+  central.advanceClock(43_201);
+  t.mock.timers.setTime(central.clock() * 1_000);
   const api = await startT03ScriptedCentralApi(t, [{ status: 200, hold: true }]);
   const webhook = await startFakeWebhook(t);
   const start = startGateway(t, {

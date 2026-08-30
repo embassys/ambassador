@@ -1,7 +1,6 @@
 # T03 red failure inventory
 
-Status: runnable future-v2 gateway contract; G01 credential and G02 enrollment
-checks green, later gateway work intentionally red
+Status: closed local G01-G03 gateway contract; all reviewed T03 behavior green
 
 The user accepted this classified gateway inventory on 2026-08-30. It merged
 through PR `#28`. Central S01 review and enforcement remain separate gates.
@@ -26,16 +25,15 @@ node --test --test-concurrency=1 --test-reporter=spec \
 
 The final `0.2.6` observation on 2026-08-29 was 128 red behavior vectors and
 one existing closed-schema guard green. G02 review added seven response-order,
-case-collision, redirect, and cookie-header regression vectors. After G02, 31
-of the 136 behavior vectors remain red and 105 are green: 19 G01 credential
-checks, 85 newly green G02 enrollment checks, and the shipped guard. Node
-reports 146 test nodes: 34 failed and 112 passed because three failing and
-seven passing parameterized parents are counted in addition to their child
-vectors.
+case-collision, redirect, and cookie-header regression vectors. G03 closes the
+remaining 31 protected-transport, reissue, publication, boundary, and artifact
+vectors. All 136 behavior vectors are green. Node reports all 146 test nodes
+passing because ten parameterized parents are counted in addition to their
+child vectors.
 
 ## Failure classification
 
-| Test | Behavior vectors | Post-G02 observation | Required gateway behavior |
+| Test | Behavior vectors | Post-G03 observation | Required gateway behavior |
 | --- | ---: | --- | --- |
 | T03-R01 | 1 | Green: bootstrap catalog remains available without central MCP | Preserve gateway ownership of the three bootstrap tools |
 | T03-R02 | 1 | Green: bootstrap schemas match the accepted bounds and patterns | Preserve exact closed registration, verification, and resend schemas |
@@ -43,7 +41,7 @@ vectors.
 | T03-R04 | 1 | Green: resend uses REST and returns the generic safe result | Preserve the token-free resend projection |
 | T03-R05, S01 | 2 | Green: verification creates fresh bound proofs and persists one credential-v2 record | Preserve nonce retry, independent binding validation, and token interception |
 | T03-R06 | 1 | Green: persistence failure leaves the gateway unenrolled | Preserve persistence as the issuance commit point |
-| T03-R07 | 1 | The credential-v2 record loads, then protected startup stops at the isolated legacy accessor | Reload the bound key/token and use fresh token-free DPoP after restart |
+| T03-R07 | 1 | Green: restart reloads the bound key/token and uses fresh token-free DPoP | Preserve explicit version discrimination and protected restart behavior |
 | T03-B02 | 13 | Green: all invalid bootstrap inputs stop locally | Preserve exact one-over, character, and unknown-field rejection |
 | T03-B02a | 1 | Green: exact maximum bootstrap fields remain accepted | Preserve the 254-byte email, 50-byte username, and 128-byte display-name boundaries |
 | T03-B03 | 10 | Green: reviewed errors and unsafe outcomes use fixed local mappings | Preserve no retry or fallback after uncertainty, including bodyless and non-JSON redirects |
@@ -56,19 +54,19 @@ vectors.
 | T03-N02 | 17 | Green: invalid issuance credentials are rejected before persistence | Preserve type, lifetime, identity, audience, binding, JWT, case-insensitive token uniqueness, response-cookie, reflection, media, cache, and size validation |
 | T03-N03 | 1 | Green: exact 4096-byte bound token persists without local exposure | Preserve the exact token boundary and interceptor |
 | T03-S02 | 14 | Green: every malformed fresh-install credential-v2 record fails before central dispatch | Preserve rejection of duplicate/missing/unknown fields, wrong version/type/algorithm, malformed JWT/JWK/DER, non-P-256 keys, missing binding, and key mismatch |
-| T03-S03 | 1 | The credential-v2 record loads, then protected startup stops before G03 transport | Complete real protected operations and independently verify every fresh ES256 proof, `htm`, fixed-route `htu`, `ath`, and token-free body |
-| T03-S04 | 1 | The credential-v2 record loads, but scheduled reissue cannot start before G03 transport | Reissue at 12 hours with one idempotency key, one nonce retry, the same P-256 key, and one persisted token replacement |
+| T03-S03 | 1 | Green: real protected operations use independently verified fresh ES256 proofs and token-free bodies | Preserve exact `htm`, canonical `htu`, `ath`, and nonce-domain behavior |
+| T03-S04 | 1 | Green: scheduled same-key reissue publishes one validated replacement | Preserve the 12-hour window, one idempotency key, one nonce retry, and persistence-before-use |
 | T03-S05 | 1 | Green: normal artifacts and captures exclude actual enrollment and DPoP markers | Preserve scanning of runtime email, code, token, key, proof, nonce, request, and response markers |
-| T03-L01 | 8 | Five one-over credential records now fail closed; the three exact-bound records load but stop before G03 protected startup | Preserve G01 credential bounds; complete exact-bound protected work and keep generated proof/auth/combined/total headers within their ceilings |
-| T03-P01 | 1 | The credential-v2 record loads, then protected startup stops before central MCP initialization | Use fresh nonce-bearing proofs for initialize, notification, GET reconnect, catalog, call, cancellation, and DELETE close on fixed `/mcp` |
-| T03-P02 | 1 | The credential-v2 record loads, then protected startup stops before the proof-rejection exchange | Surface a terminal protected-operation failure and never retry, reissue, replace, or use bearer after proof rejection |
-| T03-U01 | 1 | The credential-v2 record loads, but reissue cannot start before G03 transport | Retry the one idempotent operation with one key, fresh proofs, and one observed publication |
-| T03-U02-U05 | 4 | G01 loads and persists envelope v2; protected reissue, expiry, and invalid-token behavior remain red | Retain old token after save failure; disable at expiry; never recover on 401; persist/restart one encrypted envelope-v2 replacement and reject endpoint mismatch |
-| T03-U06 | 8 | Each fixture credential loads, then stops before the G03 reissue exchange | Reject issuer, subject, ordered audience, thumbprint, signing algorithm, lifetime, reused `jti`, and nonadvancing expiry changes while retaining the old credential |
-| T03-U07 | 7 | Each fixture credential loads, then stops before the G03 reissue exchange | Apply the verification interceptor's cache/media/exact-shape/token-reflection rules to reissue and scan artifacts for the rejected runtime credential markers |
-| T03-A01 | 1 | Enrollment fails before a verbose reissue run | Scan verbose artifacts/stdout/stderr for actual original/replacement tokens, key, proofs, nonces, code, and idempotency key after observed publication |
-| T03-C01 | 1 | Credential-v2 startup is unavailable | After full-process pre-response uncertainty, retain the complete old encrypted record, retry after restart, and scan crash artifacts |
-| T03-C02 | 1 | Credential-v2 startup is unavailable | Use encrypted-file digest change as the post-publication barrier, crash the process, reload exactly one complete envelope-v2 replacement, and scan artifacts |
+| T03-L01 | 8 | Green: five one-over records fail closed and all three exact-bound records complete protected work | Preserve credential, proof, authorization, combined-authentication, and total-header ceilings |
+| T03-P01 | 1 | Green: initialize, notification, GET reconnect, catalog, call cancellation, and DELETE close use fresh nonce-bearing proofs | Preserve fresh proof creation for every actual MCP HTTP request |
+| T03-P02 | 1 | Green: proof rejection is terminal | Preserve no retry, reissue, replacement, or bearer fallback |
+| T03-U01 | 1 | Green: one uncertain reissue repeats with the same key and fresh proof | Preserve the operation-specific idempotent exception and one publication |
+| T03-U02-U05 | 4 | Green: persistence failure, expiry, invalid-token, encrypted replacement, restart, and endpoint scope behave fail closed | Preserve old-token retention only while valid, no network at expiry, and no 401 recovery |
+| T03-U06 | 8 | Green: every identity, key, algorithm, lifetime, token-ID, and expiry change is rejected | Preserve exact same-key replacement invariants while retaining the old credential |
+| T03-U07 | 7 | Green: strict cache, media, shape, token-reflection, and artifact rules reject every unsafe response | Preserve token interception before generic handling and zero publication |
+| T03-A01 | 1 | Green: verbose enrollment and reissue artifacts contain none of the runtime secret markers | Preserve redaction of token, key, proof, nonce, code, and idempotency bytes |
+| T03-C01 | 1 | Green: a full-process pre-response crash retains the old encrypted record and restart recovers | Preserve uncertainty, restart retry, and crash-artifact scanning |
+| T03-C02 | 1 | Green: a post-publication crash reloads one complete envelope-v2 replacement | Preserve encrypted-file digest publication evidence and atomic reload |
 
 ## Deliberate instrumentation boundaries
 
@@ -100,5 +98,6 @@ vectors.
   Exact hostile server/proxy header and DPoP-field acceptance boundaries remain
   in the T01/S01 fixture/security suites, where raw wire framing is observable.
 
-No production file, migration path, or external deployment claim is part of
-T03.
+T03 makes no migration or external deployment claim. Passing it establishes
+only that the local gateway and the approved fixture contract agree; live
+central qualification remains gated separately.

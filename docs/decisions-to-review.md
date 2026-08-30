@@ -189,6 +189,49 @@ central owner and returns a material contract difference for review.
 
 ## Active architecture and dependency decisions
 
+- T03-S03 treats protected REST as transport-observational until a legitimate
+  protected REST operation occurs. A full-lifetime credential does not permit
+  an early reissue, probe, activation, receive, legacy poll, or mixed-mode
+  request merely to exercise the transport. T03-S04, U01 through U07, A01, and
+  C01 through C02 own protected REST proof coverage; G04 owns activation and
+  receive startup. This preserves the accepted task boundary while validating
+  every protected REST request that is actually observed.
+- T03-L01 advances its internal fixture clock by 43,201 seconds before it
+  expects an exact-boundary protected API request. That makes scheduled
+  same-key reissue legitimately due, so its 4,096-byte token, 1,024-byte key,
+  8-KiB plaintext, generated-header, authorization, and proof bounds do not
+  imply an otherwise forbidden startup probe or early reissue.
+- T03-U04 seeds its revoked-token condition through the accepted revocation
+  request body, `{"scope":"identity"}`. The previous empty request was rejected
+  as `invalid_request` before it could establish the authentication-failure
+  condition that U04 is intended to test.
+- T03-U05 explicitly selects the internal version 2 fixture assembly for its
+  first fresh enrollment. Its later starts intentionally omit that seam and
+  select protected transport from the stored outer credential-version
+  discriminant; this does not add production discovery, fallback, or migration.
+- T03-A01 likewise selects the internal version 2 fixture assembly for the
+  enrollment phase it is explicitly scanning. Its second start selects the
+  protected path from the persisted version 2 discriminant.
+- T03-A01 also enables the existing enrollment-fetch observation seam for its
+  first phase. Without that internal seam, the test's global observer sees the
+  later protected reissue proofs but cannot count proofs sent through G02's
+  native Node HTTP bootstrap implementation.
+- T03-P01 ignores bodyless MCP `GET` and `DELETE` requests when it searches the
+  captured stream for a JSON-RPC `tools/call`. Those transport requests remain
+  mandatory and are validated independently in the same test.
+- T03-C01/C02 use a 10-second wall-clock bound for cross-process reissue
+  observations. The previous 2,000 parent event-loop-turn bound could expire
+  before the separately spawned gateway initialized Node's HTTP client, even
+  while that worker remained healthy and running.
+- T03-C01/C02 now seed and observe the credential path selected by the real
+  platform path resolver and pass that exact path to their worker. The previous
+  hard-coded Linux state path left a macOS child unenrolled, so it could not
+  exercise protected reissue or publication.
+- The one permitted uncertain scheduled-reissue repeat waits 10 milliseconds
+  in process, reuses the operation's lowercase UUID v4 idempotency key, and
+  creates a fresh proof. Redirects, HTTP results, malformed responses, and
+  persistence failures do not use this exception. Production qualification
+  should confirm whether the fixed backoff needs a different bounded value.
 - D05 is complete. ADRs 0028 through 0031 contain the accepted connector
   foundation decisions. ADR 0032 permits K01 against the accepted G04 fixture
   contract before the external central service is ready.
