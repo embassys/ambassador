@@ -147,19 +147,24 @@ async function waitForUnitEmpty(record: MutableLaunchRecord): Promise<boolean> {
   return true;
 }
 
-async function cleanRecordedDescendant(pid: number): Promise<void> {
-  if (!signalRecordedDescendant(pid, "SIGTERM")) return;
+async function waitForRecordedProcessExit(pid: number): Promise<boolean> {
   const deadline = Date.now() + CLEANUP_MS;
   while (Date.now() < deadline) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    try {
-      process.kill(pid, 0);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
-      throw error;
-    }
+    if (!processExists(pid)) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  signalRecordedDescendant(pid, "SIGKILL");
+  return !processExists(pid);
+}
+
+async function terminateRecordedProcess(pid: number): Promise<void> {
+  if (!signalRecordedDescendant(pid, "SIGTERM")) return;
+  if (await waitForRecordedProcessExit(pid)) return;
+  if (!signalRecordedDescendant(pid, "SIGKILL")) return;
+  assert.equal(
+    await waitForRecordedProcessExit(pid),
+    true,
+    `fake Codex process ${pid} survived SIGKILL`,
+  );
 }
 
 export async function startFakeCodexAppServer(
@@ -263,11 +268,11 @@ export async function startFakeCodexAppServer(
 
   t.after(async () => {
     for (const [child, completion] of children) await waitForChildExit(child, completion);
-    for (const record of records) {
-      if (processExists(record.pid)) signalRecordedDescendant(record.pid, "SIGKILL");
-    }
     for (const pid of new Set(records.flatMap((record) => record.descendantPid ?? []))) {
-      await cleanRecordedDescendant(pid);
+      await terminateRecordedProcess(pid);
+    }
+    for (const pid of new Set(records.map((record) => record.pid))) {
+      await terminateRecordedProcess(pid);
     }
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));

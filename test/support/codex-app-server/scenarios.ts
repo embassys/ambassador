@@ -9,7 +9,7 @@ import type {
   ProviderResumeRequest,
   ProviderStartRequest,
 } from "../connector/index.js";
-import type { CodexAdapterPort } from "./cx03-production.js";
+import type { CodexAdapterPort, CodexSpawnObservationForTest } from "./cx03-production.js";
 import { loadCx03Production } from "./cx03-production.js";
 import { type FakeCodexAppServer, startFakeCodexAppServer } from "./fake-app-server.js";
 import type { FakeCodexExchange, FakeCodexProcessPlan } from "./types.js";
@@ -177,6 +177,9 @@ export async function createCx02Adapter(
     readonly fixtureExecutablePath?: string | null;
     readonly clock?: ConnectorClock;
     readonly afterVersionProbeForTest?: () => void | Promise<void>;
+    readonly spawnObserverForTest?: {
+      observe(record: CodexSpawnObservationForTest): void;
+    };
     readonly containmentForTest?: {
       contain(executionId: string): Promise<boolean>;
       isEmpty(executionId: string): boolean;
@@ -199,6 +202,9 @@ export async function createCx02Adapter(
     ...(options.afterVersionProbeForTest === undefined
       ? {}
       : { afterVersionProbeForTest: options.afterVersionProbeForTest }),
+    ...(options.spawnObserverForTest === undefined
+      ? {}
+      : { spawnObserverForTest: options.spawnObserverForTest }),
     ...(options.containmentForTest === undefined
       ? {}
       : { containmentForTest: options.containmentForTest }),

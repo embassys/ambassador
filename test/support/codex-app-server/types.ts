@@ -5,6 +5,7 @@ export const CODEX_FIXTURE_SCHEMA_SHA256 =
 export type FakeCodexWireWrite =
   | { readonly kind: "json"; readonly value: unknown; readonly gate?: string }
   | { readonly kind: "utf8"; readonly value: string; readonly gate?: string }
+  | { readonly kind: "stderr_utf8"; readonly value: string; readonly gate?: string }
   | { readonly kind: "base64"; readonly value: string; readonly gate?: string };
 
 export interface FakeCodexExchange {

@@ -134,6 +134,71 @@ test("CX02-X16 interrupts only a bound exact turn and never extends cancellation
   );
   await preTurnIterator.return?.();
 
+  const writtenWithoutTurn = await createCx02Adapter(t, "CX02-CX03:X16", {
+    appPlan: {
+      kind: "app-server",
+      exchanges: [
+        ...handshakeExchanges(),
+        {
+          expectMethod: "thread/start",
+          result: threadSettingsResponse(cwd),
+          afterResponse: [{ kind: "json", value: threadStarted(cwd) }],
+        },
+        {
+          expectMethod: "turn/start",
+          beforeResponse: [
+            {
+              kind: "json",
+              value: { method: "warning", params: { message: "held before turn binding" } },
+              gate: "hold_turn_start_response",
+            },
+          ],
+          result: { turn: validTurn() },
+          afterResponse: [
+            { kind: "json", value: turnStarted() },
+            { kind: "json", value: turnCompleted("completed", "not safely cancelled") },
+          ],
+        },
+      ],
+    },
+  });
+  const writtenIterator = writtenWithoutTurn.adapter
+    .start(startRequest("input already written"))
+    [Symbol.asyncIterator]();
+  assert.equal(eventName((await writtenIterator.next()).value), "session_bound");
+  let writtenEventSettled = false;
+  const writtenEvent = writtenIterator.next().then((result) => {
+    writtenEventSettled = true;
+    return result;
+  });
+  await writtenWithoutTurn.fake.waitForRequests(4);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(writtenEventSettled, false);
+  assert.deepEqual(await writtenWithoutTurn.adapter.cancel(cancelRequest(null)), {
+    status: "not_found",
+  });
+  assert.equal(
+    writtenWithoutTurn.fake.launches
+      .at(-1)
+      ?.requests.some((request) => request.method === "turn/interrupt"),
+    false,
+  );
+  writtenWithoutTurn.fake.release("hold_turn_start_response");
+  assert.equal(eventName((await writtenEvent).value), "turn_bound");
+  const writtenTerminal = await writtenIterator.next();
+  assert.deepEqual(writtenTerminal.value, {
+    event: "reply",
+    execution_id: CX02_EXECUTION_ID,
+    text: "not safely cancelled",
+  });
+  assert.equal((await writtenIterator.next()).done, true);
+  assert.equal(
+    writtenWithoutTurn.fake.launches
+      .at(-1)
+      ?.requests.some((request) => request.method === "turn/interrupt"),
+    false,
+  );
+
   const approvalRequest = {
     id: "approval_waiting",
     method: "item/commandExecution/requestApproval",

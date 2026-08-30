@@ -32,10 +32,29 @@ function eventName(value: unknown): unknown {
     : undefined;
 }
 
-function observeProviderEvents(adapter: CodexAdapterPort, observed: unknown[]): ProviderPort {
-  const observe = async function* (source: AsyncIterable<unknown>): AsyncIterable<unknown> {
+interface ObservedProviderInvocation {
+  readonly method: "start" | "resume" | "recover";
+  readonly request: Readonly<Record<string, unknown>>;
+  readonly events: unknown[];
+}
+
+function observeProviderEvents(
+  adapter: CodexAdapterPort,
+  observed: ObservedProviderInvocation[],
+): ProviderPort {
+  const observe = async function* (
+    method: ObservedProviderInvocation["method"],
+    request: unknown,
+    source: AsyncIterable<unknown>,
+  ): AsyncIterable<unknown> {
+    const invocation: ObservedProviderInvocation = {
+      method,
+      request: structuredClone(request as Readonly<Record<string, unknown>>),
+      events: [],
+    };
+    observed.push(invocation);
     for await (const event of source) {
-      observed.push(structuredClone(event));
+      invocation.events.push(structuredClone(event));
       yield event;
     }
   };
@@ -48,13 +67,13 @@ function observeProviderEvents(adapter: CodexAdapterPort, observed: unknown[]): 
       return adapter.postTerminalDeliveries;
     },
     start(request) {
-      return observe(adapter.start(request as never));
+      return observe("start", request, adapter.start(request as never));
     },
     resume(request) {
-      return observe(adapter.resume(request as never));
+      return observe("resume", request, adapter.resume(request as never));
     },
     recover(request) {
-      return observe(adapter.recover(request as never));
+      return observe("recover", request, adapter.recover(request as never));
     },
     async cancel(request) {
       return await adapter.cancel(request as never);
@@ -316,7 +335,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
       terminalGate: "parallel_release",
     }),
   );
-  const providerEvents: unknown[] = [];
+  const providerInvocations: ObservedProviderInvocation[] = [];
   const connector = await startConnectorRuntime({
     providerKind: "codex",
     webhookPort: await unusedLoopbackPort(),
@@ -325,7 +344,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     policy: "read-only",
     gatewayEndpoint: gateway.endpoint,
     stateDirectory,
-    provider: observeProviderEvents(adapter, providerEvents),
+    provider: observeProviderEvents(adapter, providerInvocations),
   });
   t.after(async () => await connector.close());
   gateway.enqueueMessage(k02Message("cx02_chain_1", "cx02_conversation_a", "first input"));
@@ -418,33 +437,110 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
       exactTurnStartRequest(workingDirectory, CX02_THREAD_ID, "second input"),
     ],
   );
-  const terminalProviderEvents = providerEvents.filter((event) =>
-    ["reply", "failed", "uncertain", "completed_without_reply", "cancelled"].includes(
-      String(eventName(event)),
-    ),
-  );
-  assert.equal(terminalProviderEvents.length, 3);
-  assert.equal(
-    new Set(terminalProviderEvents.map((event) => (event as { execution_id: string }).execution_id))
-      .size,
-    3,
-  );
-  assert.deepEqual(
-    providerEvents
-      .filter((event) => eventName(event) === "turn_bound")
-      .map((event) => (event as { provider_turn_id: string }).provider_turn_id)
-      .sort(),
-    [CX02_TURN_ID, "019c0000-0000-7000-8000-000000000003", turnTwo].sort(),
-  );
+  assert.equal(providerInvocations.length, 3);
+  const expectedExecutions = new Map<
+    string,
+    {
+      readonly method: "start" | "resume";
+      readonly input: string;
+      readonly sessionId: string;
+      readonly turnId: string;
+      readonly reply: string;
+    }
+  >([
+    [
+      "cx02_chain_1",
+      {
+        method: "start",
+        input: "first input",
+        sessionId: CX02_THREAD_ID,
+        turnId: CX02_TURN_ID,
+        reply: "first reply",
+      },
+    ],
+    [
+      "cx02_parallel_1",
+      {
+        method: "start",
+        input: "parallel input",
+        sessionId: threadTwo,
+        turnId: turnTwo,
+        reply: "parallel reply",
+      },
+    ],
+    [
+      "cx02_chain_2",
+      {
+        method: "resume",
+        input: "second input",
+        sessionId: CX02_THREAD_ID,
+        turnId: "019c0000-0000-7000-8000-000000000003",
+        reply: "second reply",
+      },
+    ],
+  ]);
+  const executionIds = new Set<string>();
+  for (const invocation of providerInvocations) {
+    const messageId = invocation.request.message_id;
+    assert.equal(typeof messageId, "string");
+    const expected = expectedExecutions.get(messageId as string);
+    assert.ok(expected !== undefined, `unexpected provider invocation for ${String(messageId)}`);
+    assert.equal(invocation.method, expected.method);
+    assert.equal(invocation.request.text, expected.input);
+    if (expected.method === "resume") {
+      assert.equal(invocation.request.provider_session_id, expected.sessionId);
+    }
+    const executionId = invocation.request.execution_id;
+    assert.equal(typeof executionId, "string");
+    assert.equal(executionIds.has(executionId as string), false);
+    executionIds.add(executionId as string);
+    assert.ok(
+      invocation.events.every(
+        (event) =>
+          event !== null &&
+          typeof event === "object" &&
+          !Array.isArray(event) &&
+          (event as { execution_id?: unknown }).execution_id === executionId,
+      ),
+    );
+    const sessions = invocation.events.filter((event) => eventName(event) === "session_bound");
+    assert.equal(sessions.length, expected.method === "start" ? 1 : 0);
+    if (sessions.length === 1) {
+      assert.equal(
+        (sessions[0] as { provider_session_id: unknown }).provider_session_id,
+        expected.sessionId,
+      );
+    }
+    const turns = invocation.events.filter((event) => eventName(event) === "turn_bound");
+    assert.equal(turns.length, 1);
+    assert.equal((turns[0] as { provider_turn_id: unknown }).provider_turn_id, expected.turnId);
+    const terminals = invocation.events.filter((event) =>
+      ["reply", "failed", "uncertain", "completed_without_reply", "cancelled"].includes(
+        String(eventName(event)),
+      ),
+    );
+    assert.equal(terminals.length, 1);
+    assert.deepEqual(terminals[0], {
+      event: "reply",
+      execution_id: executionId,
+      text: expected.reply,
+    });
+  }
+  assert.equal(executionIds.size, 3);
   assert.equal(gateway.calls.filter((call) => call.name === "ack_message").length, 3);
   assert.equal(gateway.calls.filter((call) => call.name === "reply_message").length, 3);
   assert.equal(gateway.calls.filter((call) => call.name === "complete_message").length, 0);
+  const replyCalls = gateway.calls.filter((call) => call.name === "reply_message");
+  assert.equal(replyCalls.length, 3);
   assert.deepEqual(
-    gateway.calls
-      .filter((call) => call.name === "reply_message")
-      .map((call) => call.arguments.text)
-      .sort(),
-    ["first reply", "parallel reply", "second reply"].sort(),
+    Object.fromEntries(
+      replyCalls.map((call) => [call.arguments.message_id, call.arguments.text] as const),
+    ),
+    {
+      cx02_chain_1: "first reply",
+      cx02_parallel_1: "parallel reply",
+      cx02_chain_2: "second reply",
+    },
   );
   for (const messageId of ["cx02_chain_1", "cx02_parallel_1", "cx02_chain_2"]) {
     const terminalIndex = gateway.calls.findIndex(

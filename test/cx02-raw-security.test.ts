@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
 import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 
@@ -19,6 +20,7 @@ import {
   type FakeCodexWireWrite,
   handshakeExchanges,
   resumeRequest,
+  startFakeCodexAppServer,
   startRequest,
   syntheticCx02Environment,
   threadSettingsResponse,
@@ -200,6 +202,37 @@ async function runCommand(
       else reject(new Error("CX02 artifact command failed"));
     });
   });
+}
+
+async function runDiagnosticWorker(request: {
+  readonly executablePath: string;
+  readonly workingDirectory: string;
+  readonly homeDirectory: string;
+  readonly input: string;
+}): Promise<{ stdout: Buffer; stderr: Buffer }> {
+  const worker = fileURLToPath(
+    new URL("./support/codex-app-server/adapter-diagnostic-worker.js", import.meta.url),
+  );
+  const child = spawn(process.execPath, [worker], {
+    cwd: process.cwd(),
+    env: { ...syntheticCx02Environment(request.homeDirectory) },
+    shell: false,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(Buffer.from(chunk)));
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
+  child.stdin.end(`${JSON.stringify(request)}\n`);
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0 && signal === null) resolve();
+      else reject(new Error(`CX02 diagnostic worker failed: ${code}/${signal}`));
+    });
+  });
+  return { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) };
 }
 
 test("CX02-X20 enforces UTF-8 JSONL record byte and depth boundaries before normalization", async (t) => {
@@ -522,19 +555,27 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   t.after(async () => await rm(root, { recursive: true, force: true }));
   const cwd = join(root, "workspace");
   const stateDirectory = join(root, "state");
+  const runtimeHome = join(root, "home-runtime");
+  const approvalHome = join(root, "home-approval");
+  const diagnosticHome = join(root, "home-diagnostic");
   await mkdir(cwd, { mode: 0o700 });
   await mkdir(stateDirectory, { mode: 0o700 });
+  await mkdir(runtimeHome, { mode: 0o700 });
+  await mkdir(approvalHome, { mode: 0o700 });
+  await mkdir(diagnosticHome, { mode: 0o700 });
   const markers = [
     "CX02_A2A_TEXT_SECRET",
     "CX02_REPLY_SECRET",
     "CX02_TOOL_DETAIL_SECRET",
     "CX02_APPROVAL_SECRET",
     "CX02_CODEX_AUTH_SECRET",
+    "CX02_POST_INPUT_CRASH_SECRET",
+    "CX02_DIAGNOSTIC_SECRET",
   ] as const;
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X23", {
     workingDirectory: cwd,
     inheritedEnvironment: {
-      ...syntheticCx02Environment("leakage"),
+      ...syntheticCx02Environment(runtimeHome),
       OPENAI_API_KEY: markers[4],
       CX02_WEBHOOK_TOKEN: "a".repeat(48),
     },
@@ -594,7 +635,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   const approval = await createCx02Adapter(t, "CX02-CX03:X23", {
     workingDirectory: cwd,
     inheritedEnvironment: {
-      ...syntheticCx02Environment("leakage-approval"),
+      ...syntheticCx02Environment(approvalHome),
       OPENAI_API_KEY: markers[4],
       CX02_WEBHOOK_TOKEN: "a".repeat(48),
     },
@@ -624,7 +665,53 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   assert.ok(!JSON.stringify(approvalEvent).includes(markers[3]));
   await approvalIterator.return?.();
 
-  const ownedRoots = [root, dirname(fake.executablePath), dirname(approval.fake.executablePath)];
+  const crashFake = await startFakeCodexAppServer(t, [
+    { kind: "version", stdout: "codex-cli 0.149.0\n" },
+    {
+      kind: "app-server",
+      exchanges: [
+        ...started(cwd),
+        {
+          expectMethod: "turn/start",
+          result: { turn: validTurn() },
+          afterResponse: [
+            {
+              kind: "json",
+              value: {
+                method: "turn/started",
+                params: { threadId: CX02_THREAD_ID, turn: validTurn() },
+              },
+            },
+            { kind: "stderr_utf8", value: `${markers[6]}\n` },
+            {
+              kind: "utf8",
+              value: `{"method":"turn/completed","diagnostic":"${markers[5]}"\n`,
+            },
+          ],
+          exitCodeAfter: 87,
+        },
+      ],
+    },
+  ]);
+  const diagnosticCapture = await runDiagnosticWorker({
+    executablePath: crashFake.executablePath,
+    workingDirectory: cwd,
+    homeDirectory: diagnosticHome,
+    input: markers[5],
+  });
+  assert.deepEqual(diagnosticCapture.stdout, Buffer.from('{"done":true}\n'));
+  assert.deepEqual(diagnosticCapture.stderr, Buffer.alloc(0));
+  for (const marker of markers) {
+    assert.ok(!diagnosticCapture.stdout.includes(Buffer.from(marker)));
+    assert.ok(!diagnosticCapture.stderr.includes(Buffer.from(marker)));
+  }
+
+  const ownedRoots = [
+    root,
+    dirname(fake.executablePath),
+    dirname(approval.fake.executablePath),
+    dirname(crashFake.executablePath),
+  ];
   for (const ownedRoot of ownedRoots) {
     const runtimeEntries = await readdir(ownedRoot, { recursive: true });
     for (const entry of runtimeEntries) {
@@ -641,6 +728,10 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   const captures = JSON.stringify([
     { arguments: launch.arguments, environment: launch.environment },
     ...approval.fake.launches.map((entry) => ({
+      arguments: entry.arguments,
+      environment: entry.environment,
+    })),
+    ...crashFake.launches.map((entry) => ({
       arguments: entry.arguments,
       environment: entry.environment,
     })),
