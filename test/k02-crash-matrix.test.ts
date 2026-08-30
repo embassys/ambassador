@@ -78,6 +78,7 @@ test("K02-C01 recovers all eight content-free crash barriers without duplicate w
         () => scenario.gatewayProxy?.calls.some((call) => call.tool === "reply_message") ?? false,
         "lost committed reply",
       );
+      await waitForOutcomeRetry(scenario, clock.nowMs() + 30_000, "lost committed reply schedule");
       clock.advance(30_000);
     }
     await assert.rejects(scenario.connector.waitForIdle(), /connector_test_crash/u);
