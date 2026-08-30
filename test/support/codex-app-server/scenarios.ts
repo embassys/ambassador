@@ -195,7 +195,10 @@ export async function createCx02Adapter(
     inheritedEnvironment: options.inheritedEnvironment ?? syntheticCx02Environment(caseId),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
-    fixtureExecutablePath: options.fixtureExecutablePath ?? fake.executablePath,
+    fixtureExecutablePath:
+      options.fixtureExecutablePath === undefined
+        ? fake.executablePath
+        : options.fixtureExecutablePath,
     ...(options.clock === undefined ? {} : { clock: options.clock }),
     ...(options.afterVersionProbeForTest === undefined
       ? {}

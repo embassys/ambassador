@@ -348,6 +348,11 @@ license, and platform ADRs.
   `thread/start` required by X06. This retains one thread start, no turn start,
   and null-turn uncertainty after restart, and matches the recorded K03/K04
   barrier ordering.
+- The CX02 adapter factory now preserves an explicit null fixture executable
+  while it still defaults an omitted value to the fake executable. The earlier
+  nullish-coalescing expression replaced null with the fake path, so X01's
+  no-executable case launched a valid fake process instead of exercising the
+  reviewed unavailable-adapter path.
 
 ## K03 implementation judgments
 
