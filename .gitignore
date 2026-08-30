@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .test-dist/
+.build/
+.stage/
 coverage/
 *.db
 *.db-shm

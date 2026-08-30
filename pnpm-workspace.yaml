@@ -1,5 +1,8 @@
 packages:
   - .
+  - packages/codex-connector
+  - packages/claude-connector
+  - packages/gemini-connector
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true

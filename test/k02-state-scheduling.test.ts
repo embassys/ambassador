@@ -7,6 +7,10 @@ import Database from "better-sqlite3";
 
 import { k02Message, startK02Scenario, waitFor } from "./support/connector/k02-production.js";
 
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function artifactBytes(root: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   async function visit(directory: string): Promise<void> {
@@ -222,6 +226,37 @@ test("K02-Q03 stops independently when later work targets a closed conversation"
   assert.equal((await scenario.wake(laterClosed.id)).status, 202);
   await assert.rejects(scenario.connector.waitForIdle(), /connector_conversation_unavailable/u);
   assert.equal(scenario.provider.requests.length, 1);
+
+  const malformedFailures: string[] = [];
+  for (const field of [
+    "id",
+    "conversation_id",
+    "sender_agent_id",
+    "in_reply_to_message_id",
+  ] as const) {
+    try {
+      const malformed = await startK02Scenario(t, "K02-K03:Q03-closed", { scripts: [] });
+      const wakeId = `q03_non_string_${field}`;
+      const rawMessage: Record<string, unknown> = {
+        ...k02Message(wakeId, `q03_non_string_conversation_${field}`),
+        [field]: 7,
+      };
+      malformed.gateway.setNextPollResultForTest({ messages: [rawMessage] });
+      assert.equal((await malformed.wake(wakeId)).status, 202);
+      await assert.rejects(
+        malformed.connector.waitForIdle(),
+        /connector_gateway_operation_failed/u,
+      );
+      assert.equal(malformed.provider.requests.length, 0);
+      assert.deepEqual(malformed.gateway.calls.at(-1), {
+        name: "poll_messages",
+        arguments: { timeout: 0 },
+      });
+    } catch (error) {
+      malformedFailures.push(`${field}: ${failureText(error)}`);
+    }
+  }
+  assert.deepEqual(malformedFailures, [], malformedFailures.join("\n"));
 });
 
 test("K02-Q03 stops independently when later work targets an uncertain conversation", async (t) => {

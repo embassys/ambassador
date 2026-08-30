@@ -27,8 +27,9 @@
   "packageManager": "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm run lint && pnpm run typecheck && pnpm test",
+    "check": "pnpm run lint && pnpm run typecheck && pnpm test && pnpm run connectors:check",
     "clean": "node scripts/clean.mjs",
+    "connectors:check": "node scripts/connectors-check.mjs",
     "format": "biome check --write .",
     "lint": "biome check .",
     "prepack": "pnpm run build",

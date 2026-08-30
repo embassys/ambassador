@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import Database from "better-sqlite3";
+
+import { GatewayClient } from "../packages/connector-core/src/local-mcp-client.js";
+
 import {
   k02Message,
   loadK02Production,
@@ -8,6 +12,43 @@ import {
   startK02Scenario,
   waitFor,
 } from "./support/connector/k02-production.js";
+
+async function settleK02Tasks(turns = 4): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function holdGatewayClose(): {
+  entered(): boolean;
+  release(): void;
+  restore(): void;
+} {
+  const original = GatewayClient.prototype.close;
+  let entered = false;
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  GatewayClient.prototype.close = async function close(): Promise<void> {
+    entered = true;
+    await held;
+    await original.call(this);
+  };
+  return {
+    entered: () => entered,
+    release() {
+      release?.();
+    },
+    restore() {
+      GatewayClient.prototype.close = original;
+    },
+  };
+}
 
 test("K02-B00 exports the accepted non-configurable connector limits", async () => {
   const module = await loadK02Production("K02-K03:B00");
@@ -114,14 +155,189 @@ test("K02-P06 keeps one absolute deadline and cancels a proven safe wait", async
   await assert.rejects(grace.connector.waitForIdle(), /connector_test_crash/u);
   await grace.connector.crash();
   graceClock.set(graceStart + 909_999);
-  const restarted = await grace.restart([]);
+  const restarted = await grace.restart([[{ kind: "wait_for_cancel" }]], {
+    gatedEvents: ["cancelled"],
+    gateContainment: true,
+  });
+  await settleK02Tasks(8);
+  assert.equal(restarted.provider.requests.length, 1);
+  const expiredRecovery = restarted.provider.requests[0];
+  assert.equal(expiredRecovery?.kind, "recover");
+  if (expiredRecovery?.kind === "recover") {
+    assert.equal(expiredRecovery.provider_session_id, "session_restart_grace");
+    assert.equal(expiredRecovery.provider_turn_id, "turn_restart_grace");
+    assert.equal(expiredRecovery.deadline_unix_ms, graceStart + 900_000);
+    assert.ok(!("input_text" in expiredRecovery));
+  }
+  graceClock.advance(0);
+  await waitFor(() => restarted.provider.cancellations.length === 1, "expired-turn cancellation");
+  assert.deepEqual(restarted.provider.cancellations[0], {
+    kind: "cancel",
+    execution_id: expiredRecovery?.execution_id,
+    provider_session_id: "session_restart_grace",
+    provider_turn_id: "turn_restart_grace",
+    reason: "deadline",
+  });
   assert.equal(restarted.providerPort.containmentAttempts, 0);
   graceClock.advance(1);
-  await restarted.connector.waitForIdle();
+  await settleK02Tasks();
   assert.equal(restarted.providerPort.containmentAttempts, 1);
+  restarted.releaseContainment();
+  restarted.releaseProviderEvent("cancelled");
+  await restarted.connector.waitForIdle();
   graceClock.advance(1);
   assert.equal(restarted.providerPort.containmentAttempts, 1);
-  assert.equal(restarted.provider.requests.length, 0);
+  assert.equal(restarted.provider.requests.length, 1);
+
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+
+  await check("delayed dispatch", async () => {
+    const startedAt = 1_788_300_000_000;
+    const delayedClock = new ManualK02Clock(startedAt);
+    const delayed = await startK02Scenario(t, "K02-K03:P06", {
+      clock: delayedClock,
+      providerDispatchDelayMsForTest: 120_000,
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_delayed_dispatch" },
+          { kind: "turn", provider_turn_id: "turn_delayed_dispatch" },
+          { kind: "wait_for_cancel" },
+        ],
+      ],
+    });
+    try {
+      const delayedMessage = k02Message(
+        "message_delayed_dispatch",
+        "conversation_delayed_dispatch",
+      );
+      delayed.enqueue(delayedMessage);
+      assert.equal((await delayed.wake(delayedMessage.id)).status, 202);
+      await waitFor(() => {
+        const database = new Database(`${delayed.stateDirectory}/correlation.sqlite3`, {
+          readonly: true,
+        });
+        try {
+          const row = database
+            .prepare<[], { turn_deadline_ms: number | null }>(
+              "SELECT turn_deadline_ms FROM messages",
+            )
+            .get();
+          return row !== undefined && row.turn_deadline_ms !== null;
+        } finally {
+          database.close();
+        }
+      }, "durable delayed dispatch decision");
+      await settleK02Tasks();
+      assert.equal(
+        delayed.provider.requests.length,
+        0,
+        "provider dispatch occurred before the content-free delayed-dispatch barrier",
+      );
+      delayedClock.advance(120_000);
+      await waitFor(() => delayed.provider.requests.length === 1, "delayed provider dispatch");
+      assert.equal(delayed.provider.requests[0]?.deadline_unix_ms, startedAt + 900_000);
+      delayedClock.advance(779_999);
+      assert.equal(delayed.provider.cancellations.length, 0);
+      delayedClock.advance(1);
+      await waitFor(() => delayed.provider.cancellations.length === 1, "remaining deadline");
+    } finally {
+      await delayed.connector.crash();
+    }
+  });
+
+  await check("hanging recovery", async () => {
+    const startedAt = 1_788_400_000_000;
+    const recoveryClock = new ManualK02Clock(startedAt);
+    const original = await startK02Scenario(t, "K02-K03:P06", {
+      clock: recoveryClock,
+      crashAfter: "turn_published",
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_hanging_recovery" },
+          { kind: "turn", provider_turn_id: "turn_hanging_recovery" },
+          { kind: "wait_for_cancel" },
+        ],
+      ],
+    });
+    const recoveryMessage = k02Message("message_hanging_recovery", "conversation_hanging_recovery");
+    original.enqueue(recoveryMessage);
+    assert.equal((await original.wake(recoveryMessage.id)).status, 202);
+    await assert.rejects(original.connector.waitForIdle(), /connector_test_crash/u);
+    await original.connector.crash();
+    recoveryClock.advance(600_000);
+    const recovered = await original.restart([[{ kind: "wait_for_cancel" }]]);
+    try {
+      await waitFor(() => recovered.provider.requests.length === 1, "hanging recovery attach");
+      const request = recovered.provider.requests[0];
+      assert.equal(request?.kind, "recover");
+      assert.equal(request?.deadline_unix_ms, startedAt + 900_000);
+      assert.ok(
+        recoveryClock.pendingTimerCountForTest() >= 1,
+        "recovery did not arm the original deadline's remaining interval",
+      );
+      recoveryClock.advance(299_999);
+      assert.equal(recovered.provider.cancellations.length, 0);
+      recoveryClock.advance(1);
+      await waitFor(
+        () => recovered.provider.cancellations.length === 1,
+        "hanging recovery deadline cancellation",
+      );
+    } finally {
+      await recovered.connector.crash();
+    }
+  });
+
+  await check("approval grace and containment", async () => {
+    const approvalClock = new ManualK02Clock(1_788_500_000_000);
+    const approval = await startK02Scenario(t, "K02-K03:P06", {
+      clock: approvalClock,
+      contained: true,
+      gateContainment: true,
+      gatedEvents: ["cancelled"],
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_approval_grace" },
+          { kind: "turn", provider_turn_id: "turn_approval_grace" },
+          { kind: "approval_required", approval_request_id: "approval_grace" },
+          { kind: "wait_for_cancel" },
+        ],
+      ],
+    });
+    try {
+      const approvalMessage = k02Message("message_approval_grace", "conversation_approval_grace");
+      approval.enqueue(approvalMessage);
+      assert.equal((await approval.wake(approvalMessage.id)).status, 202);
+      await waitFor(() => approval.provider.pulls.length === 4, "approval deadline wait");
+      approvalClock.advance(900_000);
+      await waitFor(() => approval.provider.cancellations.length === 1, "approval cancellation");
+      assert.ok(
+        approvalClock.pendingTimerCountForTest() >= 1,
+        "approval wait did not continue through the one absolute grace",
+      );
+      approvalClock.advance(9_999);
+      assert.equal(approval.providerPort.containmentAttempts, 0);
+      approvalClock.advance(1);
+      await settleK02Tasks();
+      assert.equal(
+        approval.providerPort.containmentAttempts,
+        1,
+        "approval wait skipped qualified containment after grace",
+      );
+      approval.releaseContainment();
+      approval.releaseProviderEvent("cancelled");
+    } finally {
+      await approval.connector.crash();
+    }
+  });
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-B01 accepts 10000 normalized events and rejects event 10001", async (t) => {
@@ -307,6 +523,13 @@ test("K02-L01 cancels one local gateway MCP request at the fixed 35-second timeo
     () => scenario.gatewayProxy?.calls.some((call) => call.tool === "poll_messages") ?? false,
     "held MCP poll",
   );
+  assert.deepEqual(
+    scenario.gatewayProxy?.calls
+      .map((call) => call.method)
+      .filter((method) => method !== undefined)
+      .slice(0, 3),
+    ["initialize", "notifications/initialized", "tools/call"],
+  );
   clock.advance(34_999);
   assert.equal(scenario.provider.requests.length, 0);
   clock.advance(1);
@@ -361,31 +584,131 @@ test("K02-P07 waits one absolute grace then performs three-second qualified cont
 });
 
 test("K02-SD01 bounds SIGINT and SIGTERM-style shutdown to one 15-second budget", async (t) => {
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
-    const clock = new ManualK02Clock(1_788_000_000_000);
     const waiting = (suffix: string) =>
       [
         { kind: "session", provider_session_id: `session_shutdown_${suffix}` },
         { kind: "turn", provider_turn_id: `turn_shutdown_${suffix}` },
         { kind: "wait_for_cancel" },
       ] as const;
-    const scenario = await startK02Scenario(t, "K02-K03:SD01", {
-      clock,
-      scripts: [waiting("one"), waiting("two")],
+
+    await check(`${signal} cleanup proof`, async () => {
+      const clock = new ManualK02Clock(1_788_000_000_000);
+      const scenario = await startK02Scenario(t, "K02-K03:SD01", {
+        clock,
+        contained: true,
+        scripts: [waiting("one"), waiting("two")],
+      });
+      for (const index of [1, 2]) {
+        const message = k02Message(
+          `shutdown_${signal}_clean_${index}`,
+          `shutdown_conversation_${signal}_clean_${index}`,
+        );
+        scenario.enqueue(message);
+        assert.equal((await scenario.wake(message.id)).status, 202);
+      }
+      await waitFor(() => scenario.provider.activeExecutionCount === 2, "two shutdown turns");
+      const shutdown = scenario.connector.shutdown(signal);
+      await waitFor(
+        () => scenario.provider.cancellations.length === 2,
+        "parallel shutdown cancels",
+      );
+      clock.advance(10_000);
+      await settleK02Tasks();
+      assert.equal(
+        scenario.providerPort.containmentAttempts,
+        2,
+        "clean shutdown did not prove cleanup for both active executions",
+      );
+      clock.advance(5_000);
+      await shutdown;
+      assert.ok(scenario.provider.cancellations.every((request) => request.reason === "shutdown"));
     });
-    for (const index of [1, 2]) {
+
+    await check(`${signal} incomplete cleanup`, async () => {
+      const clock = new ManualK02Clock(1_788_100_000_000);
+      const scenario = await startK02Scenario(t, "K02-K03:SD01", {
+        clock,
+        contained: false,
+        gateContainment: true,
+        scripts: [waiting("incomplete")],
+      });
       const message = k02Message(
-        `shutdown_${signal}_${index}`,
-        `shutdown_conversation_${signal}_${index}`,
+        `shutdown_${signal}_incomplete`,
+        `shutdown_conversation_${signal}_incomplete`,
       );
       scenario.enqueue(message);
       assert.equal((await scenario.wake(message.id)).status, 202);
-    }
-    await waitFor(() => scenario.provider.activeExecutionCount === 2, "two shutdown turns");
-    const shutdown = scenario.connector.shutdown(signal);
-    await waitFor(() => scenario.provider.cancellations.length === 2, "parallel shutdown cancels");
-    clock.advance(15_000);
-    await shutdown;
-    assert.ok(scenario.provider.cancellations.every((request) => request.reason === "shutdown"));
+      await waitFor(() => scenario.provider.activeExecutionCount === 1, "incomplete shutdown turn");
+      const shutdown = scenario.connector.shutdown(signal);
+      await waitFor(
+        () => scenario.provider.cancellations.length === 1,
+        "incomplete shutdown cancellation",
+      );
+      clock.advance(15_000);
+      await settleK02Tasks();
+      try {
+        await assert.rejects(shutdown, /connector_shutdown_incomplete/u);
+      } finally {
+        scenario.releaseContainment();
+      }
+      assert.equal(scenario.providerPort.containmentAttempts, 1);
+    });
+
+    await check(`${signal} awaits listener and gateway close under one budget`, async () => {
+      const clock = new ManualK02Clock(1_788_200_000_000);
+      const scenario = await startK02Scenario(t, "K02-K03:SD01", {
+        clock,
+        scripts: [
+          [
+            { kind: "session", provider_session_id: `session_transport_${signal}` },
+            { kind: "turn", provider_turn_id: `turn_transport_${signal}` },
+            { kind: "reply", text: "initialize gateway transport before shutdown" },
+          ],
+        ],
+      });
+      const message = k02Message(
+        `shutdown_transport_${signal}`,
+        `shutdown_transport_conversation_${signal}`,
+      );
+      scenario.enqueue(message);
+      assert.equal((await scenario.wake(message.id)).status, 202);
+      await scenario.connector.waitForIdle();
+      const gatewayClose = holdGatewayClose();
+      const shutdown = scenario.connector.shutdown(signal);
+      let settled = false;
+      void shutdown.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      try {
+        await waitFor(() => gatewayClose.entered(), "held gateway transport close");
+        await settleK02Tasks();
+        assert.equal(settled, false, "shutdown returned while gateway close was still pending");
+        clock.advance(14_999);
+        await settleK02Tasks();
+        assert.equal(settled, false, "shutdown returned while gateway close was still pending");
+        clock.advance(1);
+        await assert.rejects(shutdown, /connector_shutdown_incomplete/u);
+      } finally {
+        gatewayClose.release();
+        gatewayClose.restore();
+      }
+    });
   }
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });

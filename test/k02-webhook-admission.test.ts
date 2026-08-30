@@ -254,6 +254,30 @@ test("K02-W06 verifies HMAC before strict JSON and correlation validation", asyn
     assert.equal(k02ResponseStatus(response), 400);
     assert.ok(response.toString("utf8").includes("connector_wake_invalid"));
   }
+  for (const [suffix, duplicateKey] of [
+    ["literal", '"name"'],
+    ["escaped", '"na\\u006de"'],
+  ] as const) {
+    const id = `w06_equivalent_duplicate_${suffix}`;
+    const body = k02WakeBody(id).replace(
+      '"name":"A2A Gateway"',
+      `"name":"A2A Gateway",${duplicateKey}:"A2A Gateway"`,
+    );
+    const headers = k02WakeHeaders(
+      scenario.connector.webhookUrl,
+      id,
+      Math.floor(Date.now() / 1_000),
+      body,
+    );
+    assertCanonicalJsonResponse(
+      await exchange(
+        scenario.connector.webhookUrl,
+        `${k02RawHead("POST /webhook HTTP/1.1", headers)}${body}`,
+      ),
+      400,
+      '{"error":"connector_wake_invalid"}',
+    );
+  }
   const mismatchBodyId = "w06_body_id";
   const mismatchBody = k02WakeBody(mismatchBodyId);
   for (const [headerName, headerValue] of [
@@ -390,6 +414,7 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
   clock.advance(1);
   for (const response of headerResponses) assert.equal((await response).byteLength, 0);
   const held = await openK02Socket(scenario.connector.webhookUrl);
+  assert.equal(clock.pendingTimerCountForTest(), 2);
   const id = "held_body";
   const body = k02WakeBody(id);
   held.write(
@@ -398,11 +423,13 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
       k02WakeHeaders(scenario.connector.webhookUrl, id, Math.floor(clock.nowMs() / 1_000), body),
     ),
   );
+  await waitFor(() => clock.pendingTimerCountForTest() === 1, "held body request parsed");
   clock.advance(4_999);
   held.write("{");
   const heldResponse = readK02Response(held);
   clock.advance(1);
   assert.equal((await heldResponse).byteLength, 0);
+  await waitFor(() => clock.pendingTimerCountForTest() === 0, "held body request closed");
   const invalidBearer = await openK02Socket(scenario.connector.webhookUrl);
   invalidBearer.write(
     k02RawHead("POST /webhook HTTP/1.1", {
@@ -415,9 +442,11 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
     }),
   );
   assert.equal(k02ResponseStatus(await readK02Response(invalidBearer)), 401);
+  await waitFor(() => clock.pendingTimerCountForTest() === 0, "invalid-bearer request closed");
   const invalidSignatureId = "held_invalid_signature";
   const invalidSignatureBody = k02WakeBody(invalidSignatureId);
   const invalidSignature = await openK02Socket(scenario.connector.webhookUrl);
+  assert.equal(clock.pendingTimerCountForTest(), 2);
   invalidSignature.write(
     k02RawHead("POST /webhook HTTP/1.1", {
       ...k02WakeHeaders(
@@ -429,11 +458,13 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
       "X-Webhook-Signature-V2": "f".repeat(64),
     }),
   );
+  await waitFor(() => clock.pendingTimerCountForTest() === 1, "invalid-signature request parsed");
   clock.advance(4_999);
   invalidSignature.write(invalidSignatureBody.slice(0, -1));
   const invalidSignatureResponse = readK02Response(invalidSignature);
   clock.advance(1);
   assert.equal((await invalidSignatureResponse).byteLength, 0);
+  await waitFor(() => clock.pendingTimerCountForTest() === 0, "invalid-signature request closed");
   assert.equal(scenario.provider.requests.length, 0);
   assert.equal(scenario.gateway.calls.length, 0);
   assert.deepEqual(scenario.connector.inspectAdmissionStateForTest(), {
