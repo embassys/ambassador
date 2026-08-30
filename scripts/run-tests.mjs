@@ -10,7 +10,8 @@ const files = entries
     (entry) =>
       !entry.name.startsWith("t03-") &&
       !entry.name.startsWith("t04-") &&
-      !entry.name.startsWith("k02-"),
+      !entry.name.startsWith("k02-") &&
+      !entry.name.startsWith("cx02-"),
   )
   .map((entry) => join(entry.parentPath, entry.name))
   .sort();
