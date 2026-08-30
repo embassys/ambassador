@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import {
+  assertK04MessageRows,
   enrollK04Gateway,
+  K04_CONTENT_PREFIX,
   K04_REPLY_TEXT,
-  K04_WEBHOOK_TOKEN,
+  type K04ConnectorCrashBarrier,
   type K04ConnectorProcess,
   type K04GatewayFetchBarrier,
   type K04GatewayOperation,
@@ -18,12 +20,6 @@ import {
   waitForK04Acknowledgement,
 } from "./support/connector/k04-process-harness.js";
 import type { V2ManagedProcess } from "./support/v2-process-runtime.js";
-
-type ConnectorCrashBarrier =
-  | "binding_published"
-  | "turn_published"
-  | "provider_terminal_received"
-  | "reply_accepted";
 
 interface CrashCaptures {
   readonly connectors: readonly K04ConnectorProcess[];
@@ -88,12 +84,10 @@ async function hardKill(process: V2ManagedProcess): Promise<void> {
   await drainHardKill(process);
 }
 
-async function expectConnectorCrash(connector: K04ConnectorProcess): Promise<void> {
-  assert.deepEqual(await connector.process.waitForExit(), { code: 86, signal: null });
-  await connector.process.stop();
-}
-
-async function stopProcesses(captures: CrashCaptures): Promise<void> {
+async function stopProcesses(
+  fixture: Awaited<ReturnType<typeof startK04Fixture>>,
+  captures: CrashCaptures,
+): Promise<void> {
   const lastConnector = captures.connectors.at(-1);
   const lastGateway = captures.gateways.at(-1);
   if (lastConnector !== undefined) {
@@ -106,6 +100,7 @@ async function stopProcesses(captures: CrashCaptures): Promise<void> {
   if (lastGateway !== undefined) {
     assert.deepEqual(await lastGateway.process.stop(), { code: 0, signal: null });
   }
+  assertK04MessageRows(fixture, 0);
 }
 
 async function scanCrashArtifacts(
@@ -134,11 +129,36 @@ async function scanCrashArtifacts(
       },
     ],
     markers: [
-      { name: "webhook-token", value: K04_WEBHOOK_TOKEN },
       { name: "inbound-text", value: inboundText },
       { name: "reply-text", value: K04_REPLY_TEXT },
     ],
   });
+}
+
+function expectedStartRequest(inbound: {
+  readonly messageId: string;
+  readonly conversationId: string;
+}) {
+  return {
+    kind: "start" as const,
+    conversationId: inbound.conversationId,
+    messageId: inbound.messageId,
+    providerSessionId: `k04_session_${inbound.conversationId}`,
+    providerTurnId: null,
+  };
+}
+
+function expectedRecoverRequest(inbound: {
+  readonly messageId: string;
+  readonly conversationId: string;
+}) {
+  return {
+    kind: "recover" as const,
+    conversationId: inbound.conversationId,
+    messageId: inbound.messageId,
+    providerSessionId: `k04_session_${inbound.conversationId}`,
+    providerTurnId: `k04_turn_${inbound.messageId}`,
+  };
 }
 
 async function assertOneReply(
@@ -191,10 +211,14 @@ async function runGatewayCustodyCrash(
     observeFetch: true,
   });
   await waitForK04Acknowledgement(fixture, inbound.messageId);
-  assert.deepEqual(
-    connector.control.providerRequests().map((request) => request.kind),
-    ["start"],
-  );
+  await connector.control.waitForIdle();
+  await waitForOperationCounts([firstGateway, secondGateway], {
+    reply: 1,
+    complete: 0,
+    outcome: 0,
+    ack: 1,
+  });
+  assert.deepEqual(connector.control.providerRequests(), [expectedStartRequest(inbound)]);
   await assertOneReply(fixture, inbound);
   assertOperationCounts([firstGateway, secondGateway], {
     reply: 1,
@@ -204,27 +228,28 @@ async function runGatewayCustodyCrash(
   });
 
   const captures = { connectors: [connector], gateways: [firstGateway, secondGateway] };
-  await stopProcesses(captures);
+  await stopProcesses(fixture, captures);
   await scanCrashArtifacts(fixture, captures, options.inboundText);
 }
 
 async function runConnectorCrash(
   t: TestContext,
   options: {
-    readonly barrier: ConnectorCrashBarrier;
+    readonly barrier: K04ConnectorCrashBarrier;
     readonly requestId: string;
     readonly inboundText: string;
-    readonly expectedFirstKinds: readonly ("start" | "resume" | "recover")[];
-    readonly expectedRecoveryKinds: readonly ("start" | "resume" | "recover")[];
+    readonly expectedFirst: "none" | "start";
+    readonly expectedRecovery: "none" | "recover";
     readonly expectedOperations: Partial<Record<K04GatewayOperation, number>>;
     readonly proveNoProviderDispatch?: boolean;
     readonly expectReply: boolean;
+    readonly expectedCommittedOutcome: null | "replied";
   },
 ): Promise<void> {
   const fixture = await startK04Fixture(t);
   const firstConnector = await startK04ConnectorProcess(t, fixture, {
     plan: "reply",
-    crashAfter: options.barrier,
+    crashBarrier: options.barrier,
   });
   const gateway = await startK04GatewayProcess(t, fixture, firstConnector.webhookUrl, {
     observeFetch: true,
@@ -236,19 +261,32 @@ async function runConnectorCrash(
     options.inboundText,
   );
 
-  await expectConnectorCrash(firstConnector);
+  await firstConnector.control.waitForCrashBarrier(options.barrier);
   assert.deepEqual(
-    firstConnector.control.providerRequests().map((request) => request.kind),
-    options.expectedFirstKinds,
+    firstConnector.control.providerRequests(),
+    options.expectedFirst === "start" ? [expectedStartRequest(inbound)] : [],
   );
+  const beforeCrash = fixture.central.v2MessageState(inbound.messageId);
+  assert.equal(beforeCrash.terminalOutcome, options.expectedCommittedOutcome);
+  assert.equal(beforeCrash.acknowledged, false);
+  await hardKill(firstConnector.process);
   const secondConnector = await startK04ConnectorProcess(t, fixture, {
     plan: "reply",
     ...(options.proveNoProviderDispatch === true ? { proveNoProviderDispatch: true } : {}),
   });
-  await waitForK04Acknowledgement(fixture, inbound.messageId);
+  try {
+    await waitForK04Acknowledgement(fixture, inbound.messageId);
+  } catch (error) {
+    throw new Error(
+      `K04 recovery did not acknowledge; complete=${countOperations([gateway], "complete")} ack=${countOperations([gateway], "ack")} connector_exited=${secondConnector.process.child.exitCode !== null || secondConnector.process.child.signalCode !== null} fatal=${secondConnector.control.fatalCode() ?? "none"}`,
+      { cause: error },
+    );
+  }
+  await secondConnector.control.waitForIdle();
+  await waitForOperationCounts([gateway], options.expectedOperations);
   assert.deepEqual(
-    secondConnector.control.providerRequests().map((request) => request.kind),
-    options.expectedRecoveryKinds,
+    secondConnector.control.providerRequests(),
+    options.expectedRecovery === "recover" ? [expectedRecoverRequest(inbound)] : [],
   );
   assertOperationCounts([gateway], options.expectedOperations);
 
@@ -265,13 +303,16 @@ async function runConnectorCrash(
       acknowledged: true,
       leaseUntil: null,
     });
+    assert.deepEqual(gateway.control.completionRequests(), [
+      { outcome: "failed", reasonCode: "provider_start_failed" },
+    ]);
   }
 
   const captures = {
     connectors: [firstConnector, secondConnector],
     gateways: [gateway],
   };
-  await stopProcesses(captures);
+  await stopProcesses(fixture, captures);
   await scanCrashArtifacts(fixture, captures, options.inboundText);
 }
 
@@ -303,10 +344,7 @@ async function runAcceptedResponseLostCrash(
   const committed = fixture.central.v2MessageState(inbound.messageId);
   assert.equal(committed.terminalOutcome, "replied");
   assert.equal(committed.acknowledged, options.barrier === "ack_accepted_unobserved");
-  assert.deepEqual(
-    firstConnector.control.providerRequests().map((request) => request.kind),
-    ["start"],
-  );
+  assert.deepEqual(firstConnector.control.providerRequests(), [expectedStartRequest(inbound)]);
 
   sendHardKill(firstGateway.process);
   sendHardKill(firstConnector.process);
@@ -318,6 +356,7 @@ async function runAcceptedResponseLostCrash(
   const secondConnector = await startK04ConnectorProcess(t, fixture, { plan: "reply" });
   await waitForOperationCounts([firstGateway, secondGateway], options.expectedOperations);
   await waitForK04Acknowledgement(fixture, inbound.messageId);
+  await secondConnector.control.waitForIdle();
   assert.equal(secondConnector.control.providerRequests().length, 0);
   await assertOneReply(fixture, inbound);
   assertOperationCounts([firstGateway, secondGateway], options.expectedOperations);
@@ -326,7 +365,7 @@ async function runAcceptedResponseLostCrash(
     connectors: [firstConnector, secondConnector],
     gateways: [firstGateway, secondGateway],
   };
-  await stopProcesses(captures);
+  await stopProcesses(fixture, captures);
   await scanCrashArtifacts(fixture, captures, options.inboundText);
 }
 
@@ -334,7 +373,7 @@ test("K04-C01.1 redelivers after central selected a message before returning it"
   await runGatewayCustodyCrash(t, {
     barrier: "receive_selected",
     requestId: "00000000-0000-4000-8000-000000044101",
-    inboundText: "K04 receive-selection crash content stays transient 140d31.",
+    inboundText: `${K04_CONTENT_PREFIX}receive-selection-crash-140d31.`,
   });
 });
 
@@ -342,7 +381,7 @@ test("K04-C01.2 redelivers after gateway received a message before sending its w
   await runGatewayCustodyCrash(t, {
     barrier: "wake_before_request",
     requestId: "00000000-0000-4000-8000-000000044102",
-    inboundText: "K04 pre-wake crash content stays transient 2a55f0.",
+    inboundText: `${K04_CONTENT_PREFIX}pre-wake-crash-2a55f0.`,
   });
 });
 
@@ -350,12 +389,13 @@ test("K04-C01.3 never dispatches after the binding decision survives a crash", a
   await runConnectorCrash(t, {
     barrier: "binding_published",
     requestId: "00000000-0000-4000-8000-000000044103",
-    inboundText: "K04 binding crash content stays transient 3b31cc.",
-    expectedFirstKinds: [],
-    expectedRecoveryKinds: [],
+    inboundText: `${K04_CONTENT_PREFIX}binding-crash-3b31cc.`,
+    expectedFirst: "none",
+    expectedRecovery: "none",
     expectedOperations: { reply: 0, complete: 1, outcome: 0, ack: 1 },
     proveNoProviderDispatch: true,
     expectReply: false,
+    expectedCommittedOutcome: null,
   });
 });
 
@@ -363,11 +403,12 @@ test("K04-C01.4 recovers the exact turn after its provider ID became durable", a
   await runConnectorCrash(t, {
     barrier: "turn_published",
     requestId: "00000000-0000-4000-8000-000000044104",
-    inboundText: "K04 durable-turn crash content stays transient 4edc12.",
-    expectedFirstKinds: ["start"],
-    expectedRecoveryKinds: ["recover"],
+    inboundText: `${K04_CONTENT_PREFIX}durable-turn-crash-4edc12.`,
+    expectedFirst: "start",
+    expectedRecovery: "recover",
     expectedOperations: { reply: 1, complete: 0, outcome: 0, ack: 1 },
     expectReply: true,
+    expectedCommittedOutcome: null,
   });
 });
 
@@ -375,11 +416,12 @@ test("K04-C01.5 recovers the exact provider result after terminal output was vol
   await runConnectorCrash(t, {
     barrier: "provider_terminal_received",
     requestId: "00000000-0000-4000-8000-000000044105",
-    inboundText: "K04 volatile-terminal crash content stays transient 5a26d4.",
-    expectedFirstKinds: ["start"],
-    expectedRecoveryKinds: ["recover"],
+    inboundText: `${K04_CONTENT_PREFIX}volatile-terminal-crash-5a26d4.`,
+    expectedFirst: "start",
+    expectedRecovery: "recover",
     expectedOperations: { reply: 1, complete: 0, outcome: 0, ack: 1 },
     expectReply: true,
+    expectedCommittedOutcome: null,
   });
 });
 
@@ -387,20 +429,21 @@ test("K04-C01.6 resolves one reply whose accepted response was never observed", 
   await runAcceptedResponseLostCrash(t, {
     barrier: "reply_accepted_unobserved",
     requestId: "00000000-0000-4000-8000-000000044106",
-    inboundText: "K04 lost-reply-response content stays transient 6d7fc0.",
+    inboundText: `${K04_CONTENT_PREFIX}lost-reply-response-6d7fc0.`,
     expectedOperations: { reply: 1, complete: 0, outcome: 1, ack: 1 },
   });
 });
 
-test("K04-C01.7 looks up the accepted reply before acknowledgement after restart", async (t) => {
+test("K04-C01.7 repeats only acknowledgement after the durable reply transition", async (t) => {
   await runConnectorCrash(t, {
     barrier: "reply_accepted",
     requestId: "00000000-0000-4000-8000-000000044107",
-    inboundText: "K04 post-reply crash content stays transient 7f42aa.",
-    expectedFirstKinds: ["start"],
-    expectedRecoveryKinds: [],
-    expectedOperations: { reply: 1, complete: 0, outcome: 1, ack: 1 },
+    inboundText: `${K04_CONTENT_PREFIX}post-reply-crash-7f42aa.`,
+    expectedFirst: "start",
+    expectedRecovery: "none",
+    expectedOperations: { reply: 1, complete: 0, outcome: 0, ack: 1 },
     expectReply: true,
+    expectedCommittedOutcome: "replied",
   });
 });
 
@@ -408,7 +451,7 @@ test("K04-C01.8 repeats only acknowledgement after its accepted response was los
   await runAcceptedResponseLostCrash(t, {
     barrier: "ack_accepted_unobserved",
     requestId: "00000000-0000-4000-8000-000000044108",
-    inboundText: "K04 lost-ack-response content stays transient 8c119e.",
+    inboundText: `${K04_CONTENT_PREFIX}lost-ack-response-8c119e.`,
     expectedOperations: { reply: 1, complete: 0, outcome: 0, ack: 2 },
   });
 });

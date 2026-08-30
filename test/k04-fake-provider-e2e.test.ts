@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   enrollK04Gateway,
+  K04_CONTENT_PREFIX,
   K04_REPLY_TEXT,
   K04_WEBHOOK_TOKEN,
   receiveK04SenderBatch,
@@ -45,10 +46,15 @@ test("K04-E01 runs one message through the normal gateway and connector processe
   });
 
   const requests = connector.control.providerRequests();
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0]?.kind, "start");
-  assert.equal(requests[0]?.conversationId, inbound.conversationId);
-  assert.equal(requests[0]?.messageId, inbound.messageId);
+  assert.deepEqual(requests, [
+    {
+      kind: "start",
+      conversationId: inbound.conversationId,
+      messageId: inbound.messageId,
+      providerSessionId: `k04_session_${inbound.conversationId}`,
+      providerTurnId: null,
+    },
+  ]);
 
   const tools = await client.listTools();
   for (const name of [
@@ -101,22 +107,35 @@ test("K04-R01 resumes the same provider session for a second turn after restart"
   );
 
   const secondConnector = await startK04ConnectorProcess(t, fixture, { plan: "reply" });
+  const secondInboundText = `${K04_CONTENT_PREFIX}second-inbound-turn-c07291.`;
   const secondInbound = await replyToK04SenderMessage(
     fixture,
     firstReply.id as string,
-    "K04 second inbound turn remains process-only c07291.",
+    secondInboundText,
   );
   assert.equal(secondInbound.conversationId, firstInbound.conversationId);
   await waitForK04Acknowledgement(fixture, secondInbound.messageId);
   const secondReply = await receiveK04SenderMessage(fixture, secondInbound.messageId);
   assert.equal(secondReply.conversation_id, firstInbound.conversationId);
 
-  const firstRequest = firstConnector.control.providerRequests()[0];
-  const secondRequest = secondConnector.control.providerRequests()[0];
-  assert.equal(firstRequest?.kind, "start");
-  assert.equal(secondRequest?.kind, "resume");
-  assert.equal(secondRequest?.providerSessionId, firstRequest?.providerSessionId);
-  assert.notEqual(secondRequest?.messageId, firstRequest?.messageId);
+  assert.deepEqual(firstConnector.control.providerRequests(), [
+    {
+      kind: "start",
+      conversationId: firstInbound.conversationId,
+      messageId: firstInbound.messageId,
+      providerSessionId: `k04_session_${firstInbound.conversationId}`,
+      providerTurnId: null,
+    },
+  ]);
+  assert.deepEqual(secondConnector.control.providerRequests(), [
+    {
+      kind: "resume",
+      conversationId: secondInbound.conversationId,
+      messageId: secondInbound.messageId,
+      providerSessionId: `k04_session_${firstInbound.conversationId}`,
+      providerTurnId: null,
+    },
+  ]);
   assert.deepEqual(
     await stopK04ConnectorProcess(secondConnector),
     { code: 0, signal: null },
@@ -139,7 +158,7 @@ test("K04-R01 resumes the same provider session for a second turn after restart"
     ],
     markers: [
       { name: "first-inbound", value: fixture.inboundText },
-      { name: "second-inbound", value: "K04 second inbound turn remains process-only c07291." },
+      { name: "second-inbound", value: secondInboundText },
       { name: "reply", value: K04_REPLY_TEXT },
       { name: "token", value: K04_WEBHOOK_TOKEN },
     ],
@@ -193,11 +212,17 @@ test("K04-E02/E03 bounds concurrent conversations and coalesces duplicate wakes"
   const requests = connector.control.providerRequests();
   assert.equal(requests.length, 3);
   assert.deepEqual(
-    new Set(requests.map((request) => request.messageId)),
-    new Set(inbound.map((message) => message.messageId)),
+    [...requests].sort((a, b) => a.messageId.localeCompare(b.messageId)),
+    inbound
+      .map((message) => ({
+        kind: "start" as const,
+        conversationId: message.conversationId,
+        messageId: message.messageId,
+        providerSessionId: `k04_session_${message.conversationId}`,
+        providerTurnId: null,
+      }))
+      .sort((a, b) => a.messageId.localeCompare(b.messageId)),
   );
-  assert.equal(new Set(requests.map((request) => request.conversationId)).size, 3);
-  assert.equal(new Set(requests.map((request) => request.providerSessionId)).size, 3);
   const replies = await receiveK04SenderBatch(fixture);
   assert.equal(replies.length, 3);
   assert.ok(
@@ -210,4 +235,20 @@ test("K04-E02/E03 bounds concurrent conversations and coalesces duplicate wakes"
     connector.process.stderr(),
   );
   assert.deepEqual(await gateway.process.stop(), { code: 0, signal: null });
+  await scanK04Artifacts({
+    fixture,
+    captures: [
+      { name: "connector-stdout", value: connector.process.stdout() },
+      { name: "connector-stderr", value: connector.process.stderr() },
+      { name: "gateway-stdout", value: gateway.process.stdout() },
+      { name: "gateway-stderr", value: gateway.process.stderr() },
+    ],
+    markers: [
+      ...[44_003, 44_004, 44_005].map((suffix, index) => ({
+        name: `inbound-${index + 1}`,
+        value: `${fixture.inboundText} ${suffix}`,
+      })),
+      { name: "reply", value: K04_REPLY_TEXT },
+    ],
+  });
 });

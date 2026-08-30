@@ -20,6 +20,17 @@ const BARRIER_NAMES = new Set<K04GatewayFetchBarrier>([
   "ack_accepted_unobserved",
 ]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return (
+    Object.keys(value).length === expected.length &&
+    expected.every((key) => Object.hasOwn(value, key))
+  );
+}
+
 function send(message: Readonly<Record<string, unknown>>): void {
   if (process.send === undefined || !process.connected) return;
   try {
@@ -103,16 +114,17 @@ function installK04GatewayFetchPreload(): void {
         process.off("disconnect", onDisconnect);
       };
       const onMessage = (message: unknown): void => {
-        if (message === null || typeof message !== "object" || Array.isArray(message)) {
-          return;
-        }
+        if (!isRecord(message) || message.channel !== "k04_gateway_fetch_control") return;
         const candidate = message as Partial<BarrierReleaseMessage>;
         if (
+          !hasExactKeys(message, ["channel", "command", "barrier", "sequence"]) ||
           candidate.channel !== "k04_gateway_fetch_control" ||
           candidate.command !== "release" ||
           candidate.barrier !== name ||
           candidate.sequence !== arrivalSequence
         ) {
+          cleanup();
+          reject(new Error("invalid K04 gateway fetch barrier control IPC"));
           return;
         }
         cleanup();
@@ -144,6 +156,23 @@ function installK04GatewayFetchPreload(): void {
     const operation = operationFor(request, centralOrigin, webhookOrigin);
     if (operation !== "other") {
       send({ channel: "k04_gateway_fetch", event: "request", operation });
+    }
+    if (operation === "complete") {
+      const body = (await request.clone().json()) as unknown;
+      if (
+        !isRecord(body) ||
+        !hasExactKeys(body, ["outcome", "reason_code"]) ||
+        body.outcome !== "failed" ||
+        body.reason_code !== "provider_start_failed"
+      ) {
+        throw new Error("invalid K04 completion request observation");
+      }
+      send({
+        channel: "k04_gateway_fetch",
+        event: "completion_request",
+        outcome: body.outcome,
+        reason_code: body.reason_code,
+      });
     }
     if (barrier === "wake_before_request" && operation === "wake") {
       await arrive(barrier);
