@@ -249,7 +249,7 @@ function runWindowsPowerShell(
       },
       (error, stdout, stderr) => {
         if (error || stderr.length !== 0 || stdout !== expectedOutput) {
-          const status = /^A2A_REPLACE_ERROR_([0-9]+)$/u.exec(stdout)?.[1];
+          const status = /^A2A_REPLACE_ERROR_([A-Za-z]+_[0-9]+)$/u.exec(stdout)?.[1];
           reject(
             new WindowsCredentialOperationError(
               status === undefined
@@ -365,8 +365,10 @@ if (($destinationAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 
 try {
   [System.IO.File]::Replace($source, $destination, $null, $true)
 } catch {
-  $nativeStatus = $_.Exception.HResult -band 65535
-  [Console]::Out.Write("A2A_REPLACE_ERROR_$nativeStatus")
+  $nativeException = $_.Exception.GetBaseException()
+  $nativeStatus = $nativeException.HResult -band 65535
+  $nativeType = $nativeException.GetType().Name
+  [Console]::Out.Write('A2A_REPLACE_ERROR_' + $nativeType + '_' + $nativeStatus)
   exit 81
 }
 if ([System.IO.File]::Exists($source) -or [System.IO.Directory]::Exists($source)) { exit 78 }
