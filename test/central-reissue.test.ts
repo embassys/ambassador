@@ -81,8 +81,19 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   assert.fail("condition was not reached");
 }
 
-async function stalledReissue(t: TestContext) {
-  t.mock.timers.enable({ apis: ["Date"], now: NOW_SECONDS * 1_000 });
+async function waitForTurns(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.fail("condition was not reached");
+}
+
+async function stalledReissue(t: TestContext, mockRetryTimer = false) {
+  t.mock.timers.enable({
+    apis: mockRetryTimer ? ["Date", "setTimeout"] : ["Date"],
+    now: NOW_SECONDS * 1_000,
+  });
   const store = capturingStore();
   const identity = await GatewayIdentity.open(store.adapter);
   const deadlines: number[] = [];
@@ -158,6 +169,29 @@ test("closing a stalled scheduled reissue cancels it without an uncertain repeat
   assert.deepEqual(fixture.deadlines, [30_000]);
   assert.equal(fixture.attempts.length, 1);
   assert.equal(fixture.cancellations(), 1);
+  assert.equal(fixture.saved.length, 0);
+});
+
+test("closing during the uncertain retry delay cannot start another request", async (t) => {
+  const fixture = await stalledReissue(t, true);
+  fixture.reissue.start();
+  await waitForTurns(() => fixture.attempts.length === 1);
+  fixture.deadlineControllers[0]?.abort();
+  await waitForTurns(() => fixture.cancellations() === 1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  const closing = fixture.reissue.close();
+  t.mock.timers.tick(10);
+  await closing;
+  fixture.reissue.start();
+  t.mock.timers.tick(10);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(fixture.deadlines, [30_000]);
+  assert.equal(fixture.attempts.length, 1);
+  assert.equal(fixture.cancellations(), 1);
+  assert.ok(fixture.attempts[0]?.headers.get("dpop") !== null);
+  assert.equal(fixture.attempts[0]?.signal.aborted, true);
   assert.equal(fixture.saved.length, 0);
 });
 
