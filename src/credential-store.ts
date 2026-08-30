@@ -24,7 +24,7 @@ const TAG_BYTES = 16;
 const MAX_JWT_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const SYSTEM_SID = "S-1-5-18";
-const WINDOWS_POWERSHELL_TIMEOUT_MS = 10_000;
+const WINDOWS_POWERSHELL_TIMEOUT_MS = 30_000;
 const WINDOWS_HELPER_ENVIRONMENT_NAMES = [
   "SystemRoot",
   "WINDIR",
@@ -262,16 +262,22 @@ if ($args.Count -ne 0) { exit 41 }
 $target = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_ACL_PATH', 'Process')
 $kind = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_ACL_KIND', 'Process')
 if ([String]::IsNullOrEmpty($target)) { exit 42 }
-$item = Get-Item -LiteralPath $target -Force
-if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 43 }
-if (($kind -eq 'directory') -ne $item.PSIsContainer) { exit 44 }
+$attributes = [System.IO.File]::GetAttributes($target)
+if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 43 }
+$isDirectory = ($attributes -band [System.IO.FileAttributes]::Directory) -ne 0
+if (($kind -eq 'directory') -ne $isDirectory) { exit 44 }
 if ($kind -ne 'directory' -and $kind -ne 'file') { exit 45 }
 $userIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $userSid = $userIdentity.Value
-$security = if ($kind -eq 'directory') {
-  New-Object System.Security.AccessControl.DirectorySecurity
+$artifact = if ($kind -eq 'directory') {
+  [System.IO.DirectoryInfo]::new($target)
 } else {
-  New-Object System.Security.AccessControl.FileSecurity
+  [System.IO.FileInfo]::new($target)
+}
+$security = if ($kind -eq 'directory') {
+  [System.Security.AccessControl.DirectorySecurity]::new()
+} else {
+  [System.Security.AccessControl.FileSecurity]::new()
 }
 $security.SetOwner($userIdentity)
 $security.SetAccessRuleProtection($true, $false)
@@ -280,10 +286,14 @@ $inheritance = if ($kind -eq 'directory') {
 } else {
   [System.Security.AccessControl.InheritanceFlags]::None
 }
-$expected = @($userSid, '${SYSTEM_SID}') | Select-Object -Unique
+$expected = [System.Collections.Generic.HashSet[string]]::new(
+  [System.StringComparer]::OrdinalIgnoreCase
+)
+[void]$expected.Add($userSid)
+[void]$expected.Add('${SYSTEM_SID}')
 foreach ($sid in $expected) {
-  $identity = New-Object System.Security.Principal.SecurityIdentifier($sid)
-  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+  $identity = [System.Security.Principal.SecurityIdentifier]::new($sid)
+  $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
     $identity,
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     $inheritance,
@@ -292,8 +302,10 @@ foreach ($sid in $expected) {
   )
   [void]$security.AddAccessRule($rule)
 }
-Set-Acl -LiteralPath $target -AclObject $security
-$actual = Get-Acl -LiteralPath $target
+$artifact.SetAccessControl($security)
+$actual = $artifact.GetAccessControl(
+  [System.Security.AccessControl.AccessControlSections]'Access,Owner'
+)
 if (-not $actual.AreAccessRulesProtected) { exit 46 }
 if ($actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $userSid) {
   exit 47
@@ -335,16 +347,17 @@ if (-not [String]::Equals(
   [System.IO.Path]::GetDirectoryName($destination),
   [System.StringComparison]::OrdinalIgnoreCase
 )) { exit 74 }
-$sourceItem = Get-Item -LiteralPath $source -Force
-$destinationItem = Get-Item -LiteralPath $destination -Force
-if ($sourceItem.PSIsContainer -or $destinationItem.PSIsContainer) { exit 75 }
-if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 76 }
-if (($destinationItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 77 }
+$sourceAttributes = [System.IO.File]::GetAttributes($source)
+$destinationAttributes = [System.IO.File]::GetAttributes($destination)
+if (($sourceAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exit 75 }
+if (($destinationAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exit 75 }
+if (($sourceAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 76 }
+if (($destinationAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 77 }
 [System.IO.File]::Replace($source, $destination, $null, $true)
-if (Test-Path -LiteralPath $source) { exit 78 }
-$published = Get-Item -LiteralPath $destination -Force
-if ($published.PSIsContainer) { exit 79 }
-if (($published.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 80 }
+if ([System.IO.File]::Exists($source) -or [System.IO.Directory]::Exists($source)) { exit 78 }
+$publishedAttributes = [System.IO.File]::GetAttributes($destination)
+if (($publishedAttributes -band [System.IO.FileAttributes]::Directory) -ne 0) { exit 79 }
+if (($publishedAttributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 80 }
 [Console]::Out.Write('A2A_REPLACE_OK')
 `;
 
