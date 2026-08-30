@@ -203,6 +203,28 @@ Code, and Gemini still require separate
 executable or SDK, version, protocol, sandbox, approval, history, license, and
 platform ADRs.
 
+## K03 test-determinism corrections
+
+- O05 now sends distinct valid authenticated wakes while it tests coalescing
+  before the durable retry time. The approved injected-clock default had made
+  its first repeated wake byte-identical to the original request, which is an
+  ADR 0030 replay and must remain a `409`, not coalescing evidence. The HMAC,
+  replay rule, retry intervals, and coalescing behavior are unchanged.
+- O03 and O06 now observe the exact durable `retry_kind` and absolute
+  `retry_not_before_ms` before advancing their manual clocks. Observing the
+  fake proxy's request was not evidence that the connector had received the
+  simulated transport result and committed its schedule. This changes only
+  test ordering; production scheduling and every accepted interval remain
+  unchanged.
+- O06 filters the proxy's raw MCP `initialize` record only when comparing the
+  ordered delivery-control tool names. The proxy still retains that record,
+  every defined tool remains in exact order, and separate MCP session and
+  handshake evidence remains required.
+- O06 treats the fixture's absent pre-ack tombstone as not acknowledged, using
+  the same existing `?? false` semantic assertion as its other blocked-result
+  vectors. The fake gateway continues to expose a tombstone only after exact
+  acknowledgement, and later acknowledged-tombstone assertions remain exact.
+
 ## Test-only stand-ins
 
 The user authorized reasonable stand-ins for production facts that are not yet
