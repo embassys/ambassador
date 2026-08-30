@@ -1,19 +1,19 @@
 # Next architecture and security plan
 
-Status: accepted gateway architecture and provider-neutral connector boundary, production implementation not started
+Status: accepted gateway architecture and provider-neutral connector foundation, production implementation not started
 
 Date: 2026-08-30
 
 This document collects the accepted REST enrollment, conversation, recovery,
 DPoP, and provider-neutral connector work for later implementation agents. The
 user accepted ADRs 0023, 0025, 0026, and 0027 on 2026-08-29 and accepted ADR
-0024's connector boundary on 2026-08-30. D06 also approves the exact test-only
-Python fixture dependency recorded in ADR 0020. ADR 0024 does not approve a
-connector CLI, state implementation, limits, runtime, dependency, provider
-port, policy, package, platform, installation, or publishing choice. Those D05
-decisions remain pending. The current product and protocol continue to
-describe shipped version 1 behavior until implementation lands. Tests and
-fixtures come before production changes under `docs/implementation-plan.md`.
+0024's connector boundary on 2026-08-30. The user accepted ADRs 0028 through
+0031 on the same date, completing D05. D06 also approves the exact test-only
+Python fixture dependency recorded in ADR 0020. Provider-specific interfaces,
+support claims, and public distribution remain behind later gates. The current
+product and protocol continue to describe shipped version 1 behavior until
+implementation lands. Tests and fixtures come before production changes under
+`docs/implementation-plan.md`.
 
 ADRs 0023 and 0026 are accepted. PR `#28` merged T01 through T04 and C01,
 and the user accepted the T03 and T04 gateway failure inventory on 2026-08-30.
@@ -302,8 +302,9 @@ start a second provider turn.
 
 - Implement the existing bearer and HMAC V2 webhook receiver on literal
   loopback with the same timestamp, replay, header, body, and deadline rules.
-- Act as the MCP client for `poll_messages`, `reply_message`, and
-  `ack_message`. Do not expose delivery-control credentials to the provider.
+- Act as the MCP client for `poll_messages`, `reply_message`,
+  `complete_message`, `get_message_outcome`, and `ack_message`. Do not expose
+  delivery-control credentials to the provider.
 - Keep at most one in-flight turn per conversation and enforce the reviewed
   global concurrency limit.
 - Persist only the opaque correlation and lifecycle fields allowed by ADR
@@ -314,30 +315,31 @@ start a second provider turn.
   argv, environment variables, or temporary files.
 - Parse bounded structured provider events and return one bounded terminal
   payload or fixed status.
-- Cancel and reap provider processes as a complete process group.
+- Cancel through the provider port and apply only the provider/platform
+  containment mechanism that its later ADR and hard-crash tests qualify.
 - Keep prompts, responses, tool data, permissions, and credentials out of
   connector state, gateway state, logs, diagnostics, metrics, and errors.
 
-### Decisions required before tests or code
+### Accepted connector foundation decisions
 
 | ID | Decision | Required record |
 | --- | --- | --- |
-| N3-D1 | Connector executable, CLI, configuration, and working-directory interface | New CLI/configuration ADR and user approval |
-| N3-D2 | Correlation-store format, access controls, encryption, deletion, and fresh-install lifecycle | New connector-state ADR and user approval |
-| N3-D3 | Common implementation runtime, package layout, dependencies, and supported platforms | Foundation and dependency ADRs |
-| N3-D4 | Fixed concurrency, provider timeout, event, stdout, stderr, and response limits | Protocol or limit ADR |
-| N3-D5 | Provider port, local approval behavior, and which outcomes are terminal | Connector protocol and policy ADRs |
-| N3-D6 | Packaging, installation, and publishing model | Distribution plan and user approval |
+| N3-D1 | Connector executable, CLI, working-directory authority, and whole-provider retirement interface | Accepted ADR 0028 |
+| N3-D2 | Correlation-store format, access controls, encryption, retention, retirement, and fresh-install lifecycle | Accepted ADR 0029 and explicit extension of ADR 0007 |
+| N3-D3 | Common implementation runtime, private package layout, dependency scope, and platform qualification | Accepted ADR 0031 |
+| N3-D4 | Fixed webhook, concurrency, process, provider timeout, event, stdout, stderr, response, and retry limits | Accepted ADR 0030 |
+| N3-D5 | Provider port, local approval behavior, crash recovery, and terminal outcomes | Accepted ADR 0030 |
+| N3-D6 | Private packaging, installation, qualification, and later publishing gates | Accepted ADR 0031; distribution still requires Q03 or Q05 approval |
 
-Do not infer approval for these choices from acceptance of ADR 0024's product
-boundary.
+The user approved N3-D1 through N3-D6 on 2026-08-30. This does not bypass G04,
+the provider-specific ADRs, or Q03 and Q05 publication approval.
 
 ### Work order and gates
 
 | ID | Owner | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
 | N3-G1 | User | Review N3-D1 through N3-D6 | Accepted ADRs 0024 and 0025 | All foundation choices are accepted |
-| N3-T1 | Test support | Build a fake authenticated gateway MCP/webhook pair and a scriptable fake provider process | N3-G1 | Support code passes independently |
+| N3-T1 | Test support | Build a fake authenticated gateway MCP/webhook pair and a scriptable fake provider process | N3-G1, G04 | Support code passes independently |
 | N3-T2 | Security | Add red tests for auth-before-body, replay, injection, environment scrubbing, limits, timeouts, and process cleanup | N3-T1 | Failures are only missing connector behavior |
 | N3-T3 | State | Add red tests for mapping creation, resume, concurrency, repeated wakes, crash points, and uncertainty | N3-T1 | No test expects content persistence or prompt replay |
 | N3-T4 | End to end | Add a fake-provider flow from central message through reply and acknowledgement | N3-T2, N3-T3 | Full failure inventory written |
@@ -357,11 +359,11 @@ boundary.
 | N3-A03 | Two messages for one conversation arrive together | Run them in order, never concurrently |
 | N3-A04 | Messages for different conversations exceed the global cap | Queue by opaque ID without storing content |
 | N3-A05 | Sender supplies shell text, model, cwd, session, tool, or approval fields | Treat them as message content or reject them, never as execution control |
-| N3-A06 | Provider output exceeds a limit or contains invalid JSON events | Cancel safely and return a fixed terminal or uncertain state |
-| N3-A07 | Provider times out | Terminate and reap the process group without replay |
-| N3-A08 | Connector restarts after mapping but before turn start | Resume processing without creating another provider session |
+| N3-A06 | Normalized provider-port output is malformed or exceeds a limit | Cancel safely and return a fixed terminal or uncertain state; raw SDK, JSON, or JSONL envelope cases stay in the provider-specific suites |
+| N3-A07 | Provider times out | Cancel and apply the qualified containment mechanism without replay; leave the message open if cleanup cannot be proved |
+| N3-A08 | Connector restarts before or after the provider dispatch decision is durable | From `received`, gateway redelivery permits the one initial dispatch. From `binding` or `turn_starting`, never start or resume another turn; use only a proven safe pre-turn completion, qualified non-creating recovery of the exact prior turn, or uncertainty |
 | N3-A09 | Connector restarts after the provider may have acted | Recover the exact turn when supported or mark it uncertain |
-| N3-A10 | Reply succeeds and acknowledgement fails | Keep the opaque state and repeat only the idempotent reply or acknowledgement step |
+| N3-A10 | Reply succeeds and acknowledgement fails | Keep opaque state, resolve uncertainty through `get_message_outcome`, and repeat only the exact safe acknowledgement step |
 | N3-A11 | Provider session is missing or belongs to another project | Fail safe without silently rebinding the conversation |
 | N3-A12 | Inspect connector state and normal output | Find only approved opaque IDs and lifecycle data |
 | N3-A13 | Inspect provider process arguments and environment | Find no A2A body, response, webhook token, central JWT, or copied provider credential |
@@ -638,6 +640,5 @@ open until the external central owner publishes and accepts S01. N2 server
 operations use N6 protected transport. Gateway changes overlap in the MCP
 catalog, central clients, credential store, fixtures, application assembly,
 and product documentation, so G01 through G04 stay serialized and blocked by
-Gate A. ADR 0024's boundary is accepted. N3 through N5 remain blocked on the
-concrete D05 connector CLI, state, limits, dependency, provider-port, policy,
-packaging, installation, platform, and publishing decisions.
+Gate A. ADR 0024's boundary and D05 are accepted. N3 remains blocked by G04.
+N4 and N5 additionally retain provider-specific and distribution gates.

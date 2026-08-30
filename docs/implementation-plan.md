@@ -41,7 +41,7 @@ documentation land.
 | D02 | Complete | ADR 0025 fixes leased delivery, conversations, replies, terminal outcomes, acknowledgement, and activation |
 | D03 | Complete | ADR 0026 fixes DPoP issuance and transport, credential version 2, reissue, recovery, and revocation; ADR 0027 removes in-place migration from scope |
 | D04 | Complete | Accepted ADR status, active plan, review list, and central change request are synchronized |
-| D05 | Pending | ADR 0024 accepts the provider-neutral connector boundary; concrete CLI, state, policy, limit, dependency, provider-interface, packaging, installation, platform, and publishing decisions still need approval |
+| D05 | Complete | ADRs 0028 through 0031 fix the connector startup and retirement interface, state, policy, limits, provider-neutral port, runtime, dependency scope, private package layout, installation model, platform qualification, and publishing gates |
 | D06 | Complete | ADR 0020 approves direct test-only use of `cryptography==50.0.0` with its existing wheel hash, license, fixture-only scope, image effect, and update policy |
 
 The accepted contracts contain fixed values for development and test work.
@@ -162,18 +162,18 @@ this order.
 
 ## Phase 5: connector and provider work
 
-ADR 0024 accepts the separate provider-neutral connector boundary. No
-connector test or production code starts until D05 approves these concrete
-choices:
+ADR 0024 accepts the separate provider-neutral connector boundary. The user
+accepted ADRs 0028 through 0031 on 2026-08-30, completing D05 with these
+connector-wide choices:
 
-- connector executable and CLI or configuration interface;
+- connector executable, startup CLI, and explicit whole-provider state retirement;
 - working-directory and local security policy inputs;
 - content-free correlation-store technology, schema, access controls,
-  encryption, fresh-install behavior, and deletion;
-- runtime, dependencies, provider interfaces, package layout, fixed limits,
+  encryption, fresh-install behavior, and retirement;
+- runtime, dependencies, provider-neutral port, package layout, fixed limits,
   concurrency, and timeouts;
 - provider approval and uncertain-turn behavior; and
-- installation, packaging, supported platforms, and publishing.
+- installation, packaging, supported platforms, and publishing gates.
 
 After D05 and G04, implement the provider-neutral connector in the K01 through
 K04 order recorded in `docs/architecture-pr-backlog.md`: fixtures, red suite,
@@ -212,6 +212,6 @@ artifact tests.
   staging or release.
 - The local user-authorized reset interface for an unreadable credential or
   uncertain revocation remains unresolved.
-- D05's connector CLI, state technology and schema, cryptographic design,
-  limits, dependencies, provider interfaces, approval policy, packaging,
-  installation, publishing, and supported-platform decisions remain pending.
+- D05 is complete. G04 still blocks K01, and provider-specific interfaces,
+  versions, dependencies, platform support, and public distribution remain
+  behind their later ADR and release gates.

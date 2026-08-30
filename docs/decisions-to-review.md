@@ -44,9 +44,57 @@ Updated: 2026-08-30
   state. The central credential remains in the gateway, provider credentials
   remain in the provider runtime, and the connector never blindly replays an
   uncertain provider turn.
-- This boundary approval does not complete D05. Concrete connector CLI, state,
-  cryptography, limits, dependencies, provider interfaces, approval policy,
-  packaging, installation, platform, and publishing decisions remain pending.
+- ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. Real
+  provider interfaces, versions, dependencies, support claims, and public
+  distribution remain behind their later ADR and release gates.
+
+## Accepted D05 package
+
+ADRs 0028 through 0031 use the user's instruction to choose reasonable
+defaults and record them for review. The user accepted all four records on
+2026-08-30:
+
+- ADR 0028 accepts three provider-specific foreground binaries. `start` has
+  exactly four required named options for a loopback port, token environment
+  reference, canonical absolute working directory, and explicit
+  `read-only` or `workspace-write` maximum policy. The gateway MCP endpoint and
+  webhook path stay fixed. A separate confirmed `retire-state` command first
+  publishes a permanent fail-closed tombstone and then removes only one
+  provider's allowlisted correlation artifacts. The retired location is never
+  reused; a future design would need a different versioned location and new
+  identity proof while preserving the old tombstone.
+- ADR 0029 accepts one fixed per-provider SQLite store and extends the already
+  pinned `better-sqlite3` scope. It uses a
+  fresh-install-only schema, Node-core scrypt, AES-256-GCM encrypted IDs,
+  keyed indexes, provider and working-directory scope binding, exact
+  platform-qualified filesystem protections, acknowledgement-based message
+  cleanup, and indefinite conversation mapping retention until explicit
+  whole-provider retirement. Closed conversation tombstones remain until that
+  retirement, with a 100,000-row lifetime ceiling and a 256 MiB database cap.
+  Restoring both encrypted databases together to an older, mutually consistent
+  snapshot can replay local correlation state; the design detects mismatched
+  or partial rollback but cannot prevent that same-user backup rollback.
+- ADR 0030 accepts the provider-neutral `start`, `resume`, `recover`, and
+  `cancel` port; exact webhook and process bounds; one turn per conversation;
+  two turns globally; a 100-ID queue; fail-closed approval, cancellation, and
+  uncertainty; exact ADR 0025 completion mapping; reply-before-ack ordering;
+  an absolute non-resetting provider deadline, and one non-resetting
+  content-free central retry schedule.
+- ADR 0031 accepts extending the Node 24, TypeScript, pnpm,
+  `node:test`, Biome, Zod, MCP client, and Node-core toolchain to connectors,
+  with no new foundation framework. It proposes shared repository source
+  compiled directly into separate Codex, Claude, and Gemini artifacts,
+  exact-version `npx` usage, fake-provider CI, manual real-provider
+  qualification, a separately approved `next` preview gate, and a later
+  `latest` stable gate. A provider/platform is supported only after hard-crash
+  containment and recovery qualification. Publication must bind the public
+  source commit to the exact tarball digest and verify the resulting registry
+  provenance after publication.
+
+This approval completes the provider-neutral D05 foundation decisions. G04
+still blocks K01. Codex, Claude Code, and Gemini still require separate
+executable or SDK, version, protocol, sandbox, approval, history, license, and
+platform ADRs.
 
 ## Test-only stand-ins
 
@@ -63,17 +111,14 @@ central owner and returns a material contract difference for review.
 
 ## Active architecture and dependency decisions
 
-- D05 remains pending after ADR 0024's boundary approval. The connector
-  executable and CLI or configuration interface, working directory, security
-  policy, state technology and schema, access controls, encryption,
-  fresh-install behavior, deletion, runtime, dependencies, provider
-  interfaces, limits, concurrency, timeouts, and approval behavior remain
-  undecided.
+- D05 is complete. ADRs 0028 through 0031 contain the accepted connector
+  foundation decisions; G04 now blocks K01.
 - Each Codex, Claude Code, and Gemini adapter still needs its own exact
   executable or SDK version, protocol schema, dependency decision, sandbox and
   approval policy, history behavior, supported platforms, and update policy.
-- Connector installation, packaging, publishing, and distribution remain
-  unapproved. The gateway CLI stays unchanged.
+- The private package and installation model is accepted. Public-repository
+  conversion, publish jobs, preview or stable publication, and support claims
+  remain unapproved until their later gates. The gateway CLI stays unchanged.
 - The local user-authorized interface for intentional identity reset,
   unreadable credentials, and uncertain revocation remains undecided. Ordinary
   authentication or key failure must not enter recovery or overwrite a

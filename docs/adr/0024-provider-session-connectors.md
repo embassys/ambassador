@@ -65,12 +65,13 @@ Acceptance of this ADR freezes only these invariants:
   recovered, the connector fails closed as uncertain and never replays the
   provider turn blindly.
 
-This acceptance does not fix a connector command, configuration interface,
-state schema or mechanism, cryptography, numeric limit, process protocol,
-working-directory or approval policy, runtime dependency, provider interface,
-transport, package, platform, installation method, or publishing path. D05
-must approve the connector-wide choices. Each provider-specific ADR must
-approve its own interface and dependency choices.
+This boundary record alone does not fix a connector command, configuration
+interface, state schema or mechanism, cryptography, numeric limit, process
+protocol, working-directory or approval policy, runtime dependency, provider
+interface, transport, package, platform, installation method, or publishing
+path. ADRs 0028 through 0031 now approve the connector-wide D05 choices. Each
+provider-specific ADR must still approve its own interface and dependency
+choices.
 
 ### Conceptual boundary
 
@@ -93,7 +94,7 @@ Codex, Claude Code, or Gemini CLI
 User-approved local and remote capabilities
 ```
 
-A possible process for D05 to review is:
+The process accepted through ADRs 0028 through 0030 is:
 
 1. Receive the existing signed webhook wake on a literal-loopback listener.
 2. Authenticate the bearer, timestamp, HMAC signature, `Host`, and optional
@@ -138,20 +139,20 @@ provider state, persist provider session IDs, choose a working directory, or
 modify provider configuration files.
 
 The connector is the MCP client for delivery-control operations. It calls
-`poll_messages`, `reply_message`, and `ack_message` itself. It does not need to
-give the provider process the gateway bearer or expose those tools to the
-model. Codex, Claude Code, and Gemini CLI continue to use the user's existing
-MCP servers and extensions for local work. Allowing a model to initiate other
-A2A actions through the gateway would need a separate narrowed tool and
-credential decision; it must not happen implicitly as part of notification
-delivery.
+`poll_messages`, `reply_message`, `complete_message`, `get_message_outcome`,
+and `ack_message` itself. It does not need to give the provider process the
+gateway bearer or expose those tools to the model. Codex, Claude Code, and
+Gemini CLI continue to use the user's existing MCP servers and extensions for
+local work. Allowing a model to initiate other A2A actions through the gateway
+would need a separate narrowed tool and credential decision; it must not
+happen implicitly as part of notification delivery.
 
 ## Connector state boundary
 
 The accepted invariant is a separate, content-free correlation store owned by
-the connector. D05 must approve the exact technology, schema, cryptography,
-locking, access control, lifecycle, deletion, and fresh-install behavior. A
-later state proposal may need field categories such as:
+the connector. ADR 0029 fixes its technology, schema, cryptography, locking,
+access control, lifecycle, deletion, and fresh-install behavior, including the
+following field categories:
 
 - schema version;
 - opaque A2A `conversation_id`;
@@ -169,9 +170,9 @@ provider credentials, central credentials, webhook tokens, email addresses,
 verification codes, permission details, working directory paths, or provider
 transcripts. It must remain separate from the gateway notification journal.
 
-Provider session and turn IDs are sensitive local metadata. D05 must decide how
-to protect them and must approve any storage dependency before connector tests
-or production implementation.
+Provider session and turn IDs are sensitive local metadata. ADR 0029 fixes
+their protection and the accepted extension of the existing storage
+dependency. G04 still blocks connector tests and production implementation.
 
 Provider-native session history is a separate boundary. Persistent multi-turn
 resume normally causes Codex, Claude Code, or Gemini CLI to store conversation
@@ -180,12 +181,12 @@ not copy that content, but setup documentation must disclose the provider's
 storage and deletion behavior. A no-persistence mode may offer one-shot turns;
 it must not claim multi-turn continuity.
 
-## Security questions for D05
+## Security decisions fixed by D05
 
 The accepted boundary requires loopback wake delivery, MCP content retrieval,
 credential separation, content-free durability, and fail-closed uncertainty.
-D05 must turn the following candidates into an exact security and process
-policy before tests or code:
+ADRs 0028 through 0030 turn the following requirements into an exact security
+and process policy:
 
 - define webhook header, body, timestamp, replay, authentication, and deadline
   limits for the literal-loopback listener;
@@ -208,8 +209,8 @@ policy before tests or code:
 ## Crash and uncertainty rules
 
 The accepted result is fail-closed uncertainty with no blind provider-turn
-replay. D05 must decide the exact persistence ordering and common recovery
-protocol. Each provider-specific ADR must then prove when its session and turn
+replay. ADRs 0029 and 0030 fix the persistence ordering and common recovery
+protocol. Each provider-specific ADR must still prove when its session and turn
 IDs become available and whether it can read an exact prior turn without
 starting another one.
 
@@ -266,8 +267,8 @@ interface or event schema is accepted here.
 ## Packaging and platform impact
 
 The accepted boundary keeps connector code and provider dependencies out of
-the gateway artifact. D05 must decide the connector package or executable
-layout, installation and release model, and initial platform claims. A later
+the gateway artifact. ADR 0031 fixes the private connector package layout,
+installation model, release gates, and platform-qualification rule. A later
 platform claim cannot exceed both the gateway's qualified matrix and the
 selected provider runtime's qualified matrix.
 
@@ -291,20 +292,23 @@ production code.
 - Start a fresh provider session for every message. This loses the multi-turn
   context required by the shared design.
 
-## Remaining approval gates
+## D05 completion and remaining gates
 
-Connector tests and production work remain blocked until D05 approves:
+ADRs 0028 through 0031 complete D05 by approving:
 
 1. the connector executable, CLI or configuration interface, working-directory
    input, and local security-policy input;
 2. the correlation-store technology, schema, access control, encryption,
    deletion, and fresh-install behavior;
 3. fixed concurrency, timeout, event, process, output, and response limits;
-4. the common runtime and dependencies, plus each provider interface,
-   executable or SDK version, and protocol schema;
+4. the common runtime, dependencies, and provider-neutral port;
 5. local approval behavior and the mapping from provider results to terminal
    or uncertain outcomes; and
 6. packaging, installation, supported platforms, and publishing gates.
+
+G04 still blocks K01. Each provider interface, executable or SDK version, and
+protocol schema stays behind its later provider-specific ADR and blocks only
+that adapter's tests and production work.
 
 ## Approval
 
@@ -317,7 +321,7 @@ central credential leaves the gateway, no provider credential leaves the
 provider runtime, and a provider turn with an uncertain outcome is never
 replayed blindly.
 
-This approval does not complete D05 or approve a connector command, storage
-technology or schema, cryptographic design, limit, dependency, provider
-interface, approval policy, package, installation method, platform claim, or
-publishing change.
+This boundary approval did not itself complete D05. The user subsequently
+accepted ADRs 0028 through 0031 on 2026-08-30, completing the connector-wide
+foundation decisions. Provider-specific interfaces, support claims, and
+public publishing remain outside this record.
