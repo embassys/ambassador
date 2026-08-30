@@ -169,6 +169,8 @@ async function runVerificationFailure(
     centralApiUrl: api.url,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    observeCentralFetch: true,
+    targetContract: "v2",
   });
   const client = new T03RawMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();
@@ -258,6 +260,18 @@ test("T03-N01 verification nonce and proof failures use fixed precedence and ret
     {
       name: "challenge missing no-store",
       plans: [challenge({ nonce: VALID_NONCE, noStore: false })],
+      code: "central_verification_response_unsafe",
+      requests: 1,
+    },
+    {
+      name: "missing no-store precedes wrong media type",
+      plans: [challenge({ nonce: VALID_NONCE, mediaType: "text/plain", noStore: false })],
+      code: "central_verification_response_unsafe",
+      requests: 1,
+    },
+    {
+      name: "missing no-store precedes malformed JSON",
+      plans: [challenge({ nonce: VALID_NONCE, body: "{", noStore: false })],
       code: "central_verification_response_unsafe",
       requests: 1,
     },
@@ -413,6 +427,35 @@ test("T03-N02 invalid verification credentials are rejected before persistence",
       code: "central_enrollment_contract_failed",
     },
     {
+      name: "case-colliding token member",
+      response: {
+        status: 200,
+        headers: SAFE_JSON_HEADERS,
+        body: (request) =>
+          successBody(request, {
+            raw: (token) =>
+              JSON.stringify({
+                agent_id: "agent_fixture_0001",
+                username: "t03_gateway",
+                token,
+                Token: token,
+                token_type: "DPoP",
+                expires_in: 86_400,
+              }),
+          }),
+      },
+      code: "central_enrollment_contract_failed",
+    },
+    {
+      name: "verification set-cookie header",
+      response: {
+        status: 200,
+        headers: { ...SAFE_JSON_HEADERS, "set-cookie": "fixture_session=forbidden" },
+        body: (request) => successBody(request),
+      },
+      code: "central_enrollment_contract_failed",
+    },
+    {
       name: "nested credential-shaped data",
       response: {
         status: 200,
@@ -557,6 +600,7 @@ test("T03-N03 verification accepts an exact 4096-byte bound token without exposi
     centralApiUrl: api.url,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    targetContract: "v2",
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();

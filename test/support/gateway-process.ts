@@ -56,11 +56,20 @@ export async function startGatewayProcess(
     centralApiUrl?: string;
     centralMcpUrl?: string;
     executable?: string;
+    targetContract?: "current" | "v2";
   },
 ): Promise<GatewayProcess> {
   const directory = await mkdtemp(join(tmpdir(), "a2a-gateway-process-test-"));
   t.after(() => rm(directory, { force: true, recursive: true }));
-  const executable = options.executable ?? join(process.cwd(), ".test-dist", "src", "cli.js");
+  const executable =
+    options.executable ??
+    join(
+      process.cwd(),
+      ".test-dist",
+      ...(options.targetContract === "v2"
+        ? ["test", "support", "v2-gateway-process.js"]
+        : ["src", "cli.js"]),
+    );
   const child = spawn(
     process.execPath,
     [

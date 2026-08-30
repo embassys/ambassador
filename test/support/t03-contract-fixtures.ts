@@ -72,6 +72,7 @@ export async function startT03GatewayScenario(
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
     credentialStore: credentials.adapter,
+    targetContract: "v2",
     ...(options.verbose === true ? { verbose: true } : {}),
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
