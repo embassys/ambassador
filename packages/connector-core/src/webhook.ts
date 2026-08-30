@@ -58,6 +58,76 @@ function safeEqual(left: string, right: string): boolean {
   return a.byteLength === b.byteLength && timingSafeEqual(a, b);
 }
 
+function hasLoneSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseStrictWakeJson(body: Buffer): unknown | undefined {
+  let text: string;
+  let value: unknown;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+
+  const containers: (Set<string> | undefined)[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "{") {
+      containers.push(new Set());
+      continue;
+    }
+    if (character === "[") {
+      containers.push(undefined);
+      continue;
+    }
+    if (character === "}" || character === "]") {
+      containers.pop();
+      continue;
+    }
+    if (character !== '"') continue;
+
+    const start = index;
+    index += 1;
+    let escaped = false;
+    while (index < text.length) {
+      const stringCharacter = text[index];
+      if (escaped) escaped = false;
+      else if (stringCharacter === "\\") escaped = true;
+      else if (stringCharacter === '"') break;
+      index += 1;
+    }
+
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(text.slice(start, index + 1));
+    } catch {
+      return undefined;
+    }
+    if (typeof decoded !== "string" || hasLoneSurrogate(decoded)) return undefined;
+
+    let next = index + 1;
+    while ([9, 10, 13, 32].includes(text.charCodeAt(next))) next += 1;
+    if (text[next] !== ":") continue;
+    const names = containers.at(-1);
+    if (names === undefined || names.has(decoded)) return undefined;
+    names.add(decoded);
+  }
+  return value;
+}
+
 function rawWakeId(value: unknown): string | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const object = value as Record<string, unknown>;
@@ -319,16 +389,8 @@ export class WebhookReceiver {
       return;
     }
     this.#replays.set(replay, Number(timestamp));
-    const text = body.toString("utf8");
-    const keyMatches = [...text.matchAll(/"([^"\\]+)"\s*:/gu)].map((match) => match[1]);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      this.#respond(socket, state, 400, "connector_wake_invalid");
-      return;
-    }
-    if (new Set(keyMatches).size !== keyMatches.length) {
+    const parsed = parseStrictWakeJson(body);
+    if (parsed === undefined) {
       this.#respond(socket, state, 400, "connector_wake_invalid");
       return;
     }
