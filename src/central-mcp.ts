@@ -6,6 +6,7 @@ import {
   SdkHttpError,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
+import { CentralProtectedTransportError } from "./central-protected-transport.js";
 import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { assertSafeUpstreamResult, type CentralToolDefinition } from "./mcp-contract.js";
 
@@ -49,6 +50,7 @@ export class CentralMcpError extends Error {
 
 export interface CentralMcpClientOptions {
   centralMcpUrl: string | URL;
+  fetch?: FetchLike;
   verboseTranscript?: DevelopmentVerboseTranscript;
 }
 
@@ -525,6 +527,7 @@ function boundedBody(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Arra
 async function boundedFetch(
   url: string | URL,
   init: RequestInit | undefined,
+  fetcher: FetchLike,
   lifetimeSignal: AbortSignal,
   connectSignal: AbortSignal | undefined,
   operationSignal: AbortSignal | undefined,
@@ -538,7 +541,7 @@ async function boundedFetch(
   verboseTranscript?.recordHttpRequest("central_mcp", url, init);
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetcher(url, {
       ...init,
       redirect: "manual",
       signal: signals.length === 1 ? lifetimeSignal : AbortSignal.any(signals),
@@ -596,12 +599,15 @@ export class CentralMcpClient {
   private readonly lifetimeController = new AbortController();
   private readonly operationSignals = new AsyncLocalStorage<AbortSignal>();
   private client: Client | undefined;
+  private transport: StreamableHTTPClientTransport | undefined;
   private connecting: ConnectingClient | undefined;
   private closed = false;
   private readonly verboseTranscript: DevelopmentVerboseTranscript | undefined;
+  private readonly fetcher: FetchLike;
 
   constructor(options: CentralMcpClientOptions) {
     this.verboseTranscript = options.verboseTranscript;
+    this.fetcher = options.fetch ?? globalThis.fetch;
     try {
       this.centralMcpUrl = safeUrl(options.centralMcpUrl);
     } catch {
@@ -666,12 +672,21 @@ export class CentralMcpClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.lifetimeController.abort();
     this.connecting?.controller.abort();
     const connecting = this.connecting?.promise.catch(() => undefined);
     const client = this.client;
+    const transport = this.transport;
     this.client = undefined;
-    await Promise.allSettled([connecting, client?.close()]);
+    this.transport = undefined;
+    const deadline = setTimeout(() => this.lifetimeController.abort(), CONNECT_DEADLINE_MS);
+    deadline.unref();
+    try {
+      await Promise.allSettled([connecting, transport?.terminateSession()]);
+      await client?.close().catch(() => undefined);
+    } finally {
+      clearTimeout(deadline);
+      this.lifetimeController.abort();
+    }
   }
 
   private async getClient(callerSignal?: AbortSignal): Promise<Client> {
@@ -725,6 +740,7 @@ export class CentralMcpClient {
       await boundedFetch(
         url,
         init,
+        this.fetcher,
         this.lifetimeController.signal,
         connecting && init?.method !== "GET" ? connectSignal : undefined,
         this.operationSignals.getStore(),
@@ -753,7 +769,10 @@ export class CentralMcpClient {
       this.verboseTranscript?.recordError("central_mcp", error);
     };
     client.onclose = () => {
-      if (this.client === client) this.client = undefined;
+      if (this.client === client) {
+        this.client = undefined;
+        this.transport = undefined;
+      }
     };
 
     try {
@@ -763,6 +782,7 @@ export class CentralMcpClient {
       });
       if (this.closed) throw new CentralMcpError("central_mcp_closed");
       this.client = client;
+      this.transport = transport;
       return client;
     } catch (error) {
       this.verboseTranscript?.recordError("central_mcp", error);
@@ -785,6 +805,21 @@ export class CentralMcpClient {
     }
     if (error instanceof RedirectRejected) {
       return new CentralMcpError("central_mcp_redirect_rejected");
+    }
+    if (error instanceof CentralProtectedTransportError) {
+      if (error.code === "central_protected_redirect_rejected") {
+        return new CentralMcpError("central_mcp_redirect_rejected");
+      }
+      if (
+        error.code === "central_protected_authentication_failed" ||
+        error.code === "central_dpop_proof_rejected" ||
+        error.code === "central_protected_credential_expired"
+      ) {
+        return new CentralMcpError("central_mcp_authentication_failed");
+      }
+      if (error.code === "central_protected_response_unsafe") {
+        return new CentralMcpError("central_mcp_response_invalid");
+      }
     }
     if (error instanceof ResponseTooLarge) {
       return new CentralMcpError("central_mcp_response_too_large");

@@ -206,6 +206,8 @@ test("T03-U04 invalid-token responses never trigger reissue, replacement, or bea
     new URL("/api/v2/token/revoke", central.apiUrl).href,
     {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scope: "identity" }),
     },
   );
   assert.equal(revoked.status, 204);
@@ -254,6 +256,7 @@ test("T03-U05 real encrypted credential reissue replaces envelope v2 and survive
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    targetContract: "v2",
   });
   const firstClient = new TestMcpClient(first.endpoint, T03_WEBHOOK_TOKEN);
   await firstClient.initialize();

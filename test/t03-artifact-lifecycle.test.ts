@@ -35,6 +35,8 @@ test("T03-A01 verbose enrollment and reissue redact actual proof, nonce, token, 
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
+    targetContract: "v2",
+    observeCentralFetch: true,
     verbose: true,
   });
   const client = new TestMcpClient(first.endpoint, T03_WEBHOOK_TOKEN);
@@ -112,7 +114,9 @@ test("T03-A01 verbose enrollment and reissue redact actual proof, nonce, token, 
       ? []
       : [observation.requestHeaders["idempotency-key"]],
   );
-  assert.ok(proofs.length >= 4 && nonces.length >= 2 && idempotencyKeys.length === 2);
+  assert.ok(proofs.length >= 4, "verbose lifecycle observed too few protected proofs");
+  assert.ok(nonces.length >= 2, "verbose lifecycle observed too few nonce responses");
+  assert.equal(idempotencyKeys.length, 2, "verbose lifecycle observed wrong reissue count");
   assert.ok(idempotencyKeys[0] === idempotencyKeys[1]);
 
   await runT03ArtifactScan({
