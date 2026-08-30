@@ -15,6 +15,7 @@ const forbiddenControls = [
   "filesystemQualification",
   "proveNoProviderDispatch",
   "providerDispatchDelayMsForTest",
+  "processBarrierForTest",
   "stallWebhookResponseAfterCommit",
   "stateActionObserverForTest",
 ];
@@ -217,7 +218,7 @@ function stripConnector(source) {
   const spreads = removeForbiddenSpreads(output);
   if (spreads.removed !== 5) throw new Error("unexpected emitted connector test spreads");
   const statements = removeForbiddenIfStatements(spreads.output);
-  if (statements.removed !== 25) {
+  if (statements.removed !== 29) {
     throw new Error(`unexpected emitted connector test branches: ${statements.removed}`);
   }
   assertProductionOnly(statements.output);
