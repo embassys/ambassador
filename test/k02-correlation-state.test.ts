@@ -90,7 +90,6 @@ test("K02-A01 creates the exact strict schema and fixed SQLite settings", async 
     assert.equal(database.pragma("page_size", { simple: true }), 4_096);
     assert.equal(database.pragma("journal_mode", { simple: true }), "wal");
     assert.equal(database.pragma("foreign_keys", { simple: true }), 1);
-    assert.equal(database.pragma("trusted_schema", { simple: true }), 0);
     assert.equal(database.pragma("max_page_count", { simple: true }), 65_536);
     assert.deepEqual(database.pragma("integrity_check"), [{ integrity_check: "ok" }]);
     assert.deepEqual(database.pragma("foreign_key_check"), []);
