@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
-import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
+import { type ProviderPort, SYSTEM_CLOCK } from "../packages/connector-core/src/runtime-types.js";
 import {
   type CodexAppServerSpawnOptionsForTest,
   CX02_DEADLINE_MS,
@@ -15,6 +15,7 @@ import {
   CX02_TURN_ID,
   collectEvents,
   createCx02Adapter,
+  createCx02Clock,
   type FakeCodexAppServer,
   type FakeCodexExchange,
   type FakeCodexProcessPlan,
@@ -197,6 +198,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X01", {
       versionPlan,
       appPlan: validStartPlan(cwd),
+      ...(versionPlan.hold === true ? { clock: SYSTEM_CLOCK } : {}),
     });
     assert.deepEqual(await collectEvents(adapter.start(startRequest())), [
       {
@@ -230,6 +232,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
     inheritedEnvironment: syntheticCx02Environment("identity-mutation"),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
+    clock: createCx02Clock(),
     fixtureExecutablePath: fakeForMutation.executablePath,
     afterVersionProbeForTest: async () => {
       assert.ok(fakeForMutation !== undefined);
@@ -776,6 +779,7 @@ test("CX02-X08a sends only exact coarse thread and turn authority under both pol
       inheritedEnvironment: syntheticCx02Environment(`policy-${policy}`),
       webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
       connectorPackageVersion: "0.0.0-private",
+      clock: createCx02Clock(),
       fixtureExecutablePath: fake.executablePath,
     });
     t.after(async () => await adapter.close());
