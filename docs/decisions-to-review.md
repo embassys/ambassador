@@ -236,6 +236,11 @@ platform ADRs.
   simulated transport result and committed its schedule. This changes only
   test ordering; production scheduling and every accepted interval remain
   unchanged.
+- A03 waits until both encrypted session and turn mappings are durably visible
+  before crashing, and O05 observes every exact durable retry row before it
+  advances the manual clock. These are state-barrier corrections for the same
+  request-observation race; no timeout, retry interval, clock value, or
+  production behavior changed.
 - O06 filters the proxy's raw MCP `initialize` record only when comparing the
   ordered delivery-control tool names. The proxy still retains that record,
   every defined tool remains in exact order, and separate MCP session and

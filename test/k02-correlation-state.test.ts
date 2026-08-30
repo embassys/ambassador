@@ -388,7 +388,25 @@ test("K02-A03 rejects ciphertext transplanted across authenticated AAD parents",
       scenario.enqueue(message);
       assert.equal((await scenario.wake(message.id)).status, 202);
     }
-    await waitFor(() => scenario.provider.activeExecutionCount === 2, "two AAD parent rows");
+    await waitFor(() => {
+      try {
+        const database = openState(scenario.stateDirectory);
+        try {
+          return (
+            database
+              .prepare<[], { count: number }>(
+                "SELECT count(*) AS count FROM conversations c JOIN messages m USING(conversation_hmac) WHERE c.provider_session_ciphertext IS NOT NULL AND m.provider_turn_ciphertext IS NOT NULL",
+              )
+              .get()?.count === 2
+          );
+        } finally {
+          database.close();
+        }
+      } catch {
+        return false;
+      }
+    }, "two durable AAD parent rows");
+    assert.equal(scenario.provider.activeExecutionCount, 2);
     await scenario.connector.crash();
     const database = openState(scenario.stateDirectory);
     try {

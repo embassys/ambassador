@@ -548,6 +548,12 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
       scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length === 1,
     "first central attempt",
   );
+  await waitForRetrySchedule(
+    scenario,
+    "complete",
+    clock.nowMs() + 1_000,
+    "first central retry schedule",
+  );
   clock.advance(999);
   assert.equal((await sendDistinctWake()).status, 202);
   assert.equal(
@@ -571,17 +577,23 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
         attempt,
       `central attempt ${attempt}`,
     );
+    const delay =
+      attempt === 2
+        ? 2_000
+        : attempt === 3
+          ? 4_000
+          : attempt === 4
+            ? 8_000
+            : attempt === 5
+              ? 16_000
+              : 30_000;
+    await waitForRetrySchedule(
+      scenario,
+      "complete",
+      clock.nowMs() + delay,
+      `central retry schedule ${attempt}`,
+    );
     if (attempt < 255) {
-      const delay =
-        attempt === 2
-          ? 2_000
-          : attempt === 3
-            ? 4_000
-            : attempt === 4
-              ? 8_000
-              : attempt === 5
-                ? 16_000
-                : 30_000;
       clock.advance(delay - 1);
       assert.equal((await sendDistinctWake()).status, 202);
       assert.equal(
