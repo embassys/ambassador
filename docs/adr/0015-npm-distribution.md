@@ -22,9 +22,9 @@ npx --yes @a2adev/gateway@<qualified-version> start --webhook-url=<url> --webhoo
 
 User-facing guides pin the qualified gateway version. They do not require a global gateway or pnpm installation. The repository, CI, packing, and release qualification continue to use pnpm under ADR 0006.
 
-Publish initial production releases from the `main` branch only after Linux and macOS checks pass. ADR 0033 makes Windows unsupported and excludes it from initial-release artifacts and evidence. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
+Publish initial production releases from the `main` branch only after Linux and macOS checks pass. ADR 0033 makes Windows unsupported and excludes Windows qualification from initial-release artifact evidence. The platform-neutral npm package is not a Windows-qualified artifact or support claim. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
 
-The user approved `0.2.0` through `0.2.6` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. ADR 0033 later made Windows unsupported for the initial release; documentation and release artifacts exclude it.
+The user approved `0.2.0` through `0.2.6` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. ADR 0033 later made Windows unsupported for the initial release. Documentation makes no Windows-qualified artifact or support claim.
 
 Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
 
