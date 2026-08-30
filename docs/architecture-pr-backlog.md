@@ -112,7 +112,9 @@ K04 -> Codex, Claude, and Gemini adapter tracks in parallel
 
 gateway qualification -> R01 gateway release review
 first qualified adapter -> Q02 setup and distribution review
-all requested adapters qualified -> Q03 combined release review
+first qualified adapter -> Q03 preview publication review
+all requested adapters qualified + Q03 -> Q04 combined qualification
+Q04 -> Q05 stable publication review
 ```
 
 ## Wave 0: contract gate and pending decisions
@@ -128,7 +130,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | D02 | Complete | Gateway docs and central protocol docs | `docs: freeze conversation, recovery, reply, and acknowledgement contract` | None | ADR 0025 fixes messages, leased recovery, replies, acknowledgement, idempotency, terminal status, bounds, and activation |
 | D03 | Complete | Gateway docs and central security docs | `docs: freeze DPoP and token lifecycle contract` | D01 | ADR 0026 fixes the algorithm, URI rules, proof limits, nonce and replay rules, errors, credential version 2, reissue, revocation, rotation, and recovery; ADR 0027 removes migration from the target |
 | D04 | Complete | Gateway docs | `docs: accept the next architecture and replace the active implementation plan` | D01, D02, D03, user approval | ADR status and approval sections, the implementation plan, review list, product and protocol governance, and shared ownership agree |
-| D05 | Pending user review | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | Separate ADRs fix the connector command, working directory input, state technology and schema, access control, encryption, deletion, runtime, dependencies, provider interfaces, concurrency, timeouts, approvals, terminal outcomes, packaging, installation, supported platforms, and publishing gates |
+| D05 | Complete | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | ADRs 0028 through 0031 fix the connector command and explicit retirement, working-directory input, state technology and schema, access control, encryption, runtime and dependency scope, provider port, concurrency, timeouts, approvals, terminal outcomes, private packaging, installation model, platform qualification, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
 
 The gateway uses the fixed accepted route split and never adds runtime
@@ -253,14 +255,14 @@ path.
 
 ## Wave 6: build the provider-neutral connector foundation
 
-D05 may run while gateway implementation proceeds. Connector code waits for
-G04 because it needs the final local `poll_messages`, `reply_message`, and
-`ack_message` contracts.
+D05 is complete. Connector code waits for G04 because
+it needs the final local `poll_messages`, `reply_message`, `complete_message`,
+`get_message_outcome`, and `ack_message` contracts.
 
 | ID | Type | Proposed PR title | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| K01 | Green fixture PR | `test: add fake gateway and scriptable provider fixtures` | D05, G04 contract | A fake authenticated gateway exposes the three delivery-control tools; a fake provider emits deterministic session, turn, response, approval, crash, malformed, oversized, and recovery events |
-| K02 | Draft red PR | `test: specify connector security, state, and crash behavior` | K01 | Red cases cover auth-before-body, replay, prompt injection boundaries, process argv and environment, state mapping, concurrency, repeated wakes, process-group cleanup, approval, exact-turn recovery, reply-before-ack, and uncertainty |
+| K01 | Green fixture PR | `test: add fake gateway and scriptable provider fixtures` | D05, G04 contract | A fake authenticated gateway exposes the five delivery-control tools; a fake provider emits deterministic session, turn, response, approval, crash, malformed, oversized, and recovery events |
+| K02 | Draft red PR | `test: specify connector security, state, and crash behavior` | K01 | Red cases cover auth-before-body, replay, prompt injection boundaries, process argv and environment, state mapping, concurrency, repeated wakes, qualified containment cleanup, approval, exact-turn recovery, reply-before-ack, and uncertainty |
 | K03 | Implementation PR | `feat: add the provider-neutral connector foundation` | K02 failure review | Implement the approved connector command, loopback wake receiver, bounded local MCP client, opaque state store, per-conversation serialization, global concurrency, cancellation, and provider port |
 | K04 | Green E2E PR | `test: run the fake-provider conversation chain end to end` | K03, E02 | Central fixture to gateway to connector to fake provider to idempotent reply to acknowledgement passes two-turn resume, concurrent conversations, duplicate wakes, every crash barrier, restart, and artifact scans |
 
@@ -311,13 +313,14 @@ failure blocks that adapter's release but does not block the other two tracks.
 | --- | --- | --- | --- | --- |
 | R01 | Gateway release PR | `release: qualify the REST, DPoP, recovery, and reply gateway` | E01, E02, E03, W01, G05, G06, G07 | Product, protocol, ADRs, setup, status, package tests, OpenClaw and Hermes regression flows, platform matrix, security review, dependency audit, and release artifact all describe and contain the shipped gateway behavior |
 | Q01 | CI PR | `test: run every fake provider adapter through one regression matrix` | K04 and each implemented adapter | Linux, macOS, and every provider-supported Windows lane run the fake full chain without provider credentials; unsupported combinations are documented rather than silently skipped |
-| Q02 | Documentation PR | `docs: add provider-neutral connector setup and retention guidance` | First successful CX04, CL04, or GM04 | Users install and authenticate providers themselves; docs cover separate gateway and connector startup, working directory, sandbox, approvals, provider history, retention, deletion, and one-shot limitations |
-| Q03 | Distribution decision and release PR | `release: package the approved connector and provider adapters` | Q01, Q02, explicit publishing approval | Each artifact has its own version, minimal contents, supported platforms, packed-install E2E, license notices, provenance, rollback plan, and no gateway runtime-selection option |
+| Q02 | Documentation PR | `docs: add provider-neutral connector setup and retention guidance` | First successful CX04, CL04, or GM04 | Users install and authenticate providers themselves; docs cover separate gateway and connector startup, working directory, sandbox, approvals, provider history, retention, retirement, and one-shot limitations |
+| Q03 | Preview distribution decision and release PR | `release: publish an approved connector preview` | Q01, Q02, one successful provider qualification, explicit publishing approval | The selected provider artifact publishes as `0.1.0` on `next` from the public source repository with minimal contents, supported platforms, packed-install E2E, license notices, provenance, rollback instructions, and no gateway runtime-selection option |
 | Q04 | Combined qualification task | `record cross-provider soak and release evidence` | CX04, CL04, GM04, Q03 | Repeated multi-turn conversations, mixed concurrent conversations, provider restarts, gateway restarts, connector restarts, central outages, and reply uncertainty complete without duplicate turns, duplicate replies, leaked credentials, or persisted content |
+| Q05 | Stable distribution decision and release PR | `release: promote qualified connectors to stable` | Q04, explicit stable-publishing approval | The first `1.0.0` artifacts publish on `latest` only after every claimed provider and platform has passed its packed-install, hard-crash, real-runtime, security, license, and soak gates |
 
-R01 is a gateway release and does not wait for provider adapters. Connector and
-adapter releases follow their own Q03 gate. This keeps central security and
-message recovery from being blocked by provider integration work.
+R01 is a gateway release and does not wait for provider adapters. Connector
+previews follow Q03; a stable release follows Q05. This keeps central security
+and message recovery from being blocked by provider integration work.
 
 ## End-to-end test architecture
 
@@ -355,10 +358,10 @@ fixture cannot prove cross-replica atomicity.
 | SYS-10 | Deliver two messages in one conversation | Connector creates one provider session, serializes the turns, and resumes the same opaque session ID | K02, K04 |
 | SYS-11 | Deliver two conversations above the concurrency limit | Connector starts only the approved number, queues opaque IDs, and never stores content | K02, K04 |
 | SYS-12 | Repeat a wake while a turn is running | Connector returns success without starting another provider turn | K02, K04 |
-| SYS-13 | Kill the connector after session mapping but before turn start | Restart uses the stored mapping and starts one turn | K02, K04 |
+| SYS-13 | Kill the connector before or after the provider dispatch decision is durable | From `received`, gateway redelivery permits the one initial dispatch. From `binding` or `turn_starting`, restart never starts or resumes another turn; it uses only a proven safe pre-turn completion, qualified non-creating recovery of the exact prior turn, or uncertainty | K02, K04 |
 | SYS-14 | Kill the connector after the provider may have acted | Exact-turn recovery returns the prior result when supported; otherwise state becomes `uncertain` and no prompt is replayed | K02, K04 and provider tracks |
 | SYS-15 | Provider requests an unapproved tool or local approval | Connector preserves denial or the approved local flow and never changes to bypass mode | Provider red tests and manual qualification |
-| SYS-16 | Provider emits malformed or oversized output or times out | Connector cancels and reaps the process group, returns a fixed state, and records no stream content | K02 and provider red tests |
+| SYS-16 | Provider emits malformed or oversized output or times out | Connector cancels through the provider port, applies only qualified containment, returns a fixed state only when supported by evidence, and records no stream content | K02 and provider red tests |
 | SYS-17 | Complete two turns through a real provider | Both turns use one provider session and the reply reaches the normal central interface | CX04, CL04, GM04 |
 | SYS-18 | Inspect every local artifact and normal output | Find no message, prompt, response, tool data, email, verification code, JWT, DPoP key, proof, nonce, or copied provider credential outside its approved store | T02, E03, K04, Q04 |
 
@@ -432,9 +435,9 @@ expose a crash barrier.
 
 These groups may run in parallel after their dependencies are green:
 
-- D05 decision work and the external S01 red specification;
 - S04 and S06 after S03;
-- D05 decision work while later G01 through G04 proceed;
+- provider-specific ADR research while later G01 through G04 proceed, without
+  installing a provider dependency or implementing an adapter;
 - the Codex, Claude Code, and Gemini tracks after K03; and
 - G05, G06, and G07 after their separate staging gates.
 
