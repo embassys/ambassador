@@ -1,6 +1,6 @@
-# K02 red failure inventory
+# K02 classified implementation inventory
 
-Status: provider-neutral connector contract accepted for K03 implementation
+Status: provider-neutral connector foundation implemented by K03
 
 K02 specifies the accepted connector foundation in ADRs 0024 and 0028 through
 0032. It uses the K01 authenticated gateway and scripted provider port plus
@@ -8,8 +8,8 @@ K02-only raw-socket, deterministic-clock, fault-proxy, and process-observation
 seams. No test selects a Codex, Claude Code, or Gemini executable, SDK,
 protocol, dependency, version, sandbox mapping, or support claim.
 
-The normal green runner excludes `k02-*.test.js`. The existing classified red
-CI runner includes K02 by default with T03 and T04:
+The normal green runner excludes `k02-*.test.js`. The existing classified
+inventory CI runner includes K02 by default with T03 and T04:
 
 ```text
 pnpm run test:build
@@ -18,16 +18,14 @@ node scripts/run-red-inventory.mjs --suite=k02
 node scripts/run-red-inventory.mjs
 ```
 
-The reviewed pre-K03 inventory is 69 top-level nodes: 68 red, one green loader
-guard, zero skipped, and zero todo. Every red node fails only with its exact
-`[K02-K03:<case>]` marker when dynamic import reports
-`ERR_MODULE_NOT_FOUND` for the exact absent compiled K03 entry. A loaded but
-non-object module, a missing export, a transitive missing dependency, a module
-initialization exception, a fixture error, a loopback failure, a timeout, an
-unhandled rejection, a changed name, or another marker is unreviewed and makes
-the classifier fail. The green loader guard proves that a transitive missing
-dependency, syntax error, non-module value, or incomplete export surface is
-not eligible for the reviewed missing-entry marker.
+The reviewed K03 inventory is 69 top-level nodes: 69 green, zero red, zero
+skipped, and zero todo. The 68 production-backed nodes preserve the exact
+accepted K02 names and behavior boundaries. The remaining green loader guard
+proves that a transitive missing dependency, syntax error, non-module value, or
+incomplete export surface is not eligible for the historical reviewed
+missing-entry marker. Any regression, fixture error, loopback failure, timeout,
+unhandled rejection, changed name, or changed node count makes the classifier
+fail.
 
 ## Classified matrices
 
@@ -42,7 +40,7 @@ not eligible for the reviewed missing-entry marker.
 | S01 | Exact environment scrubbing plus scans of state, working paths, spawn records, and normal artifacts for content, credentials, approvals, provider IDs, and sender-controlled settings |
 | S09-S13 | Owner/correlation initialization crashes; correlation-only and mutually valid rollback behavior; 100,000-conversation capacity; injected local-filesystem qualification; startup rejects a partial marker as unavailable and an exact marker as retired; only `retire-state` repairs an exact protected prefix and resumes every sync and allowlisted deletion crash |
 | A01-A08 | Exact strict SQLite schema and pragmas; full HMAC indexes; independent AES-256-GCM IV/tag envelopes; parent-bound AAD transplant rejection; paired transition atomicity; envelope/index/schema corruption; token/provider/directory scope binding; acknowledgement cleanup and mapping retention; unallowlisted artifact and permission failures |
-| L01, SD01, B00 | Fixed 35-second gateway MCP timeout; non-resetting provider/grace/containment timers; exact fixed constants; parallel two-turn cancellation; bounded SIGINT and SIGTERM-style 15-second shutdown |
+| L01, SD01, B00 | Approved MCP client/HTTP transport initialization handshake and fixed 35-second gateway MCP timeout; non-resetting provider/grace/containment timers; exact fixed constants; parallel two-turn cancellation; bounded SIGINT and SIGTERM-style 15-second shutdown |
 | D01-D05 | Exact public `start`/`retire-state` grammar and loopback foreground startup; unpackaged shared core; exact private manifests; safe closed-provider build/stage gate; packed offline-install and command-smoke gate |
 
 P05, P07, Q02, C01, and S01 have separate nodes for independent policy,

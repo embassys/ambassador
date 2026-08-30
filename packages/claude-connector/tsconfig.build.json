@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "noEmitOnError": true,
+    "outDir": "../../.build/connectors/claude",
+    "rootDir": ".."
+  },
+  "include": ["src/**/*.ts", "../connector-core/src/**/*.ts"]
+}

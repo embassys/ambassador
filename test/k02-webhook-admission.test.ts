@@ -398,6 +398,7 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
       k02WakeHeaders(scenario.connector.webhookUrl, id, Math.floor(clock.nowMs() / 1_000), body),
     ),
   );
+  await new Promise<void>((resolve) => setImmediate(resolve));
   clock.advance(4_999);
   held.write("{");
   const heldResponse = readK02Response(held);
@@ -429,6 +430,7 @@ test("K02-W08 applies non-resetting header and request deadlines to stalls", asy
       "X-Webhook-Signature-V2": "f".repeat(64),
     }),
   );
+  await new Promise<void>((resolve) => setImmediate(resolve));
   clock.advance(4_999);
   invalidSignature.write(invalidSignatureBody.slice(0, -1));
   const invalidSignatureResponse = readK02Response(invalidSignature);
