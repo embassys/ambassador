@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createECDH, createPrivateKey, type JsonWebKey } from "node:crypto";
 import type { TestContext } from "node:test";
 
-import type { CredentialStore } from "../../src/credential-store.js";
+import type { CredentialStore, VersionedCredentialStore } from "../../src/credential-store.js";
 import { type FakeCentral, startFakeCentral } from "./fake-central.js";
 import { startFakeWebhook } from "./fake-webhook.js";
 import { TestMcpClient } from "./mcp-client.js";
@@ -22,7 +22,7 @@ export interface T03CredentialRecord {
 }
 
 export interface T03CapturingCredentialStore {
-  readonly adapter: CredentialStore;
+  readonly adapter: CredentialStore & VersionedCredentialStore;
   readonly saved: readonly string[];
 }
 
@@ -40,12 +40,19 @@ export interface T03GatewayScenario {
  */
 export function capturingCredentialStore(initial?: string): T03CapturingCredentialStore {
   const saved: string[] = [];
-  const adapter: CredentialStore = {
+  const adapter: CredentialStore & VersionedCredentialStore = {
     async load() {
-      return initial;
+      return undefined;
     },
-    async save(value) {
-      saved.push(value);
+    async save() {
+      throw new Error("T03 version 2 state reached the legacy credential store API");
+    },
+    async loadCredential() {
+      return initial === undefined ? undefined : { version: 2, plaintext: initial };
+    },
+    async saveCredential(credential) {
+      assert.equal(credential.version, 2);
+      saved.push(credential.plaintext);
     },
   };
   return { adapter, saved };

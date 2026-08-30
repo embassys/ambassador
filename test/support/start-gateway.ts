@@ -5,15 +5,13 @@ import type { TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { type CliContext, runCli } from "../../src/cli.js";
+import type { CredentialStore, VersionedCredentialStore } from "../../src/credential-store.js";
 
 interface TestOverrides {
   centralApiUrl: string;
   centralMcpUrl: string;
   stateRoot: string;
-  credentialStore?: {
-    load: () => Promise<string | undefined>;
-    save: (token: string) => Promise<void>;
-  };
+  credentialStore?: CredentialStore & Partial<VersionedCredentialStore>;
 }
 
 interface RunningGateway {
