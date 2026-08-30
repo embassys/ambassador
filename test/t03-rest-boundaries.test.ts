@@ -269,6 +269,20 @@ test("T03-B03 reviewed bootstrap errors and unsafe outcomes never fall back or r
       localCode: "central_enrollment_outcome_uncertain",
     },
     {
+      name: "bodyless redirect",
+      plan: { status: 302, headers: { location: "/api/register_agent" } },
+      localCode: "central_enrollment_outcome_uncertain",
+    },
+    {
+      name: "HTML redirect",
+      plan: {
+        status: 308,
+        headers: { location: "/api/register_agent", "content-type": "text/html" },
+        body: "<html>redirect</html>",
+      },
+      localCode: "central_enrollment_outcome_uncertain",
+    },
+    {
       name: "connection loss after dispatch",
       plan: { status: 200, drop: true },
       localCode: "central_enrollment_outcome_uncertain",
@@ -420,6 +434,14 @@ test("T03-B04 malformed and over-limit bootstrap responses fail closed", async (
         status: 200,
         headers: JSON_HEADERS,
         body: `{"agent_id":"agent_fixture_0001","username":"${T03_USERNAME}","email":"${T03_EMAIL}","nested":{"token":"forbidden-marker"}}`,
+      },
+    },
+    {
+      name: "registration set-cookie headers",
+      plan: {
+        status: 200,
+        headers: { ...JSON_HEADERS, "set-cookie": ["first=forbidden", "second=forbidden"] },
+        body: registrationBodyAtSize(512),
       },
     },
   ];

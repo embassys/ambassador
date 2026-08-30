@@ -25,11 +25,13 @@ node --test --test-concurrency=1 --test-reporter=spec \
 ```
 
 The final `0.2.6` observation on 2026-08-29 was 128 red behavior vectors and
-one existing closed-schema guard green. After G02, 31 of the 129 behavior
-vectors remain red and 98 are green: 19 G01 credential checks, 78 newly green
-G02 enrollment checks, and the shipped guard. Node reports 139 test nodes: 34
-failed and 105 passed because three failing and seven passing parameterized
-parents are counted in addition to their child vectors.
+one existing closed-schema guard green. G02 review added seven response-order,
+case-collision, redirect, and cookie-header regression vectors. After G02, 31
+of the 136 behavior vectors remain red and 105 are green: 19 G01 credential
+checks, 85 newly green G02 enrollment checks, and the shipped guard. Node
+reports 146 test nodes: 34 failed and 112 passed because three failing and
+seven passing parameterized parents are counted in addition to their child
+vectors.
 
 ## Failure classification
 
@@ -44,14 +46,14 @@ parents are counted in addition to their child vectors.
 | T03-R07 | 1 | The credential-v2 record loads, then protected startup stops at the isolated legacy accessor | Reload the bound key/token and use fresh token-free DPoP after restart |
 | T03-B02 | 13 | Green: all invalid bootstrap inputs stop locally | Preserve exact one-over, character, and unknown-field rejection |
 | T03-B02a | 1 | Green: exact maximum bootstrap fields remain accepted | Preserve the 254-byte email, 50-byte username, and 128-byte display-name boundaries |
-| T03-B03 | 8 | Green: reviewed errors and unsafe outcomes use fixed local mappings | Preserve no retry or fallback after uncertainty |
+| T03-B03 | 10 | Green: reviewed errors and unsafe outcomes use fixed local mappings | Preserve no retry or fallback after uncertainty, including bodyless and non-JSON redirects |
 | T03-B04a | 1 | Green: an exact 64 KiB valid response is projected | Preserve the body boundary before schema projection |
 | T03-B04b | 3 | Green: exact structural parser limits are accepted | Preserve safe extension discard at depth, member, and element boundaries |
-| T03-B04 | 13 | Green: malformed and one-over REST responses fail closed | Preserve status, media, encoding, UTF-8, duplicate-key, structure, size, and credential-extension rejection |
+| T03-B04 | 14 | Green: malformed and one-over REST responses fail closed | Preserve status, media, encoding, UTF-8, duplicate-key, structure, size, credential-extension, and response-cookie rejection |
 | T03-B05 | 1 | Green: shutdown cancels one in-flight bootstrap request | Preserve cancellation without retry or MCP fallback |
 | T03-B06-B08 | 3 | Green: lost outcomes and resend rate limiting map exactly | Preserve one request with no persistence or fallback |
-| T03-N01 | 11 | Green: verification failures use fixed precedence and retry bounds | Preserve exact nonce, proof, cache, safe-message, and token-free mappings |
-| T03-N02 | 15 | Green: invalid issuance credentials are rejected before persistence | Preserve type, lifetime, identity, audience, binding, JWT, duplicate, reflection, media, cache, and size validation |
+| T03-N01 | 13 | Green: verification failures use fixed precedence and retry bounds | Preserve missing-`no-store` precedence before media and body parsing plus exact nonce, proof, cache, safe-message, and token-free mappings |
+| T03-N02 | 17 | Green: invalid issuance credentials are rejected before persistence | Preserve type, lifetime, identity, audience, binding, JWT, case-insensitive token uniqueness, response-cookie, reflection, media, cache, and size validation |
 | T03-N03 | 1 | Green: exact 4096-byte bound token persists without local exposure | Preserve the exact token boundary and interceptor |
 | T03-S02 | 14 | Green: every malformed fresh-install credential-v2 record fails before central dispatch | Preserve rejection of duplicate/missing/unknown fields, wrong version/type/algorithm, malformed JWT/JWK/DER, non-P-256 keys, missing binding, and key mismatch |
 | T03-S03 | 1 | The credential-v2 record loads, then protected startup stops before G03 transport | Complete real protected operations and independently verify every fresh ES256 proof, `htm`, fixed-route `htu`, `ath`, and token-free body |

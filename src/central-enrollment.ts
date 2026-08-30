@@ -464,10 +464,17 @@ async function readFetchResponseBody(response: Response, signal: AbortSignal): P
   return bytes;
 }
 
-function assertSafeResponseHeaders(response: EnrollmentHttpResponse): void {
+function assertResponseHeaderSize(response: EnrollmentHttpResponse): void {
   if (response.rawHeaderBytes > RESPONSE_HEADERS_MAX_BYTES) {
     throw new EnrollmentContractError();
   }
+}
+
+function assertNoResponseCookies(response: EnrollmentHttpResponse): void {
+  if (response.headerValues.has("set-cookie")) throw new EnrollmentContractError();
+}
+
+function assertSafeRepresentationHeaders(response: EnrollmentHttpResponse): void {
   const mediaType = response.headers.get("content-type");
   if (mediaType === null || !SAFE_MEDIA_TYPE.test(mediaType)) throw new EnrollmentContractError();
   if (response.headers.has("content-encoding")) throw new EnrollmentContractError();
@@ -499,7 +506,7 @@ function assertSafeResponseValue(
   if (!isObject(value)) return;
   for (const [name, nested] of Object.entries(value)) {
     const lower = name.toLowerCase();
-    const permittedToken = allowTopLevelToken && depth === 0 && lower === "token";
+    const permittedToken = allowTopLevelToken && depth === 0 && name === "token";
     if (FORBIDDEN_RESPONSE_NAMES.has(lower) && !permittedToken) {
       throw new EnrollmentContractError();
     }
@@ -744,7 +751,7 @@ export class CentralEnrollmentClient {
         ...(nonce === undefined ? {} : { nonce }),
       });
       this.#verboseTranscript?.addSecret(proof);
-      const response = await this.#send(target, body, signal, { DPoP: proof });
+      const response = await this.#send("verify_email", target, body, signal, { DPoP: proof });
       const parsed = response.value;
       if (!hasNoStore(response.response)) {
         throw new CentralEnrollmentError("central_verification_response_unsafe");
@@ -794,7 +801,7 @@ export class CentralEnrollmentClient {
       throw new CentralEnrollmentError("central_enrollment_contract_failed");
     }
     const path = name === "register_agent" ? "/api/register" : "/api/resend_verification";
-    const result = await this.#send(new URL(path, this.#apiBase), body, signal);
+    const result = await this.#send(name, new URL(path, this.#apiBase), body, signal);
     if (result.response.status !== 200) {
       const failure = responseError(name, result.response, result.value);
       this.#recordSafeFailure(result.response, failure.code);
@@ -815,6 +822,10 @@ export class CentralEnrollmentClient {
     value: Record<string, unknown>,
     key: DpopKeyMaterial,
   ): VerificationEnrollmentSuccess {
+    const tokenNames = Object.keys(value).filter((name) => name.toLowerCase() === "token");
+    if (tokenNames.length !== 1 || tokenNames[0] !== "token") {
+      throw new CentralEnrollmentError("central_enrollment_contract_failed");
+    }
     const token = value.token;
     if (
       typeof value.agent_id !== "string" ||
@@ -864,6 +875,7 @@ export class CentralEnrollmentClient {
   }
 
   async #send(
+    route: BootstrapToolName,
     target: URL,
     body: Record<string, unknown>,
     signal: AbortSignal,
@@ -904,7 +916,15 @@ export class CentralEnrollmentClient {
       throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
     }
     try {
-      assertSafeResponseHeaders(response);
+      assertResponseHeaderSize(response);
+      if (route === "verify_email" && !hasNoStore(response)) {
+        throw new CentralEnrollmentError("central_verification_response_unsafe");
+      }
+      assertNoResponseCookies(response);
+      if (response.status >= 300 && response.status < 400) {
+        throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+      }
+      assertSafeRepresentationHeaders(response);
       const value = parseStrictResponse(response.body);
       return { response, value };
     } catch (error) {
