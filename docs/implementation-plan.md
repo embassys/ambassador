@@ -195,6 +195,28 @@ must not add a Windows CI lane.
 Real provider credentials never enter repository CI. Connector publication or
 installation tooling still needs explicit user approval.
 
+### Codex adapter track
+
+CX01 accepts ADR 0034 for the Codex-first preview implementation path. It pins
+Codex App Server 0.149.0 and its stable generated schema, selects one stdio
+child per provider-port invocation, fixes the thread, turn, policy, recovery,
+history, authentication, license, update, and containment boundaries, and
+supplies the exact CX02 red test plan. The decisions remain available for
+later user review, but that review does not block CX02 or CX03.
+
+| ID | Task | Depends on | Completion evidence |
+| --- | --- | --- | --- |
+| CX01 | Record the Codex App Server adapter contract | K03 | ADR 0034 accepts the exact version, schema digest, protocol subset, policy, recovery, history, platform, containment, and update decisions for the preview path |
+| CX02 | Add the fake App Server and classified red adapter specification | CX01 | Every ADR 0034 CX02 node, X01-X07, X08a-X08b, and X09-X27, fails only at the absent CX03 production boundary; Linux and macOS CI use no real Codex binary or credential |
+| CX03 | Implement the Codex adapter against the frozen provider port | CX02 failure review | The complete CX02 inventory passes without a provider dependency, public control seam, input in argv, approval grant, credential copy, or blind turn replay |
+| CX04 | Qualify one existing authenticated Codex 0.149.0 installation manually | CX03, K04 | Each claimed Linux or macOS target passes exact schema, two-turn resume, sandbox, cancellation, hard-crash containment, recovery, and artifact checks |
+
+Codex App Server is currently documented as experimental and unsupported for
+production workloads. CX04 may support only the approved Codex-first preview.
+It does not close real-central, publishing, soak, or stable gates. A failed
+hard-crash containment test leaves that provider/platform pair unsupported and
+returns its containment mechanism for a new decision.
+
 ## Release gates
 
 | Gate | Required evidence |
