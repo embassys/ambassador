@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { dirname } from "node:path";
 import type { TestContext } from "node:test";
 
 import type { ConnectorClock } from "../../../packages/connector-core/src/runtime-types.js";
@@ -16,6 +18,28 @@ export const CX02_THREAD_ID = "019c0000-0000-7000-8000-000000000001";
 export const CX02_TURN_ID = "019c0000-0000-7000-8000-000000000002";
 export const CX02_EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 export const CX02_DEADLINE_MS = 1_788_000_900_000;
+
+export function syntheticCx02Environment(
+  home = joinSyntheticHome("default"),
+): Readonly<Record<string, string>> {
+  return {
+    HOME: home,
+    PATH: [
+      dirname(process.execPath),
+      "/Users/agent/.local/bin",
+      "/opt/homebrew/bin",
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+    ].join(":"),
+    LANG: "C.UTF-8",
+    TMPDIR: tmpdir(),
+  };
+}
+
+function joinSyntheticHome(name: string): string {
+  return `${tmpdir()}/a2a-cx02-synthetic-home-${name}`;
+}
 
 export function initializeRequest(id = 1): Readonly<Record<string, unknown>> {
   return {
@@ -167,7 +191,7 @@ export async function createCx02Adapter(
   const adapter = await module.createCodexAppServerAdapterForTest({
     workingDirectory: options.workingDirectory ?? process.cwd(),
     policy: options.policy ?? "read-only",
-    inheritedEnvironment: options.inheritedEnvironment ?? process.env,
+    inheritedEnvironment: options.inheritedEnvironment ?? syntheticCx02Environment(caseId),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
     fixtureExecutablePath: options.fixtureExecutablePath ?? fake.executablePath,

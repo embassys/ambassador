@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
+import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 
 import {
   CX02_THREAD_ID,
@@ -17,10 +20,25 @@ import {
   handshakeExchanges,
   resumeRequest,
   startRequest,
+  syntheticCx02Environment,
   threadSettingsResponse,
   validThread,
   validTurn,
 } from "./support/codex-app-server/index.js";
+import { startFakeConnectorGateway } from "./support/connector/index.js";
+import { K02_TOKEN, k02Message } from "./support/connector/k02-production.js";
+
+async function unusedLoopbackPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
 
 function eventName(value: unknown): unknown {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -163,10 +181,14 @@ function jsonRecordAtBytes(method: string, targetBytes: number, depth = 1): stri
   return `${JSON.stringify({ ...base, params: { ...base.params, pad: "x".repeat(padding) } })}\n`;
 }
 
-async function runCommand(executable: string, arguments_: readonly string[]): Promise<void> {
+async function runCommand(
+  executable: string,
+  arguments_: readonly string[],
+  environment: Readonly<Record<string, string>>,
+): Promise<void> {
   const child = spawn(executable, [...arguments_], {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...environment },
     shell: false,
     stdio: "ignore",
     windowsHide: true,
@@ -457,20 +479,33 @@ test("CX02-X21 preserves every common exact limit through valid App Server envel
 
 test("CX02-X22 never replaces a missing mutated or unavailable stored thread", async (t) => {
   const cwd = process.cwd();
-  const responses = [
-    {},
-    { thread: validThread(cwd, "different_thread") },
-    { ...threadSettingsResponse(cwd), thread: { ...validThread(cwd), turns: [] } },
-    { ...threadSettingsResponse(cwd), cwd: `${cwd}/moved` },
+  const responses: readonly {
+    name: string;
+    result?: unknown;
+    error?: unknown;
+  }[] = [
+    { name: "missing", error: { code: -32_000, message: "stored thread missing" } },
+    { name: "missing response fields", result: {} },
+    { name: "different stored thread", result: { thread: validThread(cwd, "different_thread") } },
+    {
+      name: "mutated working directory",
+      result: { ...threadSettingsResponse(cwd), cwd: `${cwd}/moved` },
+    },
   ];
-  for (const result of responses) {
+  for (const vector of responses) {
     const plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }> = {
       kind: "app-server",
-      exchanges: [...handshakeExchanges(), { expectMethod: "thread/resume", result }],
+      exchanges: [
+        ...handshakeExchanges(),
+        {
+          expectMethod: "thread/resume",
+          ...(vector.error === undefined ? { result: vector.result } : { error: vector.error }),
+        },
+      ],
     };
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X22", { appPlan: plan });
     const events = await collectEvents(adapter.resume(resumeRequest()));
-    assert.ok(["failed", "uncertain"].includes(String(eventName(events.at(-1)))));
+    assert.ok(["failed", "uncertain"].includes(String(eventName(events.at(-1)))), vector.name);
     assert.equal(
       fake.launches.at(-1)?.requests.some((request) => request.method === "thread/start"),
       false,
@@ -486,25 +521,69 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   const root = await mkdtemp(join(tmpdir(), "a2a-cx02-leakage-"));
   t.after(async () => await rm(root, { recursive: true, force: true }));
   const cwd = join(root, "workspace");
+  const stateDirectory = join(root, "state");
   await mkdir(cwd, { mode: 0o700 });
+  await mkdir(stateDirectory, { mode: 0o700 });
   const markers = [
     "CX02_A2A_TEXT_SECRET",
     "CX02_REPLY_SECRET",
     "CX02_TOOL_DETAIL_SECRET",
     "CX02_APPROVAL_SECRET",
     "CX02_CODEX_AUTH_SECRET",
-  ];
+  ] as const;
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X23", {
     workingDirectory: cwd,
     inheritedEnvironment: {
-      HOME: "/cx02/provider-home",
-      PATH: process.env.PATH,
+      ...syntheticCx02Environment("leakage"),
       OPENAI_API_KEY: markers[4],
       CX02_WEBHOOK_TOKEN: "a".repeat(48),
     },
-    appPlan: activePlan(cwd, [{ kind: "json", value: completed(markers[1]) }]),
+    appPlan: activePlan(cwd, [
+      {
+        kind: "json",
+        value: {
+          method: "item/completed",
+          params: {
+            threadId: CX02_THREAD_ID,
+            turnId: CX02_TURN_ID,
+            completedAtMs: 1_788_000_001_000,
+            item: {
+              id: "private_tool_item",
+              type: "mcpToolCall",
+              server: "fixture",
+              tool: "fixture_tool",
+              arguments: { detail: markers[2] },
+              status: "completed",
+            },
+          },
+        },
+      },
+      { kind: "json", value: completed(markers[1]) },
+    ]),
   });
-  await collectEvents(adapter.start(startRequest(markers[0])));
+  const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN });
+  const connector = await startConnectorRuntime({
+    providerKind: "codex",
+    webhookPort: await unusedLoopbackPort(),
+    webhookToken: K02_TOKEN,
+    workingDirectory: cwd,
+    policy: "read-only",
+    gatewayEndpoint: gateway.endpoint,
+    stateDirectory,
+    provider: adapter as unknown as ProviderPort,
+  });
+  t.after(async () => await connector.close());
+  const message = k02Message("cx02_x23_message", "cx02_x23_conversation", markers[0]);
+  gateway.enqueueMessage(message);
+  assert.equal((await gateway.sendWake(connector.webhookUrl, message.id)).status, 202);
+  await connector.waitForIdle();
+  assert.equal(gateway.tombstone(message.id)?.outcome, "replied");
+  assert.deepEqual(
+    gateway.calls
+      .filter((call) => call.name === "reply_message")
+      .map((call) => call.arguments.text),
+    [markers[1]],
+  );
   const launch = fake.launches.at(-1);
   assert.ok(launch !== undefined);
   const executionSurface = JSON.stringify({
@@ -512,22 +591,79 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     environment: launch.environment,
   });
   for (const marker of markers) assert.ok(!executionSurface.includes(marker));
-  const runtimeEntries = await readdir(root, { recursive: true });
-  for (const entry of runtimeEntries) {
-    const path = join(root, String(entry));
-    let body: Buffer;
-    try {
-      body = await readFile(path);
-    } catch {
-      continue;
+  const approval = await createCx02Adapter(t, "CX02-CX03:X23", {
+    workingDirectory: cwd,
+    inheritedEnvironment: {
+      ...syntheticCx02Environment("leakage-approval"),
+      OPENAI_API_KEY: markers[4],
+      CX02_WEBHOOK_TOKEN: "a".repeat(48),
+    },
+    appPlan: activePlan(cwd, [
+      {
+        kind: "json",
+        value: {
+          id: "private_approval",
+          method: "item/permissions/requestApproval",
+          params: {
+            threadId: CX02_THREAD_ID,
+            turnId: CX02_TURN_ID,
+            itemId: "private_approval_item",
+            reason: markers[3],
+          },
+        },
+      },
+    ]),
+  });
+  const approvalIterator = approval.adapter
+    .start(startRequest("approval input"))
+    [Symbol.asyncIterator]();
+  await approvalIterator.next();
+  await approvalIterator.next();
+  const approvalEvent = (await approvalIterator.next()).value;
+  assert.equal(eventName(approvalEvent), "approval_required");
+  assert.ok(!JSON.stringify(approvalEvent).includes(markers[3]));
+  await approvalIterator.return?.();
+
+  const ownedRoots = [root, dirname(fake.executablePath), dirname(approval.fake.executablePath)];
+  for (const ownedRoot of ownedRoots) {
+    const runtimeEntries = await readdir(ownedRoot, { recursive: true });
+    for (const entry of runtimeEntries) {
+      const path = join(ownedRoot, String(entry));
+      let body: Buffer;
+      try {
+        body = await readFile(path);
+      } catch {
+        continue;
+      }
+      for (const marker of markers) assert.ok(!body.includes(Buffer.from(marker)));
     }
-    for (const marker of markers) assert.ok(!body.includes(Buffer.from(marker)));
   }
+  const captures = JSON.stringify([
+    { arguments: launch.arguments, environment: launch.environment },
+    ...approval.fake.launches.map((entry) => ({
+      arguments: entry.arguments,
+      environment: entry.environment,
+    })),
+  ]);
+  for (const marker of markers) assert.ok(!captures.includes(marker));
 
   for (const provider of ["codex"] as const) {
-    await runCommand(process.execPath, [join("scripts", "build-connector.mjs"), provider]);
-    await runCommand(process.execPath, [join("scripts", "stage-connector.mjs"), provider]);
-    await runCommand(process.execPath, [join("scripts", "check-packed-connector.mjs"), provider]);
+    const commandEnvironment = syntheticCx02Environment("artifact-check");
+    await runCommand(
+      process.execPath,
+      [join("scripts", "build-connector.mjs"), provider],
+      commandEnvironment,
+    );
+    await runCommand(
+      process.execPath,
+      [join("scripts", "stage-connector.mjs"), provider],
+      commandEnvironment,
+    );
+    await runCommand(
+      process.execPath,
+      [join("scripts", "check-packed-connector.mjs"), provider],
+      commandEnvironment,
+    );
   }
   const stagedRoot = ".stage/connectors/codex/package";
   const entries = await readdir(stagedRoot, { recursive: true });

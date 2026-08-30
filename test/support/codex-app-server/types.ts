@@ -34,14 +34,18 @@ export type FakeCodexProcessPlan =
       readonly writesAfterStdinEnd?: readonly FakeCodexWireWrite[];
       readonly spawnDescendant?: boolean;
       readonly killDescendantOnStdinEnd?: boolean;
+      readonly containmentForTest?: "kill" | "fail";
       readonly stderrBytes?: number;
     };
 
 export interface FakeCodexLaunchRecord {
+  readonly executable: string;
   readonly mode: "version" | "app-server" | "invalid";
   readonly arguments: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
+  readonly shell: false;
+  readonly pid: number;
   readonly requests: readonly Readonly<Record<string, unknown>>[];
   readonly stdinClosed: boolean;
   readonly descendantPid: number | undefined;

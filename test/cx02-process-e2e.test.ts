@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
 import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 import {
+  type CodexAdapterPort,
+  CX02_DEADLINE_MS,
   CX02_THREAD_ID,
   CX02_TURN_ID,
   createCx02Adapter,
@@ -18,6 +20,7 @@ import {
   loadCx03Production,
   startFakeCodexAppServer,
   startRequest,
+  syntheticCx02Environment,
   threadSettingsResponse,
   validThread,
   validTurn,
@@ -29,8 +32,41 @@ function eventName(value: unknown): unknown {
     : undefined;
 }
 
+function observeProviderEvents(adapter: CodexAdapterPort, observed: unknown[]): ProviderPort {
+  const observe = async function* (source: AsyncIterable<unknown>): AsyncIterable<unknown> {
+    for await (const event of source) {
+      observed.push(structuredClone(event));
+      yield event;
+    }
+  };
+  return {
+    spawnRecord: adapter.spawnRecord,
+    get containmentAttempts() {
+      return adapter.containmentAttempts;
+    },
+    get postTerminalDeliveries() {
+      return adapter.postTerminalDeliveries;
+    },
+    start(request) {
+      return observe(adapter.start(request as never));
+    },
+    resume(request) {
+      return observe(adapter.resume(request as never));
+    },
+    recover(request) {
+      return observe(adapter.recover(request as never));
+    },
+    async cancel(request) {
+      return await adapter.cancel(request as never);
+    },
+    async contain(executionId) {
+      return await adapter.contain(executionId);
+    },
+  };
+}
+
 import { startFakeConnectorGateway } from "./support/connector/index.js";
-import { K02_TOKEN, k02Message } from "./support/connector/k02-production.js";
+import { K02_TOKEN, k02Message, ManualK02Clock } from "./support/connector/k02-production.js";
 
 function threadStarted(cwd: string, threadId = CX02_THREAD_ID): unknown {
   return { method: "thread/started", params: { thread: validThread(cwd, threadId) } };
@@ -55,12 +91,61 @@ function turnCompleted(text: string, threadId = CX02_THREAD_ID, turnId = CX02_TU
   };
 }
 
+function exactThreadResumeRequest(cwd: string): Readonly<Record<string, unknown>> {
+  return {
+    id: 2,
+    method: "thread/resume",
+    params: {
+      threadId: CX02_THREAD_ID,
+      cwd,
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+    },
+  };
+}
+
+function exactThreadStartRequest(cwd: string): Readonly<Record<string, unknown>> {
+  return {
+    id: 2,
+    method: "thread/start",
+    params: {
+      cwd,
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+      ephemeral: false,
+      serviceName: "a2a_codex_connector",
+    },
+  };
+}
+
+function exactTurnStartRequest(
+  cwd: string,
+  threadId: string,
+  text: string,
+): Readonly<Record<string, unknown>> {
+  return {
+    id: 3,
+    method: "turn/start",
+    params: {
+      threadId,
+      input: [{ type: "text", text, text_elements: [] }],
+      cwd,
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+    },
+  };
+}
+
 function terminalPlan(
   cwd: string,
   options: {
     threadId?: string;
     turnId?: string;
     responseText?: string;
+    requestText?: string;
     terminalStatus?: "completed" | "failed" | "interrupted";
     terminalGate?: string;
     onStdinEnd?: "exit" | "linger" | "resist";
@@ -81,11 +166,17 @@ function terminalPlan(
       ...handshakeExchanges(),
       {
         expectMethod: "thread/start",
+        expectRequest: exactThreadStartRequest(cwd),
         result: threadSettingsResponse(cwd, threadId),
         afterResponse: [{ kind: "json", value: threadStarted(cwd, threadId) }],
       },
       {
         expectMethod: "turn/start",
+        expectRequest: exactTurnStartRequest(
+          cwd,
+          threadId,
+          options.requestText ?? "CX02 untrusted input",
+        ),
         result: { turn: validTurn(turnId) },
         afterResponse: [
           { kind: "json", value: turnStarted(threadId, turnId) },
@@ -177,7 +268,7 @@ test("CX02-X24 hard owner death closes the attached fake App Server unit", async
   );
   const child = spawn(process.execPath, [workerPath, fake.executablePath, cwd], {
     cwd,
-    env: process.env,
+    env: syntheticCx02Environment("owner-process"),
     shell: false,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -212,6 +303,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X25", {
     appPlan: terminalPlan(workingDirectory, {
       responseText: "first reply",
+      requestText: "first input",
       terminalGate: "parallel_release",
     }),
   });
@@ -220,9 +312,11 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
       threadId: threadTwo,
       turnId: turnTwo,
       responseText: "parallel reply",
+      requestText: "parallel input",
       terminalGate: "parallel_release",
     }),
   );
+  const providerEvents: unknown[] = [];
   const connector = await startConnectorRuntime({
     providerKind: "codex",
     webhookPort: await unusedLoopbackPort(),
@@ -231,7 +325,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     policy: "read-only",
     gatewayEndpoint: gateway.endpoint,
     stateDirectory,
-    provider: adapter as unknown as ProviderPort,
+    provider: observeProviderEvents(adapter, providerEvents),
   });
   t.after(async () => await connector.close());
   gateway.enqueueMessage(k02Message("cx02_chain_1", "cx02_conversation_a", "first input"));
@@ -262,24 +356,26 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   const parallelTombstone = gateway.tombstone("cx02_parallel_1");
   assert.equal(firstTombstone?.outcome, "replied");
   assert.equal(parallelTombstone?.outcome, "replied");
-  gateway.enqueueMessage(
-    k02Message(
-      "cx02_chain_2",
-      "cx02_conversation_a",
-      "second input",
-      firstTombstone?.reply_message_id ?? null,
-    ),
+  const continuationMessage = k02Message(
+    "cx02_chain_2",
+    "cx02_conversation_a",
+    "second input",
+    firstTombstone?.reply_message_id ?? null,
   );
+  assert.equal(continuationMessage.in_reply_to_message_id, firstTombstone?.reply_message_id);
+  gateway.enqueueMessage(continuationMessage);
   fake.enqueue({
     kind: "app-server",
     exchanges: [
       ...handshakeExchanges(),
       {
         expectMethod: "thread/resume",
+        expectRequest: exactThreadResumeRequest(workingDirectory),
         result: threadSettingsResponse(workingDirectory),
       },
       {
         expectMethod: "turn/start",
+        expectRequest: exactTurnStartRequest(workingDirectory, CX02_THREAD_ID, "second input"),
         result: { turn: validTurn("019c0000-0000-7000-8000-000000000003") },
         afterResponse: [
           {
@@ -309,7 +405,47 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   );
   assert.equal(methods.filter((method) => method === "thread/start").length, 2);
   assert.equal(methods.filter((method) => method === "thread/resume").length, 1);
+  const resumeLaunch = fake.launches.find((launch) =>
+    launch.requests.some((request) => request.method === "thread/resume"),
+  );
+  assert.ok(resumeLaunch !== undefined);
+  assert.deepEqual(
+    resumeLaunch.requests.filter((request) =>
+      ["thread/resume", "turn/start"].includes(String(request.method)),
+    ),
+    [
+      exactThreadResumeRequest(workingDirectory),
+      exactTurnStartRequest(workingDirectory, CX02_THREAD_ID, "second input"),
+    ],
+  );
+  const terminalProviderEvents = providerEvents.filter((event) =>
+    ["reply", "failed", "uncertain", "completed_without_reply", "cancelled"].includes(
+      String(eventName(event)),
+    ),
+  );
+  assert.equal(terminalProviderEvents.length, 3);
+  assert.equal(
+    new Set(terminalProviderEvents.map((event) => (event as { execution_id: string }).execution_id))
+      .size,
+    3,
+  );
+  assert.deepEqual(
+    providerEvents
+      .filter((event) => eventName(event) === "turn_bound")
+      .map((event) => (event as { provider_turn_id: string }).provider_turn_id)
+      .sort(),
+    [CX02_TURN_ID, "019c0000-0000-7000-8000-000000000003", turnTwo].sort(),
+  );
   assert.equal(gateway.calls.filter((call) => call.name === "ack_message").length, 3);
+  assert.equal(gateway.calls.filter((call) => call.name === "reply_message").length, 3);
+  assert.equal(gateway.calls.filter((call) => call.name === "complete_message").length, 0);
+  assert.deepEqual(
+    gateway.calls
+      .filter((call) => call.name === "reply_message")
+      .map((call) => call.arguments.text)
+      .sort(),
+    ["first reply", "parallel reply", "second reply"].sort(),
+  );
   for (const messageId of ["cx02_chain_1", "cx02_parallel_1", "cx02_chain_2"]) {
     const terminalIndex = gateway.calls.findIndex(
       (call) =>
@@ -330,31 +466,42 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
     plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }>;
     containmentEmpty: boolean;
     terminal: "reply" | "failed" | "uncertain" | null;
+    containmentExpected: boolean;
   }[] = [
-    { name: "normal", plan: terminalPlan(cwd), containmentEmpty: true, terminal: "reply" },
+    {
+      name: "normal",
+      plan: terminalPlan(cwd),
+      containmentEmpty: true,
+      terminal: "reply",
+      containmentExpected: false,
+    },
     {
       name: "exact failed terminal",
       plan: terminalPlan(cwd, { terminalStatus: "failed" }),
       containmentEmpty: true,
       terminal: "failed",
+      containmentExpected: false,
     },
     {
       name: "exact interrupted terminal",
       plan: terminalPlan(cwd, { terminalStatus: "interrupted" }),
       containmentEmpty: true,
       terminal: "uncertain",
+      containmentExpected: false,
     },
     {
       name: "linger",
       plan: terminalPlan(cwd, { onStdinEnd: "linger" }),
       containmentEmpty: true,
       terminal: "reply",
+      containmentExpected: true,
     },
     {
       name: "descendant",
-      plan: terminalPlan(cwd, { spawnDescendant: true, killDescendantOnStdinEnd: true }),
+      plan: terminalPlan(cwd, { spawnDescendant: true }),
       containmentEmpty: true,
       terminal: "reply",
+      containmentExpected: true,
     },
     {
       name: "late conflicting control",
@@ -371,36 +518,77 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
       }),
       containmentEmpty: true,
       terminal: "uncertain",
+      containmentExpected: false,
     },
     {
       name: "resists containment",
-      plan: terminalPlan(cwd, { onStdinEnd: "resist", spawnDescendant: true }),
+      plan: {
+        ...terminalPlan(cwd, { onStdinEnd: "resist", spawnDescendant: true }),
+        containmentForTest: "fail",
+      },
       containmentEmpty: false,
       terminal: null,
+      containmentExpected: true,
     },
   ];
   for (const vector of cases) {
     let containCalls = 0;
     let emptyChecks = 0;
-    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X27", {
+    let fakeForContainment: Awaited<ReturnType<typeof createCx02Adapter>>["fake"] | undefined;
+    const clock = new ManualK02Clock(CX02_DEADLINE_MS - 100_000);
+    const created = await createCx02Adapter(t, "CX02-CX03:X27", {
       appPlan: vector.plan,
+      clock,
       containmentForTest: {
         async contain() {
           containCalls += 1;
-          return vector.containmentEmpty;
+          assert.ok(fakeForContainment !== undefined);
+          return await fakeForContainment.containLatestUnit();
         },
         isEmpty() {
           emptyChecks += 1;
-          return vector.containmentEmpty;
+          return fakeForContainment?.isLatestUnitEmpty() ?? false;
         },
       },
     });
+    fakeForContainment = created.fake;
+    const { fake, adapter } = created;
     const events: unknown[] = [];
     let failure: unknown;
-    try {
-      for await (const event of adapter.start(startRequest())) events.push(event);
-    } catch (error) {
-      failure = error;
+    const iterator = adapter.start(startRequest())[Symbol.asyncIterator]();
+    events.push((await iterator.next()).value, (await iterator.next()).value);
+    let terminalSettled = false;
+    const terminal = iterator.next().then(
+      (result) => {
+        terminalSettled = true;
+        if (!result.done) events.push(result.value);
+      },
+      (error: unknown) => {
+        terminalSettled = true;
+        failure = error;
+      },
+    );
+    await fake.waitForStdinClosed(1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (vector.containmentExpected) {
+      assert.equal(terminalSettled, false, vector.name);
+      clock.advance(999);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(containCalls, 0, vector.name);
+      assert.equal(terminalSettled, false, vector.name);
+      clock.advance(1);
+      while (containCalls === 0) await new Promise<void>((resolve) => setImmediate(resolve));
+      if (vector.containmentEmpty) {
+        await terminal;
+      } else {
+        clock.advance(1_999);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(terminalSettled, false, vector.name);
+        clock.advance(1);
+        await terminal;
+      }
+    } else {
+      await terminal;
     }
     assert.equal(fake.launches.at(-1)?.stdinClosed, true, vector.name);
     const observedTerminal = events.findLast((event) =>
@@ -416,8 +604,9 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
     } else {
       assert.equal(failure, undefined, vector.name);
       assert.equal(eventName(observedTerminal), vector.terminal, vector.name);
+      assert.equal(fake.isLatestUnitEmpty(), true, vector.name);
     }
     assert.ok(emptyChecks >= 1, vector.name);
-    if (!vector.containmentEmpty) assert.ok(containCalls >= 1, vector.name);
+    assert.equal(containCalls > 0, vector.containmentExpected, vector.name);
   }
 });

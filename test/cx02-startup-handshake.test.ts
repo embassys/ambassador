@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
-import { appendFile, chmod } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
+import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 import {
   CX02_DEADLINE_MS,
   CX02_EXECUTION_ID,
@@ -16,11 +21,25 @@ import {
   resumeRequest,
   startFakeCodexAppServer,
   startRequest,
+  syntheticCx02Environment,
   threadSettingsResponse,
   validThread,
   validTurn,
 } from "./support/codex-app-server/index.js";
-import { ManualK02Clock } from "./support/connector/k02-production.js";
+import { startFakeConnectorGateway } from "./support/connector/index.js";
+import { K02_TOKEN, k02Message, ManualK02Clock } from "./support/connector/k02-production.js";
+
+async function unusedLoopbackPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  assert.ok(address !== null && typeof address === "object");
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
 
 function threadStarted(cwd: string, threadId = CX02_THREAD_ID): Readonly<Record<string, unknown>> {
   return {
@@ -206,7 +225,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
   const mutationAdapter = await module.createCodexAppServerAdapterForTest({
     workingDirectory: cwd,
     policy: "read-only",
-    inheritedEnvironment: process.env,
+    inheritedEnvironment: syntheticCx02Environment("identity-mutation"),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
     fixtureExecutablePath: fakeForMutation.executablePath,
@@ -225,9 +244,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
 test("CX02-X02 launches one exact direct App Server child with scrubbed sealed settings", async (t) => {
   const cwd = process.cwd();
   const inherited = {
-    HOME: "/cx02/home",
-    PATH: process.env.PATH,
-    LANG: "C.UTF-8",
+    ...syntheticCx02Environment("launch-record"),
     CX02_WEBHOOK_TOKEN: "a".repeat(48),
     OPENAI_API_KEY: "forbidden-api-key",
     NODE_OPTIONS: "--import=forbidden",
@@ -240,12 +257,18 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
   await collectEvents(adapter.start(startRequest()));
   const app = fake.launches.find((launch) => launch.mode === "app-server");
   assert.ok(app !== undefined);
+  assert.equal(app.executable, fake.executablePath);
+  assert.equal(app.shell, false);
   assert.deepEqual(app.arguments, ["app-server", "--listen", "stdio://", "--strict-config"]);
   assert.equal(app.cwd, cwd);
-  assert.equal(app.environment.CX02_WEBHOOK_TOKEN, undefined);
-  assert.equal(app.environment.OPENAI_API_KEY, undefined);
-  assert.equal(app.environment.NODE_OPTIONS, undefined);
-  assert.equal(app.environment.A2A_REMOTE_COMMAND, undefined);
+  const expectedEnvironment = syntheticCx02Environment("launch-record");
+  assert.deepEqual(app.environment, expectedEnvironment);
+  assert.deepEqual(adapter.spawnRecord, {
+    executable: fake.executablePath,
+    arguments: ["app-server", "--listen", "stdio://", "--strict-config"],
+    environment: expectedEnvironment,
+    shell: false,
+  });
   assert.ok(!JSON.stringify(app).includes("CX02 untrusted input"));
   assert.ok(Object.keys(app.environment).every((name) => Object.hasOwn(inherited, name)));
 });
@@ -292,6 +315,30 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
         {
           expectMethod: "initialize",
           beforeResponse: [{ kind: "json", value: warning }],
+          result: {},
+        },
+      ],
+      valid: false,
+    },
+    {
+      name: "early server request",
+      exchanges: [
+        {
+          expectMethod: "initialize",
+          beforeResponse: [
+            {
+              kind: "json",
+              value: {
+                id: "early-approval",
+                method: "item/commandExecution/requestApproval",
+                params: {
+                  threadId: CX02_THREAD_ID,
+                  turnId: CX02_TURN_ID,
+                  itemId: "early_item",
+                },
+              },
+            },
+          ],
           result: {},
         },
       ],
@@ -392,13 +439,23 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
           ]
         : variant.exchanges,
     };
-    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X04", { appPlan: plan });
+    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X04", { appPlan: plan });
     const events = await collectEvents(adapter.start(startRequest()));
     if (variant.valid) assert.equal(eventName(events.at(-1)), "reply", variant.name);
-    else
+    else {
       assert.deepEqual(events, [
         { event: "failed", execution_id: CX02_EXECUTION_ID, reason_code: "provider_start_failed" },
       ]);
+      const requests = fake.launches.at(-1)?.requests ?? [];
+      assert.equal(
+        requests.some((request) =>
+          ["thread/start", "thread/resume", "turn/start"].includes(String(request.method)),
+        ),
+        false,
+        variant.name,
+      );
+      assert.ok(!JSON.stringify(requests).includes("CX02 untrusted input"), variant.name);
+    }
   }
 
   const timeoutClock = new ManualK02Clock(CX02_DEADLINE_MS - 1);
@@ -420,6 +477,10 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
   assert.deepEqual(await timeoutEvents, [
     { event: "failed", execution_id: CX02_EXECUTION_ID, reason_code: "provider_start_failed" },
   ]);
+  assert.equal(
+    timeout.fake.launches.at(-1)?.requests.some((request) => request.method === "turn/start"),
+    false,
+  );
 });
 
 test("CX02-X05 binds one response-first or notification-first thread before turn input", async (t) => {
@@ -453,6 +514,49 @@ test("CX02-X05 binds one response-first or notification-first thread before turn
       1,
     );
   }
+
+  for (const notificationFirst of [false, true]) {
+    const exactNotification = { kind: "json", value: threadStarted(cwd) } as const;
+    const mismatchedNotification = {
+      kind: "json",
+      value: threadStarted(cwd, "different_thread"),
+    } as const;
+    const mismatchPlan: Extract<FakeCodexProcessPlan, { kind: "app-server" }> = {
+      kind: "app-server",
+      exchanges: [
+        ...handshakeExchanges(),
+        {
+          expectMethod: "thread/start",
+          result: threadSettingsResponse(cwd),
+          ...(notificationFirst
+            ? { beforeResponse: [mismatchedNotification], afterResponse: [exactNotification] }
+            : { afterResponse: [mismatchedNotification] }),
+        },
+      ],
+    };
+    const mismatch = await createCx02Adapter(t, "CX02-CX03:X05", {
+      appPlan: mismatchPlan,
+    });
+    const events = await collectEvents(mismatch.adapter.start(startRequest()));
+    assert.equal(
+      events.filter((event) => eventName(event) === "session_bound").length,
+      1,
+      notificationFirst ? "notification-first mismatch" : "response-first mismatch",
+    );
+    assert.equal(
+      (
+        events.find((event) => eventName(event) === "session_bound") as {
+          provider_session_id: string;
+        }
+      ).provider_session_id,
+      notificationFirst ? "different_thread" : CX02_THREAD_ID,
+    );
+    assert.equal(eventName(events.at(-1)), "failed");
+    assert.equal(
+      mismatch.fake.launches.at(-1)?.requests.some((request) => request.method === "turn/start"),
+      false,
+    );
+  }
 });
 
 test("CX02-X06 never writes input before session publication or replays after either crash side", async (t) => {
@@ -475,6 +579,83 @@ test("CX02-X06 never writes input before session publication or replays after ei
       0,
     );
     assert.equal(fake.launches.filter((launch) => launch.mode === "app-server").length, 1);
+  }
+
+  for (const vector of [
+    { name: "before session publication", failStateAfter: "session_bound" as const },
+    { name: "after session publication", crashAfter: "binding_published" as const },
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), "a2a-cx02-session-crash-"));
+    t.after(async () => await rm(root, { recursive: true, force: true }));
+    const workingDirectory = join(root, "workspace");
+    const stateDirectory = join(root, "state");
+    await mkdir(workingDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+    const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN });
+    const initial = await createCx02Adapter(t, "CX02-CX03:X06", {
+      workingDirectory,
+      appPlan: validStartPlan(workingDirectory),
+    });
+    const connector = await startConnectorRuntime({
+      providerKind: "codex",
+      webhookPort: await unusedLoopbackPort(),
+      webhookToken: K02_TOKEN,
+      workingDirectory,
+      policy: "read-only",
+      gatewayEndpoint: gateway.endpoint,
+      stateDirectory,
+      provider: initial.adapter as unknown as ProviderPort,
+      ...(vector.failStateAfter === undefined
+        ? { crashAfter: vector.crashAfter }
+        : { failStateAfter: vector.failStateAfter }),
+    });
+    t.after(async () => await connector.close());
+    const message = k02Message(
+      `cx02_x06_${vector.name.replaceAll(" ", "_")}`,
+      `cx02_x06_conversation_${vector.name.replaceAll(" ", "_")}`,
+    );
+    gateway.enqueueMessage(message);
+    assert.equal((await gateway.sendWake(connector.webhookUrl, message.id)).status, 202);
+    await assert.rejects(
+      connector.waitForIdle(),
+      vector.crashAfter === undefined ? /connector_state_unavailable/u : /connector_test_crash/u,
+    );
+    await connector.crash();
+    assert.equal(
+      initial.fake.launches.at(-1)?.requests.filter((request) => request.method === "thread/start")
+        .length,
+      1,
+      vector.name,
+    );
+    assert.equal(
+      initial.fake.launches.at(-1)?.requests.filter((request) => request.method === "turn/start")
+        .length,
+      0,
+      vector.name,
+    );
+
+    const restarted = await createCx02Adapter(t, "CX02-CX03:X06", {
+      workingDirectory,
+      appPlan: { kind: "app-server", exchanges: [] },
+    });
+    const restartedConnector = await startConnectorRuntime({
+      providerKind: "codex",
+      webhookPort: await unusedLoopbackPort(),
+      webhookToken: K02_TOKEN,
+      workingDirectory,
+      policy: "read-only",
+      gatewayEndpoint: gateway.endpoint,
+      stateDirectory,
+      provider: restarted.adapter as unknown as ProviderPort,
+    });
+    t.after(async () => await restartedConnector.close());
+    await restartedConnector.waitForIdle();
+    assert.equal(
+      restarted.fake.launches.filter((launch) => launch.mode === "app-server").length,
+      0,
+      vector.name,
+    );
+    assert.equal(gateway.tombstone(message.id)?.outcome, "uncertain", vector.name);
   }
 });
 
@@ -545,7 +726,7 @@ test("CX02-X08a sends only exact coarse thread and turn authority under both pol
     const adapter = await module.createCodexAppServerAdapterForTest({
       workingDirectory: cwd,
       policy,
-      inheritedEnvironment: process.env,
+      inheritedEnvironment: syntheticCx02Environment(`policy-${policy}`),
       webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
       connectorPackageVersion: "0.0.0-private",
       fixtureExecutablePath: fake.executablePath,
@@ -618,6 +799,77 @@ test("CX02-X08b validates every observable thread response without inventing tur
     const { adapter } = await createCx02Adapter(t, "CX02-CX03:X08b", { appPlan: plan });
     const events = await collectEvents(adapter.start(startRequest()));
     assert.equal(eventName(events.at(-1)), valid ? "reply" : "failed");
-    assert.ok(!JSON.stringify(response).includes("effectiveTurnSandbox"));
+  }
+
+  for (const response of variants) {
+    const valid = response === exact;
+    const plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }> = {
+      kind: "app-server",
+      exchanges: [
+        ...handshakeExchanges(),
+        { expectMethod: "thread/resume", result: response },
+        ...(valid
+          ? [
+              {
+                expectMethod: "turn/start",
+                result: { turn: validTurn() },
+                afterResponse: [
+                  { kind: "json" as const, value: turnStarted() },
+                  { kind: "json" as const, value: terminalReply() },
+                ],
+              },
+            ]
+          : []),
+      ],
+    };
+    const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X08b", {
+      appPlan: plan,
+    });
+    const events = await collectEvents(adapter.resume(resumeRequest()));
+    assert.equal(eventName(events.at(-1)), valid ? "reply" : "failed");
+    assert.equal(
+      fake.launches.at(-1)?.requests.some((request) => request.method === "thread/start"),
+      false,
+    );
+  }
+
+  const turnResponses: readonly { name: string; result: unknown; valid: boolean }[] = [
+    { name: "exact turn", result: { turn: validTurn() }, valid: true },
+    { name: "missing turn", result: {}, valid: false },
+    { name: "malformed turn", result: { turn: "bad" }, valid: false },
+    { name: "wrong turn ID", result: { turn: validTurn("different_turn") }, valid: false },
+    {
+      name: "unknown turn response field",
+      result: { turn: validTurn(), unknown: true },
+      valid: false,
+    },
+  ];
+  for (const vector of turnResponses) {
+    const plan: Extract<FakeCodexProcessPlan, { kind: "app-server" }> = {
+      kind: "app-server",
+      exchanges: [
+        ...handshakeExchanges(),
+        {
+          expectMethod: "thread/start",
+          result: exact,
+          afterResponse: [{ kind: "json", value: threadStarted(cwd) }],
+        },
+        {
+          expectMethod: "turn/start",
+          result: vector.result,
+          ...(vector.valid
+            ? {
+                afterResponse: [
+                  { kind: "json" as const, value: turnStarted() },
+                  { kind: "json" as const, value: terminalReply() },
+                ],
+              }
+            : { exitCodeAfter: 0 }),
+        },
+      ],
+    };
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X08b", { appPlan: plan });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(eventName(events.at(-1)), vector.valid ? "reply" : "uncertain", vector.name);
   }
 });
