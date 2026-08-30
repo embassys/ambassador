@@ -347,7 +347,7 @@ provider-specific ADRs or Q03 and Q05 publication approval.
 | N3-T2 | Security | Add red tests for auth-before-body, replay, injection, environment scrubbing, limits, timeouts, and process cleanup | N3-T1 | Failures are only missing connector behavior |
 | N3-T3 | State | Add red tests for mapping creation, resume, concurrency, repeated wakes, crash points, and uncertainty | N3-T1 | No test expects content persistence or prompt replay |
 | N3-T4 | End to end | Add a fake-provider flow from central message through reply and acknowledgement | N3-T2, N3-T3 | Full failure inventory written |
-| N3-C1 | CI | Run foundation tests on Linux, macOS, and Windows without provider credentials | N3-T4 | Red feature PR with classified failures |
+| N3-C1 | CI | Run foundation tests on Linux and macOS without provider credentials; do not add a K02 Windows lane under ADR 0033 | N3-T4 | Red feature PR with classified failures |
 | N3-G2 | User | Review the red suite and failure inventory | N3-C1 | Approval to implement the foundation |
 | N3-I1 | Connector core | Implement authenticated wake, bounded local MCP client, cancellation, and safe errors | N3-G2 | N3-T2 passes |
 | N3-I2 | Connector state | Implement the approved opaque correlation store and per-conversation serialization | N3-I1 | N3-T3 passes |

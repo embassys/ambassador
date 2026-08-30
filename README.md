@@ -8,7 +8,7 @@ Version `0.2.6` adds the temporary credential-redacted development transcript to
 
 Requirements:
 
-- macOS or Linux; Windows remains unqualified for `0.2.6`
+- macOS or Linux; Windows is unsupported for the initial release
 - Node.js 24.19.x with npm and `npx`
 - A local webhook URL and a shared 48-character lowercase hexadecimal token
 - The API and MCP URLs for an A2A development service

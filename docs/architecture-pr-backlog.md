@@ -120,7 +120,7 @@ Q04 -> Q05 stable publication review
 
 ## Wave 0: contract gate and pending decisions
 
-D01 through D07 are complete. The user approved the three target contracts and
+D01 through D08 are complete. The user approved the three target contracts and
 the fixture-only cryptography dependency on 2026-08-29, then the connector
 foundation and contract-first local implementation path on 2026-08-30.
 Canonical production URLs and other deployment facts remain central-owner
@@ -135,6 +135,7 @@ inputs. Tests substitute the fixture profile; production code must not do so.
 | D05 | Complete | Gateway or connector docs | `docs: approve connector startup, state, policy, limits, and packaging` | D02 and accepted ADR 0024 boundary | ADRs 0028 through 0031 fix the connector command and explicit retirement, working-directory input, state technology and schema, access control, encryption, runtime and dependency scope, provider port, concurrency, timeouts, approvals, terminal outcomes, private packaging, installation model, platform qualification, and publishing gates |
 | D06 | Complete | Gateway fixture docs | `docs: approve DPoP verification for the independent Python fixture` | D03 | ADR 0020 approves direct test-only use of the existing hash-locked `cryptography==50.0.0` wheel, records its license and maintenance policy, and leaves the gateway dependency set unchanged |
 | D07 | Complete | Gateway and connector docs | `docs: allow contract-first local implementation` | D01-D06 and user approval | ADR 0032 permits G01-G04, K01-K04, and later provider work against accepted fixtures while preserving Gate A, S07, combined qualification, production activation, and publishing gates |
+| D08 | Complete | Gateway and connector docs | `docs: defer Windows support for the initial release` | User direction | ADR 0033 closes W01 as deferred rather than passed, limits support and CI to macOS/Linux, and defines the approval and native evidence required to restore Windows |
 
 The gateway uses the fixed accepted route split and never adds runtime
 capability discovery or general endpoint configuration. Accepted lease
@@ -241,12 +242,12 @@ them in that order. Do not ask parallel agents to edit
 | E01 | Green E2E PR | `test: qualify REST enrollment and DPoP end to end` | G01, G02, G03, S07 | T03 is green against the Node fixture and Docker fixture; staging smoke covers HTTPS, real proxy URI handling, nonce, restart, reissue, and bearer rejection |
 | E02 | Green E2E PR | `test: qualify recovery and reply crash windows end to end` | G04, S07 | T04 is green against both fixtures; deterministic process kills prove recovery after poll, one reply after lost acceptance, and one terminal acknowledgement |
 | E03 | Qualification task | `record gateway soak, outage, recovery, and artifact-scan evidence` | E01, E02 | A bounded soak covers poll outages, nonce rotation, central restart, gateway restart, rate limits, mailbox pressure, reply conflicts, cancellation, recovery, and clean shutdown without content or credential artifacts |
-| W01 | Gateway PR | `fix: qualify credential version 2 and packed install on Windows` | G01 | Strict user and SYSTEM DACL tests pass on Windows; the packed package installs, enrolls, restarts, polls, replies, and acknowledges through the Node fixture |
+| W01 | Deferred | `defer Windows support under ADR 0033` | User direction | Closed as deferred, not passed; no initial-release or CI evidence is claimed |
 
-The Docker fixture runs on Ubuntu. Node fixture and unit coverage run on Linux,
-macOS, and Windows. Windows remains a production release blocker until W01 is
-green. A development-only release may keep the existing documented platform
-limit, but it must not claim full qualification.
+The Docker fixture runs on Ubuntu. Node fixture and unit coverage run on Linux
+and macOS. Windows is unsupported for the initial release and supplies no
+release evidence. Restoring it requires the new approved plan and native
+qualification defined by ADR 0033.
 
 ## Wave 5: remove temporary compatibility behavior
 
@@ -319,8 +320,8 @@ failure blocks that adapter's release but does not block the other two tracks.
 
 | ID | Type | Proposed PR or task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| R01 | Gateway release PR | `release: qualify the REST, DPoP, recovery, and reply gateway` | E01, E02, E03, W01, G05, G06, G07 | Product, protocol, ADRs, setup, status, package tests, OpenClaw and Hermes regression flows, platform matrix, security review, dependency audit, and release artifact all describe and contain the shipped gateway behavior |
-| Q01 | CI PR | `test: run every fake provider adapter through one regression matrix` | K04 and each implemented adapter | Linux, macOS, and every provider-supported Windows lane run the fake full chain without provider credentials; unsupported combinations are documented rather than silently skipped |
+| R01 | Gateway release PR | `release: qualify the REST, DPoP, recovery, and reply gateway` | E01, E02, E03, G05, G06, G07 | Product, protocol, ADRs, setup, status, package tests, OpenClaw and Hermes regression flows, macOS/Linux matrix, security review, dependency audit, and release artifact all describe and contain the shipped gateway behavior |
+| Q01 | CI PR | `test: run every fake provider adapter through one regression matrix` | K04 and each implemented adapter | Linux and macOS run the fake full chain without provider credentials; K02 and Q01 do not add a Windows lane under ADR 0033 |
 | Q02 | Documentation PR | `docs: add provider-neutral connector setup and retention guidance` | First successful CX04, CL04, or GM04 | Users install and authenticate providers themselves; docs cover separate gateway and connector startup, working directory, sandbox, approvals, provider history, retention, retirement, and one-shot limitations |
 | Q03 | Preview distribution decision and release PR | `release: publish an approved connector preview` | Q01, Q02, one successful provider qualification, explicit publishing approval | The selected provider artifact publishes as `0.1.0` on `next` from the public source repository with minimal contents, supported platforms, packed-install E2E, license notices, provenance, rollback instructions, and no gateway runtime-selection option |
 | Q04 | Combined qualification task | `record cross-provider soak and release evidence` | CX04, CL04, GM04, Q03 | Repeated multi-turn conversations, mixed concurrent conversations, provider restarts, gateway restarts, connector restarts, central outages, and reply uncertainty complete without duplicate turns, duplicate replies, leaked credentials, or persisted content |
@@ -336,8 +337,8 @@ and message recovery from being blocked by provider integration work.
 
 | Layer | Runs where | Uses | What it proves |
 | --- | --- | --- | --- |
-| Protocol vectors | Linux, macOS, Windows | Deterministic Node tests | JOSE, JWK thumbprint, `ath`, URI projection, schemas, bounds, duplicate keys, safe errors, and state transitions |
-| Node integration | Linux, macOS, Windows | `test/support/fake-central.ts`, raw MCP client, fake webhook | Fast gateway behavior, injected faults, cancellation, restart, local authentication, and artifact scans |
+| Protocol vectors | Linux and macOS | Deterministic Node tests | JOSE, JWK thumbprint, `ath`, URI projection, schemas, bounds, duplicate keys, safe errors, and state transitions |
+| Node integration | Linux and macOS | `test/support/fake-central.ts`, raw MCP client, fake webhook | Fast gateway behavior, injected faults, cancellation, restart, local authentication, and artifact scans |
 | Independent Docker E2E | Ubuntu CI | Pinned Python/FastAPI/FastMCP fixture and packaged gateway | Cross-language REST and MCP interoperability through a real gateway process |
 | Central service E2E | Central CI | Real database, two service replicas, shared nonce and replay state, trusted proxy | Transactions, cross-replica replay, quotas, retention, fresh enrollment, recovery, and server logs |
 | Staging smoke | Central deployment gate | Canonical HTTPS URLs and dedicated test identities | Proxy `htu`, TLS, email delivery path, rollout gates, DPoP enforcement, and deployed schemas |

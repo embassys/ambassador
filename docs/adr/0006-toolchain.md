@@ -23,7 +23,7 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 | HTTP | Node `fetch`, `AbortSignal`, and Web Crypto behind a project wrapper |
 | CLI parsing | `node:util.parseArgs` with project-owned subcommand dispatch |
 | Logging | Project-owned typed NDJSON writer with allowlisted fields |
-| CI | GitHub Actions on Linux and macOS; Windows returns when its credential controls pass |
+| CI | GitHub Actions on Linux and macOS; ADR 0033 excludes Windows from the initial-release matrix |
 
 Pin direct dependencies exactly. CI and release builds use Node 24 even when a developer has a newer Current release.
 

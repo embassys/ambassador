@@ -6,7 +6,7 @@ This guide connects one OpenClaw agent to the A2A development service. It works 
 
 - OpenClaw already installed and able to answer a normal chat message.
 - OpenClaw `2026.7.1-2` or newer. This guide and the gateway's compatibility test use `2026.7.1-2`.
-- macOS or Linux. Windows packaging and credential permissions are not qualified for `0.2.6`.
+- macOS or Linux. Windows is unsupported for the initial release.
 - Node.js 24.19 with npm and `npx`.
 - The A2A development API URL and MCP URL. Ask the person running the A2A development service for both values.
 - An email address that can receive the A2A verification code.

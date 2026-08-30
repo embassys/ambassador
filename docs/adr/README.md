@@ -43,6 +43,11 @@ fixtures before the external central service is ready. Gate A, S07, combined
 qualification, production activation, support claims, and publishing remain
 blocked on their real evidence and approvals.
 
+ADR 0033 was accepted on 2026-08-30. The initial gateway and connector release
+supports macOS and Linux only. Windows is unsupported, implementation-plan task
+W01 is closed as deferred rather than passed, and Windows CI may return only
+under a new approved implementation and qualification plan.
+
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and
 deployment facts, tests use only the stand-ins in
