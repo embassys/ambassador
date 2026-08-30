@@ -867,6 +867,13 @@ class ConnectorRuntime implements ConnectorHandle {
       return undefined;
     if (phase === "recover_unbound" && kind !== "uncertain") return undefined;
     if (phase === "recover_reply_only" && kind !== "reply") return undefined;
+    if (
+      phase === "start_unbound" &&
+      (kind === "reply" ||
+        kind === "completed_without_reply" ||
+        (kind === "failed" && event.reason_code !== "provider_start_failed"))
+    )
+      return undefined;
     if (kind === "reply") {
       if (!scalarText(event.text, CONNECTOR_LIMITS.finalReplyBytes)) return undefined;
       return { operation: "reply", text: event.text };
@@ -1005,6 +1012,7 @@ class ConnectorRuntime implements ConnectorHandle {
             payload: { text: work.replyText },
           });
           if (
+            !exactObject(result, ["message_id", "conversation_id", "status"]) ||
             result.status !== "accepted" ||
             !gatewayId(result.message_id) ||
             !gatewayId(result.conversation_id) ||
@@ -1050,6 +1058,7 @@ class ConnectorRuntime implements ConnectorHandle {
             reason_code: terminal.reason,
           });
           if (
+            !exactObject(result, ["message_id", "outcome", "status"]) ||
             !gatewayId(result.message_id) ||
             result.message_id !== work.message.id ||
             result.outcome !== terminal.outcome ||
@@ -1091,6 +1100,13 @@ class ConnectorRuntime implements ConnectorHandle {
             message_id: work.message.id,
           });
           if (
+            !exactObject(result, [
+              "message_id",
+              "conversation_id",
+              "status",
+              "outcome",
+              "reply_message_id",
+            ]) ||
             !gatewayId(result.message_id) ||
             !gatewayId(result.conversation_id) ||
             result.message_id !== work.message.id ||
@@ -1130,6 +1146,10 @@ class ConnectorRuntime implements ConnectorHandle {
           if (this.options.crashForRecoveryState === "outcome_open")
             throw new Error("connector_test_crash");
           if (row.terminalOperation === "reply" && work.replyText === null) {
+            if (work.turnId === null) {
+              await this.#moveLostReplyToUncertain(work);
+              continue;
+            }
             await this.#recover(work, "recover_reply_only");
             return;
           }
@@ -1149,6 +1169,7 @@ class ConnectorRuntime implements ConnectorHandle {
         this.#state.beforeExternalEffect();
         const result = await this.#gateway.call("ack_message", { message_id: work.message.id });
         if (
+          !exactObject(result, ["message_id", "status"]) ||
           !gatewayId(result.message_id) ||
           result.message_id !== work.message.id ||
           result.status !== "acked"
@@ -1599,6 +1620,10 @@ class ConnectorRuntime implements ConnectorHandle {
         ["turn_starting", "turn_running", "waiting_for_approval"].includes(stored.lifecycle)
       ) {
         const cleanupAt = stored.turnDeadlineMs + CONNECTOR_LIMITS.cancellationGraceMs;
+        if (this.#clock.nowMs() < cleanupAt && work.sessionId !== null && work.turnId !== null) {
+          this.#attachExpiredTurnForCancellation(work);
+          return;
+        }
         if (this.#clock.nowMs() < cleanupAt)
           await sleep(this.#clock, cleanupAt - this.#clock.nowMs());
         await this.#cancelUncertain(work, "deadline", false, false);
@@ -1639,6 +1664,26 @@ class ConnectorRuntime implements ConnectorHandle {
     } catch (error) {
       this.#fail(error);
     }
+  }
+
+  #attachExpiredTurnForCancellation(work: Work): void {
+    if (work.sessionId === null || work.turnId === null || work.stored.turnDeadlineMs === null)
+      throw new ConnectorError("connector_state_unavailable");
+    const request = {
+      kind: "recover" as const,
+      execution_id: work.executionId,
+      conversation_id: work.message.conversation_id,
+      message_id: work.message.id,
+      provider_session_id: work.sessionId,
+      provider_turn_id: work.turnId,
+      deadline_unix_ms: work.stored.turnDeadlineMs,
+    };
+    work.deadlineTimer = this.#clock.setTimer(() => {
+      void this.#deadline(work);
+    }, 0);
+    this.#state.beforeExternalEffect();
+    this.#observeSpawn();
+    this.options.provider.recover(request);
   }
 
   async #recover(work: Work, phase: string): Promise<void> {
