@@ -1,7 +1,8 @@
 export {
   type CodexAdapterForTestOptions,
   type CodexAdapterPort,
-  type CodexSpawnObservationForTest,
+  type CodexAppServerSpawnForTest,
+  type CodexAppServerSpawnOptionsForTest,
   type Cx03ProductionModule,
   isExactMissingCx03Entry,
   loadCx03Production,
