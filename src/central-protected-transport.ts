@@ -183,13 +183,13 @@ export class CentralProtectedTransport {
   readonly fetchAndInspectCredentials = async <T>(
     url: string | URL,
     init: RequestInit | undefined,
-    inspect: (response: Response, accessTokens: readonly string[]) => Promise<T>,
+    inspect: (response: Response, accessTokens: () => readonly string[]) => Promise<T>,
   ): Promise<T> => await this.#fetch(url, init, inspect);
 
   async #fetch<T>(
     url: string | URL,
     init: RequestInit | undefined,
-    inspect: (response: Response, accessTokens: readonly string[]) => Promise<T>,
+    inspect: (response: Response, accessTokens: () => readonly string[]) => Promise<T>,
   ): Promise<T> {
     const target = requestTarget(url);
     const method = requestMethod(init?.method);
@@ -356,22 +356,22 @@ export class CentralProtectedTransport {
         throw failure("central_protected_response_unsafe");
       }
       if (parsedNonce !== undefined) this.#nonceCache.set(this.#domain, parsedNonce);
-      let currentCredential: LoadedCentralCredentialV2;
-      try {
-        currentCredential = this.#credential();
-      } catch {
-        await cancelBody(response);
-        throw failure("central_protected_response_unsafe");
-      }
-      if (!validCredential(currentCredential)) {
-        await cancelBody(response);
-        throw failure("central_protected_response_unsafe");
-      }
-      const accessTokens = [
-        ...new Set([credential.record.access_token, currentCredential.record.access_token]),
-      ];
-      for (const accessToken of accessTokens) this.#verboseTranscript?.addSecret(accessToken);
-      return await inspect(response, accessTokens);
+      return await inspect(response, () => {
+        let currentCredential: LoadedCentralCredentialV2;
+        try {
+          currentCredential = this.#credential();
+        } catch {
+          throw failure("central_protected_response_unsafe");
+        }
+        if (!validCredential(currentCredential)) {
+          throw failure("central_protected_response_unsafe");
+        }
+        const accessTokens = [
+          ...new Set([credential.record.access_token, currentCredential.record.access_token]),
+        ];
+        for (const accessToken of accessTokens) this.#verboseTranscript?.addSecret(accessToken);
+        return accessTokens;
+      });
     }
     throw failure("central_dpop_nonce_retry_exhausted");
   }

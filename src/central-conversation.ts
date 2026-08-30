@@ -981,13 +981,15 @@ export class CentralConversationClient {
   async #response(
     spec: RequestSpec,
     response: Response,
-    accessTokens: readonly string[] = [],
+    accessTokens?: () => readonly string[],
   ): Promise<Record<string, unknown>> {
     try {
       assertSafeResponseHead(response);
       const bytes = await readBoundedBody(response, spec.responseLimit ?? RESPONSE_BODY_MAX_BYTES);
       const value = parseStrictJson(bytes);
-      for (const accessToken of accessTokens) assertSafeUpstreamResult(value, accessToken);
+      for (const accessToken of accessTokens?.() ?? []) {
+        assertSafeUpstreamResult(value, accessToken);
+      }
       if (!spec.expectedStatus.includes(response.status)) throw applicationError(response, value);
       return value;
     } catch (error) {

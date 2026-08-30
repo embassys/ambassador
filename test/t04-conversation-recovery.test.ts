@@ -3,6 +3,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+import Database from "better-sqlite3";
+
 import { EncryptedFileCredentialStore } from "../src/credential-store.js";
 import { parseCentralCredentialV2 } from "../src/credential-v2.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
@@ -28,6 +30,20 @@ const START_PROPERTIES = ["payload", "recipient_username", "request_id"];
 const REPLY_PROPERTIES = ["message_id", "payload"];
 const COMPLETE_PROPERTIES = ["message_id", "outcome", "reason_code"];
 const MESSAGE_ID_PROPERTIES = ["message_id"];
+
+function journalContains(stateRoot: string, messageId: string): boolean {
+  const database = new Database(join(stateRoot, "notifications.sqlite"), { readonly: true });
+  try {
+    const row = database
+      .prepare<[string], { present: number }>(
+        "SELECT EXISTS (SELECT 1 FROM notification_relay WHERE message_id = ?) AS present",
+      )
+      .get(messageId);
+    return row?.present === 1;
+  } finally {
+    database.close();
+  }
+}
 
 test("T04-P01 uses REST enrollment, DPoP transport, and activation before receive", async (t) => {
   let observedBearerAuthorization = false;
@@ -495,6 +511,10 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
   });
   await scenario.gateway.stop();
   const oldAccessToken = scenario.central.currentV2Token(T04_USERNAME);
+  const repliedState = scenario.central.v2MessageState(inbound.messageId);
+  assert.equal(typeof repliedState.replyMessageId, "string");
+  let reissuedAccessToken = oldAccessToken;
+  let reissuedCredentialPublished = false;
   scenario.central.advanceClock(43_201);
   t.mock.timers.enable({ apis: ["Date"], now: scenario.central.clock() * 1_000 });
   let releaseReissue: (() => void) | undefined;
@@ -505,15 +525,33 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
   const reissueStarted = new Promise<void>((resolve) => {
     markReissueStarted = resolve;
   });
-  let releaseReceive: ((response: Response) => void) | undefined;
-  const heldReceive = new Promise<Response>((resolve) => {
-    releaseReceive = resolve;
+  const reflectedMessageId = "t04_reissue_reflection_message";
+  let releaseReceiveBody: ((accessToken: string) => void) | undefined;
+  const heldReceiveBody = new Promise<Uint8Array>((resolve) => {
+    releaseReceiveBody = (accessToken) =>
+      resolve(
+        new TextEncoder().encode(
+          JSON.stringify({
+            messages: [
+              {
+                id: reflectedMessageId,
+                conversation_id: "t04_reissue_reflection_conversation",
+                sender_agent_id: "fixture_sender_agent",
+                message_type: "conversation_turn",
+                in_reply_to_message_id: null,
+                payload: { text: accessToken },
+                created_at: new Date(scenario.central.clock() * 1_000).toISOString(),
+              },
+            ],
+          }),
+        ),
+      );
   });
-  let markReceiveStarted: (() => void) | undefined;
-  const receiveStarted = new Promise<void>((resolve) => {
-    markReceiveStarted = resolve;
+  let markReceiveBodyStarted: (() => void) | undefined;
+  const receiveBodyStarted = new Promise<void>((resolve) => {
+    markReceiveBodyStarted = resolve;
   });
-  installT04FetchInterceptor(t, async (_request, call, forward) => {
+  installT04FetchInterceptor(t, async (request, call, forward) => {
     if (
       call.origin === scenario.central.apiUrl &&
       call.method === "POST" &&
@@ -528,17 +566,51 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
       call.method === "GET" &&
       call.pathname === "/api/v2/messages/receive"
     ) {
-      markReceiveStarted?.();
-      return await heldReceive;
+      return new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              markReceiveBodyStarted?.();
+              const bytes = await heldReceiveBody;
+              controller.enqueue(bytes);
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        {
+          status: 200,
+          headers: {
+            "cache-control": "no-store",
+            "content-type": "application/json",
+          },
+        },
+      );
+    }
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "GET" &&
+      call.pathname === `/api/v2/messages/${inbound.messageId}/outcome`
+    ) {
+      reissuedCredentialPublished ||=
+        reissuedAccessToken !== oldAccessToken &&
+        request.headers.get("authorization") === `DPoP ${reissuedAccessToken}`;
+      return t04JsonResponse(200, {
+        message_id: inbound.messageId,
+        conversation_id: inbound.conversationId,
+        status: "terminal",
+        outcome: "replied",
+        reply_message_id: repliedState.replyMessageId,
+      });
     }
     return undefined;
   });
   t.after(() => {
     releaseReissue?.();
-    releaseReceive?.(t04JsonResponse(200, { messages: [] }));
+    releaseReceiveBody?.(oldAccessToken);
   });
   const restarted = await restartT04Gateway(t, scenario);
-  await Promise.all([reissueStarted, receiveStarted]);
+  await Promise.all([reissueStarted, receiveBodyStarted]);
   releaseReissue?.();
   let newAccessToken = oldAccessToken;
   for (let turn = 0; turn < 2_000 && newAccessToken === oldAccessToken; turn += 1) {
@@ -546,6 +618,7 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
     newAccessToken = scenario.central.currentV2Token(T04_USERNAME);
   }
   assert.equal(newAccessToken === oldAccessToken, false, "same-key reissue did not complete");
+  reissuedAccessToken = newAccessToken;
   const persistedCredentialStore = new EncryptedFileCredentialStore(
     join(scenario.gateway.stateRoot, "central-credential.json"),
     T04_WEBHOOK_TOKEN,
@@ -567,24 +640,20 @@ test("T04-S01 leaves artifacts and normal transcripts free of conversation conte
     true,
     "same-key reissue was not published after persistence",
   );
-  releaseReceive?.(
-    t04JsonResponse(200, {
-      messages: [
-        {
-          id: "t04_reissue_reflection_message",
-          conversation_id: "t04_reissue_reflection_conversation",
-          sender_agent_id: "fixture_sender_agent",
-          message_type: "conversation_turn",
-          in_reply_to_message_id: null,
-          payload: { text: newAccessToken },
-          created_at: new Date(scenario.central.clock() * 1_000).toISOString(),
-        },
-      ],
-    }),
+  for (let turn = 0; turn < 100 && !reissuedCredentialPublished; turn += 1) {
+    await restarted.client.callTool("get_message_outcome", { message_id: inbound.messageId });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.equal(
+    reissuedCredentialPublished,
+    true,
+    "same-key reissue was not published to protected requests",
   );
+  releaseReceiveBody?.(newAccessToken);
   for (let turn = 0; turn < 20; turn += 1) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  assert.equal(journalContains(scenario.gateway.stateRoot, reflectedMessageId), false);
   const local = await restarted.client.callTool("poll_messages", { timeout: 0 });
   assert.equal(Array.isArray(local.messages) ? local.messages.length : -1, 0);
   await restarted.gateway.stop();
