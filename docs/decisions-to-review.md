@@ -383,6 +383,17 @@ license, and platform ADRs.
   final unterminated record from a valid record split across chunks; EOF is the
   protocol evidence that makes the record final and invalid. The vector still
   requires uncertainty and preserves every byte, depth, and parser bound.
+- X21 now states the expected terminal kind for every limit vector and expects
+  exact `failed/provider_result_invalid` for a 262,145-byte final reply. The
+  earlier generic `accepted: false` mapping required uncertainty for that same
+  terminal value while X12 and ADR 0034 classify an over-limit authoritative
+  final result as `provider_result_invalid`. Event, stdout, stderr, and other
+  transport excesses remain uncertain.
+- X21 now also distinguishes the provider-ID limit by dispatch state. A
+  1,025-byte thread ID returned by `thread/start` is an exact pre-turn failure,
+  so it expects `failed/provider_start_failed` consistently with X08b and ADR
+  0034. A 1,025-byte turn ID remains post-dispatch uncertainty. Both exact
+  1,024-byte IDs remain accepted.
 - X06 uses the existing `session_binding` recovery crash seam for the
   post-session-publication case. The earlier `binding_published` seam runs
   before the provider-port call and therefore cannot observe the one
