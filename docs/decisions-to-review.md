@@ -86,8 +86,17 @@ affected choice for review rather than silently changing the client contract.
   token ID and a later expiry. An authentication-failed identity cannot enter
   this path.
 - POSIX version 2 credential replacement uses the reviewed atomic file path.
-  Windows replacement remains fail-closed until W01 supplies and qualifies
-  the approved native replacement and DACL behavior.
+  W01a uses fixed encoded Windows PowerShell 5.1 scripts to set and inspect
+  SID-based ACLs and calls .NET `File.Replace` without a backup for the native
+  all-or-nothing replacement. Paths pass through process environment entries,
+  not script text. The Windows claim remains provisional until its CI job
+  passes.
+- W01 is provisionally split. W01a qualifies Windows credential version 2
+  ownership, DACLs, same-key atomic replacement, restart, corruption, and
+  failure handling after G01. W01b will run the packed full-chain Windows
+  install, enrollment, restart, receive, reply, and acknowledgement checks
+  after G04. This split does not complete W01 or remove it from the release
+  gate.
 
 ## Accepted D05 package
 

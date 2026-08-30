@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   EncryptedFileCredentialStore,
   type EncryptedFileCredentialStoreOptions,
+  type WindowsCredentialFileReplacement,
 } from "../src/credential-store.js";
 import {
   assertSameKeyCredentialReplacement,
@@ -47,6 +50,118 @@ function credential(
   options: { readonly issuedAt?: number; readonly tokenId?: string } = {},
 ) {
   return createCentralCredentialV2Record(accessToken(key.thumbprint, options), key);
+}
+
+const TEST_WINDOWS_ACCESS_CONTROL = {
+  async secure() {},
+};
+
+function simulatedWindowsOptions(
+  replacement: WindowsCredentialFileReplacement,
+): EncryptedFileCredentialStoreOptions {
+  return {
+    platform: "win32",
+    windowsAccessControl: TEST_WINDOWS_ACCESS_CONTROL,
+    windowsFileReplacement: replacement,
+  };
+}
+
+async function assertOnlyPublishedCredential(directory: string): Promise<void> {
+  assert.deepEqual(await readdir(directory), ["central-credential.json"]);
+}
+
+function executeWindowsPowerShell(script: string, environment: NodeJS.ProcessEnv): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, ...environment },
+        maxBuffer: 32 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error !== null || stderr.length !== 0) {
+          reject(new Error("Native Windows ACL observation failed"));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+interface WindowsAclObservation {
+  readonly currentSid: string;
+  readonly ownerSid: string;
+  readonly protected: boolean;
+  readonly rules: ReadonlyArray<{
+    readonly sid: string;
+    readonly rights: number;
+    readonly inheritance: number;
+    readonly propagation: number;
+    readonly type: number;
+    readonly inherited: boolean;
+  }>;
+}
+
+const WINDOWS_ACL_OBSERVATION_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+if ($args.Count -ne 0) { exit 61 }
+$target = [Environment]::GetEnvironmentVariable('A2A_W01A_ACL_TARGET', 'Process')
+if ([String]::IsNullOrEmpty($target)) { exit 62 }
+$acl = Get-Acl -LiteralPath $target
+$currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$rules = @($acl.GetAccessRules(
+  $true,
+  $true,
+  [System.Security.Principal.SecurityIdentifier]
+) | ForEach-Object {
+  [ordered]@{
+    sid = $_.IdentityReference.Value
+    rights = [int]$_.FileSystemRights
+    inheritance = [int]$_.InheritanceFlags
+    propagation = [int]$_.PropagationFlags
+    type = [int]$_.AccessControlType
+    inherited = [bool]$_.IsInherited
+  }
+})
+[ordered]@{
+  currentSid = $currentSid
+  ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  protected = [bool]$acl.AreAccessRulesProtected
+  rules = $rules
+} | ConvertTo-Json -Compress -Depth 4
+`;
+
+async function observeWindowsAcl(path: string): Promise<WindowsAclObservation> {
+  const output = await executeWindowsPowerShell(WINDOWS_ACL_OBSERVATION_SCRIPT, {
+    A2A_W01A_ACL_TARGET: path,
+  });
+  return JSON.parse(output) as WindowsAclObservation;
+}
+
+function assertWindowsAcl(observation: WindowsAclObservation, kind: "directory" | "file"): void {
+  assert.equal(observation.protected, true);
+  assert.equal(observation.ownerSid, observation.currentSid);
+  assert.deepEqual(
+    observation.rules.map((rule) => rule.sid).sort(),
+    [observation.currentSid, "S-1-5-18"].sort(),
+  );
+  for (const rule of observation.rules) {
+    assert.equal(rule.rights, 2_032_127);
+    assert.equal(rule.inheritance, kind === "directory" ? 3 : 0);
+    assert.equal(rule.propagation, 0);
+    assert.equal(rule.type, 0);
+    assert.equal(rule.inherited, false);
+  }
 }
 
 test("strictly parses one bound P-256 credential and rejects hidden record changes", () => {
@@ -134,6 +249,11 @@ test("encrypted envelope version 2 creates fresh state and handles same-key repl
           windowsAccessControl: {
             async secure() {},
           },
+          windowsFileReplacement: {
+            async replace(sourcePath, destinationPath) {
+              await rename(sourcePath, destinationPath);
+            },
+          },
         }
       : {};
   const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
@@ -148,23 +268,176 @@ test("encrypted envelope version 2 creates fresh state and handles same-key repl
   assert.ok(!firstEnvelope.includes(Buffer.from(HOOK_TOKEN)));
   assert.ok(!firstEnvelope.includes(Buffer.from(SCOPE)));
 
-  if (process.platform === "win32") {
-    await assert.rejects(
-      createStore().saveCredential({ version: 2, plaintext: replacement }),
-      /Windows credential replacement is not qualified/u,
-    );
-    assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: original });
-    assert.deepEqual(await readFile(path), firstEnvelope);
-    assert.deepEqual(await readdir(join(root, "state")), ["central-credential.json"]);
-    return;
-  }
-
   await createStore().saveCredential({ version: 2, plaintext: replacement });
   assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: replacement });
   const replacementEnvelope = await readFile(path);
   assert.equal(JSON.parse(replacementEnvelope.toString("utf8")).version, 2);
   assert.ok(!replacementEnvelope.includes(Buffer.from(replacement)));
   assert.deepEqual(await readdir(join(root, "state")), ["central-credential.json"]);
+});
+
+test("Windows replacement publishes one validated sibling and survives restart", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-w01a-simulated-success-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const directory = join(root, "state");
+  const path = join(directory, "central-credential.json");
+  const key = generateDpopKeyMaterial();
+  const original = serializeCentralCredentialV2(credential(key));
+  const replacement = serializeCentralCredentialV2(
+    credential(key, {
+      issuedAt: 1_788_043_201,
+      tokenId: "00000000-0000-4000-8000-000000000104",
+    }),
+  );
+  const calls: Array<{ sourcePath: string; destinationPath: string }> = [];
+  const fileReplacement: WindowsCredentialFileReplacement = {
+    async replace(sourcePath, destinationPath) {
+      calls.push({ sourcePath, destinationPath });
+      await rename(sourcePath, destinationPath);
+    },
+  };
+  const options = simulatedWindowsOptions(fileReplacement);
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
+
+  await createStore().saveCredential({ version: 2, plaintext: original });
+  await createStore().saveCredential({ version: 2, plaintext: replacement });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.destinationPath, path);
+  assert.match(calls[0]?.sourcePath ?? "", /central-credential\.json\.tmp-[0-9]+-[0-9a-f]{32}$/u);
+  assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: replacement });
+  await assertOnlyPublishedCredential(directory);
+});
+
+test("Windows pre-publication replacement failure preserves the old record and removes the sibling", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-w01a-simulated-before-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const directory = join(root, "state");
+  const path = join(directory, "central-credential.json");
+  const key = generateDpopKeyMaterial();
+  const original = serializeCentralCredentialV2(credential(key));
+  const replacement = serializeCentralCredentialV2(
+    credential(key, {
+      issuedAt: 1_788_043_201,
+      tokenId: "00000000-0000-4000-8000-000000000105",
+    }),
+  );
+  const fileReplacement: WindowsCredentialFileReplacement = {
+    async replace() {
+      throw new Error("injected pre-publication replacement failure");
+    },
+  };
+  const options = simulatedWindowsOptions(fileReplacement);
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
+  await createStore().saveCredential({ version: 2, plaintext: original });
+  const digest = createHash("sha256")
+    .update(await readFile(path))
+    .digest("hex");
+
+  await assert.rejects(
+    createStore().saveCredential({ version: 2, plaintext: replacement }),
+    /credential/u,
+  );
+
+  assert.equal(
+    createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex"),
+    digest,
+  );
+  assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: original });
+  await assertOnlyPublishedCredential(directory);
+});
+
+test("Windows uncertain post-publication result reloads the complete replacement", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-w01a-simulated-after-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const directory = join(root, "state");
+  const path = join(directory, "central-credential.json");
+  const key = generateDpopKeyMaterial();
+  const original = serializeCentralCredentialV2(credential(key));
+  const replacement = serializeCentralCredentialV2(
+    credential(key, {
+      issuedAt: 1_788_043_201,
+      tokenId: "00000000-0000-4000-8000-000000000106",
+    }),
+  );
+  const fileReplacement: WindowsCredentialFileReplacement = {
+    async replace(sourcePath, destinationPath) {
+      await rename(sourcePath, destinationPath);
+      throw new Error("injected uncertain post-publication result");
+    },
+  };
+  const options = simulatedWindowsOptions(fileReplacement);
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
+  await createStore().saveCredential({ version: 2, plaintext: original });
+
+  await createStore().saveCredential({ version: 2, plaintext: replacement });
+
+  assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: replacement });
+  await assertOnlyPublishedCredential(directory);
+});
+
+test("Windows corrupt post-publication result fails closed and leaves no sibling", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-w01a-simulated-corrupt-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const directory = join(root, "state");
+  const path = join(directory, "central-credential.json");
+  const key = generateDpopKeyMaterial();
+  const original = serializeCentralCredentialV2(credential(key));
+  const replacement = serializeCentralCredentialV2(
+    credential(key, {
+      issuedAt: 1_788_043_201,
+      tokenId: "00000000-0000-4000-8000-000000000107",
+    }),
+  );
+  const fileReplacement: WindowsCredentialFileReplacement = {
+    async replace(sourcePath, destinationPath) {
+      await rename(sourcePath, destinationPath);
+      await writeFile(destinationPath, "{corrupt");
+      throw new Error("injected corrupt post-publication result");
+    },
+  };
+  const options = simulatedWindowsOptions(fileReplacement);
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE, options);
+  await createStore().saveCredential({ version: 2, plaintext: original });
+
+  await assert.rejects(createStore().saveCredential({ version: 2, plaintext: replacement }));
+  await assert.rejects(createStore().loadCredential());
+  await assertOnlyPublishedCredential(directory);
+});
+
+test("W01a enforces native owner and SYSTEM DACLs, replaces atomically, and rejects restart corruption", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-w01a-;[]$()-"));
+  t.after(() => rm(root, { force: true, recursive: true }));
+  const directory = join(root, "state");
+  const path = join(directory, "central-credential.json");
+  const key = generateDpopKeyMaterial();
+  const original = serializeCentralCredentialV2(credential(key));
+  const replacement = serializeCentralCredentialV2(
+    credential(key, {
+      issuedAt: 1_788_043_201,
+      tokenId: "00000000-0000-4000-8000-000000000108",
+    }),
+  );
+  const createStore = () => new EncryptedFileCredentialStore(path, HOOK_TOKEN, SCOPE);
+
+  await createStore().saveCredential({ version: 2, plaintext: original });
+  assertWindowsAcl(await observeWindowsAcl(directory), "directory");
+  assertWindowsAcl(await observeWindowsAcl(path), "file");
+
+  await createStore().saveCredential({ version: 2, plaintext: replacement });
+  assert.deepEqual(await createStore().loadCredential(), { version: 2, plaintext: replacement });
+  assertWindowsAcl(await observeWindowsAcl(directory), "directory");
+  assertWindowsAcl(await observeWindowsAcl(path), "file");
+  await assertOnlyPublishedCredential(directory);
+
+  await writeFile(path, "{corrupt");
+  await assert.rejects(createStore().loadCredential());
+  assert.equal(await readFile(path, "utf8"), "{corrupt");
+  await assertOnlyPublishedCredential(directory);
 });
 
 test("rejects every outer and inner credential-version mismatch", async (t) => {

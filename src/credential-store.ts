@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
 import { type FileHandle, link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
 import {
@@ -24,6 +24,20 @@ const TAG_BYTES = 16;
 const MAX_JWT_BYTES = 4 * 1024 * 1024;
 const MAX_FILE_BYTES = 6 * 1024 * 1024;
 const SYSTEM_SID = "S-1-5-18";
+const WINDOWS_POWERSHELL_TIMEOUT_MS = 10_000;
+const WINDOWS_HELPER_ENVIRONMENT_NAMES = [
+  "SystemRoot",
+  "WINDIR",
+  "ComSpec",
+  "PATHEXT",
+  "PATH",
+  "TEMP",
+  "TMP",
+  "USERPROFILE",
+  "LOCALAPPDATA",
+  "APPDATA",
+  "PROGRAMDATA",
+] as const;
 const HOOK_TOKEN_PATTERN = /^[0-9a-f]{48}$/;
 const BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const ENVELOPE_KEYS = [
@@ -80,9 +94,14 @@ export interface WindowsCredentialAccessControl {
   secure(path: string, kind: CredentialArtifactKind): Promise<void>;
 }
 
+export interface WindowsCredentialFileReplacement {
+  replace(sourcePath: string, destinationPath: string): Promise<void>;
+}
+
 export interface EncryptedFileCredentialStoreOptions {
   platform?: NodeJS.Platform;
   windowsAccessControl?: WindowsCredentialAccessControl;
+  windowsFileReplacement?: WindowsCredentialFileReplacement;
 }
 
 interface SecuredDirectory {
@@ -181,33 +200,57 @@ function deriveKey(hookToken: Buffer, salt: Buffer): Promise<Buffer> {
   });
 }
 
-function assertSid(value: string): string {
-  if (!/^S-1-(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*)){1,15}$/.test(value)) {
-    throw new Error("Current Windows identity is unavailable");
+function windowsPowerShellExecutable(): string {
+  const systemRoot = process.env.SystemRoot;
+  if (
+    systemRoot === undefined ||
+    !isAbsolute(systemRoot) ||
+    systemRoot.includes("\0") ||
+    systemRoot.includes("\r") ||
+    systemRoot.includes("\n")
+  ) {
+    throw new Error("Windows credential operation failed");
   }
-  const components = value.split("-").slice(2);
-  const authority = components.shift();
-  if (authority === undefined || BigInt(authority) > 281_474_976_710_655n) {
-    throw new Error("Current Windows identity is unavailable");
-  }
-  if (components.some((component) => BigInt(component) > 4_294_967_295n)) {
-    throw new Error("Current Windows identity is unavailable");
-  }
-  return value;
+  return join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-function runExecutable(file: string, arguments_: string[]): Promise<string> {
+function windowsHelperEnvironment(additions: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of WINDOWS_HELPER_ENVIRONMENT_NAMES) {
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  return { ...environment, ...additions };
+}
+
+function runWindowsPowerShell(
+  script: string,
+  environment: Readonly<Record<string, string>>,
+  expectedOutput: string,
+): Promise<void> {
   return new Promise((resolveOutput, reject) => {
     execFile(
-      file,
-      arguments_,
-      { encoding: "utf8", maxBuffer: 32 * 1024, windowsHide: true },
+      windowsPowerShellExecutable(),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-EncodedCommand",
+        Buffer.from(script, "utf16le").toString("base64"),
+      ],
+      {
+        encoding: "utf8",
+        env: windowsHelperEnvironment(environment),
+        maxBuffer: 32 * 1024,
+        timeout: WINDOWS_POWERSHELL_TIMEOUT_MS,
+        windowsHide: true,
+      },
       (error, stdout, stderr) => {
-        if (error || stderr.length !== 0) {
-          reject(new Error("Windows credential access control failed"));
+        if (error || stderr.length !== 0 || stdout !== expectedOutput) {
+          reject(new Error("Windows credential operation failed"));
           return;
         }
-        resolveOutput(stdout);
+        resolveOutput();
       },
     );
   });
@@ -215,18 +258,22 @@ function runExecutable(file: string, arguments_: string[]): Promise<string> {
 
 const WINDOWS_ACL_SCRIPT = `
 $ErrorActionPreference = 'Stop'
-if ($args.Count -ne 3) { exit 41 }
-$target = $args[0]
-$userSid = $args[1]
-$kind = $args[2]
+if ($args.Count -ne 0) { exit 41 }
+$target = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_ACL_PATH', 'Process')
+$kind = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_ACL_KIND', 'Process')
+if ([String]::IsNullOrEmpty($target)) { exit 42 }
 $item = Get-Item -LiteralPath $target -Force
-if (($kind -eq 'directory') -ne $item.PSIsContainer) { exit 42 }
-if ($kind -ne 'directory' -and $kind -ne 'file') { exit 43 }
+if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 43 }
+if (($kind -eq 'directory') -ne $item.PSIsContainer) { exit 44 }
+if ($kind -ne 'directory' -and $kind -ne 'file') { exit 45 }
+$userIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$userSid = $userIdentity.Value
 $security = if ($kind -eq 'directory') {
   New-Object System.Security.AccessControl.DirectorySecurity
 } else {
   New-Object System.Security.AccessControl.FileSecurity
 }
+$security.SetOwner($userIdentity)
 $security.SetAccessRuleProtection($true, $false)
 $inheritance = if ($kind -eq 'directory') {
   [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
@@ -247,54 +294,83 @@ foreach ($sid in $expected) {
 }
 Set-Acl -LiteralPath $target -AclObject $security
 $actual = Get-Acl -LiteralPath $target
-if (-not $actual.AreAccessRulesProtected) { exit 44 }
+if (-not $actual.AreAccessRulesProtected) { exit 46 }
+if ($actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $userSid) {
+  exit 47
+}
 $rules = @($actual.GetAccessRules(
   $true,
   $true,
   [System.Security.Principal.SecurityIdentifier]
 ))
-if ($rules.Count -ne $expected.Count) { exit 45 }
+if ($rules.Count -ne $expected.Count) { exit 48 }
 foreach ($rule in $rules) {
-  if ($expected -notcontains $rule.IdentityReference.Value) { exit 46 }
-  if ($rule.IsInherited) { exit 47 }
+  if ($expected -notcontains $rule.IdentityReference.Value) { exit 49 }
+  if ($rule.IsInherited) { exit 50 }
   if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) {
-    exit 48
+    exit 51
   }
   if ([int]$rule.FileSystemRights -ne [int][System.Security.AccessControl.FileSystemRights]::FullControl) {
-    exit 49
+    exit 52
   }
-  if ($rule.InheritanceFlags -ne $inheritance) { exit 50 }
+  if ($rule.InheritanceFlags -ne $inheritance) { exit 53 }
   if ($rule.PropagationFlags -ne [System.Security.AccessControl.PropagationFlags]::None) {
-    exit 51
+    exit 54
   }
 }
 [Console]::Out.Write('A2A_ACL_OK')
 `;
 
+const WINDOWS_REPLACE_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+if ($args.Count -ne 0) { exit 71 }
+$source = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_REPLACE_SOURCE', 'Process')
+$destination = [Environment]::GetEnvironmentVariable('A2A_CREDENTIAL_REPLACE_DESTINATION', 'Process')
+if ([String]::IsNullOrEmpty($source) -or [String]::IsNullOrEmpty($destination)) { exit 72 }
+$source = [System.IO.Path]::GetFullPath($source)
+$destination = [System.IO.Path]::GetFullPath($destination)
+if ($source -eq $destination) { exit 73 }
+if (-not [String]::Equals(
+  [System.IO.Path]::GetDirectoryName($source),
+  [System.IO.Path]::GetDirectoryName($destination),
+  [System.StringComparison]::OrdinalIgnoreCase
+)) { exit 74 }
+$sourceItem = Get-Item -LiteralPath $source -Force
+$destinationItem = Get-Item -LiteralPath $destination -Force
+if ($sourceItem.PSIsContainer -or $destinationItem.PSIsContainer) { exit 75 }
+if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 76 }
+if (($destinationItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 77 }
+[System.IO.File]::Replace($source, $destination, $null, $true)
+if (Test-Path -LiteralPath $source) { exit 78 }
+$published = Get-Item -LiteralPath $destination -Force
+if ($published.PSIsContainer) { exit 79 }
+if (($published.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { exit 80 }
+[Console]::Out.Write('A2A_REPLACE_OK')
+`;
+
 class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessControl {
-  private userSid?: Promise<string>;
-
   async secure(path: string, kind: CredentialArtifactKind): Promise<void> {
-    this.userSid ??= this.readUserSid();
-    const sid = await this.userSid;
-    const output = await runExecutable("powershell.exe", [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
+    await runWindowsPowerShell(
       WINDOWS_ACL_SCRIPT,
-      path,
-      sid,
-      kind,
-    ]);
-    if (output !== "A2A_ACL_OK") throw new Error("Windows credential access control failed");
+      {
+        A2A_CREDENTIAL_ACL_PATH: path,
+        A2A_CREDENTIAL_ACL_KIND: kind,
+      },
+      "A2A_ACL_OK",
+    );
   }
+}
 
-  private async readUserSid(): Promise<string> {
-    const output = await runExecutable("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
-    const match = /^(?:"(?:[^"]|"")*"),"([^"]+)"\r?\n?$/.exec(output);
-    if (match?.[1] === undefined) throw new Error("Current Windows identity is unavailable");
-    return assertSid(match[1]);
+class BuiltInWindowsCredentialFileReplacement implements WindowsCredentialFileReplacement {
+  async replace(sourcePath: string, destinationPath: string): Promise<void> {
+    await runWindowsPowerShell(
+      WINDOWS_REPLACE_SCRIPT,
+      {
+        A2A_CREDENTIAL_REPLACE_SOURCE: sourcePath,
+        A2A_CREDENTIAL_REPLACE_DESTINATION: destinationPath,
+      },
+      "A2A_REPLACE_OK",
+    );
   }
 }
 
@@ -305,6 +381,7 @@ export class EncryptedFileCredentialStore implements CredentialStore, VersionedC
   private readonly credentialScope: string;
   private readonly platform: NodeJS.Platform;
   private readonly windowsAccessControl?: WindowsCredentialAccessControl;
+  private readonly windowsFileReplacement?: WindowsCredentialFileReplacement;
 
   constructor(
     path: string,
@@ -326,6 +403,8 @@ export class EncryptedFileCredentialStore implements CredentialStore, VersionedC
     if (this.platform === "win32") {
       this.windowsAccessControl =
         options.windowsAccessControl ?? new BuiltInWindowsCredentialAccessControl();
+      this.windowsFileReplacement =
+        options.windowsFileReplacement ?? new BuiltInWindowsCredentialFileReplacement();
     }
   }
 
@@ -408,9 +487,6 @@ export class EncryptedFileCredentialStore implements CredentialStore, VersionedC
         }
         const credential = parseCentralCredentialV2(stored.plaintext);
         assertSameKeyCredentialReplacement(credential, replacement);
-        if (this.platform === "win32") {
-          throw new Error("Windows credential replacement is not qualified");
-        }
         current = { bytes: stored.bytes };
       } catch (error) {
         if (errorCode(error) !== "ENOENT") throw error;
@@ -480,8 +556,28 @@ export class EncryptedFileCredentialStore implements CredentialStore, VersionedC
           latestCredential,
           replacement as LoadedCentralCredentialV2,
         );
-        await rename(temporaryPath, this.path);
-        temporaryCreated = false;
+        if (this.platform === "win32") {
+          const windowsFileReplacement = this.windowsFileReplacement;
+          if (windowsFileReplacement === undefined) throw invalidCredential();
+          try {
+            await windowsFileReplacement.replace(temporaryPath, this.path);
+            temporaryCreated = false;
+          } catch {
+            const recovered = await this.loadCredential().catch(() => undefined);
+            if (recovered?.version !== version || recovered.plaintext !== plaintext) {
+              throw invalidCredential();
+            }
+            try {
+              await unlink(temporaryPath);
+            } catch (error) {
+              if (errorCode(error) !== "ENOENT") throw invalidCredential();
+            }
+            temporaryCreated = false;
+          }
+        } else {
+          await rename(temporaryPath, this.path);
+          temporaryCreated = false;
+        }
       } else if (this.platform === "win32") {
         await this.assertCredentialAbsent();
         await rename(temporaryPath, this.path);
