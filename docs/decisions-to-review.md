@@ -124,6 +124,14 @@ affected choice for review rather than silently changing the client contract.
   home test seams described in `test/k02-failure-inventory.md`. None is a
   public CLI, configuration, packaged crash control, provider qualification,
   publishing approval, or Windows support claim.
+- The K03 implementation read found and corrected two K02 assertions that
+  contradicted the accepted ADRs. Q03 now observes the exact
+  `poll_messages` request `{timeout:0}` instead of a nonexistent
+  `message_ids` selector. S13 now requires startup to classify a nonexact
+  retirement marker as `connector_state_unavailable`, reserves
+  `connector_state_retired` for the exact 28-byte marker, and leaves prefix
+  repair solely to confirmed `retire-state`. The reviewed node count and
+  production contracts are unchanged.
 
 ## Accepted D05 package
 

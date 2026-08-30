@@ -246,6 +246,8 @@ test("K02-Q03 stops independently when later work targets an uncertain conversat
   assert.equal(scenario.gateway.tombstone(uncertain.id), undefined);
   const laterUncertain = k02Message("q03_uncertain_later", "q03_uncertain_conversation");
   scenario.enqueue(laterUncertain);
+  const pollsBeforeLaterWake =
+    scenario.gatewayProxy?.calls.filter((call) => call.tool === "poll_messages").length ?? 0;
   assert.equal((await scenario.wake(laterUncertain.id)).status, 202);
   try {
     await assert.rejects(scenario.connector.waitForIdle(), /connector_conversation_unavailable/u);
@@ -253,13 +255,9 @@ test("K02-Q03 stops independently when later work targets an uncertain conversat
     scenario.gatewayProxy?.release("complete_message");
   }
   assert.equal(scenario.provider.requests.length, 1);
-  assert.equal(
-    scenario.gateway.calls.some(
-      (call) =>
-        call.name === "poll_messages" &&
-        Array.isArray(call.arguments.message_ids) &&
-        call.arguments.message_ids.includes(laterUncertain.id),
-    ),
-    true,
-  );
+  const pollsAfterLaterWake =
+    scenario.gatewayProxy?.calls.filter((call) => call.tool === "poll_messages") ?? [];
+  assert.equal(pollsAfterLaterWake.length, pollsBeforeLaterWake + 1);
+  assert.deepEqual(pollsAfterLaterWake.at(-1)?.arguments, { timeout: 0 });
+  assert.equal(scenario.gateway.tombstone(laterUncertain.id), undefined);
 });
