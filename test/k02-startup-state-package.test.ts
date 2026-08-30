@@ -794,7 +794,7 @@ test("K02-S12 opens no state until the injected filesystem qualification proves 
   ]);
 });
 
-test("K02-S13 resumes every retirement marker prefix, sync, and allowlisted deletion crash", async (t) => {
+test("K02-S13 distinguishes partial markers while retirement resumes every crash barrier", async (t) => {
   const module = await loadK02Production("K02-K03:S13");
   const barriers = [
     { kind: "marker_created" } as const,
@@ -826,6 +826,8 @@ test("K02-S13 resumes every retirement marker prefix, sync, and allowlisted dele
       }),
       /connector_test_crash/u,
     );
+    const partialMarker =
+      crashAfter.kind === "marker_created" || crashAfter.kind === "marker_prefix";
     await assert.rejects(
       module.initializeConnectorStateForTest({
         stateDirectory,
@@ -833,7 +835,7 @@ test("K02-S13 resumes every retirement marker prefix, sync, and allowlisted dele
         providerKind: "codex",
         workingDirectory: WORKING_DIRECTORY,
       }),
-      /connector_state_retired/u,
+      partialMarker ? /connector_state_unavailable/u : /connector_state_retired/u,
     );
     assert.deepEqual(
       await module.retireConnectorStateForTest({
