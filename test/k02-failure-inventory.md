@@ -35,11 +35,11 @@ fail.
 | Q01-Q03 | Retain and order-dispatch all 100 queued IDs without eviction; one conversation lane; two global turns; exact session resume; call `poll_messages` with exactly `{timeout:0}`; fail closed when that bounded result contains later work for a closed or unresolved uncertain conversation |
 | P01-P10 | Complete start/resume/recover automata; sender-data boundary; K03-constructed argv/environment/shell record; durable approval waiting and running; absolute deadline; successful and failed qualified containment after the remaining grace; injected-port crash invariants; state-publication barriers; malformed, misordered, wrong-execution, and late events |
 | B01-B05 | 10,000/10,001 normalized events; 1,024/1,025-byte provider IDs; 262,144/262,145-byte progress; independent 8 MiB stdout/stderr exact and one-over capture; 262,144/262,145-byte final reply |
-| O01-O06 | Exact completion mapping and reply bytes; reply-before-ack; uncertainty without redispatch; lost-open reply recovery; mailbox-full in-memory retry; one lifetime 1/2/4/8/16/30-second schedule; every accepted application result on its operation-specific branch; permanent, authentication, malformed, terminal-mismatch, unknown, and uncertain-transport results across reply, completion, outcome lookup, and acknowledgement |
-| C01-C04 | All eight content-free crash seams; exact-turn recovery; received-only initial dispatch; no redispatch from binding or turn-starting; committed-lost-reply outcome lookup; no restoration of a cleared reply plan |
+| O01-O06 | Exact completion mapping and reply bytes; reply-before-ack; uncertainty without redispatch; lost-open reply outcome lookup and exact-turn recovery before uncertainty; mailbox-full in-memory retry; one lifetime 1/2/4/8/16/30-second schedule; every accepted application result on its operation-specific branch; permanent, authentication, malformed, terminal-mismatch, unknown, and uncertain-transport results across reply, completion, outcome lookup, and acknowledgement |
+| C01-C04 | All eight content-free crash seams; exact-turn recovery; received-only initial dispatch with a fail-closed state precondition; no dispatch of later durable work while startup recovery is unresolved; no redispatch from binding or turn-starting; outcome lookup before every recovered central-pending operation, including after a durable attempt claim; terminal acknowledgement and open completion retry; no restoration of a cleared reply plan |
 | S01 | Exact environment scrubbing plus scans of state, working paths, spawn records, and normal artifacts for content, credentials, approvals, provider IDs, and sender-controlled settings |
 | S09-S13 | Owner/correlation initialization crashes; correlation-only and mutually valid rollback behavior; 100,000-conversation capacity; injected local-filesystem qualification; startup rejects a partial marker as unavailable and an exact marker as retired; only `retire-state` repairs an exact protected prefix and resumes every sync and allowlisted deletion crash |
-| A01-A08 | Exact strict SQLite schema and pragmas; full HMAC indexes; independent AES-256-GCM IV/tag envelopes; parent-bound AAD transplant rejection; paired transition atomicity; envelope/index/schema corruption; token/provider/directory scope binding; acknowledgement cleanup and mapping retention; unallowlisted artifact and permission failures |
+| A01-A08 | Exact strict SQLite schema and pragmas; full HMAC indexes; independent AES-256-GCM IV/tag envelopes; parent-bound AAD transplant rejection; every paired message/conversation transition atomic across injected crash seams; startup rejection of every disallowed lifecycle join; envelope/index/schema corruption; token/provider/directory scope binding; reply acknowledgement restores an active conversation while completion and its acknowledgement close both sides; mapping retention; unallowlisted artifact and permission failures |
 | L01, SD01, B00 | Approved MCP client/HTTP transport initialization handshake and fixed 35-second gateway MCP timeout; non-resetting provider/grace/containment timers; exact fixed constants; parallel two-turn cancellation; bounded SIGINT and SIGTERM-style 15-second shutdown |
 | D01-D05 | Exact public `start`/`retire-state` grammar and loopback foreground startup; unpackaged shared core; exact private manifests; safe closed-provider build/stage gate; packed offline-install and command-smoke gate |
 
@@ -67,6 +67,12 @@ marker (`connector_state_unavailable` on startup) from the exact permanent
 marker (`connector_state_retired`), while confirmed `retire-state` remains the
 only operation allowed to finish an exact protected prefix. These are test
 corrections, not contract changes, and do not change the 69-node inventory.
+
+A later lifecycle review strengthened C01, C03, O03, A04, and A07 without
+adding a top-level node. The added assertions directly exercise the accepted
+ADR 0029 and ADR 0030 recovery, dispatch-gating, paired-state, and lifecycle
+join rules. They do not increase a timeout, relax a contract, or change the
+reviewed 69-node inventory.
 
 Production startup remains ADR 0028's provider-specific entrypoint with the
 fixed gateway MCP endpoint, account-derived state root, four required options,

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
 import Database from "better-sqlite3";
+
+import { openConnectorState } from "../packages/connector-core/src/state.js";
 
 import {
   type K02CrashBarrier,
@@ -35,6 +38,40 @@ async function waitForOutcomeRetry(
       database.close();
     }
   }, label);
+}
+
+function seedReceivedRow(
+  scenario: K02Scenario,
+  message: ReturnType<typeof k02Message>,
+  nowMs: number,
+  continuation: boolean,
+): void {
+  const state = openConnectorState({
+    stateDirectory: scenario.stateDirectory,
+    webhookToken: "0123456789abcdef0123456789abcdef0123456789abcdef",
+    providerKind: "codex",
+    workingDirectory: realpathSync.native(scenario.workingDirectory),
+    nowMs,
+  });
+  try {
+    if (!continuation) {
+      state.insertConversationAndMessage(message.conversation_id, message.id, nowMs);
+      return;
+    }
+    const seedMessageId = `${message.id}_seed`;
+    state.insertConversationAndMessage(message.conversation_id, seedMessageId, nowMs);
+    state.dispatch(seedMessageId, false, nowMs);
+    state.bindSession(message.conversation_id, seedMessageId, `${message.id}_session`, nowMs);
+    state.transitionMessage(seedMessageId, "turn_starting", "central_pending", nowMs, {
+      terminal_operation: "reply",
+    });
+    state.transitionMessage(seedMessageId, "central_pending", "ack_pending", nowMs);
+    state.transitionMessage(seedMessageId, "ack_pending", "closed", nowMs);
+    state.deleteClosedMessage(seedMessageId);
+    state.insertContinuation(message.conversation_id, message.id, nowMs);
+  } finally {
+    state.close();
+  }
 }
 
 test("K02-C01 recovers all eight content-free crash barriers without duplicate work", async (t) => {
@@ -277,6 +314,129 @@ test("K02-C03 dispatches once only from received and never from binding or turn_
     outcome: "failed",
     reason_code: "provider_start_failed",
   });
+
+  for (const continuation of [false, true]) {
+    const clock = new ManualK02Clock(continuation ? 1_788_190_000_000 : 1_788_180_000_000);
+    const stale = await startK02Scenario(t, "K02-K03:C03", {
+      clock,
+      gatewayProxy: true,
+      scripts: [],
+    });
+    await stale.connector.close();
+    const staleMessage = k02Message(
+      `c03_stale_${continuation}`,
+      `c03_stale_conversation_${continuation}`,
+      "stale durable input",
+      continuation ? `c03_stale_${continuation}_seed` : null,
+    );
+    seedReceivedRow(stale, staleMessage, clock.nowMs(), continuation);
+    stale.enqueue(staleMessage);
+    stale.gatewayProxy?.failNext("poll_messages", { kind: "hold" });
+    const restarted = await stale.restart([
+      [
+        ...(continuation
+          ? []
+          : [{ kind: "session", provider_session_id: "c03_stale_session" } as const]),
+        { kind: "turn", provider_turn_id: `c03_stale_turn_${continuation}` },
+        { kind: "reply", text: `c03 stale reply ${continuation}` },
+      ],
+    ]);
+    await waitFor(
+      () => stale.gatewayProxy?.calls.some((call) => call.tool === "poll_messages") ?? false,
+      "stale-state poll claim",
+    );
+    const staleDatabase = new Database(join(stale.stateDirectory, "correlation.sqlite3"));
+    try {
+      const result = staleDatabase
+        .prepare(
+          "UPDATE messages SET lifecycle=?, turn_started_at_ms=?, turn_deadline_ms=?, updated_at_ms=? WHERE lifecycle='received'",
+        )
+        .run(
+          continuation ? "turn_starting" : "binding",
+          clock.nowMs(),
+          clock.nowMs() + 900_000,
+          clock.nowMs(),
+        );
+      assert.equal(result.changes, 1);
+    } finally {
+      staleDatabase.close();
+    }
+    stale.gatewayProxy?.release("poll_messages");
+    await assert.rejects(
+      restarted.connector.waitForIdle(),
+      /connector_state_unavailable/u,
+      "dispatch did not fail closed after its received-state precondition became stale",
+    );
+    assert.equal(restarted.provider.requests.length, 0);
+  }
+
+  for (const continuation of [false, true]) {
+    const clock = new ManualK02Clock(continuation ? 1_788_210_000_000 : 1_788_200_000_000);
+    const blocked = await startK02Scenario(t, "K02-K03:C03", {
+      clock,
+      crashAfter: "reply_committed_unobserved",
+      gatewayProxy: true,
+      scripts: [
+        [
+          { kind: "session", provider_session_id: `c03_blocker_session_${continuation}` },
+          { kind: "turn", provider_turn_id: `c03_blocker_turn_${continuation}` },
+          { kind: "reply", text: `c03 blocker reply ${continuation}` },
+        ],
+      ],
+    });
+    blocked.gatewayProxy?.failNext("reply_message", { kind: "drop_after_commit" });
+    const blocker = k02Message(
+      `c03_blocker_${continuation}`,
+      `c03_blocker_conversation_${continuation}`,
+    );
+    blocked.enqueue(blocker);
+    assert.equal((await blocked.wake(blocker.id, Math.floor(clock.nowMs() / 1_000))).status, 202);
+    await assert.rejects(blocked.connector.waitForIdle(), /connector_test_crash/u);
+    await blocked.connector.crash();
+
+    const later = k02Message(
+      `c03_later_${continuation}`,
+      `c03_later_conversation_${continuation}`,
+      "later durable input",
+      continuation ? `c03_later_${continuation}_seed` : null,
+    );
+    seedReceivedRow(blocked, later, clock.nowMs(), continuation);
+    blocked.enqueue(later);
+    blocked.gatewayProxy?.failNext("get_message_outcome", { kind: "hold" });
+    const restarted = await blocked.restart([
+      [
+        ...(continuation
+          ? []
+          : [{ kind: "session", provider_session_id: "c03_later_new_session" } as const]),
+        { kind: "turn", provider_turn_id: `c03_later_turn_${continuation}` },
+        { kind: "reply", text: `c03 later reply ${continuation}` },
+      ],
+    ]);
+    await waitFor(
+      () =>
+        blocked.gatewayProxy?.calls.some((call) => call.tool === "get_message_outcome") ?? false,
+      "blocked startup outcome lookup",
+    );
+    try {
+      assert.equal((await blocked.wake(later.id, Math.floor(clock.nowMs() / 1_000))).status, 202);
+      await waitFor(
+        () => blocked.gateway.calls.filter((call) => call.name === "poll_messages").length === 2,
+        "later durable row poll",
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(
+        restarted.provider.requests.length,
+        0,
+        "startup recovery admitted provider dispatch before the prior row resolved",
+      );
+    } finally {
+      blocked.gatewayProxy?.release("get_message_outcome");
+    }
+    await restarted.connector.waitForIdle();
+    assert.equal(restarted.provider.requests.length, 1);
+    assert.equal(restarted.provider.requests[0]?.kind, continuation ? "resume" : "start");
+  }
 });
 
 test("K02-C04 never restores a reply plan after the durable lost-open uncertain transition", async (t) => {

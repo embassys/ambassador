@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { createDecipheriv, createHash, createHmac, scryptSync } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { chmod, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
 import Database from "better-sqlite3";
 
+import { openConnectorState } from "../packages/connector-core/src/state.js";
+
 import {
   K02_TOKEN,
   k02Message,
+  ManualK02Clock,
   startK02Scenario,
   waitFor,
 } from "./support/connector/k02-production.js";
@@ -497,6 +501,296 @@ test("K02-A04 commits paired message and conversation transitions atomically", a
   } finally {
     database.close();
   }
+
+  const pairedFaults = [
+    {
+      name: "uncertain terminal",
+      fault: "uncertain_after_message_update",
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_atomic_uncertain" },
+          { kind: "turn", provider_turn_id: "turn_atomic_uncertain" },
+          { kind: "uncertain" },
+        ],
+      ],
+      oldPair: { conversation: "active", message: "turn_running" },
+    },
+    {
+      name: "completion acceptance",
+      fault: "completion_after_conversation_update",
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_atomic_completion" },
+          { kind: "turn", provider_turn_id: "turn_atomic_completion" },
+          { kind: "no_reply" },
+        ],
+      ],
+      oldPair: { conversation: "active", message: "central_pending" },
+    },
+    {
+      name: "reply acknowledgement",
+      fault: "reply_ack_after_conversation_update",
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_atomic_reply_ack" },
+          { kind: "turn", provider_turn_id: "turn_atomic_reply_ack" },
+          { kind: "reply", text: "atomic reply acknowledgement" },
+        ],
+      ],
+      oldPair: { conversation: "active", message: "ack_pending" },
+    },
+    {
+      name: "completion acknowledgement",
+      fault: "completion_ack_after_conversation_update",
+      scripts: [
+        [
+          { kind: "session", provider_session_id: "session_atomic_completion_ack" },
+          { kind: "turn", provider_turn_id: "turn_atomic_completion_ack" },
+          { kind: "no_reply" },
+        ],
+      ],
+      oldPair: { conversation: "closed", message: "ack_pending" },
+    },
+  ] as const;
+  for (const [index, vector] of pairedFaults.entries()) {
+    const atomic = await startK02Scenario(t, "K02-K03:A04", {
+      failPairedStateWriteAfter: vector.fault,
+      scripts: vector.scripts,
+    });
+    const atomicMessage = k02Message(`atomic_${index}`, `atomic_conversation_${index}`);
+    atomic.enqueue(atomicMessage);
+    assert.equal((await atomic.wake(atomicMessage.id)).status, 202);
+    await assert.rejects(
+      atomic.connector.waitForIdle(),
+      /connector_state_unavailable/u,
+      `${vector.name} did not expose the injected paired-write failure`,
+    );
+    await atomic.connector.close();
+    const atomicDatabase = openState(atomic.stateDirectory);
+    try {
+      assert.deepEqual(
+        atomicDatabase
+          .prepare<[], { conversation: string; message: string }>(
+            "SELECT conversations.lifecycle AS conversation, messages.lifecycle AS message FROM conversations JOIN messages USING(conversation_hmac)",
+          )
+          .get(),
+        vector.oldPair,
+        `${vector.name} left a mixed durable pair`,
+      );
+    } finally {
+      atomicDatabase.close();
+    }
+  }
+
+  const lostReplyClock = new ManualK02Clock(1_788_420_000_000);
+  const lostReply = await startK02Scenario(t, "K02-K03:A04", {
+    clock: lostReplyClock,
+    failPairedStateWriteAfter: "lost_reply_after_message_update",
+    gatewayProxy: true,
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_atomic_lost_reply" },
+        { kind: "turn", provider_turn_id: "turn_atomic_lost_reply" },
+        { kind: "reply", text: "atomic lost reply" },
+      ],
+      [{ kind: "uncertain" }],
+    ],
+  });
+  lostReply.gatewayProxy?.failNext("reply_message", { kind: "drop_before_dispatch" });
+  const lostReplyMessage = k02Message("atomic_lost_reply", "atomic_lost_reply_conversation");
+  lostReply.enqueue(lostReplyMessage);
+  assert.equal(
+    (await lostReply.wake(lostReplyMessage.id, Math.floor(lostReplyClock.nowMs() / 1_000))).status,
+    202,
+  );
+  await waitFor(() => {
+    const retryDatabase = openState(lostReply.stateDirectory);
+    try {
+      const row = retryDatabase
+        .prepare<[], { retry_kind: string | null }>("SELECT retry_kind FROM messages")
+        .get();
+      return row?.retry_kind === "outcome_lookup";
+    } finally {
+      retryDatabase.close();
+    }
+  }, "atomic lost-reply outcome schedule");
+  lostReplyClock.advance(30_000);
+  await assert.rejects(lostReply.connector.waitForIdle(), /connector_state_unavailable/u);
+  await lostReply.connector.close();
+  const lostReplyDatabase = openState(lostReply.stateDirectory);
+  try {
+    assert.deepEqual(
+      lostReplyDatabase
+        .prepare<[], { conversation: string; message: string }>(
+          "SELECT conversations.lifecycle AS conversation, messages.lifecycle AS message FROM conversations JOIN messages USING(conversation_hmac)",
+        )
+        .get(),
+      { conversation: "active", message: "central_pending" },
+    );
+  } finally {
+    lostReplyDatabase.close();
+  }
+
+  const recovered = await startK02Scenario(t, "K02-K03:A04", {
+    crashForRecoveryState: "uncertain",
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_atomic_recovered_reply" },
+        { kind: "turn", provider_turn_id: "turn_atomic_recovered_reply" },
+        { kind: "uncertain" },
+      ],
+    ],
+  });
+  const recoveredMessage = k02Message(
+    "atomic_recovered_reply",
+    "atomic_recovered_reply_conversation",
+  );
+  recovered.enqueue(recoveredMessage);
+  assert.equal((await recovered.wake(recoveredMessage.id)).status, 202);
+  await assert.rejects(recovered.connector.waitForIdle(), /connector_test_crash/u);
+  await recovered.connector.crash();
+  const recoveredRestart = await recovered.restart(
+    [[{ kind: "reply", text: "exact recovered reply" }]],
+    { failPairedStateWriteAfter: "reply_ack_after_conversation_update" },
+  );
+  await assert.rejects(recoveredRestart.connector.waitForIdle(), /connector_state_unavailable/u);
+  await recoveredRestart.connector.close();
+  const recoveredDatabase = openState(recovered.stateDirectory);
+  try {
+    assert.deepEqual(
+      recoveredDatabase
+        .prepare<[], { conversation: string; message: string }>(
+          "SELECT conversations.lifecycle AS conversation, messages.lifecycle AS message FROM conversations JOIN messages USING(conversation_hmac)",
+        )
+        .get(),
+      { conversation: "uncertain", message: "ack_pending" },
+    );
+  } finally {
+    recoveredDatabase.close();
+  }
+
+  const joinScenario = await startK02Scenario(t, "K02-K03:A04", { scripts: [] });
+  await joinScenario.connector.close();
+  const joinNow = Date.now();
+  const joinState = openConnectorState({
+    stateDirectory: joinScenario.stateDirectory,
+    webhookToken: K02_TOKEN,
+    providerKind: "codex",
+    workingDirectory: realpathSync.native(joinScenario.workingDirectory),
+    nowMs: joinNow,
+  });
+  joinState.insertConversationAndMessage("join_conversation", "join_message", joinNow);
+  joinState.dispatch("join_message", false, joinNow);
+  joinState.bindSession("join_conversation", "join_message", "join_provider_session", joinNow);
+  joinState.bindTurn("join_message", "join_provider_session", "join_provider_turn", joinNow);
+  joinState.close();
+
+  type MessageShape =
+    | "received"
+    | "binding"
+    | "turn_starting"
+    | "turn_running"
+    | "waiting_for_approval"
+    | "uncertain"
+    | "central_pending_reply"
+    | "central_pending_complete"
+    | "ack_pending_reply"
+    | "ack_pending_complete"
+    | "blocked_empty"
+    | "blocked_reply"
+    | "blocked_complete"
+    | "closed_reply"
+    | "closed_complete";
+  const allowedJoins: Readonly<Record<MessageShape, readonly string[]>> = {
+    received: ["binding", "active"],
+    binding: ["binding"],
+    turn_starting: ["active"],
+    turn_running: ["active"],
+    waiting_for_approval: ["active"],
+    uncertain: ["uncertain"],
+    central_pending_reply: ["active", "uncertain"],
+    central_pending_complete: ["binding", "active", "uncertain"],
+    ack_pending_reply: ["active", "uncertain"],
+    ack_pending_complete: ["closed"],
+    blocked_empty: ["binding", "active", "uncertain"],
+    blocked_reply: ["active", "uncertain"],
+    blocked_complete: ["binding", "active", "uncertain", "closed"],
+    closed_reply: ["active"],
+    closed_complete: ["closed"],
+  };
+  const allConversationStates = ["binding", "active", "uncertain", "closed"] as const;
+  const joinDatabase = openState(joinScenario.stateDirectory);
+  const baseConversation = joinDatabase
+    .prepare<[], Record<string, unknown>>("SELECT * FROM conversations")
+    .get();
+  const baseMessage = joinDatabase
+    .prepare<[], Record<string, unknown>>("SELECT * FROM messages")
+    .get();
+  assert.ok(baseConversation !== undefined && baseMessage !== undefined);
+  joinDatabase.close();
+
+  for (const [shape, allowed] of Object.entries(allowedJoins) as [
+    MessageShape,
+    readonly string[],
+  ][]) {
+    for (const conversationLifecycle of allConversationStates) {
+      if (allowed.includes(conversationLifecycle)) continue;
+      const databaseForShape = openState(joinScenario.stateDirectory);
+      try {
+        const hasSession = conversationLifecycle !== "binding";
+        databaseForShape
+          .prepare(
+            "UPDATE conversations SET provider_session_hmac=?, provider_session_iv=?, provider_session_ciphertext=?, provider_session_tag=?, lifecycle=?",
+          )
+          .run(
+            hasSession ? baseConversation.provider_session_hmac : null,
+            hasSession ? baseConversation.provider_session_iv : null,
+            hasSession ? baseConversation.provider_session_ciphertext : null,
+            hasSession ? baseConversation.provider_session_tag : null,
+            conversationLifecycle,
+          );
+        const running = ["turn_running", "waiting_for_approval", "uncertain"].includes(shape);
+        const reply = shape.endsWith("_reply");
+        const complete = shape.endsWith("_complete");
+        const blocked = shape.startsWith("blocked_");
+        const lifecycle = shape.replace(/_(reply|complete|empty)$/u, "");
+        const dispatched = lifecycle !== "received";
+        databaseForShape
+          .prepare(
+            "UPDATE messages SET provider_turn_hmac=?, provider_turn_iv=?, provider_turn_ciphertext=?, provider_turn_tag=?, lifecycle=?, blocked_class=?, terminal_operation=?, completion_outcome=?, completion_reason=?, retry_kind=NULL, retry_not_before_ms=NULL, retry_attempt_count=0, turn_started_at_ms=?, turn_deadline_ms=?",
+          )
+          .run(
+            running && hasSession ? baseMessage.provider_turn_hmac : null,
+            running && hasSession ? baseMessage.provider_turn_iv : null,
+            running && hasSession ? baseMessage.provider_turn_ciphertext : null,
+            running && hasSession ? baseMessage.provider_turn_tag : null,
+            lifecycle,
+            blocked ? "contract" : null,
+            reply ? "reply" : complete ? "complete" : null,
+            complete ? "failed" : null,
+            complete ? "provider_execution_failed" : null,
+            dispatched ? baseMessage.turn_started_at_ms : null,
+            dispatched ? baseMessage.turn_deadline_ms : null,
+          );
+      } finally {
+        databaseForShape.close();
+      }
+      assert.throws(
+        () => {
+          const invalid = openConnectorState({
+            stateDirectory: joinScenario.stateDirectory,
+            webhookToken: K02_TOKEN,
+            providerKind: "codex",
+            workingDirectory: realpathSync.native(joinScenario.workingDirectory),
+            nowMs: Date.now(),
+          });
+          invalid.close();
+        },
+        /connector_state_unavailable/u,
+        `startup accepted disallowed ${shape}/${conversationLifecycle} join`,
+      );
+    }
+  }
 });
 
 test("K02-A05 independently rejects ciphertext, GCM-tag, HMAC-index, and schema corruption", async (t) => {
@@ -565,9 +859,89 @@ test("K02-A07 deletes only an acknowledged message and retains the conversation 
         ?.count,
       1,
     );
+    assert.equal(
+      database.prepare<[], { lifecycle: string }>("SELECT lifecycle FROM conversations").get()
+        ?.lifecycle,
+      "active",
+    );
     assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged, true);
   } finally {
     database.close();
+  }
+
+  const completion = await startK02Scenario(t, "K02-K03:A07", {
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_retention_completion" },
+        { kind: "turn", provider_turn_id: "turn_retention_completion" },
+        { kind: "no_reply" },
+      ],
+    ],
+  });
+  const completionMessage = k02Message(
+    "message_retention_completion",
+    "conversation_retention_completion",
+  );
+  completion.enqueue(completionMessage);
+  assert.equal((await completion.wake(completionMessage.id)).status, 202);
+  await completion.connector.waitForIdle();
+  const completionDatabase = openState(completion.stateDirectory);
+  try {
+    assert.equal(
+      completionDatabase
+        .prepare<[], { count: number }>("SELECT count(*) AS count FROM messages")
+        .get()?.count,
+      0,
+    );
+    assert.equal(
+      completionDatabase
+        .prepare<[], { lifecycle: string }>("SELECT lifecycle FROM conversations")
+        .get()?.lifecycle,
+      "closed",
+    );
+  } finally {
+    completionDatabase.close();
+  }
+
+  const recovered = await startK02Scenario(t, "K02-K03:A07", {
+    crashForRecoveryState: "uncertain",
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_retention_recovered" },
+        { kind: "turn", provider_turn_id: "turn_retention_recovered" },
+        { kind: "uncertain" },
+      ],
+    ],
+  });
+  const recoveredMessage = k02Message(
+    "message_retention_recovered",
+    "conversation_retention_recovered",
+  );
+  recovered.enqueue(recoveredMessage);
+  assert.equal((await recovered.wake(recoveredMessage.id)).status, 202);
+  await assert.rejects(recovered.connector.waitForIdle(), /connector_test_crash/u);
+  await recovered.connector.crash();
+  const restarted = await recovered.restart([
+    [{ kind: "reply", text: "retained exact recovered reply" }],
+  ]);
+  await restarted.connector.waitForIdle();
+  const recoveredDatabase = openState(recovered.stateDirectory);
+  try {
+    assert.equal(
+      recoveredDatabase
+        .prepare<[], { count: number }>("SELECT count(*) AS count FROM messages")
+        .get()?.count,
+      0,
+    );
+    assert.equal(
+      recoveredDatabase
+        .prepare<[], { lifecycle: string }>("SELECT lifecycle FROM conversations")
+        .get()?.lifecycle,
+      "active",
+      "acknowledging an exactly recovered reply did not restore the uncertain conversation",
+    );
+  } finally {
+    recoveredDatabase.close();
   }
 });
 

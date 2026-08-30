@@ -72,6 +72,23 @@ async function waitForRetrySchedule(
   }, label);
 }
 
+function simulateCrashAfterDurableAttemptClaim(
+  scenario: K02Scenario,
+  retryKind: "reply" | "complete",
+): void {
+  const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"));
+  try {
+    const result = database
+      .prepare(
+        "UPDATE messages SET retry_kind=?, retry_not_before_ms=NULL, retry_attempt_count=MAX(retry_attempt_count, 1)",
+      )
+      .run(retryKind);
+    assert.equal(result.changes, 1);
+  } finally {
+    database.close();
+  }
+}
+
 function deliveryScript(
   operation: K02DeliveryOperation,
   suffix: string,
@@ -398,6 +415,104 @@ test("K02-C01 resolves a committed lost reply through outcome lookup and one ack
   );
   assert.equal(restarted.provider.requests.length, 0);
   assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged, true);
+
+  const claimedTerminalClock = new ManualK02Clock(1_788_400_000_000);
+  const claimedTerminal = await startK02Scenario(t, "K02-K03:C01", {
+    clock: claimedTerminalClock,
+    crashAfter: "reply_accepted",
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_claimed_terminal" },
+        { kind: "turn", provider_turn_id: "turn_claimed_terminal" },
+        { kind: "reply", text: "claimed terminal reply" },
+      ],
+    ],
+  });
+  const claimedTerminalMessage = k02Message(
+    "message_claimed_terminal",
+    "conversation_claimed_terminal",
+  );
+  claimedTerminal.enqueue(claimedTerminalMessage);
+  assert.equal(
+    (
+      await claimedTerminal.wake(
+        claimedTerminalMessage.id,
+        Math.floor(claimedTerminalClock.nowMs() / 1_000),
+      )
+    ).status,
+    202,
+  );
+  await assert.rejects(claimedTerminal.connector.waitForIdle(), /connector_test_crash/u);
+  await claimedTerminal.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(claimedTerminal, "reply");
+  const claimedTerminalRestart = await claimedTerminal.restart([]);
+  try {
+    await waitFor(
+      () => claimedTerminal.gateway.calls.length >= 3,
+      "recovered claimed reply outcome lookup",
+    );
+    assert.equal(
+      claimedTerminal.gateway.calls[2]?.name,
+      "get_message_outcome",
+      "recovery repeated a claimed reply before resolving its outcome",
+    );
+    await claimedTerminalRestart.connector.waitForIdle();
+    assert.deepEqual(
+      claimedTerminal.gateway.calls.map((call) => call.name),
+      ["poll_messages", "reply_message", "get_message_outcome", "ack_message"],
+    );
+  } finally {
+    await claimedTerminalRestart.connector.close();
+  }
+
+  const openCompletionClock = new ManualK02Clock(1_788_410_000_000);
+  const openCompletion = await startK02Scenario(t, "K02-K03:C01", {
+    clock: openCompletionClock,
+    gatewayProxy: true,
+    scripts: [[{ kind: "failed", reason_code: "provider_start_failed" }]],
+  });
+  openCompletion.gatewayProxy?.failNext("complete_message", { kind: "drop_before_dispatch" });
+  const openCompletionMessage = k02Message(
+    "message_claimed_open_completion",
+    "conversation_claimed_open_completion",
+  );
+  openCompletion.enqueue(openCompletionMessage);
+  assert.equal(
+    (
+      await openCompletion.wake(
+        openCompletionMessage.id,
+        Math.floor(openCompletionClock.nowMs() / 1_000),
+      )
+    ).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    openCompletion,
+    "outcome_lookup",
+    openCompletionClock.nowMs() + 30_000,
+    "claimed open completion outcome schedule",
+  );
+  await openCompletion.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(openCompletion, "complete");
+  const openCompletionRestart = await openCompletion.restart([]);
+  try {
+    await waitFor(
+      () => openCompletion.gateway.calls.length >= 2,
+      "recovered claimed completion outcome lookup",
+    );
+    assert.equal(
+      openCompletion.gateway.calls[1]?.name,
+      "get_message_outcome",
+      "recovery repeated a claimed completion before resolving its outcome",
+    );
+    await openCompletionRestart.connector.waitForIdle();
+    assert.deepEqual(
+      openCompletion.gateway.calls.map((call) => call.name),
+      ["poll_messages", "get_message_outcome", "complete_message", "ack_message"],
+    );
+  } finally {
+    await openCompletionRestart.connector.close();
+  }
 });
 
 test("K02-P07 blocks terminal reporting when qualified containment cannot prove cleanup", async (t) => {
@@ -468,6 +583,58 @@ test("K02-O03 converts a lost open reply to uncertain after exact recovery canno
     scenario.provider.requests.map((request) => request.kind),
     ["start", "recover"],
   );
+
+  const claimedClock = new ManualK02Clock(1_788_430_000_000);
+  const claimed = await startK02Scenario(t, "K02-K03:O03", {
+    clock: claimedClock,
+    gatewayProxy: true,
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_claimed_open_reply" },
+        { kind: "turn", provider_turn_id: "turn_claimed_open_reply" },
+        { kind: "reply", text: "exact claimed open reply" },
+      ],
+    ],
+  });
+  claimed.gatewayProxy?.failNext("reply_message", { kind: "drop_before_dispatch" });
+  const claimedMessage = k02Message(
+    "message_claimed_open_reply",
+    "conversation_claimed_open_reply",
+  );
+  claimed.enqueue(claimedMessage);
+  assert.equal(
+    (await claimed.wake(claimedMessage.id, Math.floor(claimedClock.nowMs() / 1_000))).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    claimed,
+    "outcome_lookup",
+    claimedClock.nowMs() + 30_000,
+    "claimed open reply outcome schedule",
+  );
+  await claimed.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(claimed, "reply");
+  const claimedRestart = await claimed.restart([
+    [
+      { kind: "progress", text: "recovering claimed open reply" },
+      { kind: "reply", text: "exact claimed open reply" },
+    ],
+  ]);
+  try {
+    await claimedRestart.connector.waitForIdle();
+    assert.deepEqual(
+      claimed.gateway.calls.map((call) => call.name),
+      ["poll_messages", "get_message_outcome", "reply_message", "ack_message"],
+      "lost reply recovery did not resolve open state before exact-turn recovery",
+    );
+    assert.deepEqual(
+      claimedRestart.provider.requests.map((request) => request.kind),
+      ["recover"],
+    );
+    assert.equal(claimed.gateway.tombstone(claimedMessage.id)?.outcome, "replied");
+  } finally {
+    await claimedRestart.connector.close();
+  }
 });
 
 test("K02-O04 retains one mailbox-full reply in memory and retries no provider turn", async (t) => {
