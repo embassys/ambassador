@@ -585,6 +585,8 @@ class ConnectorRuntime implements ConnectorHandle {
     const continuation = work.conversation.lifecycle === "active";
     const now = this.#clock.nowMs();
     work.stored = this.#state.dispatch(work.message.id, continuation, now);
+    if (this.options.processBarrierForTest !== undefined)
+      await this.options.processBarrierForTest("binding_published");
     if (
       this.options.crashAfter === "binding_published" ||
       (continuation && this.options.crashAfterTurnStarting)
@@ -729,6 +731,8 @@ class ConnectorRuntime implements ConnectorHandle {
           work.turnId = event.provider_turn_id;
           this.#state.bindTurn(work.message.id, work.sessionId, work.turnId, this.#clock.nowMs());
           phase = "running_bound";
+          if (this.options.processBarrierForTest !== undefined)
+            await this.options.processBarrierForTest("turn_published");
           if (this.options.crashAfter === "turn_published") throw new Error("connector_test_crash");
           continue;
         }
@@ -831,6 +835,8 @@ class ConnectorRuntime implements ConnectorHandle {
           await this.#contractFailure(work);
           return;
         }
+        if (this.options.processBarrierForTest !== undefined)
+          await this.options.processBarrierForTest("provider_terminal_received");
         if (this.options.crashAfter === "provider_terminal_received")
           throw new Error("connector_test_crash");
         if (this.options.failStateAfter === "terminal_plan") {
@@ -1055,6 +1061,8 @@ class ConnectorRuntime implements ConnectorHandle {
             nowMs: this.#clock.nowMs(),
             messageValues: { retry_kind: null, retry_not_before_ms: null },
           });
+          if (this.options.processBarrierForTest !== undefined)
+            await this.options.processBarrierForTest("reply_accepted");
           continue;
         }
         if (kind === "complete") {

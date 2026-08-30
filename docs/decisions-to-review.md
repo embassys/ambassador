@@ -374,6 +374,12 @@ central owner and returns a material contract difference for review.
 
 ## Active architecture and dependency decisions
 
+- K04 uses one test-only connector child entrypoint under `test/support`. It is
+  absent from package bins and exports, accepts only a closed fake-provider
+  plan, and exchanges content-free process-control events. The normal test
+  runner excludes both fixed-port K04 files from its parallel set, requires
+  their exact inventory, and runs them together with concurrency one after the
+  parallel child has closed.
 - T03-S03 treats protected REST as transport-observational until a legitimate
   protected REST operation occurs. A full-lifetime credential does not permit
   an early reissue, probe, activation, receive, legacy poll, or mixed-mode
