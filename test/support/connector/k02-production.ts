@@ -547,6 +547,10 @@ export class ManualK02Clock implements K02Clock {
     if (typeof timer === "number") this.#timers.delete(timer);
   }
 
+  pendingTimerCountForTest(): number {
+    return this.#timers.size;
+  }
+
   advance(ms: number): void {
     assert.ok(Number.isSafeInteger(ms) && ms >= 0);
     this.currentMs += ms;
