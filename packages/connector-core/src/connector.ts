@@ -44,6 +44,7 @@ interface Work {
   sawStatefulProgress: boolean;
   approvalId: string | null;
   cancellationRequested: boolean;
+  startupRecovery: boolean;
 }
 
 type Terminal =
@@ -167,6 +168,8 @@ class ConnectorRuntime implements ConnectorHandle {
   readonly #queued = new Set<string>();
   readonly #starting = new Set<string>();
   readonly #active = new Map<string, Work>();
+  readonly #startupRecoveryIds = new Set<string>();
+  readonly #startupRecoveryWaiters = new Set<() => void>();
   readonly #idleWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
   #fatal: Error | undefined;
   #closed = false;
@@ -202,8 +205,18 @@ class ConnectorRuntime implements ConnectorHandle {
       providerKind: canonicalOptions.providerKind,
       workingDirectory: canonicalOptions.workingDirectory,
       nowMs: (canonicalOptions.clock ?? SYSTEM_CLOCK).nowMs(),
+      ...(canonicalOptions.stateActionObserverForTest === undefined
+        ? {}
+        : { stateActionObserverForTest: canonicalOptions.stateActionObserverForTest }),
     });
     const runtime = new ConnectorRuntime(canonicalOptions, state);
+    let prepared: Work[];
+    try {
+      prepared = runtime.#prepareStartupRecovery();
+    } catch (error) {
+      state.close();
+      throw error;
+    }
     try {
       await runtime.#receiver.listen();
     } catch {
@@ -211,7 +224,8 @@ class ConnectorRuntime implements ConnectorHandle {
       connectorError("connector_listener_unavailable");
     }
     queueMicrotask(() => {
-      void runtime.#recoverStartup();
+      for (const work of prepared) void runtime.#recoverPrepared(work);
+      runtime.#pump();
     });
     return runtime;
   }
@@ -306,6 +320,12 @@ class ConnectorRuntime implements ConnectorHandle {
 
   #admit(id: string): "accepted" | "coalesced" | "full" {
     if (this.#queued.has(id) || this.#starting.has(id) || this.#active.has(id)) return "coalesced";
+    try {
+      this.#state.beforeExternalEffect();
+    } catch (error) {
+      this.#fail(error);
+      return "full";
+    }
     if (this.#queue.length >= CONNECTOR_LIMITS.waitingWakeIds) return "full";
     this.#queue.push(id);
     this.#queued.add(id);
@@ -330,6 +350,7 @@ class ConnectorRuntime implements ConnectorHandle {
 
   async #startId(id: string): Promise<void> {
     try {
+      this.#state.beforeExternalEffect();
       const result = await this.#gateway.call("poll_messages", { timeout: 0 });
       if (
         !exactObject(result, ["messages"]) ||
@@ -347,6 +368,8 @@ class ConnectorRuntime implements ConnectorHandle {
         return;
       }
       if (matching.length !== 1) throw new GatewayObservation("contract");
+      await this.#waitForStartupRecovery();
+      if (this.#fatal !== undefined) throw this.#fatal;
       await this.#admitMessage(matching[0] as GatewayMessage);
     } catch (error) {
       this.#starting.delete(id);
@@ -401,6 +424,7 @@ class ConnectorRuntime implements ConnectorHandle {
       sawStatefulProgress: false,
       approvalId: null,
       cancellationRequested: false,
+      startupRecovery: false,
     };
     this.#starting.delete(message.id);
     this.#active.set(message.id, work);
@@ -411,13 +435,16 @@ class ConnectorRuntime implements ConnectorHandle {
   async #dispatch(work: Work): Promise<void> {
     const continuation = work.conversation.lifecycle === "active";
     const now = this.#clock.nowMs();
-    this.#state.dispatch(work.message.id, continuation, now);
-    work.stored = this.#state.readMessage(work.message.id) as StoredMessage;
+    work.stored = this.#state.dispatch(work.message.id, continuation, now);
     if (
       this.options.crashAfter === "binding_published" ||
       (continuation && this.options.crashAfterTurnStarting)
     )
       throw new Error("connector_test_crash");
+    if (this.options.providerDispatchDelayMsForTest !== undefined)
+      await sleep(this.#clock, this.options.providerDispatchDelayMsForTest);
+    const deadline = work.stored.turnDeadlineMs;
+    if (deadline === null) throw new ConnectorError("connector_state_unavailable");
     const request = continuation
       ? {
           kind: "resume",
@@ -426,7 +453,7 @@ class ConnectorRuntime implements ConnectorHandle {
           message_id: work.message.id,
           provider_session_id: work.sessionId,
           input_text: work.message.payload.text,
-          deadline_unix_ms: now + CONNECTOR_LIMITS.providerDeadlineMs,
+          deadline_unix_ms: deadline,
         }
       : {
           kind: "start",
@@ -434,16 +461,20 @@ class ConnectorRuntime implements ConnectorHandle {
           conversation_id: work.message.conversation_id,
           message_id: work.message.id,
           input_text: work.message.payload.text,
-          deadline_unix_ms: now + CONNECTOR_LIMITS.providerDeadlineMs,
+          deadline_unix_ms: deadline,
         };
+    this.#state.beforeExternalEffect();
     this.#observeSpawn();
     const stream = continuation
       ? this.options.provider.resume(request)
       : this.options.provider.start(request);
     work.iterator = stream[Symbol.asyncIterator]();
-    work.deadlineTimer = this.#clock.setTimer(() => {
-      void this.#deadline(work);
-    }, CONNECTOR_LIMITS.providerDeadlineMs);
+    work.deadlineTimer = this.#clock.setTimer(
+      () => {
+        void this.#deadline(work);
+      },
+      Math.max(0, deadline - this.#clock.nowMs()),
+    );
     await this.#consume(work, continuation ? "turn_unbound" : "start_unbound", false);
   }
 
@@ -756,18 +787,21 @@ class ConnectorRuntime implements ConnectorHandle {
       if (
         ["binding", "turn_starting", "turn_running", "waiting_for_approval"].includes(row.lifecycle)
       ) {
-        this.#state.transitionMessage(
-          work.message.id,
-          row.lifecycle,
-          "uncertain",
-          this.#clock.nowMs(),
-        );
-        this.#state.transitionConversation(
+        this.#state.transitionPair({
+          conversationId: work.message.conversation_id,
+          messageId: work.message.id,
+          fromConversation: ["binding", "active"],
+          fromMessage: row.lifecycle,
+          toConversation: "uncertain",
+          toMessage: "uncertain",
+          nowMs: this.#clock.nowMs(),
+          ...(this.options.failPairedStateWriteAfter === "uncertain_after_message_update"
+            ? { failAfter: "uncertain_after_message_update" as const }
+            : {}),
+        });
+        work.conversation = this.#state.readConversation(
           work.message.conversation_id,
-          ["binding", "active"],
-          "uncertain",
-          this.#clock.nowMs(),
-        );
+        ) as StoredConversation;
       }
       if (this.options.crashForRecoveryState === "uncertain")
         throw new Error("connector_test_crash");
@@ -787,13 +821,18 @@ class ConnectorRuntime implements ConnectorHandle {
             retry_kind: null,
             retry_not_before_ms: null,
           };
-    this.#state.transitionMessage(
-      work.message.id,
-      current.lifecycle,
-      "central_pending",
-      this.#clock.nowMs(),
-      values,
-    );
+    const conversation = this.#state.readConversation(work.message.conversation_id);
+    if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
+    this.#state.transitionPair({
+      conversationId: work.message.conversation_id,
+      messageId: work.message.id,
+      fromConversation: conversation.lifecycle,
+      fromMessage: current.lifecycle,
+      toConversation: conversation.lifecycle,
+      toMessage: "central_pending",
+      nowMs: this.#clock.nowMs(),
+      messageValues: values,
+    });
     await this.#centralLoop(work);
   }
 
@@ -820,6 +859,7 @@ class ConnectorRuntime implements ConnectorHandle {
             await this.#moveLostReplyToUncertain(work);
             continue;
           }
+          this.#state.beforeExternalEffect();
           const result = await this.#gateway.call("reply_message", {
             message_id: work.message.id,
             payload: { text: work.replyText },
@@ -844,19 +884,25 @@ class ConnectorRuntime implements ConnectorHandle {
             );
             throw new Error("connector_test_crash");
           }
-          this.#state.transitionMessage(
-            work.message.id,
-            "central_pending",
-            "ack_pending",
-            this.#clock.nowMs(),
-            { retry_kind: null, retry_not_before_ms: null },
-          );
+          const conversation = this.#state.readConversation(work.message.conversation_id);
+          if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
+          this.#state.transitionPair({
+            conversationId: work.message.conversation_id,
+            messageId: work.message.id,
+            fromConversation: conversation.lifecycle,
+            fromMessage: "central_pending",
+            toConversation: conversation.lifecycle,
+            toMessage: "ack_pending",
+            nowMs: this.#clock.nowMs(),
+            messageValues: { retry_kind: null, retry_not_before_ms: null },
+          });
           continue;
         }
         if (kind === "complete") {
           const terminal = work.terminal;
           if (terminal?.operation !== "complete")
             throw new ConnectorError("connector_state_unavailable");
+          this.#state.beforeExternalEffect();
           const result = await this.#gateway.call("complete_message", {
             message_id: work.message.id,
             outcome: terminal.outcome,
@@ -882,22 +928,23 @@ class ConnectorRuntime implements ConnectorHandle {
             );
             throw new Error("connector_test_crash");
           }
-          this.#state.transitionConversation(
-            work.message.conversation_id,
-            ["binding", "active", "uncertain"],
-            "closed",
-            this.#clock.nowMs(),
-          );
-          this.#state.transitionMessage(
-            work.message.id,
-            "central_pending",
-            "ack_pending",
-            this.#clock.nowMs(),
-            { retry_kind: null, retry_not_before_ms: null },
-          );
+          this.#state.transitionPair({
+            conversationId: work.message.conversation_id,
+            messageId: work.message.id,
+            fromConversation: ["binding", "active", "uncertain"],
+            fromMessage: "central_pending",
+            toConversation: "closed",
+            toMessage: "ack_pending",
+            nowMs: this.#clock.nowMs(),
+            messageValues: { retry_kind: null, retry_not_before_ms: null },
+            ...(this.options.failPairedStateWriteAfter === "completion_after_conversation_update"
+              ? { failAfter: "completion_after_conversation_update" as const }
+              : {}),
+          });
           continue;
         }
         if (kind === "outcome_lookup") {
+          this.#state.beforeExternalEffect();
           const result = await this.#gateway.call("get_message_outcome", {
             message_id: work.message.id,
           });
@@ -917,20 +964,18 @@ class ConnectorRuntime implements ConnectorHandle {
                 : result.outcome !== row.completionOutcome || result.reply_message_id !== null
             )
               throw new GatewayObservation("contract");
-            if (!replyPlan)
-              this.#state.transitionConversation(
-                work.message.conversation_id,
-                ["binding", "active", "uncertain"],
-                "closed",
-                this.#clock.nowMs(),
-              );
-            this.#state.transitionMessage(
-              work.message.id,
-              "central_pending",
-              "ack_pending",
-              this.#clock.nowMs(),
-              { retry_kind: null, retry_not_before_ms: null },
-            );
+            const conversation = this.#state.readConversation(work.message.conversation_id);
+            if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
+            this.#state.transitionPair({
+              conversationId: work.message.conversation_id,
+              messageId: work.message.id,
+              fromConversation: conversation.lifecycle,
+              fromMessage: "central_pending",
+              toConversation: replyPlan ? conversation.lifecycle : "closed",
+              toMessage: "ack_pending",
+              nowMs: this.#clock.nowMs(),
+              messageValues: { retry_kind: null, retry_not_before_ms: null },
+            });
             continue;
           }
           if (
@@ -958,17 +1003,30 @@ class ConnectorRuntime implements ConnectorHandle {
           );
           continue;
         }
+        this.#state.beforeExternalEffect();
         const result = await this.#gateway.call("ack_message", { message_id: work.message.id });
         if (result.message_id !== work.message.id || result.status !== "acked")
           throw new GatewayObservation("contract");
         if (this.options.crashAfter === "ack_accepted") throw new Error("connector_test_crash");
-        this.#state.transitionMessage(
-          work.message.id,
-          "ack_pending",
-          "closed",
-          this.#clock.nowMs(),
-          { retry_kind: null, retry_not_before_ms: null },
-        );
+        const conversation = this.#state.readConversation(work.message.conversation_id);
+        if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
+        const reply = row.terminalOperation === "reply";
+        this.#state.transitionPair({
+          conversationId: work.message.conversation_id,
+          messageId: work.message.id,
+          fromConversation: conversation.lifecycle,
+          fromMessage: "ack_pending",
+          toConversation: reply ? "active" : "closed",
+          toMessage: "closed",
+          nowMs: this.#clock.nowMs(),
+          messageValues: { retry_kind: null, retry_not_before_ms: null },
+          ...(this.options.failPairedStateWriteAfter ===
+          (reply
+            ? "reply_ack_after_conversation_update"
+            : "completion_ack_after_conversation_update")
+            ? { failAfter: this.options.failPairedStateWriteAfter }
+            : {}),
+        });
         this.#state.deleteClosedMessage(work.message.id);
         this.#finish(work);
         return;
@@ -1093,27 +1151,27 @@ class ConnectorRuntime implements ConnectorHandle {
 
   async #moveLostReplyToUncertain(work: Work): Promise<void> {
     const row = this.#state.readMessage(work.message.id) as StoredMessage;
-    this.#state.transitionMessage(
-      work.message.id,
-      row.lifecycle,
-      "uncertain",
-      this.#clock.nowMs(),
-      {
+    const conversation = this.#state.readConversation(work.message.conversation_id);
+    if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
+    this.#state.transitionPair({
+      conversationId: work.message.conversation_id,
+      messageId: work.message.id,
+      fromConversation: ["active", "uncertain"],
+      fromMessage: row.lifecycle,
+      toConversation: "uncertain",
+      toMessage: "uncertain",
+      nowMs: this.#clock.nowMs(),
+      messageValues: {
         terminal_operation: null,
         completion_outcome: null,
         completion_reason: null,
         retry_kind: null,
         retry_not_before_ms: null,
       },
-    );
-    const conversation = this.#state.readConversation(work.message.conversation_id);
-    if (conversation?.lifecycle === "active")
-      this.#state.transitionConversation(
-        work.message.conversation_id,
-        "active",
-        "uncertain",
-        this.#clock.nowMs(),
-      );
+      ...(this.options.failPairedStateWriteAfter === "lost_reply_after_message_update"
+        ? { failAfter: "lost_reply_after_message_update" as const }
+        : {}),
+    });
     if (this.options.crashAfterLostReplyUncertain) throw new Error("connector_test_crash");
     work.replyText = null;
     work.terminal = {
@@ -1121,19 +1179,22 @@ class ConnectorRuntime implements ConnectorHandle {
       outcome: "uncertain",
       reason: "provider_outcome_unknown",
     };
-    this.#state.transitionMessage(
-      work.message.id,
-      "uncertain",
-      "central_pending",
-      this.#clock.nowMs(),
-      {
+    this.#state.transitionPair({
+      conversationId: work.message.conversation_id,
+      messageId: work.message.id,
+      fromConversation: "uncertain",
+      fromMessage: "uncertain",
+      toConversation: "uncertain",
+      toMessage: "central_pending",
+      nowMs: this.#clock.nowMs(),
+      messageValues: {
         terminal_operation: "complete",
         completion_outcome: "uncertain",
         completion_reason: "provider_outcome_unknown",
         retry_kind: null,
         retry_not_before_ms: null,
       },
-    );
+    });
   }
 
   async #contractFailure(work: Work): Promise<void> {
@@ -1141,6 +1202,7 @@ class ConnectorRuntime implements ConnectorHandle {
   }
   async #stateFailure(work: Work): Promise<void> {
     try {
+      this.#state.beforeExternalEffect();
       await this.options.provider.cancel({
         kind: "cancel",
         execution_id: work.executionId,
@@ -1149,7 +1211,10 @@ class ConnectorRuntime implements ConnectorHandle {
         reason: "state_failure",
       });
     } catch {}
-    await this.options.provider.contain(work.executionId).catch(() => false);
+    try {
+      this.#state.beforeExternalEffect();
+      await this.options.provider.contain(work.executionId).catch(() => false);
+    } catch {}
     this.#fail(new ConnectorError("connector_state_unavailable"));
   }
 
@@ -1161,6 +1226,7 @@ class ConnectorRuntime implements ConnectorHandle {
   ): Promise<void> {
     if (issueCancel) {
       try {
+        this.#state.beforeExternalEffect();
         await this.options.provider.cancel({
           kind: "cancel",
           execution_id: work.executionId,
@@ -1213,6 +1279,7 @@ class ConnectorRuntime implements ConnectorHandle {
       timedOut = true;
       return false;
     });
+    this.#state.beforeExternalEffect();
     const result = await Promise.race([
       this.options.provider.contain(work.executionId).catch(() => false),
       timeout,
@@ -1225,36 +1292,51 @@ class ConnectorRuntime implements ConnectorHandle {
     const storedDeadline = this.#state.readMessage(work.message.id)?.turnDeadlineMs;
     const cleanupAt =
       (storedDeadline ?? this.#clock.nowMs()) + CONNECTOR_LIMITS.cancellationGraceMs;
+    const grace =
+      this.#clock.nowMs() < cleanupAt
+        ? new Promise<void>((resolve) => {
+            work.deadlineTimer = this.#clock.setTimer(resolve, cleanupAt - this.#clock.nowMs());
+          })
+        : Promise.resolve();
+    work.cancellationRequested = true;
     try {
-      const result = await this.options.provider.cancel({
-        kind: "cancel",
-        execution_id: work.executionId,
-        provider_session_id: work.sessionId,
-        provider_turn_id: work.turnId,
-        reason: "deadline",
-      });
-      if (
-        !exactObject(result, ["status"]) ||
-        !["cancel_requested", "already_terminal", "not_found"].includes(String(result.status))
-      )
-        throw new Error("invalid cancel");
-      work.cancellationRequested = true;
+      this.#state.beforeExternalEffect();
+      void this.options.provider
+        .cancel({
+          kind: "cancel",
+          execution_id: work.executionId,
+          provider_session_id: work.sessionId,
+          provider_turn_id: work.turnId,
+          reason: "deadline",
+        })
+        .then((result) => {
+          if (
+            !exactObject(result, ["status"]) ||
+            !["cancel_requested", "already_terminal", "not_found"].includes(String(result.status))
+          )
+            return;
+          if (this.options.crashAfterCancellation) this.#fail(new Error("connector_test_crash"));
+        })
+        .catch(() => {});
     } catch {}
-    if (work.approvalId !== null && !work.sawStatefulProgress) return;
-    if (this.options.crashAfterCancellation) {
-      this.#fail(new Error("connector_test_crash"));
-      return;
-    }
-    if (this.#clock.nowMs() < cleanupAt) await sleep(this.#clock, cleanupAt - this.#clock.nowMs());
+    await grace;
+    if (!this.#active.has(work.message.id) || this.#fatal !== undefined) return;
     await this.#cancelUncertain(work, "deadline", false, false);
   }
 
-  async #recoverStartup(): Promise<void> {
-    try {
-      for (const stored of this.#state.allOpenMessages()) {
-        const conversation = this.#state.readConversationByHmac(stored.conversationHmac);
-        if (conversation === undefined) throw new ConnectorError("connector_state_unavailable");
-        const placeholder: GatewayMessage = {
+  #prepareStartupRecovery(): Work[] {
+    const prepared: Work[] = [];
+    for (const stored of this.#state.allOpenMessages()) {
+      const conversation = this.#state.readConversationByHmac(stored.conversationHmac);
+      if (conversation === undefined) connectorError("connector_state_unavailable");
+      if (stored.lifecycle === "blocked") connectorError("connector_message_blocked");
+      if (stored.lifecycle === "received") {
+        this.#queue.push(stored.messageId);
+        this.#queued.add(stored.messageId);
+        continue;
+      }
+      const work: Work = {
+        message: {
           id: stored.messageId,
           conversation_id: conversation.conversationId,
           sender_agent_id: "recovery",
@@ -1262,128 +1344,153 @@ class ConnectorRuntime implements ConnectorHandle {
           in_reply_to_message_id: null,
           payload: { text: "recovery" },
           created_at: "1970-01-01T00:00:00.000Z",
-        };
-        const work: Work = {
-          message: placeholder,
-          conversation,
-          stored,
-          executionId: randomUUID(),
-          sessionId: conversation.sessionId,
-          turnId: stored.turnId,
-          replyText: null,
-          terminal:
-            stored.terminalOperation === "complete"
-              ? {
-                  operation: "complete",
-                  outcome: stored.completionOutcome as string,
-                  reason: stored.completionReason as string,
-                }
-              : null,
-          deadlineTimer: undefined,
-          iterator: null,
-          pullPending: false,
-          sawStatefulProgress: false,
-          approvalId: null,
-          cancellationRequested: false,
-        };
-        this.#active.set(stored.messageId, work);
-        if (stored.lifecycle === "blocked") throw new ConnectorError("connector_message_blocked");
-        if (stored.lifecycle === "received") {
-          this.#active.delete(stored.messageId);
-          if (!this.#queued.has(stored.messageId)) {
-            this.#queue.push(stored.messageId);
-            this.#queued.add(stored.messageId);
-          }
-          continue;
-        }
-        if (stored.lifecycle === "binding") {
-          if (this.options.proveNoProviderDispatch)
-            await this.#publishAndDeliver(work, {
-              operation: "complete",
-              outcome: "failed",
-              reason: "provider_start_failed",
-            });
-          else
-            await this.#publishAndDeliver(work, {
-              operation: "complete",
-              outcome: "uncertain",
-              reason: "provider_outcome_unknown",
-            });
-          continue;
-        }
-        if (stored.lifecycle === "turn_starting" && this.options.proveNoProviderDispatch) {
-          await this.#publishAndDeliver(work, {
-            operation: "complete",
-            outcome: "failed",
-            reason: "provider_start_failed",
-          });
-          continue;
-        }
-        if (stored.lifecycle === "central_pending" || stored.lifecycle === "ack_pending") {
-          await this.#centralLoop(work);
-          continue;
-        }
-        if (
-          stored.lifecycle === "uncertain" &&
-          stored.terminalOperation === null &&
-          stored.retryAttemptCount > 0
-        ) {
-          await this.#publishAndDeliver(work, {
-            operation: "complete",
-            outcome: "uncertain",
-            reason: "provider_outcome_unknown",
-          });
-          continue;
-        }
-        if (
-          stored.turnDeadlineMs !== null &&
-          this.#clock.nowMs() >= stored.turnDeadlineMs &&
-          ["turn_starting", "turn_running", "waiting_for_approval"].includes(stored.lifecycle)
-        ) {
-          const cleanupAt = stored.turnDeadlineMs + CONNECTOR_LIMITS.cancellationGraceMs;
-          if (this.#clock.nowMs() < cleanupAt) {
-            await sleep(this.#clock, cleanupAt - this.#clock.nowMs());
-          }
-          await this.#cancelUncertain(work, "deadline", false, false);
-          continue;
-        }
-        if (
-          (stored.lifecycle === "turn_running" || stored.lifecycle === "waiting_for_approval") &&
-          stored.turnId === null
-        ) {
-          await this.#publishAndDeliver(work, {
-            operation: "complete",
-            outcome: "uncertain",
-            reason: "provider_outcome_unknown",
-          });
-          continue;
-        }
-        if (
-          conversation.sessionId !== null &&
-          (stored.lifecycle === "turn_starting" || stored.turnId !== null)
-        ) {
-          await this.#recover(
-            work,
-            stored.lifecycle === "turn_starting"
-              ? "recover_unbound"
-              : stored.lifecycle === "waiting_for_approval"
-                ? "recover_waiting_bound"
-                : stored.lifecycle === "uncertain"
-                  ? "recover_terminal_only"
-                  : "running_bound",
-          );
-          continue;
-        }
+        },
+        conversation,
+        stored,
+        executionId: randomUUID(),
+        sessionId: conversation.sessionId,
+        turnId: stored.turnId,
+        replyText: null,
+        terminal:
+          stored.terminalOperation === "complete"
+            ? {
+                operation: "complete",
+                outcome: stored.completionOutcome as string,
+                reason: stored.completionReason as string,
+              }
+            : null,
+        deadlineTimer: undefined,
+        iterator: null,
+        pullPending: false,
+        sawStatefulProgress: false,
+        approvalId: null,
+        cancellationRequested: false,
+        startupRecovery: true,
+      };
+      this.#active.set(stored.messageId, work);
+      this.#startupRecoveryIds.add(stored.messageId);
+      prepared.push(work);
+    }
+    return prepared;
+  }
+
+  async #waitForStartupRecovery(): Promise<void> {
+    if (this.#startupRecoveryIds.size === 0) return;
+    await new Promise<void>((resolve) => this.#startupRecoveryWaiters.add(resolve));
+  }
+
+  #releaseStartupRecovery(work: Work): void {
+    if (!work.startupRecovery || !this.#startupRecoveryIds.delete(work.message.id)) return;
+    work.startupRecovery = false;
+    if (this.#startupRecoveryIds.size !== 0) return;
+    for (const resolve of this.#startupRecoveryWaiters) resolve();
+    this.#startupRecoveryWaiters.clear();
+  }
+
+  async #recoverPrepared(work: Work): Promise<void> {
+    try {
+      const { stored } = work;
+      if (stored.lifecycle === "binding") {
+        await this.#publishAndDeliver(
+          work,
+          this.options.proveNoProviderDispatch
+            ? { operation: "complete", outcome: "failed", reason: "provider_start_failed" }
+            : {
+                operation: "complete",
+                outcome: "uncertain",
+                reason: "provider_outcome_unknown",
+              },
+        );
+        return;
+      }
+      if (stored.lifecycle === "turn_starting" && this.options.proveNoProviderDispatch) {
+        await this.#publishAndDeliver(work, {
+          operation: "complete",
+          outcome: "failed",
+          reason: "provider_start_failed",
+        });
+        return;
+      }
+      if (stored.lifecycle === "central_pending") {
+        this.#state.transitionPair({
+          conversationId: work.message.conversation_id,
+          messageId: work.message.id,
+          fromConversation: work.conversation.lifecycle,
+          fromMessage: "central_pending",
+          toConversation: work.conversation.lifecycle,
+          toMessage: "central_pending",
+          nowMs: this.#clock.nowMs(),
+          messageValues: {
+            retry_kind: "outcome_lookup",
+            retry_not_before_ms: stored.retryNotBeforeMs,
+          },
+        });
+        work.stored = this.#state.readMessage(work.message.id) as StoredMessage;
+        await this.#centralLoop(work);
+        return;
+      }
+      if (stored.lifecycle === "ack_pending") {
+        await this.#centralLoop(work);
+        return;
+      }
+      if (
+        stored.lifecycle === "uncertain" &&
+        stored.terminalOperation === null &&
+        stored.retryAttemptCount > 0
+      ) {
         await this.#publishAndDeliver(work, {
           operation: "complete",
           outcome: "uncertain",
           reason: "provider_outcome_unknown",
         });
+        return;
       }
+      if (
+        stored.turnDeadlineMs !== null &&
+        this.#clock.nowMs() >= stored.turnDeadlineMs &&
+        ["turn_starting", "turn_running", "waiting_for_approval"].includes(stored.lifecycle)
+      ) {
+        const cleanupAt = stored.turnDeadlineMs + CONNECTOR_LIMITS.cancellationGraceMs;
+        if (this.#clock.nowMs() < cleanupAt)
+          await sleep(this.#clock, cleanupAt - this.#clock.nowMs());
+        await this.#cancelUncertain(work, "deadline", false, false);
+        return;
+      }
+      if (
+        (stored.lifecycle === "turn_running" || stored.lifecycle === "waiting_for_approval") &&
+        stored.turnId === null
+      ) {
+        await this.#publishAndDeliver(work, {
+          operation: "complete",
+          outcome: "uncertain",
+          reason: "provider_outcome_unknown",
+        });
+        return;
+      }
+      if (
+        work.conversation.sessionId !== null &&
+        (stored.lifecycle === "turn_starting" || stored.turnId !== null)
+      ) {
+        await this.#recover(
+          work,
+          stored.lifecycle === "turn_starting"
+            ? "recover_unbound"
+            : stored.lifecycle === "waiting_for_approval"
+              ? "recover_waiting_bound"
+              : stored.lifecycle === "uncertain"
+                ? "recover_terminal_only"
+                : "running_bound",
+        );
+        return;
+      }
+      await this.#publishAndDeliver(work, {
+        operation: "complete",
+        outcome: "uncertain",
+        reason: "provider_outcome_unknown",
+      });
     } catch (error) {
       this.#fail(error);
     }
-    this.#pump();
   }
 
   async #recover(work: Work, phase: string): Promise<void> {
@@ -1404,6 +1511,15 @@ class ConnectorRuntime implements ConnectorHandle {
       provider_turn_id: work.turnId,
       deadline_unix_ms: work.stored.turnDeadlineMs ?? this.#clock.nowMs(),
     };
+    const deadline = work.stored.turnDeadlineMs;
+    if (deadline === null) throw new ConnectorError("connector_state_unavailable");
+    work.deadlineTimer = this.#clock.setTimer(
+      () => {
+        void this.#deadline(work);
+      },
+      Math.max(0, deadline - this.#clock.nowMs()),
+    );
+    this.#state.beforeExternalEffect();
     this.#observeSpawn();
     work.iterator = this.options.provider.recover(request)[Symbol.asyncIterator]();
     await this.#consume(work, phase, true);
@@ -1412,6 +1528,7 @@ class ConnectorRuntime implements ConnectorHandle {
   #finish(work: Work): void {
     this.#clock.clearTimer(work.deadlineTimer);
     this.#active.delete(work.message.id);
+    this.#releaseStartupRecovery(work);
     this.#pump();
   }
   #fail(error: unknown): void {
@@ -1420,6 +1537,8 @@ class ConnectorRuntime implements ConnectorHandle {
         ? error
         : new ConnectorError("connector_internal_error");
     this.#fatal = normalized;
+    for (const resolve of this.#startupRecoveryWaiters) resolve();
+    this.#startupRecoveryWaiters.clear();
     for (const waiter of this.#idleWaiters) waiter.reject(normalized);
     this.#idleWaiters.clear();
   }
