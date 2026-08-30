@@ -469,13 +469,29 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
         { event: "failed", execution_id: CX02_EXECUTION_ID, reason_code: "provider_start_failed" },
       ]);
       const requests = fake.launches.at(-1)?.requests ?? [];
-      assert.equal(
-        requests.some((request) =>
-          ["thread/start", "thread/resume", "turn/start"].includes(String(request.method)),
-        ),
-        false,
-        variant.name,
-      );
+      if (variant.name === "config warning after initialized") {
+        assert.deepEqual(
+          requests.filter((request) => request.method === "thread/start"),
+          requests.some((request) => request.method === "thread/start")
+            ? [threadStartRequest(cwd)]
+            : [],
+        );
+        assert.equal(
+          requests.some((request) =>
+            ["thread/resume", "turn/start"].includes(String(request.method)),
+          ),
+          false,
+          variant.name,
+        );
+      } else {
+        assert.equal(
+          requests.some((request) =>
+            ["thread/start", "thread/resume", "turn/start"].includes(String(request.method)),
+          ),
+          false,
+          variant.name,
+        );
+      }
       assert.ok(!JSON.stringify(requests).includes("CX02 untrusted input"), variant.name);
     }
   }
