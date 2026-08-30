@@ -6,11 +6,36 @@ import Database from "better-sqlite3";
 
 import {
   type K02CrashBarrier,
+  type K02Scenario,
   k02Message,
   ManualK02Clock,
   startK02Scenario,
   waitFor,
 } from "./support/connector/k02-production.js";
+
+async function waitForOutcomeRetry(
+  scenario: K02Scenario,
+  retryNotBeforeMs: number,
+  label: string,
+): Promise<void> {
+  await waitFor(() => {
+    const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
+      readonly: true,
+    });
+    try {
+      const row = database
+        .prepare<[], { retry_kind: string | null; retry_not_before_ms: number | null }>(
+          "SELECT retry_kind, retry_not_before_ms FROM messages",
+        )
+        .get();
+      return row?.retry_kind === "outcome_lookup" && row.retry_not_before_ms === retryNotBeforeMs;
+    } catch {
+      return false;
+    } finally {
+      database.close();
+    }
+  }, label);
+}
 
 test("K02-C01 recovers all eight content-free crash barriers without duplicate work", async (t) => {
   const barriers: K02CrashBarrier[] = [
@@ -117,7 +142,7 @@ test("K02-C01 recovers all eight content-free crash barriers without duplicate w
     await restarted.connector.waitForIdle();
     assert.equal(
       scenario.provider.requests.filter((request) => request.kind === "start").length,
-      1,
+      crashAfter === "binding_published" ? 0 : 1,
     );
     if (crashAfter === "binding_published") {
       assert.equal(restarted.provider.requests.length, 0);
@@ -276,6 +301,7 @@ test("K02-C04 never restores a reply plan after the durable lost-open uncertain 
     () => scenario.gatewayProxy?.calls.some((call) => call.tool === "reply_message") ?? false,
     "lost open reply dispatch",
   );
+  await waitForOutcomeRetry(scenario, clock.nowMs() + 30_000, "lost open reply schedule");
   clock.advance(30_000);
   await assert.rejects(scenario.connector.waitForIdle(), /connector_test_crash/u);
   await scenario.connector.crash();
