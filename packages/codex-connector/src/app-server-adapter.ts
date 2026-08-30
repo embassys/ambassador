@@ -711,6 +711,7 @@ interface ActiveInvocation {
   teardownPromise: Promise<void> | null;
   readonly deltas: Map<string, string>;
   readonly completedItems: Map<string, Record<string, unknown>>;
+  approvalPending: boolean;
 }
 
 class CodexAppServerAdapter implements ProviderPort {
@@ -785,8 +786,25 @@ class CodexAppServerAdapter implements ProviderPort {
       } catch {
         // The stream translates this dispatch-sensitive loss to uncertainty.
       }
+      invocation.cancellationTimer = this.#clock.setTimer(
+        () => {
+          void this.#expireCancellation(invocation);
+        },
+        Math.max(
+          0,
+          invocation.request.deadline_unix_ms +
+            CONNECTOR_LIMITS.cancellationGraceMs -
+            this.#clock.nowMs(),
+        ),
+      );
     }
     return { status: "cancel_requested" };
+  }
+
+  async #expireCancellation(invocation: ActiveInvocation): Promise<void> {
+    if (invocation.terminal) return;
+    const contained = await this.#contain(invocation);
+    invocation.transport.abort(contained ? new ProcessEnded() : new ContainmentFailure());
   }
 
   async contain(executionId: string): Promise<boolean> {
@@ -905,18 +923,23 @@ class CodexAppServerAdapter implements ProviderPort {
       teardownPromise: null,
       deltas: new Map(),
       completedItems: new Map(),
+      approvalPending: false,
     };
     this.#active.set(request.execution_id, invocation);
     return invocation;
   }
 
   async #next(invocation: ActiveInvocation): Promise<IteratorResult<Record<string, unknown>>> {
+    const pending = invocation.transport.next();
     const bounded = await waitBounded(
       this.#clock,
-      invocation.transport.next(),
+      pending,
       Math.max(0, invocation.request.deadline_unix_ms - this.#clock.nowMs()),
     );
-    if (bounded.timedOut) throw new ProcessEnded();
+    if (bounded.timedOut) {
+      if (!invocation.cancellationRequested) throw new ProcessEnded();
+      return await pending;
+    }
     return bounded.value;
   }
 
@@ -1038,7 +1061,14 @@ class CodexAppServerAdapter implements ProviderPort {
       const next = await this.#next(invocation);
       if (next.done) throw new ProcessEnded();
       const record = next.value;
-      if (Object.hasOwn(record, "id")) {
+      const method = eventMethod(record);
+      if (Object.hasOwn(record, "id") && method !== undefined) {
+        if (invocation.turnId === null) pendingRecords.push(record);
+        else {
+          const normalized = this.#handleTurnNotification(invocation, record);
+          if (normalized !== undefined) buffered.push(normalized);
+        }
+      } else if (Object.hasOwn(record, "id")) {
         if (record.id === 3) {
           const result = responseResult(record, 3);
           if (!isRecord(result) || !hasExactKeys(result, ["turn"])) throw new ProtocolFailure();
@@ -1049,7 +1079,6 @@ class CodexAppServerAdapter implements ProviderPort {
           this.#handleInterruptResponse(invocation, record);
         }
       } else {
-        const method = eventMethod(record);
         if (
           invocation.turnId === null &&
           [
@@ -1114,6 +1143,9 @@ class CodexAppServerAdapter implements ProviderPort {
       return undefined;
     }
     if (method === "turn/completed") {
+      if (invocation.approvalPending && !invocation.cancellationRequested) {
+        throw new ProtocolFailure();
+      }
       return this.#terminalFromTurn(invocation, record);
     }
     if (method === "item/agentMessage/delta") {
@@ -1123,8 +1155,48 @@ class CodexAppServerAdapter implements ProviderPort {
       this.#completedItem(invocation, record);
       return undefined;
     }
+    if (
+      [
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+      ].includes(method ?? "")
+    ) {
+      return this.#approvalRequest(invocation, record);
+    }
+    if (method === "serverRequest/resolved") throw new ProtocolFailure();
     if (this.#ignoredNotification(invocation, record)) return undefined;
     throw new ProtocolFailure();
+  }
+
+  #approvalRequest(invocation: ActiveInvocation, record: Record<string, unknown>): unknown {
+    if (
+      invocation.approvalPending ||
+      !hasExactKeys(record, ["id", "method", "params"]) ||
+      !isRecord(record.params) ||
+      record.params.threadId !== invocation.sessionId ||
+      record.params.turnId !== invocation.turnId ||
+      !validateId(record.params.itemId)
+    ) {
+      throw new ProtocolFailure();
+    }
+    let approvalRequestId: string;
+    if (typeof record.id === "number" && Number.isSafeInteger(record.id)) {
+      approvalRequestId = `n:${record.id}`;
+    } else if (isUnicodeScalarString(record.id)) {
+      approvalRequestId = `s:${record.id}`;
+    } else {
+      throw new ProtocolFailure();
+    }
+    if (!validBoundedString(approvalRequestId, CONNECTOR_LIMITS.providerIdBytes)) {
+      throw new ProtocolFailure();
+    }
+    invocation.approvalPending = true;
+    return {
+      event: "approval_required",
+      execution_id: invocation.executionId,
+      approval_request_id: approvalRequestId,
+    };
   }
 
   #agentDelta(invocation: ActiveInvocation, record: Record<string, unknown>): unknown {
