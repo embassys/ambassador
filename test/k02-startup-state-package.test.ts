@@ -1499,6 +1499,8 @@ test("K02-S12 opens no state until the injected filesystem qualification proves 
       "directory",
       "file",
       "directory",
+      "file",
+      "directory",
     ]);
   });
 
