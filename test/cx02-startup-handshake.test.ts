@@ -459,7 +459,14 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
               ],
             },
           ]
-        : variant.exchanges,
+        : ["config warning after initialized", "duplicate response"].includes(variant.name)
+          ? [
+              ...variant.exchanges,
+              {
+                expectMethod: "thread/start",
+              },
+            ]
+          : variant.exchanges,
     };
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X04", { appPlan: plan });
     const events = await collectEvents(adapter.start(startRequest()));
@@ -469,7 +476,7 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
         { event: "failed", execution_id: CX02_EXECUTION_ID, reason_code: "provider_start_failed" },
       ]);
       const requests = fake.launches.at(-1)?.requests ?? [];
-      if (variant.name === "config warning after initialized") {
+      if (["config warning after initialized", "duplicate response"].includes(variant.name)) {
         assert.deepEqual(
           requests.filter((request) => request.method === "thread/start"),
           requests.some((request) => request.method === "thread/start")
