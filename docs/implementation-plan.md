@@ -2,7 +2,7 @@
 
 Status: active for the accepted version 2 architecture
 
-Updated: 2026-08-29
+Updated: 2026-08-30
 
 ## Rules
 
@@ -83,8 +83,10 @@ G04 contract + D05
 
 ## Phase 1: fixtures, test support, and red specifications
 
-Green support work may merge before production behavior. The red behavior
-suites remain unmerged until their review gates pass.
+Green support work may merge before production behavior. Gateway red
+specifications may merge after the user accepts their exact inventory. The
+central red specification may merge after the central owner accepts its exact
+inventory. Neither repository review closes Gate A by itself.
 
 | ID | Repository | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
@@ -95,6 +97,12 @@ suites remain unmerged until their review gates pass.
 | C01 | Gateway | Run unit and Node integration tests on Linux, macOS, and Windows; run packaged Docker E2E on Ubuntu | T01-T04 | CI publishes a classified red failure inventory |
 | S01 | Central, external | Add red issuer, DPoP middleware, proxy, replay, enrollment, message, reply, recovery, quota, and two-replica transaction tests | Accepted contracts | Central owner publishes a classified failure inventory in the central repository |
 | GATE-A | User and central owner | Review T03, T04, and S01 failure inventories | C01, S01 | Written approval that failures represent the accepted contracts |
+
+The gateway half of this gate is complete. PR `#28` merged T03, T04, and C01
+after the user accepted their classified failure inventory on 2026-08-30.
+Gate A remains open until the central owner publishes and accepts S01 in the
+central repository. The merge records the reviewed gateway specification; it
+does not authorize G01 through G04 or stand in for central DPoP enforcement.
 
 D06 is complete. T01 may use the approved `cryptography==50.0.0` wheel for
 independent fixture key and signature operations. The fixture must not share
@@ -190,6 +198,8 @@ artifact tests.
 
 ## Current blockers and pending decisions
 
+- The user accepted the T03 and T04 gateway inventory. Gate A still lacks the
+  external S01 inventory and central-owner review.
 - The central implementation repository and owners must complete S01 through
   S07. This gateway workspace does not contain that production service.
 - Production issuer, API resource, MCP resource, API base, and MCP endpoint

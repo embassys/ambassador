@@ -1,7 +1,7 @@
 # C01 cross-platform failure inventory
 
-Status: runnable CI specification, intentionally red only inside the
-classified future-v2 jobs
+Status: merged CI specification, intentionally red only inside the classified
+future-v2 jobs
 
 C01 keeps two contracts separate. The normal test command runs the shipped
 `0.2.6` regression suite and must be green on Linux and macOS. On Windows it
@@ -105,23 +105,26 @@ replacement, full T03 or T04 lifecycle, artifact-file scan, package install,
 or packed end-to-end flow. G01 and W01 own native credential, child-process,
 and packed qualification. E03 owns Windows artifact-file scan qualification.
 
-This boundary also preserves the dependency order. C01 can publish the
-contract failure inventory for Gate A. Gate A then unlocks G01, and W01
+This boundary also preserves the dependency order. C01 supplies the gateway
+inventory for Gate A. Gate A unlocks external S02 and S03 work. G01 starts only
+after S03 enforces DPoP in development for dedicated identities, and W01 then
 qualifies the resulting version 2 credential and packed lifecycle. Requiring
-W01 evidence in C01 would create a C01 to Gate A to G01 to W01 dependency
-cycle.
+W01 evidence in C01 would create a dependency cycle through Gate A, S03, G01,
+and W01.
 
 ## Platform evidence
 
 The normal-test CI matrix is Node `24.19.0` on `ubuntu-latest`,
 `macos-latest`, and `windows-latest`. The exact future-v2 red inventory runs on
 Linux and macOS. The packaged Docker lane is Ubuntu `linux/amd64` only. GitHub
-Actions runs `33281606636` and `33281887094` provide Node `24.19.0` evidence
-for the Ubuntu full check, the macOS full check after its fixture fix, the
-Ubuntu Docker lane, and the Ubuntu package lane. The Windows job in run
-`33281887094` identified the native qualification boundary and stopped in
-the shipped baseline before the exact red inventory. The narrowed Windows lane
-described above remains pending a CI rerun.
+Actions run `33282853898` passed the Ubuntu, macOS, and narrowed Windows checks,
+the Ubuntu Docker lane, and both package lanes. The Windows job ran the
+platform-neutral current regression and published the explicit deferral table.
+It did not classify the unrun future-v2 or native qualification work as green.
+
+The user accepted the T03 and T04 classification on 2026-08-30, and PR `#28`
+merged the complete C01 inventory. The external central S01 inventory and
+central-owner review remain required before gateway production work begins.
 
 The Linux and macOS jobs append a count-only classified-red table to their job
 summaries. The Windows job appends a count-only deferral table and does not
