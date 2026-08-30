@@ -64,6 +64,10 @@ async function writeWire(write: FakeCodexWireWrite): Promise<void> {
     process.stdout.write(write.value);
     return;
   }
+  if (write.kind === "stderr_utf8") {
+    process.stderr.write(write.value);
+    return;
+  }
   process.stdout.write(Buffer.from(write.value, "base64"));
 }
 

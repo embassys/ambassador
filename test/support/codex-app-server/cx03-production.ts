@@ -21,10 +21,22 @@ export interface CodexAdapterForTestOptions {
   readonly fixtureExecutablePath: string | null;
   readonly clock?: ConnectorClock;
   readonly afterVersionProbeForTest?: () => void | Promise<void>;
+  readonly spawnObserverForTest?: {
+    observe(record: CodexSpawnObservationForTest): void;
+  };
   readonly containmentForTest?: {
     contain(executionId: string): Promise<boolean>;
     isEmpty(executionId: string): boolean;
   };
+}
+
+export interface CodexSpawnObservationForTest {
+  readonly executable: string;
+  readonly arguments: readonly string[];
+  readonly cwd: string;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly shell: false;
+  readonly stdio: readonly ["pipe", "pipe", "pipe"];
 }
 
 export interface CodexAdapterPort
