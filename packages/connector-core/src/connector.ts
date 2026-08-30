@@ -106,6 +106,10 @@ function providerId(value: unknown): value is string {
   return scalarText(value, CONNECTOR_LIMITS.providerIdBytes);
 }
 
+function gatewayId(value: unknown): value is string {
+  return typeof value === "string" && URI_UNRESERVED_ID_PATTERN.test(value);
+}
+
 function validateMessage(value: unknown): GatewayMessage | undefined {
   const keys = [
     "id",
@@ -118,17 +122,14 @@ function validateMessage(value: unknown): GatewayMessage | undefined {
   ];
   if (!exactObject(value, keys)) return undefined;
   if (
-    !URI_UNRESERVED_ID_PATTERN.test(String(value.id)) ||
-    !URI_UNRESERVED_ID_PATTERN.test(String(value.conversation_id)) ||
-    !URI_UNRESERVED_ID_PATTERN.test(String(value.sender_agent_id))
+    !gatewayId(value.id) ||
+    !gatewayId(value.conversation_id) ||
+    !gatewayId(value.sender_agent_id)
   )
     return undefined;
   if (
     value.message_type !== "conversation_turn" ||
-    !(
-      value.in_reply_to_message_id === null ||
-      URI_UNRESERVED_ID_PATTERN.test(String(value.in_reply_to_message_id))
-    )
+    !(value.in_reply_to_message_id === null || gatewayId(value.in_reply_to_message_id))
   )
     return undefined;
   if (
@@ -866,8 +867,9 @@ class ConnectorRuntime implements ConnectorHandle {
           });
           if (
             result.status !== "accepted" ||
-            result.conversation_id !== work.message.conversation_id ||
-            !URI_UNRESERVED_ID_PATTERN.test(String(result.message_id))
+            !gatewayId(result.message_id) ||
+            !gatewayId(result.conversation_id) ||
+            result.conversation_id !== work.message.conversation_id
           )
             throw new GatewayObservation("contract");
           if (this.options.crashAfter === "reply_accepted") {
@@ -909,6 +911,7 @@ class ConnectorRuntime implements ConnectorHandle {
             reason_code: terminal.reason,
           });
           if (
+            !gatewayId(result.message_id) ||
             result.message_id !== work.message.id ||
             result.outcome !== terminal.outcome ||
             result.status !== "recorded"
@@ -949,6 +952,8 @@ class ConnectorRuntime implements ConnectorHandle {
             message_id: work.message.id,
           });
           if (
+            !gatewayId(result.message_id) ||
+            !gatewayId(result.conversation_id) ||
             result.message_id !== work.message.id ||
             result.conversation_id !== work.message.conversation_id
           )
@@ -959,8 +964,7 @@ class ConnectorRuntime implements ConnectorHandle {
             const replyPlan = row.terminalOperation === "reply";
             if (
               replyPlan
-                ? result.outcome !== "replied" ||
-                  !URI_UNRESERVED_ID_PATTERN.test(String(result.reply_message_id))
+                ? result.outcome !== "replied" || !gatewayId(result.reply_message_id)
                 : result.outcome !== row.completionOutcome || result.reply_message_id !== null
             )
               throw new GatewayObservation("contract");
@@ -1005,7 +1009,11 @@ class ConnectorRuntime implements ConnectorHandle {
         }
         this.#state.beforeExternalEffect();
         const result = await this.#gateway.call("ack_message", { message_id: work.message.id });
-        if (result.message_id !== work.message.id || result.status !== "acked")
+        if (
+          !gatewayId(result.message_id) ||
+          result.message_id !== work.message.id ||
+          result.status !== "acked"
+        )
           throw new GatewayObservation("contract");
         if (this.options.crashAfter === "ack_accepted") throw new Error("connector_test_crash");
         const conversation = this.#state.readConversation(work.message.conversation_id);
