@@ -243,6 +243,7 @@ test("K02-C03 dispatches once only from received and never from binding or turn_
       { kind: "reply", text: "received recovery reply" },
     ],
   ]);
+  assert.equal((await received.wake(receivedMessage.id)).status, 202);
   await receivedRestart.connector.waitForIdle();
   assert.equal(receivedRestart.provider.requests.length, 1);
   assert.equal(receivedRestart.provider.requests[0]?.kind, "start");
@@ -341,6 +342,10 @@ test("K02-C03 dispatches once only from received and never from binding or turn_
         { kind: "reply", text: `c03 stale reply ${continuation}` },
       ],
     ]);
+    assert.equal(
+      (await stale.wake(staleMessage.id, Math.floor(clock.nowMs() / 1_000))).status,
+      202,
+    );
     await waitFor(
       () => stale.gatewayProxy?.calls.some((call) => call.tool === "poll_messages") ?? false,
       "stale-state poll claim",
