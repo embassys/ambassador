@@ -378,13 +378,14 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
     },
     {
       name: "config warning after initialized",
-      exchanges: [
-        ...handshakeExchanges(),
-        {
-          expectMethod: "thread/start",
-          beforeResponse: [{ kind: "json", value: configWarning }],
-        },
-      ],
+      exchanges: handshakeExchanges().map((exchange, index) =>
+        index === 1
+          ? {
+              ...exchange,
+              afterResponse: [{ kind: "json", value: configWarning }],
+            }
+          : exchange,
+      ),
       valid: false,
     },
     {
@@ -604,7 +605,7 @@ test("CX02-X06 never writes input before session publication or replays after ei
 
   for (const vector of [
     { name: "before session publication", failStateAfter: "session_bound" as const },
-    { name: "after session publication", crashAfter: "binding_published" as const },
+    { name: "after session publication", crashForRecoveryState: "session_binding" as const },
   ]) {
     const root = await mkdtemp(join(tmpdir(), "a2a-cx02-session-crash-"));
     t.after(async () => await rm(root, { recursive: true, force: true }));
@@ -627,7 +628,7 @@ test("CX02-X06 never writes input before session publication or replays after ei
       stateDirectory,
       provider: initial.adapter as unknown as ProviderPort,
       ...(vector.failStateAfter === undefined
-        ? { crashAfter: vector.crashAfter }
+        ? { crashForRecoveryState: vector.crashForRecoveryState }
         : { failStateAfter: vector.failStateAfter }),
     });
     t.after(async () => await connector.close());
@@ -639,7 +640,9 @@ test("CX02-X06 never writes input before session publication or replays after ei
     assert.equal((await gateway.sendWake(connector.webhookUrl, message.id)).status, 202);
     await assert.rejects(
       connector.waitForIdle(),
-      vector.crashAfter === undefined ? /connector_state_unavailable/u : /connector_test_crash/u,
+      vector.failStateAfter === undefined
+        ? /connector_test_crash/u
+        : /connector_state_unavailable/u,
     );
     await connector.crash();
     assert.equal(
@@ -761,7 +764,14 @@ test("CX02-X08a sends only exact coarse thread and turn authority under both pol
       threadStartRequest(cwd),
       turnStartRequest(cwd, text, policy),
     ]);
-    const serialized = JSON.stringify(requests);
+    const settingsOnly = structuredClone(requests) as Record<string, unknown>[];
+    const turn = settingsOnly.find((request) => request.method === "turn/start");
+    assert.ok(turn !== undefined && typeof turn.params === "object" && turn.params !== null);
+    const params = turn.params as { input?: { text?: string }[] };
+    assert.equal(params.input?.length, 1);
+    assert.equal(params.input?.[0]?.text, text);
+    if (params.input?.[0] !== undefined) params.input[0].text = "<input_text>";
+    const serialized = JSON.stringify(settingsOnly);
     for (const forbidden of [
       "dangerFullAccess",
       '"model"',

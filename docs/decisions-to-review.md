@@ -330,6 +330,25 @@ license, and platform ADRs.
   committed it. The earlier test selected the crash seam without producing
   the uncertain transport observation the seam represents.
 
+## CX02 test-determinism corrections
+
+- X04 now emits `configWarning` after the fake App Server receives
+  `initialized` and before the adapter sends `thread/start`. The earlier fake
+  attached the warning to the `thread/start` response while also requiring
+  that no `thread/start` request occur, so no implementation could satisfy
+  both observations. The opted-out warning still fails before provider input.
+- X08a keeps its byte-exact outbound request assertion, then replaces only the
+  cloned text item's contents with a neutral sentinel before scanning local
+  setting fields. The earlier scan required the sender's literal
+  `dangerFullAccess` text both present and absent in the same serialized
+  request list. X09 continues to prove byte-exact input preservation.
+- X06 uses the existing `session_binding` recovery crash seam for the
+  post-session-publication case. The earlier `binding_published` seam runs
+  before the provider-port call and therefore cannot observe the one
+  `thread/start` required by X06. This retains one thread start, no turn start,
+  and null-turn uncertainty after restart, and matches the recorded K03/K04
+  barrier ordering.
+
 ## K03 implementation judgments
 
 - The local gateway client uses the approved
