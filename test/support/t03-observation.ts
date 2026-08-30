@@ -228,6 +228,21 @@ export async function startT03ScriptedCentralApi(
           responseFinished: () => finished,
         };
         requests.push(captured);
+        if (
+          captured.method === "POST" &&
+          captured.path === "/api/v2/delivery/activate" &&
+          captured.body.byteLength === 0 &&
+          typeof captured.headers.authorization === "string" &&
+          captured.headers.authorization.startsWith("DPoP ") &&
+          typeof captured.headers.dpop === "string"
+        ) {
+          response.writeHead(200, {
+            "cache-control": "no-store",
+            "content-type": "application/json",
+          });
+          response.end('{"delivery_version":"v2","status":"active"}');
+          return;
+        }
         const planIndex = pending.findIndex(
           (candidate) =>
             (candidate.method === undefined || candidate.method === captured.method) &&

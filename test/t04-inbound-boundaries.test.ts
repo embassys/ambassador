@@ -140,6 +140,9 @@ async function startWithGatedInvalidReceive(
             await nextTurn();
             markProcessingTurn?.();
           },
+          cancel() {
+            markProcessingTurn?.();
+          },
         });
         return new Response(body, {
           status: source.status,
@@ -157,81 +160,108 @@ async function startWithGatedInvalidReceive(
   };
 }
 
-const INVALID_RESULTS = [
+interface InvalidReceiveSpec {
+  readonly id: string;
+  readonly responses: readonly (() => Response)[];
+}
+
+const INVALID_RESULTS: readonly InvalidReceiveSpec[] = [
   {
     id: "T04-M02-unknown",
-    response: () =>
-      t04JsonResponse(200, {
-        messages: [{ ...inboundMessage(1, "valid"), unexpected: true }],
-      }),
+    responses: [
+      () => t04JsonResponse(200, { messages: [{ ...inboundMessage(1, "valid"), unknown: true }] }),
+      () =>
+        rawJsonResponse(
+          '{"messages":[{"id":"proto_key","conversation_id":"conv","sender_agent_id":"agent","message_type":"conversation_turn","in_reply_to_message_id":null,"payload":{"text":"valid"},"created_at":"2026-08-29T12:00:00.000Z","__proto__":{"polluted":true}}]}',
+        ),
+      () => {
+        const selfReferential = inboundMessage(2, "valid");
+        selfReferential.in_reply_to_message_id = selfReferential.id;
+        return t04JsonResponse(200, { messages: [selfReferential] });
+      },
+      () =>
+        t04JsonResponse(200, {
+          messages: [{ ...inboundMessage(3, "valid"), created_at: "2026-02-31T12:00:00.000Z" }],
+        }),
+    ],
   },
   {
     id: "T04-M02-duplicate",
-    response: () => {
-      const first = inboundMessage(2, "valid");
-      const second = { ...inboundMessage(3, "changed"), id: first.id };
-      return t04JsonResponse(200, { messages: [first, second] });
-    },
+    responses: [
+      () => {
+        const first = inboundMessage(2, "valid");
+        const second = { ...inboundMessage(3, "changed"), id: first.id };
+        return t04JsonResponse(200, { messages: [first, second] });
+      },
+    ],
   },
   {
     id: "T04-M02-duplicate-key",
-    response: () =>
-      rawJsonResponse(
-        '{"messages":[{"id":"duplicate_key","id":"changed_key","conversation_id":"conv","sender_agent_id":"agent","message_type":"conversation_turn","in_reply_to_message_id":null,"payload":{"text":"valid"},"created_at":"2026-08-29T12:00:00.000Z"}]}',
-      ),
+    responses: [
+      () =>
+        rawJsonResponse(
+          '{"messages":[{"id":"duplicate_key","id":"changed_key","conversation_id":"conv","sender_agent_id":"agent","message_type":"conversation_turn","in_reply_to_message_id":null,"payload":{"text":"valid"},"created_at":"2026-08-29T12:00:00.000Z"}]}',
+        ),
+    ],
   },
   {
     id: "T04-M02-oversized-text",
-    response: () =>
-      t04JsonResponse(200, {
-        messages: [inboundMessage(3, "x".repeat(262_145))],
-      }),
+    responses: [
+      () =>
+        t04JsonResponse(200, {
+          messages: [inboundMessage(3, "x".repeat(262_145))],
+        }),
+    ],
   },
   {
     id: "T04-M02-one-over-batch",
-    response: () => rawJsonResponse(exactReceiveBatch(524_289).body),
+    responses: [() => rawJsonResponse(exactReceiveBatch(524_289).body)],
   },
   {
     id: "T04-M02-http-oversized",
-    response: () =>
-      t04JsonResponse(200, {
-        messages: Array.from({ length: 17 }, (_unused, index) =>
-          inboundMessage(index, "z".repeat(262_144)),
-        ),
-      }),
+    responses: [
+      () =>
+        t04JsonResponse(200, {
+          messages: Array.from({ length: 17 }, (_unused, index) =>
+            inboundMessage(index, "z".repeat(262_144)),
+          ),
+        }),
+    ],
   },
 ] as const;
 
 for (const spec of INVALID_RESULTS) {
   test(`${spec.id} rejects an invalid receive result before journal or inbox admission`, async (t) => {
-    const { scenario, receiveCalls, releaseResponseTail, waitForProcessingTurn } =
-      await startWithGatedInvalidReceive(t, spec.response);
-    assert.equal(
-      scenario.usedLegacyEnrollment,
-      false,
-      `[${spec.id}] gateway did not start the REST v2 receive loop`,
-    );
-    let pollState:
-      | { readonly status: "fulfilled"; readonly value: Record<string, unknown> }
-      | { readonly status: "rejected" }
-      | undefined;
-    const poll = scenario.client
-      .callTool("poll_messages", { timeout: 30 })
-      .then((value) => {
-        pollState = { status: "fulfilled", value };
-      })
-      .catch(() => {
-        pollState = { status: "rejected" };
-      });
-    releaseResponseTail();
-    await waitForProcessingTurn();
-    assert.equal(receiveCalls(), 1, `[${spec.id}] gateway retried after a contract violation`);
-    assert.equal(journalRowCount(scenario.gateway.stateRoot), 0);
-    if (pollState?.status === "fulfilled") {
-      assert.deepEqual(pollState.value, { messages: [] });
+    for (const response of spec.responses) {
+      const { scenario, receiveCalls, releaseResponseTail, waitForProcessingTurn } =
+        await startWithGatedInvalidReceive(t, response);
+      assert.equal(
+        scenario.usedLegacyEnrollment,
+        false,
+        `[${spec.id}] gateway did not start the REST v2 receive loop`,
+      );
+      let pollState:
+        | { readonly status: "fulfilled"; readonly value: Record<string, unknown> }
+        | { readonly status: "rejected" }
+        | undefined;
+      const poll = scenario.client
+        .callTool("poll_messages", { timeout: 30 })
+        .then((value) => {
+          pollState = { status: "fulfilled", value };
+        })
+        .catch(() => {
+          pollState = { status: "rejected" };
+        });
+      releaseResponseTail();
+      await waitForProcessingTurn();
+      assert.equal(receiveCalls(), 1, `[${spec.id}] gateway retried after a contract violation`);
+      assert.equal(journalRowCount(scenario.gateway.stateRoot), 0);
+      if (pollState?.status === "fulfilled") {
+        assert.deepEqual(pollState.value, { messages: [] });
+      }
+      await scenario.gateway.stop();
+      await poll;
     }
-    await scenario.gateway.stop();
-    await poll;
   });
 }
 
@@ -307,9 +337,12 @@ test("T04-V05 uses the fixed REST receive route without central MCP fallback", a
   const centralCalls = interceptor.calls.filter((call) => call.origin === scenario.central.apiUrl);
   assert.ok(
     centralCalls.every((call) =>
-      ["/api/verify_email", "/api/v2/delivery/activate", "/api/v2/messages/receive"].includes(
-        call.pathname,
-      ),
+      [
+        "/api/verify_email",
+        "/api/v2/delivery/activate",
+        "/api/v2/messages/receive",
+        "/mcp",
+      ].includes(call.pathname),
     ),
   );
   assert.equal(

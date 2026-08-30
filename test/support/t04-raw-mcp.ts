@@ -52,6 +52,37 @@ export class T04RawMcpClient {
     return response.error;
   }
 
+  async callToolAndDiscardResponse(
+    name: string,
+    arguments_: Record<string, unknown>,
+  ): Promise<void> {
+    const id = this.#nextId;
+    this.#nextId += 1;
+    const headers: Record<string, string> = {
+      accept: "application/json, text/event-stream",
+      authorization: this.#authorization,
+      "content-type": "application/json",
+    };
+    if (this.#sessionId !== undefined) {
+      headers["mcp-protocol-version"] = "2025-06-18";
+      headers["mcp-session-id"] = this.#sessionId;
+    }
+    const response = await fetch(this.#endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: arguments_ },
+      }),
+      redirect: "manual",
+    });
+    assert.equal(response.status, 200);
+    this.#sessionId = response.headers.get("mcp-session-id") ?? this.#sessionId;
+    await response.body?.cancel();
+  }
+
   async #request(method: string, params: Record<string, unknown>): Promise<JsonRpcResponse> {
     const id = this.#nextId;
     this.#nextId += 1;

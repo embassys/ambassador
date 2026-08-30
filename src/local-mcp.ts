@@ -37,9 +37,19 @@ export interface LocalMcpRouter {
 }
 
 export class LocalMcpToolError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly retryAfterMs?: number | null,
+  ) {
     super("Tool call failed");
     this.name = "LocalMcpToolError";
+  }
+
+  get data(): Record<string, unknown> {
+    return {
+      code: this.code,
+      ...(this.retryAfterMs === undefined ? {} : { retry_after_ms: this.retryAfterMs }),
+    };
   }
 }
 
@@ -328,7 +338,7 @@ export class LocalMcpServer {
         );
       } catch (error) {
         if (error instanceof LocalMcpToolError) {
-          throw new ProtocolError(-32_002, "Tool call failed", { code: error.code });
+          throw new ProtocolError(-32_002, "Tool call failed", error.data);
         }
         throw new Error("Tool call failed");
       } finally {

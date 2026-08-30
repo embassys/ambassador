@@ -114,6 +114,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       webhookToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
+      signal,
       ...(verboseTranscript === undefined ? {} : { verboseTranscript }),
       ...(context.testOverrides === undefined
         ? developmentCentralUrls
@@ -139,6 +140,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     if (failure !== undefined) throw failure;
     return 0;
   } catch (error) {
+    if (signal.aborted) return 0;
     if (error instanceof GatewayOptionsError) {
       context.io.stderr.write(`${error.message}\n`);
       return error.exitCode;

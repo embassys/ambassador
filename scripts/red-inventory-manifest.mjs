@@ -449,7 +449,7 @@ function t04Failure(file, name) {
   return { file, nesting: 0, status: "fail", skip: false, todo: false, boundary, name };
 }
 
-const t04 = [
+const reviewedT04 = [
   ...[
     "T04-X-start-commit kills the gateway after central commit and recovers once",
     "T04-X-receive-commit kills the gateway after central commit and recovers once",
@@ -510,6 +510,8 @@ const t04 = [
     "T04 support holds a completed upstream response until explicit release",
   ]),
 ];
+
+const t04 = reviewedT04.map((entry) => ({ ...entry, status: "pass", boundary: undefined }));
 
 const packagedDocker = [
   {

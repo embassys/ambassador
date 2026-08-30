@@ -24,7 +24,10 @@ async function crashFixture(t: TestContext): Promise<CrashFixture> {
   t.after(() => rm(artifactRoot, { force: true, recursive: true }));
   const central = await startFakeCentral(t);
   const gatewayTime = Math.floor(Date.now() / 1_000);
-  if (gatewayTime > central.clock()) central.advanceClock(gatewayTime - central.clock());
+  if (gatewayTime > central.clock()) {
+    central.advanceClock(gatewayTime - central.clock());
+    central.refreshSeedCredentials();
+  }
   return {
     central,
     webhook: await startFakeWebhook(t),
