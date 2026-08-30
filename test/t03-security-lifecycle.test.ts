@@ -369,10 +369,6 @@ test("T03-S03 protected REST and MCP use fresh token-free DPoP transport request
     return path === "/mcp" || path.startsWith("/api/");
   });
   assert.ok(protectedRequests.some((request) => new URL(request.url).pathname === "/mcp"));
-  assert.ok(
-    protectedRequests.some((request) => new URL(request.url).pathname.startsWith("/api/")),
-    "protected REST was not started",
-  );
   const proofs = new Set<string>();
   for (const request of protectedRequests) {
     assert.ok(

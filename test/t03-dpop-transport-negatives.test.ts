@@ -123,7 +123,9 @@ test("T03-P01 MCP initialize, catalog, reconnect, call cancellation, and close e
   await client.listTools();
   const call = client.callTool("list_action_types", {});
   await waitForT03Observation(() =>
-    mcp.requests.some((request) => requestMessage(request).method === "tools/call"),
+    mcp.requests.some(
+      (request) => request.body.byteLength > 0 && requestMessage(request).method === "tools/call",
+    ),
   );
   const stopping = gateway.stop();
   await assert.rejects(call);

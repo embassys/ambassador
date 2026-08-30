@@ -358,7 +358,7 @@ function validateArguments(
   return { email: value.email };
 }
 
-function parseStrictResponse(bytes: Uint8Array): Record<string, unknown> {
+export function parseStrictCentralJsonResponse(bytes: Uint8Array): Record<string, unknown> {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -936,7 +936,7 @@ export class CentralEnrollmentClient {
       throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
     }
     try {
-      const value = parseStrictResponse(response.body);
+      const value = parseStrictCentralJsonResponse(response.body);
       return { response, value };
     } catch (error) {
       if (error instanceof EnrollmentOutcomeUncertain) {

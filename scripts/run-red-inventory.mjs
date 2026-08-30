@@ -23,10 +23,10 @@ const definitions = {
       "t03-security-lifecycle.test.js",
       "t03-size-boundaries.test.js",
     ],
-    expected: { tests: 146, pass: 112, fail: 34, skipped: 0, todo: 0 },
+    expected: { tests: 146, pass: 146, fail: 0, skipped: 0, todo: 0 },
     timeoutMs: 90_000,
     vectorNote:
-      "136 behavior vectors: 31 expected red, 105 current green (19 G01 credential checks, 85 newly green G02 enrollment checks, and 1 shipped closed-schema guard)",
+      "136 behavior vectors: all 136 green after G01 credential, G02 enrollment, and G03 protected-transport work",
   },
   t04: {
     key: "t04",
@@ -296,7 +296,8 @@ async function runSuite(definition) {
   if (bounded.timedOut) throw new Error(`${definition.label} timed out`);
   if (overflow) throw new Error(`${definition.label} output exceeded the 4 MiB diagnostic bound`);
   if (stderrBytes !== 0) throw new Error(`${definition.label} emitted unexpected stderr output`);
-  if (bounded.value.signal !== null || bounded.value.code !== 1) {
+  const expectedExitCode = definition.expected.fail === 0 ? 0 : 1;
+  if (bounded.value.signal !== null || bounded.value.code !== expectedExitCode) {
     throw new Error(
       `${definition.label} exited unexpectedly: code=${String(bounded.value.code)} signal=${String(bounded.value.signal)}`,
     );

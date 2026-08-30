@@ -70,6 +70,10 @@ export class GatewayIdentity {
     return this.#authenticationFailed;
   }
 
+  get credentialVersion(): 1 | 2 | undefined {
+    return this.#credential?.version;
+  }
+
   authenticatedToken(): string {
     if (this.#authenticationFailed) {
       throw new IdentityError("central_authentication_failed");
