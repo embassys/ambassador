@@ -307,6 +307,13 @@ test("K02-L01 cancels one local gateway MCP request at the fixed 35-second timeo
     () => scenario.gatewayProxy?.calls.some((call) => call.tool === "poll_messages") ?? false,
     "held MCP poll",
   );
+  assert.deepEqual(
+    scenario.gatewayProxy?.calls
+      .map((call) => call.method)
+      .filter((method) => method !== undefined)
+      .slice(0, 3),
+    ["initialize", "notifications/initialized", "tools/call"],
+  );
   clock.advance(34_999);
   assert.equal(scenario.provider.requests.length, 0);
   clock.advance(1);

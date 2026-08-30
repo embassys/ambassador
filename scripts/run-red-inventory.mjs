@@ -61,10 +61,10 @@ const definitions = {
       "k02-state-scheduling.test.js",
       "k02-webhook-admission.test.js",
     ],
-    expected: { tests: 69, pass: 1, fail: 68, skipped: 0, todo: 0 },
-    timeoutMs: 180_000,
+    expected: { tests: 69, pass: 69, fail: 0, skipped: 0, todo: 0 },
+    timeoutMs: 600_000,
     boundaryKind: "marker",
-    vectorNote: "69 checks: 68 expected red at the exact absent K03 entry, 1 loader guard green",
+    vectorNote: "69 checks: 68 K03 connector behaviors and 1 loader guard green",
   },
   "packaged-docker": {
     key: "packaged-docker",

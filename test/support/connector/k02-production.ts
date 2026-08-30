@@ -237,6 +237,7 @@ export type K02GatewayFault =
   | { kind: "hold" };
 
 export interface K02GatewayProxyCall {
+  method: string | undefined;
   tool: string | undefined;
   atMs: number;
   arguments: Readonly<Record<string, unknown>> | undefined;
@@ -301,6 +302,7 @@ export class K02GatewayFaultProxy {
     const body = Buffer.concat(chunks);
     let parsed: {
       id?: unknown;
+      method?: unknown;
       params?: { name?: unknown; arguments?: unknown };
     } = {};
     try {
@@ -311,6 +313,7 @@ export class K02GatewayFaultProxy {
     const tool = typeof parsed.params?.name === "string" ? parsed.params.name : undefined;
     const arguments_ = parsed.params?.arguments;
     this.#calls.push({
+      method: typeof parsed.method === "string" ? parsed.method : undefined,
       tool,
       atMs: Date.now(),
       arguments:
@@ -787,6 +790,10 @@ export async function startK02Scenario(
     workingDirectory?: string;
   } = {},
 ): Promise<K02Scenario> {
+  const connectorsForCleanup: K02ConnectorHandle[] = [];
+  t.after(async () => {
+    for (const handle of connectorsForCleanup.reverse()) await handle.close();
+  });
   const root = await mkdtemp(join(tmpdir(), "a2a-k02-"));
   const stateDirectory = options.stateDirectory ?? join(root, "state");
   const workingDirectory = options.workingDirectory ?? join(root, "workspace");
@@ -868,7 +875,7 @@ export async function startK02Scenario(
       ? {}
       : { stallWebhookResponseAfterCommit: options.stallWebhookResponseAfterCommit }),
   });
-  t.after(async () => await connector.close());
+  connectorsForCleanup.push(connector);
   const webhookPort = Number(new URL(connector.webhookUrl).port);
   return {
     module,
@@ -933,7 +940,7 @@ export async function startK02Scenario(
           ? {}
           : { proveNoProviderDispatch: restartOptions.proveNoProviderDispatch }),
       });
-      t.after(async () => await restartedConnector.close());
+      connectorsForCleanup.push(restartedConnector);
       return {
         connector: restartedConnector,
         provider: restartedProvider,

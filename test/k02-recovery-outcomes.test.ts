@@ -370,6 +370,7 @@ test("K02-C02 recovers only the exact durable turn after a crash", async (t) => 
 test("K02-C01 resolves a committed lost reply through outcome lookup and one ack", async (t) => {
   const scenario = await startK02Scenario(t, "K02-K03:C01", {
     crashAfter: "reply_committed_unobserved",
+    gatewayProxy: true,
     scripts: [
       [
         { kind: "session", provider_session_id: "session_commit" },
@@ -379,6 +380,7 @@ test("K02-C01 resolves a committed lost reply through outcome lookup and one ack
     ],
   });
   const message = k02Message("message_commit", "conversation_commit");
+  scenario.gatewayProxy?.failNext("reply_message", { kind: "drop_after_commit" });
   scenario.enqueue(message);
   assert.equal((await scenario.wake(message.id)).status, 202);
   await assert.rejects(scenario.connector.waitForIdle(), /connector_test_crash/u);
@@ -1002,7 +1004,11 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     const message = k02Message(`o06_${suffix}`, `o06_${suffix}_conversation`);
     scenario.enqueue(message);
     assert.equal((await scenario.wake(message.id)).status, 202);
-    await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
+    await assert.rejects(
+      scenario.connector.waitForIdle(),
+      /connector_gateway_operation_failed/u,
+      `${suffix} gateway result must fail closed`,
+    );
     const Database = (await import("better-sqlite3")).default;
     const { join } = await import("node:path");
     const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
