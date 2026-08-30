@@ -226,9 +226,9 @@ platform ADRs.
   acknowledgement, and later acknowledged-tombstone assertions remain exact.
 - C01 now expects no provider `start` at the pre-dispatch
   `binding_published` barrier, matching C03; every post-dispatch barrier still
-  requires exactly one original start. C04 observes the exact durable
-  outcome-retry kind and time before advancing its manual clock, applying the
-  same ordering rule as O03 and O06 without changing the retry schedule.
+  requires exactly one original start. C01 and C04 observe the exact durable
+  outcome-retry kind and time before advancing their manual clocks, applying
+  the same ordering rule as O03 and O06 without changing the retry schedule.
 
 ## Test-only stand-ins
 
