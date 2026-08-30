@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { CredentialStore, VersionedCredentialStore } from "../src/credential-store.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { startGatewayProcess } from "./support/gateway-process.js";
@@ -217,20 +218,28 @@ test("T03-R06 persistence failure leaves the gateway unenrolled after valid issu
   await registerPendingIdentity(central);
   const webhook = await startFakeWebhook(t);
   let saveAttempted = false;
+  const failingStore: CredentialStore & VersionedCredentialStore = {
+    async load() {
+      return undefined;
+    },
+    async save() {
+      throw new Error("version 2 used the legacy credential store API");
+    },
+    async loadCredential() {
+      return undefined;
+    },
+    async saveCredential(credential) {
+      assert.equal(credential.version, 2);
+      saveAttempted = true;
+      throw new Error("injected credential publication failure");
+    },
+  };
   const gateway = await startGateway(t, {
     webhookUrl: webhook.url,
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
-    credentialStore: {
-      async load() {
-        return undefined;
-      },
-      async save() {
-        saveAttempted = true;
-        throw new Error("injected credential publication failure");
-      },
-    },
+    credentialStore: failingStore,
   });
   const client = new TestMcpClient(gateway.endpoint, T03_WEBHOOK_TOKEN);
   await client.initialize();

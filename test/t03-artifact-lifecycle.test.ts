@@ -52,11 +52,13 @@ test("T03-A01 verbose enrollment and reissue redact actual proof, nonce, token, 
     centralMcpUrl: new URL(central.mcpUrl).href,
   });
   const credentialPath = join(first.stateRoot, "central-credential.json");
-  const originalText = await new EncryptedFileCredentialStore(
+  const originalStored = await new EncryptedFileCredentialStore(
     credentialPath,
     T03_WEBHOOK_TOKEN,
     scope,
-  ).load();
+  ).loadCredential();
+  assert.equal(originalStored?.version, 2);
+  const originalText = originalStored?.plaintext;
   assert.ok(originalText !== undefined);
   const original = JSON.parse(originalText) as T03CredentialRecord;
 
@@ -82,7 +84,8 @@ test("T03-A01 verbose enrollment and reissue redact actual proof, nonce, token, 
   );
   let replacementText: string | undefined;
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const candidate = await replacementStore.load();
+    const stored = await replacementStore.loadCredential();
+    const candidate = stored?.version === 2 ? stored.plaintext : undefined;
     if (
       candidate !== undefined &&
       (JSON.parse(candidate) as T03CredentialRecord).access_token !== original.access_token
