@@ -31,6 +31,7 @@ import {
   k02ApprovalControlArguments,
   k02Message,
   loadK02Production,
+  seedK02ConversationCapacityForTest,
   startK02Scenario,
 } from "./support/connector/k02-production.js";
 
@@ -126,6 +127,15 @@ async function unusedPort(): Promise<number> {
   return port;
 }
 
+async function assertLoopbackPortReusable(port: number): Promise<void> {
+  const server = createServer();
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolveListen());
+  });
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+}
+
 async function startGatewayConnectionGuard(t: TestContext): Promise<() => number> {
   let acceptedConnections = 0;
   const server = createServer((socket) => {
@@ -149,6 +159,10 @@ async function userInfoPreload(
   t: TestContext,
   accountHome: string,
   providerProcessMarker?: string,
+  filesystem?: {
+    behavior: "unproven" | "wrong_uid" | "observe_sync";
+    marker: string;
+  },
 ): Promise<string> {
   const preloadDirectory = await temporaryDirectory(t, "a2a-k02-user-info-");
   const preload = join(preloadDirectory, "user-info.mjs");
@@ -156,23 +170,101 @@ async function userInfoPreload(
     providerProcessMarker === undefined
       ? []
       : [
-          'import childProcess from "node:child_process";',
-          'import { appendFileSync } from "node:fs";',
           `const providerProcessMarker = ${JSON.stringify(providerProcessMarker)};`,
           "const rejectProviderProcess = () => {",
-          '  appendFileSync(providerProcessMarker, "provider process attempted\\n", { mode: 0o600 });',
+          '  fs.appendFileSync(providerProcessMarker, "provider process attempted\\n", { mode: 0o600 });',
           '  throw new Error("provider process attempted before CLI admission");',
           "};",
           'for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]) {',
           "  childProcess[name] = rejectProviderProcess;",
           "}",
         ];
+  const filesystemGuard =
+    filesystem === undefined
+      ? []
+      : filesystem.behavior === "unproven"
+        ? [
+            `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+            "const filesystemFailure = () => {",
+            '  fs.appendFileSync(filesystemMarker, "statfs\\n", { mode: 0o600 });',
+            '  const error = new Error("filesystem residence unproven");',
+            '  error.code = "ENOSYS";',
+            "  return error;",
+            "};",
+            "fs.statfsSync = () => {",
+            "  throw filesystemFailure();",
+            "};",
+            "fs.statfs = (_path, options, callback) => {",
+            '  const done = typeof options === "function" ? options : callback;',
+            "  queueMicrotask(() => done(filesystemFailure()));",
+            "};",
+            "fs.promises.statfs = async () => { throw filesystemFailure(); };",
+          ]
+        : filesystem.behavior === "wrong_uid"
+          ? [
+              `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+              "const withWrongUid = (path, metadata) => {",
+              `  if (String(path) === ${JSON.stringify(accountHome)}) {`,
+              '    fs.appendFileSync(filesystemMarker, "wrong_uid\\n", { mode: 0o600 });',
+              '    Object.defineProperty(metadata, "uid", { value: Number(metadata.uid) + 1 });',
+              "  }",
+              "  return metadata;",
+              "};",
+              "const realLstatSync = fs.lstatSync;",
+              "fs.lstatSync = (path, options) => {",
+              "  return withWrongUid(path, realLstatSync(path, options));",
+              "};",
+              "const realLstat = fs.lstat;",
+              "fs.lstat = (path, options, callback) => {",
+              '  const done = typeof options === "function" ? options : callback;',
+              '  const selectedOptions = typeof options === "function" ? undefined : options;',
+              "  realLstat(path, selectedOptions, (error, metadata) => {",
+              "    done(error, error === null ? withWrongUid(path, metadata) : metadata);",
+              "  });",
+              "};",
+              "const realPromiseLstat = fs.promises.lstat;",
+              "fs.promises.lstat = async (path, options) => {",
+              "  return withWrongUid(path, await realPromiseLstat(path, options));",
+              "};",
+            ]
+          : [
+              `const filesystemMarker = ${JSON.stringify(filesystem.marker)};`,
+              "const recordSync = (metadata) => {",
+              '  const kind = metadata.isDirectory() ? "directory" : "file";',
+              '  fs.appendFileSync(filesystemMarker, kind + "\\n", { mode: 0o600 });',
+              "};",
+              "const realFsyncSync = fs.fsyncSync;",
+              "fs.fsyncSync = (descriptor) => {",
+              "  recordSync(fs.fstatSync(descriptor));",
+              "  return realFsyncSync(descriptor);",
+              "};",
+              "const realFsync = fs.fsync;",
+              "fs.fsync = (descriptor, callback) => {",
+              "  recordSync(fs.fstatSync(descriptor));",
+              "  return realFsync(descriptor, callback);",
+              "};",
+              'const probeHandle = await fs.promises.open(filesystemMarker, "a", 0o600);',
+              "const fileHandlePrototype = Object.getPrototypeOf(probeHandle);",
+              "await probeHandle.close();",
+              "const realHandleSync = fileHandlePrototype.sync;",
+              "fileHandlePrototype.sync = async function () {",
+              "  recordSync(await this.stat());",
+              "  return realHandleSync.call(this);",
+              "};",
+            ];
   await writeFile(
     preload,
     [
       'import os from "node:os";',
+      ...(providerProcessMarker === undefined
+        ? []
+        : ['import childProcess from "node:child_process";']),
+      ...(providerProcessMarker === undefined && filesystem === undefined
+        ? []
+        : ['import fs from "node:fs";']),
       'import { syncBuiltinESMExports } from "node:module";',
       ...processGuard,
+      ...filesystemGuard,
       "const realUserInfo = os.userInfo;",
       `os.userInfo = () => ({ ...realUserInfo(), homedir: ${JSON.stringify(accountHome)} });`,
       "syncBuiltinESMExports();",
@@ -183,6 +275,56 @@ async function userInfoPreload(
   return pathToFileURL(preload).href;
 }
 
+async function startupBarrierPreload(
+  t: TestContext,
+  accountHome: string,
+  scriptLines: readonly string[],
+): Promise<string> {
+  const preloadDirectory = await temporaryDirectory(t, "a2a-k02-startup-barrier-");
+  const preload = join(preloadDirectory, "startup-barrier.mjs");
+  await writeFile(
+    preload,
+    [
+      'import fs from "node:fs";',
+      'import os from "node:os";',
+      'import { syncBuiltinESMExports } from "node:module";',
+      "const realUserInfo = os.userInfo;",
+      `os.userInfo = () => ({ ...realUserInfo(), homedir: ${JSON.stringify(accountHome)} });`,
+      ...scriptLines,
+      "syncBuiltinESMExports();",
+      "",
+    ].join("\n"),
+    { encoding: "utf8", mode: 0o600 },
+  );
+  return pathToFileURL(preload).href;
+}
+
+async function waitForMarker(path: string, expected: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    const contents = await readFile(path, "utf8").catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw error;
+    });
+    if (contents.includes(expected)) return;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${expected}`);
+    await delay(10);
+  }
+}
+
+async function capturedOutcome(
+  process: CapturedChild,
+  readiness: string,
+): Promise<"exited" | "ready"> {
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    if (process.child.exitCode !== null || process.child.signalCode !== null) return "exited";
+    if (process.stdout().includes(readiness)) return "ready";
+    if (Date.now() >= deadline) throw new Error("timed out waiting for connector outcome");
+    await delay(10);
+  }
+}
+
 function startArguments(port: number, workingDirectory: string): string[] {
   return [
     "start",
@@ -191,6 +333,10 @@ function startArguments(port: number, workingDirectory: string): string[] {
     `--working-directory=${workingDirectory}`,
     "--policy=read-only",
   ];
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function providerStateDirectory(accountHome: string, provider: (typeof PROVIDERS)[number]): string {
@@ -363,7 +509,7 @@ test("K02-D02 starts each exact foreground entrypoint with ordered fixed errors"
   const accountHome = await realpath(accountHomeInput);
   const workingDirectory = await realpath(workingDirectoryInput);
   const preload = await userInfoPreload(t, accountHome);
-  await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
+  const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
   const completedProviders: string[] = [];
 
   for (const provider of PROVIDERS) {
@@ -472,6 +618,32 @@ test("K02-D02 starts each exact foreground entrypoint with ordered fixed errors"
     assert.equal(foreground.stdout(), readiness);
     assert.equal(foreground.stderr(), "");
 
+    const fatalPort = await unusedPort();
+    const fatalForeground = run(startArguments(fatalPort, workingDirectory));
+    t.after(async () => {
+      if (fatalForeground.child.exitCode === null && fatalForeground.child.signalCode === null) {
+        fatalForeground.child.kill("SIGKILL");
+      }
+      await fatalForeground.exit;
+    });
+    const fatalReadiness = `Connector webhook: http://127.0.0.1:${fatalPort}/webhook\n`;
+    await waitForReadiness(fatalForeground, fatalReadiness);
+    const malformedIdWake = `runtime_fatal_${provider}`;
+    gateway.setNextPollResultForTest({
+      messages: [{ ...k02Message("ignored_string_id", "runtime_fatal_conversation"), id: 7 }],
+    });
+    assert.equal(
+      (await gateway.sendWake(`http://127.0.0.1:${fatalPort}/webhook`, malformedIdWake)).status,
+      202,
+    );
+    assert.deepEqual(await waitForCapturedExit(fatalForeground, `${provider} runtime fatal`), {
+      code: 1,
+      signal: null,
+    });
+    assert.equal(fatalForeground.stdout(), fatalReadiness);
+    assert.equal(fatalForeground.stderr(), "a2a connector: connector_gateway_operation_failed\n");
+    await assertLoopbackPortReusable(fatalPort);
+
     const occupied = createServer();
     await new Promise<void>((resolveListen, reject) => {
       occupied.once("error", reject);
@@ -574,6 +746,227 @@ test("K02-D02 starts each exact foreground entrypoint with ordered fixed errors"
 
 test("K02-S09 initializes once and fails closed at every owner/correlation crash boundary", async (t) => {
   const module = await loadK02Production("K02-K03:S09");
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+
+  await check("singleton remains held through token resolution", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s09-token-lock-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const tokenEntered = join(root, "token-entered");
+    const tokenRelease = join(root, "token-release");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const gatedPreload = await startupBarrierPreload(t, accountHome, [
+      `const tokenEntered = ${JSON.stringify(tokenEntered)};`,
+      `const tokenRelease = ${JSON.stringify(tokenRelease)};`,
+      "const originalEnvironment = process.env;",
+      "let tokenPaused = false;",
+      "process.env = new Proxy(originalEnvironment, {",
+      "  get(target, property, receiver) {",
+      '    if (property === "A2A_CONNECTOR_WEBHOOK_TOKEN" && !tokenPaused) {',
+      "      tokenPaused = true;",
+      '      fs.appendFileSync(tokenEntered, "resolving\\n", { mode: 0o600 });',
+      "      const wait = new Int32Array(new SharedArrayBuffer(4));",
+      "      while (!fs.existsSync(tokenRelease)) Atomics.wait(wait, 0, 0, 10);",
+      "    }",
+      "    return Reflect.get(target, property, receiver);",
+      "  },",
+      "});",
+    ]);
+    const plainPreload = await userInfoPreload(t, accountHome);
+    const cli = resolve(".test-dist/packages/codex-connector/src/cli.js");
+    const port = await unusedPort();
+    const owner = startCapturedChild(
+      process.execPath,
+      [`--import=${gatedPreload}`, cli, ...startArguments(port, workspace)],
+      {
+        cwd: workspace,
+        env: { ...process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+      },
+    );
+    t.after(async () => {
+      await writeFile(tokenRelease, "release\n", { encoding: "utf8", mode: 0o600 }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        },
+      );
+      if (owner.child.exitCode === null && owner.child.signalCode === null)
+        owner.child.kill("SIGKILL");
+      await owner.exit;
+    });
+    await waitForMarker(tokenEntered, "resolving");
+
+    const contenderPort = await unusedPort();
+    const contenderReadiness = `Connector webhook: http://127.0.0.1:${contenderPort}/webhook\n`;
+    const contender = startCapturedChild(
+      process.execPath,
+      [`--import=${plainPreload}`, cli, ...startArguments(contenderPort, workspace)],
+      {
+        cwd: workspace,
+        env: { ...process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+      },
+    );
+    const outcome = await capturedOutcome(contender, contenderReadiness);
+    if (outcome === "ready") contender.child.kill("SIGTERM");
+    const contenderExit = await contender.exit;
+    await writeFile(tokenRelease, "release\n", { encoding: "utf8", mode: 0o600 });
+    const readiness = `Connector webhook: http://127.0.0.1:${port}/webhook\n`;
+    await waitForReadiness(owner, readiness);
+    owner.child.kill("SIGTERM");
+    assert.deepEqual(await owner.exit, { code: 0, signal: null });
+    assert.equal(outcome, "exited", "a contender bound while the owner was resolving its token");
+    assert.deepEqual(contenderExit, { code: 7, signal: null });
+    assert.equal(contender.stdout(), "");
+    assert.equal(contender.stderr(), "a2a connector: connector_already_running\n");
+  });
+
+  await check("fresh start excludes retirement across marker publication", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s09-retire-race-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const markerChecked = join(root, "marker-checked");
+    const markerRelease = join(root, "marker-release");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const retiredPath = join(providerStateDirectory(accountHome, "codex"), "retired.v1");
+    const racePreload = await startupBarrierPreload(t, accountHome, [
+      `const retiredPath = ${JSON.stringify(retiredPath)};`,
+      `const markerChecked = ${JSON.stringify(markerChecked)};`,
+      `const markerRelease = ${JSON.stringify(markerRelease)};`,
+      "const realExistsSync = fs.existsSync;",
+      "let markerPaused = false;",
+      "fs.existsSync = (path) => {",
+      "  if (!markerPaused && String(path) === retiredPath) {",
+      "    markerPaused = true;",
+      "    const existed = realExistsSync(path);",
+      '    fs.appendFileSync(markerChecked, "checked\\n", { mode: 0o600 });',
+      "    const wait = new Int32Array(new SharedArrayBuffer(4));",
+      "    while (!realExistsSync(markerRelease)) Atomics.wait(wait, 0, 0, 10);",
+      "    return existed;",
+      "  }",
+      "  return realExistsSync(path);",
+      "};",
+    ]);
+    const plainPreload = await userInfoPreload(t, accountHome);
+    const cli = resolve(".test-dist/packages/codex-connector/src/cli.js");
+    const port = await unusedPort();
+    const starting = startCapturedChild(
+      process.execPath,
+      [`--import=${racePreload}`, cli, ...startArguments(port, workspace)],
+      {
+        cwd: workspace,
+        env: { ...process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+      },
+    );
+    t.after(async () => {
+      await writeFile(markerRelease, "release\n", { encoding: "utf8", mode: 0o600 }).catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        },
+      );
+      if (starting.child.exitCode === null && starting.child.signalCode === null) {
+        starting.child.kill("SIGKILL");
+      }
+      await starting.exit;
+    });
+    await waitForMarker(markerChecked, "checked");
+    const retiring = startCapturedChild(
+      process.execPath,
+      [`--import=${plainPreload}`, cli, "retire-state", "--confirm=retire-all-correlation"],
+      { cwd: workspace, env: process.env },
+    );
+    const retirementExit = await waitForCapturedExit(retiring, "concurrent retirement");
+    await writeFile(markerRelease, "release\n", { encoding: "utf8", mode: 0o600 });
+    const readiness = `Connector webhook: http://127.0.0.1:${port}/webhook\n`;
+    await waitForReadiness(starting, readiness);
+    starting.child.kill("SIGTERM");
+    assert.deepEqual(await starting.exit, { code: 0, signal: null });
+    assert.deepEqual(
+      { exit: retirementExit, stdout: retiring.stdout(), stderr: retiring.stderr() },
+      {
+        exit: { code: 7, signal: null },
+        stdout: "",
+        stderr: "a2a connector: connector_state_retire_refused\n",
+      },
+      "retirement published a tombstone while a fresh start was already in progress",
+    );
+    await assert.rejects(readFile(retiredPath), /ENOENT/u);
+  });
+
+  await check("committed owner guard is durable before correlation creation", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s09-owner-sync-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const syncMarker = join(root, "sync-order");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await startupBarrierPreload(t, accountHome, [
+      `const syncMarker = ${JSON.stringify(syncMarker)};`,
+      "const descriptorPaths = new Map();",
+      "const realOpenSync = fs.openSync;",
+      "const realCloseSync = fs.closeSync;",
+      "const realFsyncSync = fs.fsyncSync;",
+      "fs.openSync = (path, ...arguments_) => {",
+      "  const descriptor = realOpenSync(path, ...arguments_);",
+      "  descriptorPaths.set(descriptor, String(path));",
+      "  return descriptor;",
+      "};",
+      "fs.closeSync = (descriptor) => {",
+      "  descriptorPaths.delete(descriptor);",
+      "  return realCloseSync(descriptor);",
+      "};",
+      "fs.fsyncSync = (descriptor) => {",
+      '  fs.appendFileSync(syncMarker, "sync:" + (descriptorPaths.get(descriptor) ?? "unknown") + "\\n", { mode: 0o600 });',
+      "  return realFsyncSync(descriptor);",
+      "};",
+    ]);
+    const cli = resolve(".test-dist/packages/codex-connector/src/cli.js");
+    const port = await unusedPort();
+    const captured = startCapturedChild(
+      process.execPath,
+      [`--import=${preload}`, cli, ...startArguments(port, workspace)],
+      {
+        cwd: workspace,
+        env: { ...globalThis.process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+      },
+    );
+    t.after(async () => {
+      if (captured.child.exitCode === null && captured.child.signalCode === null) {
+        captured.child.kill("SIGKILL");
+      }
+      await captured.exit;
+    });
+    await waitForReadiness(captured, `Connector webhook: http://127.0.0.1:${port}/webhook\n`);
+    captured.child.kill("SIGTERM");
+    assert.deepEqual(await captured.exit, { code: 0, signal: null });
+    const events = (await readFile(syncMarker, "utf8")).trim().split("\n");
+    const ownerSyncs = events
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.endsWith("/owner.sqlite3"));
+    const firstCorrelationSync = events.findIndex((event) =>
+      event.endsWith("/correlation.sqlite3"),
+    );
+    assert.ok(firstCorrelationSync >= 0, "correlation database was never synced");
+    assert.ok(
+      ownerSyncs.length >= 2 &&
+        (ownerSyncs[1]?.index ?? Number.POSITIVE_INFINITY) < firstCorrelationSync,
+      `owner guard sync order was ${events.join(", ")}`,
+    );
+  });
+
   for (const barrier of [
     "before_owner_flag",
     "after_owner_flag",
@@ -604,6 +997,7 @@ test("K02-S09 initializes once and fails closed at every owner/correlation crash
       );
     }
   }
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-S10 rejects correlation-only rollback and documents mutually valid rollback residual risk", async (t) => {
@@ -693,75 +1087,181 @@ test("K02-S10 rejects correlation-only rollback and documents mutually valid rol
 
 test("K02-S11 refuses only conversation 100001 and admits a mapped continuation", async (t) => {
   const module = await loadK02Production("K02-K03:S11");
-  const stateDirectory = await temporaryDirectory(t, "a2a-k02-s11-");
-  const activeConversationId = "s11_existing_conversation";
-  const activeProviderSessionId = "s11_existing_session";
-  await module.initializeConnectorStateForTest({
-    stateDirectory,
-    webhookToken: K02_TOKEN,
-    providerKind: "codex",
-    workingDirectory: WORKING_DIRECTORY,
-  });
-  await module.seedConnectorConversationsForTest({
-    stateDirectory,
-    webhookToken: K02_TOKEN,
-    providerKind: "codex",
-    workingDirectory: WORKING_DIRECTORY,
-    count: 100_000,
-    activeConversationId,
-    activeProviderSessionId,
-  });
-  const newConversation = await startK02Scenario(t, "K02-K03:S11", {
-    stateDirectory,
-    workingDirectory: WORKING_DIRECTORY,
-    scripts: [],
-  });
-  const newMessage = k02Message("s11_new_message", "s11_new_conversation");
-  newConversation.enqueue(newMessage);
-  assert.equal((await newConversation.wake(newMessage.id)).status, 202);
-  await assert.rejects(newConversation.connector.waitForIdle(), /connector_state_capacity/u);
-  assert.equal(newConversation.provider.requests.length, 0);
-  await newConversation.connector.crash();
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
 
-  const invalidContinuation = await startK02Scenario(t, "K02-K03:S11", {
-    stateDirectory,
-    workingDirectory: WORKING_DIRECTORY,
-    scripts: [],
-  });
-  const invalidContinuationMessage = k02Message("s11_null_predecessor", activeConversationId);
-  invalidContinuation.enqueue(invalidContinuationMessage);
-  assert.equal((await invalidContinuation.wake(invalidContinuationMessage.id)).status, 202);
-  await assert.rejects(
-    invalidContinuation.connector.waitForIdle(),
-    /connector_conversation_unavailable/u,
-  );
-  assert.equal(invalidContinuation.provider.requests.length, 0);
-  await invalidContinuation.connector.crash();
-
-  const continuation = await startK02Scenario(t, "K02-K03:S11", {
-    stateDirectory,
-    workingDirectory: WORKING_DIRECTORY,
-    scripts: [
-      [
-        { kind: "turn", provider_turn_id: "s11_continuation_turn" },
-        { kind: "reply", text: "mapped continuation" },
+  await check("conversation capacity warns and preserves mapped work", async () => {
+    const stateDirectory = await temporaryDirectory(t, "a2a-k02-s11-");
+    const activeConversationId = "s11_existing_conversation";
+    const activeProviderSessionId = "s11_existing_session";
+    await module.initializeConnectorStateForTest({
+      stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: WORKING_DIRECTORY,
+    });
+    seedK02ConversationCapacityForTest({
+      stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: WORKING_DIRECTORY,
+      count: 100_000,
+      activeConversationId,
+      activeProviderSessionId,
+    });
+    const scenario = await startK02Scenario(t, "K02-K03:S11", {
+      stateDirectory,
+      workingDirectory: WORKING_DIRECTORY,
+      scripts: [
+        [
+          { kind: "turn", provider_turn_id: "s11_continuation_turn" },
+          { kind: "reply", text: "mapped continuation" },
+        ],
       ],
-    ],
+    });
+    let warnings = "";
+    const originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      warnings += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const newMessage = k02Message("s11_new_message", "s11_new_conversation");
+      scenario.enqueue(newMessage);
+      assert.equal((await scenario.wake(newMessage.id)).status, 202);
+      await assert.doesNotReject(scenario.connector.waitForIdle());
+      assert.deepEqual(scenario.connector.inspectAdmissionStateForTest(), {
+        queuedIds: [],
+        activeIds: [],
+        replayEntries: 1,
+      });
+      assert.equal(scenario.provider.requests.length, 0);
+
+      const continuationMessage = k02Message(
+        "s11_continuation",
+        activeConversationId,
+        "mapped continuation",
+        "s11_prior_message",
+      );
+      scenario.enqueue(continuationMessage);
+      assert.equal((await scenario.wake(continuationMessage.id)).status, 202);
+      await scenario.connector.waitForIdle();
+      const resume = scenario.provider.requests[0];
+      assert.equal(resume?.kind, "resume");
+      if (resume?.kind === "resume") {
+        assert.equal(resume.provider_session_id, activeProviderSessionId);
+      }
+      assert.equal(warnings, "a2a connector: connector_state_capacity\n");
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    const invalidContinuationMessage = k02Message("s11_null_predecessor", activeConversationId);
+    scenario.enqueue(invalidContinuationMessage);
+    assert.equal((await scenario.wake(invalidContinuationMessage.id)).status, 202);
+    await assert.rejects(scenario.connector.waitForIdle(), /connector_conversation_unavailable/u);
+    assert.equal(scenario.provider.requests.length, 1);
   });
-  const continuationMessage = k02Message(
-    "s11_continuation",
-    activeConversationId,
-    "mapped continuation",
-    "s11_prior_message",
-  );
-  continuation.enqueue(continuationMessage);
-  assert.equal((await continuation.wake(continuationMessage.id)).status, 202);
-  await continuation.connector.waitForIdle();
-  const resume = continuation.provider.requests[0];
-  assert.equal(resume?.kind, "resume");
-  if (resume?.kind === "resume") {
-    assert.equal(resume.provider_session_id, activeProviderSessionId);
-  }
+
+  await check("received rows wait for their authenticated wake at message capacity", async () => {
+    const stateDirectory = await temporaryDirectory(t, "a2a-k02-s11-message-quota-");
+    const activeConversationId = "s11_message_quota_existing";
+    const activeProviderSessionId = "s11_message_quota_session";
+    await module.initializeConnectorStateForTest({
+      stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: WORKING_DIRECTORY,
+    });
+    await module.seedConnectorConversationsForTest({
+      stateDirectory,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex",
+      workingDirectory: WORKING_DIRECTORY,
+      count: 2,
+      activeConversationId,
+      activeProviderSessionId,
+      openMessageCount: 2,
+    });
+    const messageQuota = await startK02Scenario(t, "K02-K03:S11", {
+      stateDirectory,
+      workingDirectory: WORKING_DIRECTORY,
+      scripts: [
+        [
+          { kind: "turn", provider_turn_id: "s11_received_turn" },
+          { kind: "reply", text: "matched durable received row" },
+        ],
+      ],
+    });
+    assert.deepEqual(
+      messageQuota.connector.inspectAdmissionStateForTest(),
+      { queuedIds: [], activeIds: [], replayEntries: 0 },
+      "startup scheduled a durable received row without an authenticated wake",
+    );
+    for (let turn = 0; turn < 4; turn += 1) {
+      await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+    }
+    assert.equal(messageQuota.gateway.calls.length, 0, "startup polled for a durable received row");
+    assert.equal(messageQuota.provider.requests.length, 0);
+
+    let warnings = "";
+    const originalWrite = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      warnings += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const excessMessage = k02Message("s11_message_quota_excess", "s11_message_quota_new");
+      messageQuota.enqueue(excessMessage);
+      assert.equal((await messageQuota.wake(excessMessage.id)).status, 202);
+      await assert.doesNotReject(messageQuota.connector.waitForIdle());
+      assert.deepEqual(messageQuota.connector.inspectAdmissionStateForTest(), {
+        queuedIds: [],
+        activeIds: [],
+        replayEntries: 1,
+      });
+      assert.equal(warnings, "a2a connector: connector_state_capacity\n");
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    const received = k02Message(
+      "seed_message_0",
+      activeConversationId,
+      "matched durable received row",
+      "s11_prior_message",
+    );
+    messageQuota.enqueue(received);
+    assert.equal((await messageQuota.wake(received.id)).status, 202);
+    await messageQuota.connector.waitForIdle();
+    assert.equal(messageQuota.provider.requests[0]?.kind, "resume");
+    assert.deepEqual(
+      messageQuota.gateway.calls.map((call) => call.name),
+      ["poll_messages", "poll_messages", "reply_message", "ack_message"],
+    );
+    const quotaDatabase = new Database(join(stateDirectory, "correlation.sqlite3"), {
+      readonly: true,
+    });
+    try {
+      assert.deepEqual(
+        quotaDatabase
+          .prepare<[], { lifecycle: string }>("SELECT lifecycle FROM messages ORDER BY rowid")
+          .all(),
+        [{ lifecycle: "received" }],
+        "the unmatched durable received row did not remain dormant",
+      );
+    } finally {
+      quotaDatabase.close();
+    }
+  });
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-S12 opens no state until the injected filesystem qualification proves local", async (t) => {
@@ -792,6 +1292,247 @@ test("K02-S12 opens no state until the injected filesystem qualification proves 
     "correlation.sqlite3",
     "owner.sqlite3",
   ]);
+
+  const strengthenedFailures: string[] = [];
+  const check = async (label: string, operation: () => Promise<void>): Promise<void> => {
+    try {
+      await operation();
+    } catch (error) {
+      strengthenedFailures.push(`${label}: ${failureText(error)}`);
+    }
+  };
+  const cli = resolve(".test-dist/packages/codex-connector/src/cli.js");
+  const runPublic = (
+    preload: string,
+    arguments_: readonly string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ) =>
+    startCapturedChild(process.execPath, [`--import=${preload}`, cli, ...arguments_], {
+      cwd,
+      env,
+    });
+
+  await check("0750 account home with private connector directories", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s12-home-mode-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    await mkdir(accountHomeInput, { mode: 0o750 });
+    await chmod(accountHomeInput, 0o750);
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await userInfoPreload(t, accountHome);
+    const port = await unusedPort();
+    const captured = runPublic(preload, startArguments(port, workspace), workspace, {
+      ...process.env,
+      A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN,
+    });
+    t.after(async () => {
+      if (captured.child.exitCode === null && captured.child.signalCode === null) {
+        captured.child.kill("SIGKILL");
+      }
+      await captured.exit;
+    });
+    await waitForReadiness(captured, `Connector webhook: http://127.0.0.1:${port}/webhook\n`);
+    const providerDirectory = providerStateDirectory(accountHome, "codex");
+    let current = providerDirectory;
+    while (current !== accountHome) {
+      assert.equal((await stat(current)).mode & 0o777, 0o700, `${current} is not private`);
+      current = dirname(current);
+    }
+    assert.equal((await stat(accountHome)).mode & 0o777, 0o750);
+    captured.child.kill("SIGTERM");
+    assert.deepEqual(await captured.exit, { code: 0, signal: null });
+  });
+
+  await check(
+    "production filesystem qualification targets the final provider location",
+    async () => {
+      const root = await temporaryDirectory(t, "a2a-k02-s12-final-location-");
+      const accountHomeInput = join(root, "account-home");
+      const workspaceInput = join(root, "workspace");
+      const marker = join(root, "statfs-target");
+      await mkdir(accountHomeInput, { mode: 0o700 });
+      await mkdir(workspaceInput, { mode: 0o700 });
+      const accountHome = await realpath(accountHomeInput);
+      const workspace = await realpath(workspaceInput);
+      const expectedStateLocation = providerStateDirectory(accountHome, "codex");
+      const preload = await startupBarrierPreload(t, accountHome, [
+        `const expectedStateLocation = ${JSON.stringify(expectedStateLocation)};`,
+        `const statfsMarker = ${JSON.stringify(marker)};`,
+        "const realStatfsSync = fs.statfsSync;",
+        "const realStatfs = fs.statfs;",
+        "const realPromiseStatfs = fs.promises.statfs;",
+        "const checkStatfsPath = (path) => {",
+        '  fs.appendFileSync(statfsMarker, String(path) + "\\n", { mode: 0o600 });',
+        "  if (String(path) !== expectedStateLocation) {",
+        '    const error = new Error("filesystem qualification used the wrong target");',
+        '    error.code = "ENOSYS";',
+        "    throw error;",
+        "  }",
+        "};",
+        "fs.statfsSync = (path, options) => {",
+        "  checkStatfsPath(path);",
+        "  return realStatfsSync(path, options);",
+        "};",
+        "fs.statfs = (path, options, callback) => {",
+        "  const done = typeof options === 'function' ? options : callback;",
+        "  const selectedOptions = typeof options === 'function' ? undefined : options;",
+        "  try { checkStatfsPath(path); } catch (error) { queueMicrotask(() => done(error)); return; }",
+        "  return realStatfs(path, selectedOptions, done);",
+        "};",
+        "fs.promises.statfs = async (path, options) => {",
+        "  checkStatfsPath(path);",
+        "  return await realPromiseStatfs(path, options);",
+        "};",
+      ]);
+      const port = await unusedPort();
+      const captured = runPublic(preload, startArguments(port, workspace), workspace, {
+        ...process.env,
+        A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN,
+      });
+      t.after(async () => {
+        if (captured.child.exitCode === null && captured.child.signalCode === null) {
+          captured.child.kill("SIGKILL");
+        }
+        await captured.exit;
+      });
+      await waitForReadiness(captured, `Connector webhook: http://127.0.0.1:${port}/webhook\n`);
+      assert.deepEqual((await readFile(marker, "utf8")).trim().split("\n"), [
+        expectedStateLocation,
+      ]);
+      captured.child.kill("SIGTERM");
+      assert.deepEqual(await captured.exit, { code: 0, signal: null });
+    },
+  );
+
+  await check("unproven production filesystem", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s12-public-unproven-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const marker = join(root, "filesystem-probe");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await userInfoPreload(t, accountHome, undefined, {
+      behavior: "unproven",
+      marker,
+    });
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), workspace),
+      workspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "unproven production filesystem"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+    assert.match(await readFile(marker, "utf8"), /statfs\n/u);
+    await assert.rejects(readdir(providerStateDirectory(accountHome, "codex")), /ENOENT/u);
+  });
+
+  await check("effective UID rejection", async () => {
+    const root = await temporaryDirectory(t, "a2a-k02-s12-public-uid-");
+    const accountHomeInput = join(root, "account-home");
+    const workspaceInput = join(root, "workspace");
+    const marker = join(root, "uid-probe");
+    await mkdir(accountHomeInput, { mode: 0o700 });
+    await mkdir(workspaceInput, { mode: 0o700 });
+    const accountHome = await realpath(accountHomeInput);
+    const workspace = await realpath(workspaceInput);
+    const preload = await userInfoPreload(t, accountHome, undefined, {
+      behavior: "wrong_uid",
+      marker,
+    });
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), workspace),
+      workspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "wrong effective UID"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+    assert.match(await readFile(marker, "utf8"), /wrong_uid\n/u);
+    await assert.rejects(readdir(providerStateDirectory(accountHome, "codex")), /ENOENT/u);
+  });
+
+  const durableRoot = await temporaryDirectory(t, "a2a-k02-s12-public-durable-");
+  const durableHomeInput = join(durableRoot, "account-home");
+  const durableWorkspaceInput = join(durableRoot, "workspace");
+  const durabilityMarker = join(durableRoot, "durability-probe");
+  await mkdir(durableHomeInput, { mode: 0o700 });
+  await mkdir(durableWorkspaceInput, { mode: 0o700 });
+  const durableHome = await realpath(durableHomeInput);
+  const durableWorkspace = await realpath(durableWorkspaceInput);
+  const durablePreload = await userInfoPreload(t, durableHome, undefined, {
+    behavior: "observe_sync",
+    marker: durabilityMarker,
+  });
+  const durablePort = await unusedPort();
+  await check("initialization durability", async () => {
+    const captured = runPublic(
+      durablePreload,
+      startArguments(durablePort, durableWorkspace),
+      durableWorkspace,
+      { ...process.env, A2A_CONNECTOR_WEBHOOK_TOKEN: K02_TOKEN },
+    );
+    t.after(async () => {
+      if (captured.child.exitCode === null && captured.child.signalCode === null) {
+        captured.child.kill("SIGKILL");
+      }
+      await captured.exit;
+    });
+    const readiness = `Connector webhook: http://127.0.0.1:${durablePort}/webhook\n`;
+    await waitForReadiness(captured, readiness);
+    assert.equal(captured.child.kill("SIGTERM"), true);
+    assert.deepEqual(await waitForCapturedExit(captured, "durable initialization shutdown"), {
+      code: 0,
+      signal: null,
+    });
+    assert.deepEqual((await readFile(durabilityMarker, "utf8")).trim().split("\n"), [
+      "file",
+      "directory",
+      "file",
+      "directory",
+      "file",
+      "directory",
+    ]);
+  });
+
+  await check("protected parent chain", async () => {
+    const connectorRoot = dirname(providerStateDirectory(durableHome, "codex"));
+    await chmod(connectorRoot, 0o755);
+    const environment = { ...process.env };
+    delete environment.A2A_CONNECTOR_WEBHOOK_TOKEN;
+    const preload = await userInfoPreload(t, durableHome);
+    const captured = runPublic(
+      preload,
+      startArguments(await unusedPort(), durableWorkspace),
+      durableWorkspace,
+      environment,
+    );
+    assert.deepEqual(await waitForCapturedExit(captured, "weak protected parent"), {
+      code: 7,
+      signal: null,
+    });
+    assert.equal(captured.stdout(), "");
+    assert.equal(captured.stderr(), "a2a connector: connector_state_unavailable\n");
+  });
+
+  assert.deepEqual(strengthenedFailures, [], strengthenedFailures.join("\n"));
 });
 
 test("K02-S13 distinguishes partial markers while retirement resumes every crash barrier", async (t) => {
@@ -861,6 +1602,15 @@ test("K02-D03 keeps connector-core unpackaged and fixes every private provider m
   };
   assert.equal(rootManifest.scripts?.["connectors:check"], "node scripts/connectors-check.mjs");
   for (const provider of PROVIDERS) {
+    const providerCli = await readFile(
+      resolve(`packages/${provider}-connector/src/cli.ts`),
+      "utf8",
+    );
+    assert.equal(
+      providerCli.includes("../../connector-core/src/index.js"),
+      false,
+      `${provider} public CLI deep-imports the repository test boundary`,
+    );
     const manifest = JSON.parse(
       await readFile(resolve(`packages/${provider}-connector/package.json`), "utf8"),
     ) as unknown;
@@ -992,6 +1742,55 @@ function importSpecifiers(source: string): string[] {
 function dependencyName(specifier: string): string {
   if (!specifier.startsWith("@")) return specifier.split("/")[0] ?? specifier;
   return specifier.split("/").slice(0, 2).join("/");
+}
+
+const FORBIDDEN_PACKAGED_CONTROLS = [
+  "startConnectorFoundation",
+  "connector_test_crash",
+  "crashAfter",
+  "failStateAfter",
+  "failPairedStateWriteAfter",
+  "crashAtUnboundState",
+  "crashAfterCancellation",
+  "crashAfterLostReplyUncertain",
+  "crashForRecoveryState",
+  "crashAfterReceived",
+  "crashAfterTurnStarting",
+  "proveNoProviderDispatch",
+  "stallWebhookResponseAfterCommit",
+  "providerDispatchDelayMsForTest",
+  "stateActionObserverForTest",
+  "filesystemQualification",
+] as const;
+
+function packagedBoundaryFailures(source: string, label: string): string[] {
+  const failures = new Set<string>();
+  if (source.includes("../../connector-core/src/index.js")) {
+    failures.add(`${label} deep-imports the repository test boundary`);
+  }
+  for (const control of new Set(source.match(/\b[A-Za-z_$][\w$]*ForTest\b/gu) ?? [])) {
+    failures.add(`${label} exposes test control ${control}`);
+  }
+  for (const control of FORBIDDEN_PACKAGED_CONTROLS) {
+    if (!source.includes(control)) continue;
+    failures.add(
+      control === "startConnectorFoundation"
+        ? `${label} exposes the arbitrary gateway/state-root foundation`
+        : `${label} exposes test control ${control}`,
+    );
+  }
+  return [...failures];
+}
+
+async function assertStagedTestBoundary(
+  stageRoot: string,
+  files: readonly string[],
+): Promise<void> {
+  const failures: string[] = [];
+  for (const file of files.filter((candidate) => candidate.endsWith(".js"))) {
+    failures.push(...packagedBoundaryFailures(await readFile(join(stageRoot, file), "utf8"), file));
+  }
+  assert.deepEqual(failures, [], failures.join("\n"));
 }
 
 async function assertBuildAndStage(provider: (typeof PROVIDERS)[number]): Promise<void> {
@@ -1275,6 +2074,7 @@ test("K02-D04 runs the closed-provider build and stage gate without stale or lin
     const stage = await runRepositoryScript("scripts/stage-connector.mjs", [provider]);
     assert.equal(stage.code, 0, `${stage.stdout}\n${stage.stderr}`);
     await assertBuildAndStage(provider);
+    await assertStagedTestBoundary(stageRoot, (await inventory(stageRoot)).files);
     await writeFile(join(stageRoot, "stale.txt"), "stale stage", {
       encoding: "utf8",
       mode: 0o600,
@@ -1298,6 +2098,7 @@ test("K02-D04 runs the closed-provider build and stage gate without stale or lin
     const restoredStage = await runRepositoryScript("scripts/stage-connector.mjs", [provider]);
     assert.equal(restoredStage.code, 0, `${restoredStage.stdout}\n${restoredStage.stderr}`);
     await assertBuildAndStage(provider);
+    await assertStagedTestBoundary(stageRoot, (await inventory(stageRoot)).files);
     await assert.rejects(lstat(buildTemporaryRoot), /ENOENT/u);
     await assert.rejects(lstat(stageTemporaryRoot), /ENOENT/u);
   }
@@ -1337,6 +2138,15 @@ test("K02-D05 gates the exact private packed and clean-installed command artifac
       .map((entry) => entry.path.slice("package/".length))
       .sort();
     assert.deepEqual(tarFiles, stageInventory.files);
+    const packedBoundaryFailures: string[] = [];
+    for (const entry of tarEntries) {
+      if (entry.type === "file" && entry.path.endsWith(".js")) {
+        packedBoundaryFailures.push(
+          ...packagedBoundaryFailures(entry.bytes.toString("utf8"), entry.path),
+        );
+      }
+    }
+    assert.deepEqual(packedBoundaryFailures, [], packedBoundaryFailures.join("\n"));
     const expectedDirectories = new Set(stageInventory.directories);
     for (const entry of tarEntries) {
       const path = entry.path.slice("package/".length).replace(/\/$/u, "");
@@ -1349,11 +2159,19 @@ test("K02-D05 gates the exact private packed and clean-installed command artifac
         assert.equal(entry.mode, 0o755);
         continue;
       }
-      assert.equal(
-        createHash("sha256").update(entry.bytes).digest("hex"),
-        await sha256(join(stageRoot, path)),
-        `packing changed ${path}`,
-      );
+      if (path === "package.json") {
+        assert.deepEqual(
+          JSON.parse(entry.bytes.toString("utf8")),
+          JSON.parse(await readFile(join(stageRoot, path), "utf8")),
+          "packing changed the package manifest",
+        );
+      } else {
+        assert.equal(
+          createHash("sha256").update(entry.bytes).digest("hex"),
+          await sha256(join(stageRoot, path)),
+          `packing changed ${path}`,
+        );
+      }
       assert.equal(
         entry.mode,
         path === `dist/${provider}-connector/src/cli.js` ? 0o755 : 0o644,
@@ -1397,14 +2215,29 @@ test("K02-D05 gates the exact private packed and clean-installed command artifac
     );
     const installedPackage = join(installRoot, "node_modules", "@a2adev", `${provider}-connector`);
     const installedInventory = await inventory(installedPackage);
-    assert.deepEqual(installedInventory, stageInventory);
+    const packageManagerShim = `node_modules/.bin/a2a-${provider}-connector`;
+    assert.deepEqual(installedInventory, {
+      directories: [...stageInventory.directories, "node_modules", "node_modules/.bin"].sort(),
+      files: [...stageInventory.files, packageManagerShim].sort(),
+      links: [],
+    });
+    await assertMode(join(installedPackage, packageManagerShim), 0o755);
     for (const file of stageInventory.files) {
-      assert.equal(
-        await sha256(join(installedPackage, file)),
-        await sha256(join(stageRoot, file)),
-        `clean install changed ${file}`,
-      );
+      if (file === "package.json") {
+        assert.deepEqual(
+          JSON.parse(await readFile(join(installedPackage, file), "utf8")),
+          JSON.parse(await readFile(join(stageRoot, file), "utf8")),
+          "clean install changed the package manifest",
+        );
+      } else {
+        assert.equal(
+          await sha256(join(installedPackage, file)),
+          await sha256(join(stageRoot, file)),
+          `clean install changed ${file}`,
+        );
+      }
     }
+    await assertStagedTestBoundary(installedPackage, stageInventory.files);
     assert.deepEqual(await readdir(join(installRoot, "node_modules", "@a2adev")), [
       `${provider}-connector`,
     ]);

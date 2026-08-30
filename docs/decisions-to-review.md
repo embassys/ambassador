@@ -203,6 +203,96 @@ Code, and Gemini still require separate
 executable or SDK, version, protocol, sandbox, approval, history, license, and
 platform ADRs.
 
+## K03 test-determinism corrections
+
+- The K01 wake helper defaults to the injected clock's epoch when one is
+  present. Explicit raw W02 timestamp vectors are unchanged. This removes a
+  wall-clock dependency from deterministic connector scenarios without
+  changing the webhook contract.
+- Packed and clean-installed comparisons treat only pnpm's canonical
+  `package.json` serialization, package-local bin shim, and missing final
+  manifest LF as package-manager normalization. Parsed manifests remain
+  structurally exact; every other staged payload keeps byte-hash equality,
+  and every other installed path remains forbidden.
+- Raw-socket setup is serialized through a recovering test-only tail and
+  waits two Node event-loop turns after connect. Response collection treats
+  only client `ECONNRESET` as terminal close. W08 additionally yields once
+  after sending each held request head before advancing the manual clock, so
+  the test observes a registered request rather than host socket scheduling.
+  Production deadlines and the rejection of every other socket error are
+  unchanged.
+- W08 now replaces that event-loop yield with a content-free barrier on the
+  injected clock: it advances only after the header timer is cleared and the
+  request timer remains. This proves the held request reached `request_parsed`
+  without adding a connector, CLI, staged-package, or public control surface;
+  every production deadline and manual-clock value is unchanged.
+- External reopened SQLite connections no longer assert `trusted_schema` or
+  `max_page_count`: both are connection-local observations. The live
+  connector-owned connection still proves their exact accepted values, and
+  every persistent pragma, DDL, digest, mode, and row check remains exact.
+- O05 now sends distinct valid authenticated wakes while it tests coalescing
+  before the durable retry time. The approved injected-clock default had made
+  its first repeated wake byte-identical to the original request, which is an
+  ADR 0030 replay and must remain a `409`, not coalescing evidence. The HMAC,
+  replay rule, retry intervals, and coalescing behavior are unchanged.
+- O03 and O06 now observe the exact durable `retry_kind` and absolute
+  `retry_not_before_ms` before advancing their manual clocks. Observing the
+  fake proxy's request was not evidence that the connector had received the
+  simulated transport result and committed its schedule. This changes only
+  test ordering; production scheduling and every accepted interval remain
+  unchanged.
+- A03 waits until both encrypted session and turn mappings are durably visible
+  before crashing, and O05 observes every exact durable retry row before it
+  advances the manual clock. These are state-barrier corrections for the same
+  request-observation race; no timeout, retry interval, clock value, or
+  production behavior changed.
+- O06 filters the proxy's raw MCP `initialize` record only when comparing the
+  ordered delivery-control tool names. The proxy still retains that record,
+  every defined tool remains in exact order, and separate MCP session and
+  handshake evidence remains required.
+- O06 treats the fixture's absent pre-ack tombstone as not acknowledged, using
+  the same existing `?? false` semantic assertion as its other blocked-result
+  vectors. The fake gateway continues to expose a tombstone only after exact
+  acknowledgement, and later acknowledged-tombstone assertions remain exact.
+- C01 now expects no provider `start` at the pre-dispatch
+  `binding_published` barrier, matching C03; every post-dispatch barrier still
+  requires exactly one original start. C01 and C04 observe the exact durable
+  outcome-retry kind and time before advancing their manual clocks, applying
+  the same ordering rule as O03 and O06 without changing the retry schedule.
+- C01's committed-but-unobserved reply scenario now routes the reply through
+  the existing fault proxy and drops the response after the fake gateway has
+  committed it. The earlier test selected the crash seam without producing
+  the uncertain transport observation the seam represents.
+
+## K03 implementation judgments
+
+- The local gateway client uses the approved
+  `@modelcontextprotocol/client` 2.0.0 `StreamableHTTPClientTransport`, pins
+  the accepted 2025-06-18 handshake, sends `notifications/initialized`, and
+  applies the injected 35-second request abort. A project-owned fetch wrapper
+  keeps redirects manual, bounds collected response bytes to 4 MiB, and
+  rejects a JSON-RPC response whose ID does not match the request. This is a
+  boundary hardening layer around the approved transport, not a second MCP
+  implementation.
+- Startup acquires the SQLite owner singleton before schema inspection on the
+  pre-token path, so a live owner yields `connector_already_running` within
+  the fixed busy timeout instead of blocking on schema reads. Normal state
+  opening retains the full schema and pragma validation. Failed opens erase
+  derived keys and close both database handles.
+- After an uncertain reply transport result, the connector discards the
+  in-memory reply bytes and relies only on central outcome lookup plus the
+  exact provider-turn recovery contract. It never persists or reconstructs
+  reply text from correlation state.
+- K03's process environment, output-boundary, cancellation, and containment
+  helpers are provider-neutral foundation evidence only. Each real provider
+  ADR and adapter must attach those helpers to its actual launch path and pass
+  provider/platform containment qualification before that adapter is
+  supported.
+- The user approved a Codex-first usable preview after K03 and K04. Claude
+  Code and Gemini follow as parallel adapter tracks. Real-central
+  qualification, publication, soak evidence, and stable support claims remain
+  deferred to their existing later gates.
+
 ## Test-only stand-ins
 
 The user authorized reasonable stand-ins for production facts that are not yet

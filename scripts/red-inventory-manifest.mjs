@@ -525,14 +525,14 @@ const packagedDocker = [
   },
 ];
 
-function k02Failure(file, boundary, name) {
+function k02Pass(file, name) {
   return {
     file,
     nesting: 0,
-    status: "fail",
+    status: "pass",
     skip: false,
     todo: false,
-    boundary,
+    boundary: undefined,
     name,
   };
 }
@@ -730,7 +730,7 @@ const k02Groups = {
 
 const k02 = [
   ...Object.entries(k02Groups).flatMap(([file, cases]) =>
-    cases.map(([boundary, name]) => k02Failure(file, boundary, name)),
+    cases.map(([, name]) => k02Pass(file, name)),
   ),
   ...pass("k02-loader-boundary.test.js", 0, [
     "K02 support classifies only the exact absent K03 entry as reviewed red",

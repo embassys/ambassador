@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createCipheriv, createHmac, randomBytes, scryptSync } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+
+import Database from "better-sqlite3";
 
 import {
   type FakeConnectorGateway,
@@ -52,6 +54,13 @@ export type K02StateFaultBarrier =
   | "first_progress"
   | "approval_required"
   | "terminal_plan";
+export type K02PairedStateFaultBarrier =
+  | "conversation_update"
+  | "uncertain_after_message_update"
+  | "lost_reply_after_message_update"
+  | "completion_after_conversation_update"
+  | "reply_ack_after_conversation_update"
+  | "completion_ack_after_conversation_update";
 export type K02RecoveryStateCrash =
   | "session_binding"
   | "approval_wait"
@@ -106,7 +115,7 @@ export interface K02ConnectorOptions {
   clock?: K02Clock;
   crashAfter?: K02CrashBarrier;
   failStateAfter?: K02StateFaultBarrier;
-  failPairedStateWriteAfter?: "conversation_update";
+  failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
   crashAtUnboundState?: "turn_running" | "waiting_for_approval";
   crashAfterCancellation?: boolean;
   crashAfterLostReplyUncertain?: boolean;
@@ -115,6 +124,10 @@ export interface K02ConnectorOptions {
   crashAfterTurnStarting?: boolean;
   proveNoProviderDispatch?: boolean;
   stallWebhookResponseAfterCommit?: boolean;
+  providerDispatchDelayMsForTest?: number;
+  stateActionObserverForTest?: {
+    observe(event: Readonly<Record<string, unknown>>): void;
+  };
 }
 
 export interface K02ConnectorHandle {
@@ -185,6 +198,7 @@ export interface K02ProductionModule {
     count: number;
     activeConversationId: string;
     activeProviderSessionId: string;
+    openMessageCount?: number;
   }): Promise<void>;
   retireConnectorStateForTest(options: {
     stateDirectory: string;
@@ -213,18 +227,23 @@ export interface K02Scenario {
     scripts: readonly (readonly K02ProviderStep[])[],
     options?: {
       contained?: boolean;
+      gatedEvents?: readonly string[];
+      gateContainment?: boolean;
       crashAfter?: K02CrashBarrier;
       webhookToken?: string;
       workingDirectory?: string;
       providerKind?: "codex" | "claude" | "gemini";
       crashForRecoveryState?: K02RecoveryStateCrash;
       proveNoProviderDispatch?: boolean;
+      failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
       cancelResult?: unknown;
     },
   ): Promise<{
     connector: K02ConnectorHandle;
     provider: ScriptedFakeProvider;
     providerPort: K02ProviderPort;
+    releaseProviderEvent(event: string): void;
+    releaseContainment(): void;
   }>;
 }
 
@@ -237,6 +256,7 @@ export type K02GatewayFault =
   | { kind: "hold" };
 
 export interface K02GatewayProxyCall {
+  method: string | undefined;
   tool: string | undefined;
   atMs: number;
   arguments: Readonly<Record<string, unknown>> | undefined;
@@ -301,6 +321,7 @@ export class K02GatewayFaultProxy {
     const body = Buffer.concat(chunks);
     let parsed: {
       id?: unknown;
+      method?: unknown;
       params?: { name?: unknown; arguments?: unknown };
     } = {};
     try {
@@ -311,6 +332,7 @@ export class K02GatewayFaultProxy {
     const tool = typeof parsed.params?.name === "string" ? parsed.params.name : undefined;
     const arguments_ = parsed.params?.arguments;
     this.#calls.push({
+      method: typeof parsed.method === "string" ? parsed.method : undefined,
       tool,
       atMs: Date.now(),
       arguments:
@@ -353,7 +375,14 @@ export class K02GatewayFaultProxy {
     }
     if (fault?.kind === "structured_result") {
       const bytes = Buffer.from(
-        JSON.stringify({ jsonrpc: "2.0", id: parsed.id, result: fault.value }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: parsed.id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify(fault.value) }],
+            structuredContent: fault.value,
+          },
+        }),
       );
       response.writeHead(200, {
         "cache-control": "no-store",
@@ -399,6 +428,130 @@ export class K02GatewayFaultProxy {
       response.writeHead(upstreamResponse.status, responseHeaders);
       response.end(bytes);
     });
+  }
+}
+
+function k02StateFrame(domain: number, parts: readonly Buffer[]): Buffer {
+  const fields = parts.map((part) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(part.byteLength);
+    return Buffer.concat([length, part]);
+  });
+  return Buffer.concat([
+    Buffer.from("A2A-CONNECTOR-STATE\0", "ascii"),
+    Buffer.from([1, domain]),
+    ...fields,
+  ]);
+}
+
+function k02StateHmac(key: Buffer, domain: number, parts: readonly Buffer[]): Buffer {
+  return createHmac("sha256", key).update(k02StateFrame(domain, parts)).digest();
+}
+
+function k02StateEnvelope(
+  key: Buffer,
+  raw: Buffer,
+  aad: Buffer,
+  iv: Buffer,
+): { iv: Buffer; ciphertext: Buffer; tag: Buffer } {
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(aad);
+  return {
+    iv,
+    ciphertext: Buffer.concat([cipher.update(raw), cipher.final()]),
+    tag: cipher.getAuthTag(),
+  };
+}
+
+export function seedK02ConversationCapacityForTest(options: {
+  stateDirectory: string;
+  webhookToken: string;
+  providerKind: "codex" | "claude" | "gemini";
+  workingDirectory: string;
+  count: number;
+  activeConversationId: string;
+  activeProviderSessionId: string;
+}): void {
+  assert.ok(options.count >= 1 && options.count <= 100_000);
+  const database = new Database(join(options.stateDirectory, "correlation.sqlite3"));
+  const meta = database
+    .prepare<[], { kdf_salt: Buffer }>("SELECT kdf_salt FROM store_meta WHERE singleton=1")
+    .get();
+  assert.ok(meta !== undefined);
+  const derived = scryptSync(Buffer.from(options.webhookToken, "hex"), meta.kdf_salt, 64, {
+    N: 131_072,
+    r: 8,
+    p: 1,
+    maxmem: 268_435_456,
+  });
+  const aesKey = derived.subarray(0, 32);
+  const hmacKey = derived.subarray(32, 64);
+  const provider = Buffer.from(options.providerKind, "ascii");
+  const directory = Buffer.from(options.workingDirectory, "utf8");
+  const ivs = randomBytes(options.count * 12 + 12);
+  const insert = database.prepare(
+    "INSERT INTO conversations(conversation_hmac, conversation_iv, conversation_ciphertext, conversation_tag, provider_session_hmac, provider_session_iv, provider_session_ciphertext, provider_session_tag, lifecycle, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const now = Date.now();
+  try {
+    database.pragma("synchronous=OFF");
+    database.transaction(() => {
+      for (let index = 0; index < options.count; index += 1) {
+        const conversationId =
+          index === 0 ? options.activeConversationId : `capacity_conversation_${index}`;
+        const conversationRaw = Buffer.from(conversationId, "ascii");
+        const conversationHmac = k02StateHmac(hmacKey, 0x02, [conversationRaw]);
+        const conversationEnvelope = k02StateEnvelope(
+          aesKey,
+          conversationRaw,
+          k02StateFrame(0x11, [provider, directory, conversationHmac]),
+          ivs.subarray(index * 12, index * 12 + 12),
+        );
+        if (index === 0) {
+          const sessionRaw = Buffer.from(options.activeProviderSessionId, "utf8");
+          const sessionHmac = k02StateHmac(hmacKey, 0x04, [sessionRaw]);
+          const sessionEnvelope = k02StateEnvelope(
+            aesKey,
+            sessionRaw,
+            k02StateFrame(0x13, [provider, directory, conversationHmac, sessionHmac]),
+            ivs.subarray(options.count * 12, options.count * 12 + 12),
+          );
+          insert.run(
+            conversationHmac,
+            conversationEnvelope.iv,
+            conversationEnvelope.ciphertext,
+            conversationEnvelope.tag,
+            sessionHmac,
+            sessionEnvelope.iv,
+            sessionEnvelope.ciphertext,
+            sessionEnvelope.tag,
+            "active",
+            now,
+            now,
+          );
+        } else {
+          insert.run(
+            conversationHmac,
+            conversationEnvelope.iv,
+            conversationEnvelope.ciphertext,
+            conversationEnvelope.tag,
+            null,
+            null,
+            null,
+            null,
+            "closed",
+            now,
+            now,
+          );
+        }
+      }
+    })();
+    database.pragma("wal_checkpoint(TRUNCATE)");
+  } finally {
+    aesKey.fill(0);
+    hmacKey.fill(0);
+    derived.fill(0);
+    database.close();
   }
 }
 
@@ -468,14 +621,28 @@ export function k02RawHead(requestLine: string, headers: Readonly<Record<string,
     .join("\r\n")}\r\n\r\n`;
 }
 
+let rawSocketSetupTail = Promise.resolve();
+
 export async function openK02Socket(webhookUrl: string): Promise<Socket> {
-  const url = new URL(webhookUrl);
-  const socket = connect({ host: "127.0.0.1", port: Number(url.port) });
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("error", reject);
+  const predecessor = rawSocketSetupTail;
+  let release: (() => void) | undefined;
+  rawSocketSetupTail = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  return socket;
+  await predecessor;
+  try {
+    const url = new URL(webhookUrl);
+    const socket = connect({ host: "127.0.0.1", port: Number(url.port) });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return socket;
+  } finally {
+    release?.();
+  }
 }
 
 export async function readK02Response(socket: Socket, timeoutMs = 7_000): Promise<Buffer> {
@@ -497,7 +664,8 @@ export async function readK02Response(socket: Socket, timeoutMs = 7_000): Promis
     });
     socket.once("error", (error) => {
       clearTimeout(timer);
-      reject(error);
+      if ((error as NodeJS.ErrnoException).code === "ECONNRESET") resolve(Buffer.concat(chunks));
+      else reject(error);
     });
   });
 }
@@ -527,6 +695,10 @@ export class ManualK02Clock implements K02Clock {
 
   clearTimer(timer: unknown): void {
     if (typeof timer === "number") this.#timers.delete(timer);
+  }
+
+  pendingTimerCountForTest(): number {
+    return this.#timers.size;
   }
 
   advance(ms: number): void {
@@ -714,7 +886,7 @@ export function validateK02ProductionModule(loaded: unknown): K02ProductionModul
 }
 
 export async function loadK02Production(caseId: string): Promise<K02ProductionModule> {
-  const url = new URL("../../../packages/connector-core/src/index.js", import.meta.url);
+  const url = new URL("./k02-module.js", import.meta.url);
   let loaded: unknown;
   try {
     loaded = await import(url.href);
@@ -751,7 +923,7 @@ export async function startK02Scenario(
     clock?: K02Clock;
     crashAfter?: K02CrashBarrier;
     failStateAfter?: K02StateFaultBarrier;
-    failPairedStateWriteAfter?: "conversation_update";
+    failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
     crashAtUnboundState?: "turn_running" | "waiting_for_approval";
     crashAfterCancellation?: boolean;
     crashAfterLostReplyUncertain?: boolean;
@@ -760,6 +932,10 @@ export async function startK02Scenario(
     crashAfterTurnStarting?: boolean;
     proveNoProviderDispatch?: boolean;
     stallWebhookResponseAfterCommit?: boolean;
+    providerDispatchDelayMsForTest?: number;
+    stateActionObserverForTest?: {
+      observe(event: Readonly<Record<string, unknown>>): void;
+    };
     policy?: K02Policy;
     gatedEvents?: readonly string[];
     gatewayProxy?: boolean;
@@ -772,6 +948,10 @@ export async function startK02Scenario(
     workingDirectory?: string;
   } = {},
 ): Promise<K02Scenario> {
+  const connectorsForCleanup: K02ConnectorHandle[] = [];
+  t.after(async () => {
+    for (const handle of connectorsForCleanup.reverse()) await handle.close();
+  });
   const root = await mkdtemp(join(tmpdir(), "a2a-k02-"));
   const stateDirectory = options.stateDirectory ?? join(root, "state");
   const workingDirectory = options.workingDirectory ?? join(root, "workspace");
@@ -852,8 +1032,14 @@ export async function startK02Scenario(
     ...(options.stallWebhookResponseAfterCommit === undefined
       ? {}
       : { stallWebhookResponseAfterCommit: options.stallWebhookResponseAfterCommit }),
+    ...(options.providerDispatchDelayMsForTest === undefined
+      ? {}
+      : { providerDispatchDelayMsForTest: options.providerDispatchDelayMsForTest }),
+    ...(options.stateActionObserverForTest === undefined
+      ? {}
+      : { stateActionObserverForTest: options.stateActionObserverForTest }),
   });
-  t.after(async () => await connector.close());
+  connectorsForCleanup.push(connector);
   const webhookPort = Number(new URL(connector.webhookUrl).port);
   return {
     module,
@@ -872,10 +1058,13 @@ export async function startK02Scenario(
       gateway.enqueueMessage(message);
     },
     async wake(messageId, timestampSeconds) {
+      const effectiveTimestamp =
+        timestampSeconds ??
+        (options.clock === undefined ? undefined : Math.floor(options.clock.nowMs() / 1_000));
       return await gateway.sendWake(
         connector.webhookUrl,
         messageId,
-        timestampSeconds === undefined ? {} : { timestampSeconds },
+        effectiveTimestamp === undefined ? {} : { timestampSeconds: effectiveTimestamp },
       );
     },
     releaseProviderEvent(event) {
@@ -890,9 +1079,9 @@ export async function startK02Scenario(
         restartedProvider,
         scripts,
         restartOptions.contained ?? true,
-        [],
+        restartOptions.gatedEvents ?? [],
         undefined,
-        false,
+        restartOptions.gateContainment ?? false,
         restartOptions.cancelResult,
       );
       const restartedConnector = await module.startConnectorFoundation({
@@ -914,12 +1103,21 @@ export async function startK02Scenario(
         ...(restartOptions.proveNoProviderDispatch === undefined
           ? {}
           : { proveNoProviderDispatch: restartOptions.proveNoProviderDispatch }),
+        ...(restartOptions.failPairedStateWriteAfter === undefined
+          ? {}
+          : { failPairedStateWriteAfter: restartOptions.failPairedStateWriteAfter }),
       });
-      t.after(async () => await restartedConnector.close());
+      connectorsForCleanup.push(restartedConnector);
       return {
         connector: restartedConnector,
         provider: restartedProvider,
         providerPort: restartedProviderPort,
+        releaseProviderEvent(event) {
+          restartedProviderPort.release(event);
+        },
+        releaseContainment() {
+          restartedProviderPort.releaseContainment();
+        },
       };
     },
   };

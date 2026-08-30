@@ -34,6 +34,61 @@ function assertBlockedClass(scenario: K02Scenario, expected: string): void {
   }
 }
 
+function readRetrySchedule(scenario: K02Scenario):
+  | {
+      retry_kind: string | null;
+      retry_not_before_ms: number | null;
+    }
+  | undefined {
+  const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
+    readonly: true,
+  });
+  try {
+    return database
+      .prepare<[], { retry_kind: string | null; retry_not_before_ms: number | null }>(
+        "SELECT retry_kind, retry_not_before_ms FROM messages",
+      )
+      .get();
+  } finally {
+    database.close();
+  }
+}
+
+async function waitForRetrySchedule(
+  scenario: K02Scenario,
+  retryKind: string,
+  retryNotBeforeMs: number,
+  label: string,
+): Promise<void> {
+  await waitFor(() => {
+    try {
+      const schedule = readRetrySchedule(scenario);
+      return (
+        schedule?.retry_kind === retryKind && schedule.retry_not_before_ms === retryNotBeforeMs
+      );
+    } catch {
+      return false;
+    }
+  }, label);
+}
+
+function simulateCrashAfterDurableAttemptClaim(
+  scenario: K02Scenario,
+  retryKind: "reply" | "complete",
+): void {
+  const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"));
+  try {
+    const result = database
+      .prepare(
+        "UPDATE messages SET retry_kind=?, retry_not_before_ms=NULL, retry_attempt_count=MAX(retry_attempt_count, 1)",
+      )
+      .run(retryKind);
+    assert.equal(result.changes, 1);
+  } finally {
+    database.close();
+  }
+}
+
 function deliveryScript(
   operation: K02DeliveryOperation,
   suffix: string,
@@ -46,6 +101,13 @@ function deliveryScript(
     { kind: "turn", provider_turn_id: `${suffix}_turn` },
     { kind: "reply", text: `${suffix}_reply_bytes` },
   ];
+}
+
+function retryKindFor(operation: K02DeliveryOperation): string {
+  if (operation === "reply_message") return "reply";
+  if (operation === "complete_message") return "complete";
+  if (operation === "get_message_outcome") return "outcome_lookup";
+  return "ack";
 }
 
 test("K02-O01 sends every exact terminal mapping before one acknowledgement", async (t) => {
@@ -325,6 +387,7 @@ test("K02-C02 recovers only the exact durable turn after a crash", async (t) => 
 test("K02-C01 resolves a committed lost reply through outcome lookup and one ack", async (t) => {
   const scenario = await startK02Scenario(t, "K02-K03:C01", {
     crashAfter: "reply_committed_unobserved",
+    gatewayProxy: true,
     scripts: [
       [
         { kind: "session", provider_session_id: "session_commit" },
@@ -334,6 +397,7 @@ test("K02-C01 resolves a committed lost reply through outcome lookup and one ack
     ],
   });
   const message = k02Message("message_commit", "conversation_commit");
+  scenario.gatewayProxy?.failNext("reply_message", { kind: "drop_after_commit" });
   scenario.enqueue(message);
   assert.equal((await scenario.wake(message.id)).status, 202);
   await assert.rejects(scenario.connector.waitForIdle(), /connector_test_crash/u);
@@ -351,6 +415,104 @@ test("K02-C01 resolves a committed lost reply through outcome lookup and one ack
   );
   assert.equal(restarted.provider.requests.length, 0);
   assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged, true);
+
+  const claimedTerminalClock = new ManualK02Clock(1_788_400_000_000);
+  const claimedTerminal = await startK02Scenario(t, "K02-K03:C01", {
+    clock: claimedTerminalClock,
+    crashAfter: "reply_accepted",
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_claimed_terminal" },
+        { kind: "turn", provider_turn_id: "turn_claimed_terminal" },
+        { kind: "reply", text: "claimed terminal reply" },
+      ],
+    ],
+  });
+  const claimedTerminalMessage = k02Message(
+    "message_claimed_terminal",
+    "conversation_claimed_terminal",
+  );
+  claimedTerminal.enqueue(claimedTerminalMessage);
+  assert.equal(
+    (
+      await claimedTerminal.wake(
+        claimedTerminalMessage.id,
+        Math.floor(claimedTerminalClock.nowMs() / 1_000),
+      )
+    ).status,
+    202,
+  );
+  await assert.rejects(claimedTerminal.connector.waitForIdle(), /connector_test_crash/u);
+  await claimedTerminal.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(claimedTerminal, "reply");
+  const claimedTerminalRestart = await claimedTerminal.restart([]);
+  try {
+    await waitFor(
+      () => claimedTerminal.gateway.calls.length >= 3,
+      "recovered claimed reply outcome lookup",
+    );
+    assert.equal(
+      claimedTerminal.gateway.calls[2]?.name,
+      "get_message_outcome",
+      "recovery repeated a claimed reply before resolving its outcome",
+    );
+    await claimedTerminalRestart.connector.waitForIdle();
+    assert.deepEqual(
+      claimedTerminal.gateway.calls.map((call) => call.name),
+      ["poll_messages", "reply_message", "get_message_outcome", "ack_message"],
+    );
+  } finally {
+    await claimedTerminalRestart.connector.close();
+  }
+
+  const openCompletionClock = new ManualK02Clock(1_788_410_000_000);
+  const openCompletion = await startK02Scenario(t, "K02-K03:C01", {
+    clock: openCompletionClock,
+    gatewayProxy: true,
+    scripts: [[{ kind: "failed", reason_code: "provider_start_failed" }]],
+  });
+  openCompletion.gatewayProxy?.failNext("complete_message", { kind: "drop_before_dispatch" });
+  const openCompletionMessage = k02Message(
+    "message_claimed_open_completion",
+    "conversation_claimed_open_completion",
+  );
+  openCompletion.enqueue(openCompletionMessage);
+  assert.equal(
+    (
+      await openCompletion.wake(
+        openCompletionMessage.id,
+        Math.floor(openCompletionClock.nowMs() / 1_000),
+      )
+    ).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    openCompletion,
+    "outcome_lookup",
+    openCompletionClock.nowMs() + 30_000,
+    "claimed open completion outcome schedule",
+  );
+  await openCompletion.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(openCompletion, "complete");
+  const openCompletionRestart = await openCompletion.restart([]);
+  try {
+    await waitFor(
+      () => openCompletion.gateway.calls.length >= 2,
+      "recovered claimed completion outcome lookup",
+    );
+    assert.equal(
+      openCompletion.gateway.calls[1]?.name,
+      "get_message_outcome",
+      "recovery repeated a claimed completion before resolving its outcome",
+    );
+    await openCompletionRestart.connector.waitForIdle();
+    assert.deepEqual(
+      openCompletion.gateway.calls.map((call) => call.name),
+      ["poll_messages", "get_message_outcome", "complete_message", "ack_message"],
+    );
+  } finally {
+    await openCompletionRestart.connector.close();
+  }
 });
 
 test("K02-P07 blocks terminal reporting when qualified containment cannot prove cleanup", async (t) => {
@@ -400,6 +562,12 @@ test("K02-O03 converts a lost open reply to uncertain after exact recovery canno
     () => scenario.gateway.calls.filter((call) => call.name === "poll_messages").length === 1,
     "initial poll",
   );
+  await waitForRetrySchedule(
+    scenario,
+    "outcome_lookup",
+    clock.nowMs() + 30_000,
+    "lost-open outcome schedule",
+  );
   clock.advance(30_000);
   await scenario.connector.waitForIdle();
   assert.deepEqual(
@@ -415,6 +583,147 @@ test("K02-O03 converts a lost open reply to uncertain after exact recovery canno
     scenario.provider.requests.map((request) => request.kind),
     ["start", "recover"],
   );
+
+  const claimedClock = new ManualK02Clock(1_788_430_000_000);
+  const claimed = await startK02Scenario(t, "K02-K03:O03", {
+    clock: claimedClock,
+    gatewayProxy: true,
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_claimed_open_reply" },
+        { kind: "turn", provider_turn_id: "turn_claimed_open_reply" },
+        { kind: "reply", text: "exact claimed open reply" },
+      ],
+    ],
+  });
+  claimed.gatewayProxy?.failNext("reply_message", { kind: "drop_before_dispatch" });
+  const claimedMessage = k02Message(
+    "message_claimed_open_reply",
+    "conversation_claimed_open_reply",
+  );
+  claimed.enqueue(claimedMessage);
+  assert.equal(
+    (await claimed.wake(claimedMessage.id, Math.floor(claimedClock.nowMs() / 1_000))).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    claimed,
+    "outcome_lookup",
+    claimedClock.nowMs() + 30_000,
+    "claimed open reply outcome schedule",
+  );
+  await claimed.connector.crash();
+  simulateCrashAfterDurableAttemptClaim(claimed, "reply");
+  const claimedRestart = await claimed.restart([
+    [
+      { kind: "progress", text: "recovering claimed open reply" },
+      { kind: "reply", text: "exact claimed open reply" },
+    ],
+  ]);
+  try {
+    await claimedRestart.connector.waitForIdle();
+    assert.deepEqual(
+      claimed.gateway.calls.map((call) => call.name),
+      ["poll_messages", "get_message_outcome", "reply_message", "ack_message"],
+      "lost reply recovery did not resolve open state before exact-turn recovery",
+    );
+    assert.deepEqual(
+      claimedRestart.provider.requests.map((request) => request.kind),
+      ["recover"],
+    );
+    assert.equal(claimed.gateway.tombstone(claimedMessage.id)?.outcome, "replied");
+  } finally {
+    await claimedRestart.connector.close();
+  }
+
+  const nullTurnClock = new ManualK02Clock(1_788_440_000_000);
+  const nullTurn = await startK02Scenario(t, "K02-K03:O03", {
+    clock: nullTurnClock,
+    crashAfterLostReplyUncertain: true,
+    gatewayProxy: true,
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_null_turn_lost_reply" },
+        { kind: "reply", text: "lost reply without a durable turn" },
+      ],
+      [{ kind: "uncertain" }],
+    ],
+  });
+  nullTurn.gatewayProxy?.failNext("reply_message", { kind: "drop_before_dispatch" });
+  const nullTurnMessage = k02Message(
+    "message_null_turn_lost_reply",
+    "conversation_null_turn_lost_reply",
+  );
+  nullTurn.enqueue(nullTurnMessage);
+  assert.equal(
+    (await nullTurn.wake(nullTurnMessage.id, Math.floor(nullTurnClock.nowMs() / 1_000))).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    nullTurn,
+    "outcome_lookup",
+    nullTurnClock.nowMs() + 30_000,
+    "null-turn lost reply outcome schedule",
+  );
+  nullTurnClock.advance(30_000);
+  await assert.rejects(nullTurn.connector.waitForIdle(), /connector_test_crash/u);
+  await nullTurn.connector.crash();
+
+  const database = new Database(join(nullTurn.stateDirectory, "correlation.sqlite3"), {
+    readonly: true,
+  });
+  try {
+    assert.deepEqual(
+      database
+        .prepare<
+          [],
+          {
+            conversation_lifecycle: string;
+            message_lifecycle: string;
+            provider_turn_hmac: Buffer | null;
+            terminal_operation: string | null;
+            completion_outcome: string | null;
+            completion_reason: string | null;
+            retry_kind: string | null;
+            retry_not_before_ms: number | null;
+          }
+        >(
+          "SELECT c.lifecycle AS conversation_lifecycle, m.lifecycle AS message_lifecycle, m.provider_turn_hmac, m.terminal_operation, m.completion_outcome, m.completion_reason, m.retry_kind, m.retry_not_before_ms FROM conversations c JOIN messages m USING(conversation_hmac)",
+        )
+        .get(),
+      {
+        conversation_lifecycle: "uncertain",
+        message_lifecycle: "uncertain",
+        provider_turn_hmac: null,
+        terminal_operation: null,
+        completion_outcome: null,
+        completion_reason: null,
+        retry_kind: null,
+        retry_not_before_ms: null,
+      },
+    );
+  } finally {
+    database.close();
+  }
+
+  const nullTurnRestart = await nullTurn.restart([]);
+  await nullTurnRestart.connector.waitForIdle();
+  assert.deepEqual(
+    [...nullTurn.provider.requests, ...nullTurnRestart.provider.requests].map(
+      (request) => request.kind,
+    ),
+    ["start"],
+  );
+  assert.deepEqual(
+    nullTurn.gateway.calls.map((call) => call.name),
+    ["poll_messages", "get_message_outcome", "complete_message", "ack_message"],
+  );
+  assert.deepEqual(nullTurn.gateway.calls.at(-2)?.arguments, {
+    message_id: nullTurnMessage.id,
+    outcome: "uncertain",
+    reason_code: "provider_outcome_unknown",
+  });
+  assert.equal(nullTurn.gateway.tombstone(nullTurnMessage.id)?.acknowledged, true);
 });
 
 test("K02-O04 retains one mailbox-full reply in memory and retries no provider turn", async (t) => {
@@ -483,15 +792,66 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
     });
   }
   const message = k02Message("o05_message", "o05_conversation");
+  let lastWakeTimestamp = Math.floor(clock.nowMs() / 1_000) - 1;
+  const sendDistinctWake = async (): Promise<Response> => {
+    lastWakeTimestamp = Math.max(Math.floor(clock.nowMs() / 1_000), lastWakeTimestamp + 1);
+    return await scenario.wake(message.id, lastWakeTimestamp);
+  };
+  const readLifetimeRetry = (): {
+    retry_attempt_count: number;
+    retry_kind: string | null;
+    retry_not_before_ms: number | null;
+  } => {
+    const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
+      readonly: true,
+    });
+    try {
+      return database
+        .prepare<
+          [],
+          {
+            retry_attempt_count: number;
+            retry_kind: string | null;
+            retry_not_before_ms: number | null;
+          }
+        >("SELECT retry_attempt_count, retry_kind, retry_not_before_ms FROM messages")
+        .get() as {
+        retry_attempt_count: number;
+        retry_kind: string | null;
+        retry_not_before_ms: number | null;
+      };
+    } finally {
+      database.close();
+    }
+  };
+  const lifetimeDelay = (count: number): number => {
+    if (count === 1) return 1_000;
+    if (count === 2) return 2_000;
+    if (count === 3) return 4_000;
+    if (count === 4) return 8_000;
+    if (count === 5) return 16_000;
+    return 30_000;
+  };
   scenario.enqueue(message);
-  assert.equal((await scenario.wake(message.id)).status, 202);
+  assert.equal((await sendDistinctWake()).status, 202);
   await waitFor(
     () =>
       scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length === 1,
     "first central attempt",
   );
+  await waitForRetrySchedule(
+    scenario,
+    "complete",
+    clock.nowMs() + 1_000,
+    "first central retry schedule",
+  );
+  assert.deepEqual(readLifetimeRetry(), {
+    retry_attempt_count: 1,
+    retry_kind: "complete",
+    retry_not_before_ms: clock.nowMs() + 1_000,
+  });
   clock.advance(999);
-  assert.equal((await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status, 202);
+  assert.equal((await sendDistinctWake()).status, 202);
   assert.equal(
     scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length,
     1,
@@ -499,46 +859,52 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
   await scenario.connector.crash();
   let restarted = await scenario.restart([]);
   assert.equal(restarted.provider.requests.length, 0);
-  assert.equal((await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status, 202);
+  assert.equal((await sendDistinctWake()).status, 202);
   assert.equal(
     scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length,
     1,
   );
   clock.advance(1);
 
-  for (let attempt = 2; attempt <= 255; attempt += 1) {
+  for (let completeCall = 2; completeCall <= 255; completeCall += 1) {
     await waitFor(
       () =>
         scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length ===
-        attempt,
-      `central attempt ${attempt}`,
+        completeCall,
+      `central complete call ${completeCall}`,
     );
-    if (attempt < 255) {
-      const delay =
-        attempt === 2
-          ? 2_000
-          : attempt === 3
-            ? 4_000
-            : attempt === 4
-              ? 8_000
-              : attempt === 5
-                ? 16_000
-                : 30_000;
-      clock.advance(delay - 1);
-      assert.equal(
-        (await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status,
-        202,
+    const expectedLifetimeCount = Math.min(completeCall + 1, 255);
+    await waitFor(() => {
+      const retry = readLifetimeRetry();
+      return (
+        retry.retry_attempt_count === expectedLifetimeCount &&
+        retry.retry_kind === "complete" &&
+        retry.retry_not_before_ms !== null
       );
+    }, `durable lifetime retry claim ${expectedLifetimeCount}`);
+    const durableRetry = readLifetimeRetry();
+    const delay = lifetimeDelay(durableRetry.retry_attempt_count);
+    assert.equal(durableRetry.retry_not_before_ms, clock.nowMs() + delay);
+    if (completeCall === 2) {
+      assert.deepEqual(
+        scenario.gatewayProxy?.calls
+          .filter((call) => call.tool === "complete_message" || call.tool === "get_message_outcome")
+          .slice(0, 3)
+          .map((call) => call.tool),
+        ["complete_message", "get_message_outcome", "complete_message"],
+      );
+    }
+    if (completeCall < 255) {
+      clock.advance(delay - 1);
+      assert.equal((await sendDistinctWake()).status, 202);
       assert.equal(
         scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length,
-        attempt,
+        completeCall,
       );
       clock.advance(1);
     }
   }
 
-  const Database = (await import("better-sqlite3")).default;
-  const { join } = await import("node:path");
   const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
     readonly: true,
   });
@@ -555,7 +921,7 @@ test("K02-O05 follows one 1,2,4,8,16,30-second lifetime retry schedule", async (
     database.close();
   }
   clock.advance(29_999);
-  assert.equal((await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status, 202);
+  assert.equal((await sendDistinctWake()).status, 202);
   assert.equal(
     scenario.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length,
     255,
@@ -620,6 +986,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
             1,
           `${suffix} lost reply`,
         );
+        await waitForRetrySchedule(
+          scenario,
+          "outcome_lookup",
+          clock.nowMs() + 30_000,
+          `${suffix} outcome schedule`,
+        );
         clock.advance(30_000);
       }
       await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
@@ -658,11 +1030,23 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
           scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length === 1,
         `${suffix} lost reply`,
       );
+      await waitForRetrySchedule(
+        scenario,
+        "outcome_lookup",
+        clock.nowMs() + 30_000,
+        `${suffix} outcome schedule`,
+      );
       clock.advance(30_000);
     }
     await waitFor(
       () => scenario.gatewayProxy?.calls.filter((call) => call.tool === operation).length === 1,
       `${suffix} first rate-limited operation`,
+    );
+    await waitForRetrySchedule(
+      scenario,
+      retryKindFor(operation),
+      clock.nowMs() + 60_000,
+      `${suffix} rate-limit schedule`,
     );
     clock.advance(59_999);
     assert.equal(scenario.gatewayProxy?.calls.filter((call) => call.tool === operation).length, 1);
@@ -704,6 +1088,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
             1,
           `${suffix} lost reply`,
         );
+        await waitForRetrySchedule(
+          scenario,
+          "outcome_lookup",
+          clock.nowMs() + 30_000,
+          `${suffix} outcome schedule`,
+        );
         clock.advance(30_000);
       }
       await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
@@ -737,6 +1127,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     () =>
       baseDelay.gatewayProxy?.calls.filter((call) => call.tool === "complete_message").length === 1,
     "rate limit below base delay",
+  );
+  await waitForRetrySchedule(
+    baseDelay,
+    "complete",
+    baseDelayClock.nowMs() + 1_000,
+    "rate-limit base schedule",
   );
   baseDelayClock.advance(999);
   assert.equal(
@@ -774,6 +1170,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
           scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length === 1,
         `${suffix} lost reply`,
       );
+      await waitForRetrySchedule(
+        scenario,
+        "outcome_lookup",
+        clock.nowMs() + 30_000,
+        `${suffix} outcome schedule`,
+      );
       clock.advance(30_000);
     }
     await waitFor(
@@ -782,6 +1184,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     );
     const delay =
       operation === "get_message_outcome" ? 30_000 : operation === "ack_message" ? 2_000 : 1_000;
+    await waitForRetrySchedule(
+      scenario,
+      retryKindFor(operation),
+      clock.nowMs() + delay,
+      `${suffix} temporary schedule`,
+    );
     clock.advance(delay - 1);
     assert.equal(scenario.gatewayProxy?.calls.filter((call) => call.tool === operation).length, 1);
     clock.advance(1);
@@ -811,6 +1219,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
       () => scenario.gatewayProxy?.calls.filter((call) => call.tool === operation).length === 1,
       `${suffix} ambiguous terminal response`,
     );
+    await waitForRetrySchedule(
+      scenario,
+      "outcome_lookup",
+      clock.nowMs() + 30_000,
+      `${suffix} already-terminal schedule`,
+    );
     clock.advance(29_999);
     assert.equal(
       scenario.gatewayProxy?.calls.filter((call) => call.tool === "get_message_outcome").length,
@@ -819,7 +1233,9 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     clock.advance(1);
     await scenario.connector.waitForIdle();
     assert.deepEqual(
-      scenario.gatewayProxy?.calls.map((call) => call.tool),
+      scenario.gatewayProxy?.calls
+        .filter((call) => call.tool !== undefined)
+        .map((call) => call.tool),
       ["poll_messages", operation, "get_message_outcome", operation, "ack_message"],
     );
     assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged, true);
@@ -864,6 +1280,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
           scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length === 1,
         `${suffix} lost reply`,
       );
+      await waitForRetrySchedule(
+        scenario,
+        "outcome_lookup",
+        clock.nowMs() + 30_000,
+        `${suffix} outcome schedule`,
+      );
       clock.advance(30_000);
     }
     await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
@@ -893,7 +1315,11 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     const message = k02Message(`o06_${suffix}`, `o06_${suffix}_conversation`);
     scenario.enqueue(message);
     assert.equal((await scenario.wake(message.id)).status, 202);
-    await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
+    await assert.rejects(
+      scenario.connector.waitForIdle(),
+      /connector_gateway_operation_failed/u,
+      `${suffix} gateway result must fail closed`,
+    );
     const Database = (await import("better-sqlite3")).default;
     const { join } = await import("node:path");
     const database = new Database(join(scenario.stateDirectory, "correlation.sqlite3"), {
@@ -928,6 +1354,94 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     assert.equal((await scenario.wake(message.id)).status, 202);
     await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
     assert.equal(scenario.gateway.tombstone(message.id), undefined);
+  }
+
+  const successfulResultExtensions = [
+    { name: "unknown", member: { unexpected_member: true } },
+    { name: "credential-shaped", member: { access_token: "must_not_pass" } },
+  ] as const;
+  for (const [operationIndex, operation] of deliveryOperations.entries()) {
+    for (const [extensionIndex, extension] of successfulResultExtensions.entries()) {
+      const suffix = `o06_success_shape_${operationIndex}_${extensionIndex}`;
+      const clock = new ManualK02Clock(
+        1_788_350_000_000 + operationIndex * 100_000 + extensionIndex * 10_000,
+      );
+      const scenario = await startK02Scenario(t, "K02-K03:O06", {
+        clock,
+        gatewayProxy: true,
+        scripts: [[...deliveryScript(operation, suffix)]],
+      });
+      const message = k02Message(`${suffix}_message`, `${suffix}_conversation`);
+      let successfulResult: Readonly<Record<string, unknown>>;
+      if (operation === "reply_message") {
+        successfulResult = {
+          message_id: `${suffix}_reply`,
+          conversation_id: message.conversation_id,
+          status: "accepted",
+        };
+      } else if (operation === "complete_message") {
+        successfulResult = {
+          message_id: message.id,
+          outcome: "failed",
+          status: "recorded",
+        };
+      } else if (operation === "get_message_outcome") {
+        scenario.gatewayProxy?.failNext("reply_message", { kind: "drop_after_commit" });
+        successfulResult = {
+          message_id: message.id,
+          conversation_id: message.conversation_id,
+          status: "terminal",
+          outcome: "replied",
+          reply_message_id: "fixture_reply_1",
+        };
+      } else {
+        successfulResult = { message_id: message.id, status: "acked" };
+      }
+      scenario.gatewayProxy?.failNext(operation, {
+        kind: "structured_result",
+        value: { ...successfulResult, ...extension.member },
+      });
+      scenario.enqueue(message);
+      assert.equal(
+        (await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status,
+        202,
+      );
+      if (operation === "get_message_outcome") {
+        await waitFor(
+          () =>
+            scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length ===
+            1,
+          `${suffix} lost reply`,
+        );
+        await waitForRetrySchedule(
+          scenario,
+          "outcome_lookup",
+          clock.nowMs() + 30_000,
+          `${suffix} outcome schedule`,
+        );
+        clock.advance(30_000);
+      }
+      await assert.rejects(
+        scenario.connector.waitForIdle(),
+        /connector_gateway_operation_failed/u,
+        `${operation} accepted a successful ${extension.name} result extension`,
+      );
+      assertBlockedClass(scenario, "contract");
+      const expectedTools =
+        operation === "get_message_outcome"
+          ? ["poll_messages", "reply_message", "get_message_outcome"]
+          : operation === "ack_message"
+            ? ["poll_messages", "reply_message", "ack_message"]
+            : ["poll_messages", operation];
+      assert.deepEqual(
+        scenario.gatewayProxy?.calls
+          .filter((call) => call.tool !== undefined)
+          .map((call) => call.tool),
+        expectedTools,
+        `${operation} continued after a successful ${extension.name} result extension`,
+      );
+      assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged ?? false, false);
+    }
   }
 
   const uncertainPoll = await startK02Scenario(t, "K02-K03:O06", {
@@ -973,6 +1487,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     () =>
       malformedOutcome.gatewayProxy?.calls.some((call) => call.tool === "reply_message") ?? false,
     "uncertain reply",
+  );
+  await waitForRetrySchedule(
+    malformedOutcome,
+    "outcome_lookup",
+    outcomeClock.nowMs() + 30_000,
+    "malformed outcome schedule",
   );
   outcomeClock.advance(30_000);
   await assert.rejects(
@@ -1023,6 +1543,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
         .length === 1,
     "same-ID mismatched terminal seed",
   );
+  await waitForRetrySchedule(
+    mismatchedOutcome,
+    "outcome_lookup",
+    mismatchedClock.nowMs() + 30_000,
+    "mismatched outcome schedule",
+  );
   mismatchedClock.advance(30_000);
   await assert.rejects(
     mismatchedOutcome.connector.waitForIdle(),
@@ -1034,7 +1560,10 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
       .length,
     1,
   );
-  assert.equal(mismatchedOutcome.gateway.tombstone(mismatchedMessage.id)?.acknowledged, false);
+  assert.equal(
+    mismatchedOutcome.gateway.tombstone(mismatchedMessage.id)?.acknowledged ?? false,
+    false,
+  );
 
   const outcomeContractVectors = [
     {
@@ -1118,6 +1647,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
       () => scenario.gatewayProxy?.calls.some((call) => call.tool === sideEffect) ?? false,
       `${vector.name} terminal request`,
     );
+    await waitForRetrySchedule(
+      scenario,
+      "outcome_lookup",
+      clock.nowMs() + 30_000,
+      `${vector.name} outcome schedule`,
+    );
     clock.advance(30_000);
     await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
     assertBlockedClass(scenario, "contract");
@@ -1129,7 +1664,7 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
       scenario.gatewayProxy?.calls.filter((call) => call.tool === "ack_message").length,
       0,
     );
-    assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged, false);
+    assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged ?? false, false);
   }
 
   for (const operation of ["reply_message", "complete_message"] as const) {
@@ -1157,6 +1692,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     await waitFor(
       () => scenario.gatewayProxy?.calls.some((call) => call.tool === operation) ?? false,
       `uncertain ${operation}`,
+    );
+    await waitForRetrySchedule(
+      scenario,
+      "outcome_lookup",
+      clock.nowMs() + 30_000,
+      `uncertain ${operation} schedule`,
     );
     clock.advance(30_000);
     await scenario.connector.waitForIdle();
@@ -1199,12 +1740,24 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
       uncertainOutcome.gatewayProxy?.calls.some((call) => call.tool === "reply_message") ?? false,
     "uncertain outcome seed",
   );
+  await waitForRetrySchedule(
+    uncertainOutcome,
+    "outcome_lookup",
+    uncertainOutcomeClock.nowMs() + 30_000,
+    "uncertain outcome first schedule",
+  );
   uncertainOutcomeClock.advance(30_000);
   await waitFor(
     () =>
       uncertainOutcome.gatewayProxy?.calls.filter((call) => call.tool === "get_message_outcome")
         .length === 1,
     "first uncertain outcome lookup",
+  );
+  await waitForRetrySchedule(
+    uncertainOutcome,
+    "outcome_lookup",
+    uncertainOutcomeClock.nowMs() + 30_000,
+    "uncertain outcome second schedule",
   );
   uncertainOutcomeClock.advance(29_999);
   assert.equal(
@@ -1246,6 +1799,12 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
   await waitFor(
     () => uncertainAck.gatewayProxy?.calls.some((call) => call.tool === "ack_message") ?? false,
     "uncertain acknowledgement",
+  );
+  await waitForRetrySchedule(
+    uncertainAck,
+    "ack",
+    ackClock.nowMs() + 2_000,
+    "uncertain acknowledgement schedule",
   );
   ackClock.advance(1_999);
   assert.equal(
