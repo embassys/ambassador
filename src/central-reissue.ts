@@ -143,6 +143,23 @@ function isUncertainTransportFailure(error: unknown): boolean {
   );
 }
 
+function waitForUncertainRetry(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (canRetry: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", aborted);
+      resolve(canRetry);
+    };
+    const aborted = (): void => finish(false);
+    const timer = setTimeout(() => finish(true), UNCERTAIN_RETRY_DELAY_MS);
+    signal.addEventListener("abort", aborted, { once: true });
+  });
+}
+
 export class CentralReissueController {
   readonly #target: URL;
   readonly #identity: GatewayIdentity;
@@ -258,9 +275,8 @@ export class CentralReissueController {
           return false;
         }
         if (isUncertainTransportFailure(error) && uncertainAttempt === 0) {
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, UNCERTAIN_RETRY_DELAY_MS);
-          });
+          const canRetry = await waitForUncertainRetry(this.#lifetime.signal);
+          if (!canRetry || this.#closed || this.#lifetime.signal.aborted) return false;
           continue;
         }
         if (
