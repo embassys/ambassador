@@ -170,13 +170,12 @@ test("K02-P06 keeps one absolute deadline and cancels a proven safe wait", async
           readonly: true,
         });
         try {
-          return (
-            database
-              .prepare<[], { turn_deadline_ms: number | null }>(
-                "SELECT turn_deadline_ms FROM messages",
-              )
-              .get()?.turn_deadline_ms !== null
-          );
+          const row = database
+            .prepare<[], { turn_deadline_ms: number | null }>(
+              "SELECT turn_deadline_ms FROM messages",
+            )
+            .get();
+          return row !== undefined && row.turn_deadline_ms !== null;
         } finally {
           database.close();
         }
