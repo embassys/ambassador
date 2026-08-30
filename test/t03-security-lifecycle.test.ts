@@ -469,11 +469,18 @@ test("T03-S05 normal artifacts and captures exclude actual enrollment and DPoP m
     centralMcpUrl: central.mcpUrl,
     credentialStore: {
       async load() {
-        return await delegate.load();
+        return undefined;
       },
-      async save(value) {
-        saved.push(value);
-        await delegate.save(value);
+      async save() {
+        throw new Error("T03 version 2 state reached the legacy credential store API");
+      },
+      async loadCredential() {
+        return await delegate.loadCredential();
+      },
+      async saveCredential(credential) {
+        assert.equal(credential.version, 2);
+        saved.push(credential.plaintext);
+        await delegate.saveCredential(credential);
       },
     },
   });

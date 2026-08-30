@@ -1,4 +1,11 @@
-import type { CredentialStore } from "./credential-store.js";
+import type { CredentialStore, VersionedCredentialStore } from "./credential-store.js";
+import {
+  assertSameKeyCredentialReplacement,
+  type CentralCredentialV2Record,
+  type LoadedCentralCredentialV2,
+  parseCentralCredentialV2,
+  serializeCentralCredentialV2,
+} from "./credential-v2.js";
 import { parseVerificationSuccess, type VerificationSuccess } from "./mcp-contract.js";
 
 export type { CredentialStore } from "./credential-store.js";
@@ -8,6 +15,7 @@ export class IdentityError extends Error {
     readonly code:
       | "already_enrolled"
       | "central_authentication_failed"
+      | "legacy_credential_required"
       | "not_enrolled"
       | "verification_busy",
   ) {
@@ -17,23 +25,45 @@ export class IdentityError extends Error {
 }
 
 export class GatewayIdentity {
-  #centralToken: string | undefined;
+  #credential:
+    | { readonly version: 1; readonly token: string }
+    | { readonly version: 2; readonly value: LoadedCentralCredentialV2 }
+    | undefined;
   #authenticationFailed = false;
   #verificationBusy = false;
 
   private constructor(
     private readonly credentialStore: CredentialStore,
-    centralToken: string | undefined,
+    credential:
+      | { readonly version: 1; readonly token: string }
+      | { readonly version: 2; readonly value: LoadedCentralCredentialV2 }
+      | undefined,
   ) {
-    this.#centralToken = centralToken;
+    this.#credential = credential;
   }
 
   static async open(credentialStore: CredentialStore): Promise<GatewayIdentity> {
-    return new GatewayIdentity(credentialStore, await credentialStore.load());
+    if (isVersionedCredentialStore(credentialStore)) {
+      const stored = await credentialStore.loadCredential();
+      if (stored === undefined) return new GatewayIdentity(credentialStore, undefined);
+      if (stored.version === 1 && stored.plaintext.trimStart().startsWith("{")) {
+        throw new Error("The legacy credential is invalid");
+      }
+      return new GatewayIdentity(
+        credentialStore,
+        stored.version === 1
+          ? { version: 1, token: stored.plaintext }
+          : { version: 2, value: parseCentralCredentialV2(stored.plaintext) },
+      );
+    }
+    const token = await credentialStore.load();
+    if (token === undefined) return new GatewayIdentity(credentialStore, undefined);
+    if (token.trimStart().startsWith("{")) throw new Error("The legacy credential is invalid");
+    return new GatewayIdentity(credentialStore, { version: 1, token });
   }
 
   get enrolled(): boolean {
-    return this.#centralToken !== undefined;
+    return this.#credential !== undefined;
   }
 
   get authenticationFailed(): boolean {
@@ -44,14 +74,47 @@ export class GatewayIdentity {
     if (this.#authenticationFailed) {
       throw new IdentityError("central_authentication_failed");
     }
-    if (this.#centralToken === undefined) {
+    if (this.#credential === undefined) {
       throw new IdentityError("not_enrolled");
     }
-    return this.#centralToken;
+    if (this.#credential.version !== 1) throw new IdentityError("legacy_credential_required");
+    return this.#credential.token;
+  }
+
+  authenticatedCredentialV2(): LoadedCentralCredentialV2 {
+    if (this.#authenticationFailed) {
+      throw new IdentityError("central_authentication_failed");
+    }
+    if (this.#credential?.version !== 2) {
+      throw new IdentityError("not_enrolled");
+    }
+    return this.#credential.value;
+  }
+
+  async commitCredentialV2(record: CentralCredentialV2Record): Promise<LoadedCentralCredentialV2> {
+    if (this.#credential !== undefined) throw new IdentityError("already_enrolled");
+    const serialized = serializeCentralCredentialV2(record);
+    const credential = parseCentralCredentialV2(serialized);
+    const store = requireVersionedCredentialStore(this.credentialStore);
+    await store.saveCredential({ version: 2, plaintext: serialized });
+    this.#credential = { version: 2, value: credential };
+    return credential;
+  }
+
+  async replaceCredentialV2(record: CentralCredentialV2Record): Promise<LoadedCentralCredentialV2> {
+    const current = this.authenticatedCredentialV2();
+    const serialized = serializeCentralCredentialV2(record);
+    const replacement = parseCentralCredentialV2(serialized);
+    assertSameKeyCredentialReplacement(current, replacement);
+    const store = requireVersionedCredentialStore(this.credentialStore);
+    await store.saveCredential({ version: 2, plaintext: serialized });
+    if (this.#authenticationFailed) throw new IdentityError("central_authentication_failed");
+    this.#credential = { version: 2, value: replacement };
+    return replacement;
   }
 
   async verify(operation: () => Promise<unknown>): Promise<VerificationSuccess["localResult"]> {
-    if (this.#centralToken !== undefined) {
+    if (this.#credential !== undefined) {
       throw new IdentityError("already_enrolled");
     }
     if (this.#verificationBusy) {
@@ -62,7 +125,7 @@ export class GatewayIdentity {
     try {
       const verified = parseVerificationSuccess(await operation());
       await this.credentialStore.save(verified.token);
-      this.#centralToken = verified.token;
+      this.#credential = { version: 1, token: verified.token };
       this.#authenticationFailed = false;
       return verified.localResult;
     } finally {
@@ -71,8 +134,28 @@ export class GatewayIdentity {
   }
 
   markAuthenticationFailed(): void {
-    if (this.#centralToken !== undefined) {
+    if (this.#credential !== undefined) {
       this.#authenticationFailed = true;
     }
   }
+}
+
+function isVersionedCredentialStore(
+  store: CredentialStore,
+): store is CredentialStore & VersionedCredentialStore {
+  return (
+    "loadCredential" in store &&
+    typeof store.loadCredential === "function" &&
+    "saveCredential" in store &&
+    typeof store.saveCredential === "function"
+  );
+}
+
+function requireVersionedCredentialStore(
+  store: CredentialStore,
+): CredentialStore & VersionedCredentialStore {
+  if (!isVersionedCredentialStore(store)) {
+    throw new Error("The versioned credential store is unavailable");
+  }
+  return store;
 }

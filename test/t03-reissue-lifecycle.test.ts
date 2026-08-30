@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test, { type TestContext } from "node:test";
 
-import { EncryptedFileCredentialStore } from "../src/credential-store.js";
+import {
+  type CredentialStore,
+  EncryptedFileCredentialStore,
+  type VersionedCredentialStore,
+} from "../src/credential-store.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
@@ -129,20 +133,28 @@ test("T03-U02 reissue persistence failure retains and continues with the old cre
   const observed = installT03FetchObserver(t, [central.apiUrl]);
   const webhook = await startFakeWebhook(t);
   let saveAttempts = 0;
+  const failingStore: CredentialStore & VersionedCredentialStore = {
+    async load() {
+      return undefined;
+    },
+    async save() {
+      throw new Error("version 2 used the legacy credential store API");
+    },
+    async loadCredential() {
+      return { version: 2, plaintext: JSON.stringify(original) };
+    },
+    async saveCredential(credential) {
+      assert.equal(credential.version, 2);
+      saveAttempts += 1;
+      throw new Error("injected replacement publication failure");
+    },
+  };
   const gateway = await startGateway(t, {
     webhookUrl: webhook.url,
     webhookToken: T03_WEBHOOK_TOKEN,
     centralApiUrl: central.apiUrl,
     centralMcpUrl: central.mcpUrl,
-    credentialStore: {
-      async load() {
-        return JSON.stringify(original);
-      },
-      async save() {
-        saveAttempts += 1;
-        throw new Error("injected replacement publication failure");
-      },
-    },
+    credentialStore: failingStore,
   });
   await waitForT03Observation(() => saveAttempts === 1);
 
@@ -256,11 +268,13 @@ test("T03-U05 real encrypted credential reissue replaces envelope v2 and survive
     centralApiUrl: new URL(central.apiUrl).href,
     centralMcpUrl: new URL(central.mcpUrl).href,
   });
-  const originalText = await new EncryptedFileCredentialStore(
+  const originalStored = await new EncryptedFileCredentialStore(
     `${first.stateRoot}/central-credential.json`,
     T03_WEBHOOK_TOKEN,
     scope,
-  ).load();
+  ).loadCredential();
+  assert.equal(originalStored?.version, 2);
+  const originalText = originalStored?.plaintext;
   assert.ok(originalText !== undefined);
   const original = JSON.parse(originalText) as T03CredentialRecord;
   central.advanceClock(43_201);
@@ -281,7 +295,8 @@ test("T03-U05 real encrypted credential reissue replaces envelope v2 and survive
   );
   let replacementText: string | undefined;
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const candidate = await replacementStore.load();
+    const stored = await replacementStore.loadCredential();
+    const candidate = stored?.version === 2 ? stored.plaintext : undefined;
     if (
       candidate !== undefined &&
       (JSON.parse(candidate) as T03CredentialRecord).access_token !== original.access_token
