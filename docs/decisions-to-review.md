@@ -283,6 +283,15 @@ platform ADRs.
   in-memory reply bytes and relies only on central outcome lookup plus the
   exact provider-turn recovery contract. It never persists or reconstructs
   reply text from correlation state.
+- K03's process environment, output-boundary, cancellation, and containment
+  helpers are provider-neutral foundation evidence only. Each real provider
+  ADR and adapter must attach those helpers to its actual launch path and pass
+  provider/platform containment qualification before that adapter is
+  supported.
+- The user approved a Codex-first usable preview after K03 and K04. Claude
+  Code and Gemini follow as parallel adapter tracks. Real-central
+  qualification, publication, soak evidence, and stable support claims remain
+  deferred to their existing later gates.
 
 ## Test-only stand-ins
 
