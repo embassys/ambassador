@@ -635,6 +635,95 @@ test("K02-O03 converts a lost open reply to uncertain after exact recovery canno
   } finally {
     await claimedRestart.connector.close();
   }
+
+  const nullTurnClock = new ManualK02Clock(1_788_440_000_000);
+  const nullTurn = await startK02Scenario(t, "K02-K03:O03", {
+    clock: nullTurnClock,
+    crashAfterLostReplyUncertain: true,
+    gatewayProxy: true,
+    scripts: [
+      [
+        { kind: "session", provider_session_id: "session_null_turn_lost_reply" },
+        { kind: "reply", text: "lost reply without a durable turn" },
+      ],
+      [{ kind: "uncertain" }],
+    ],
+  });
+  nullTurn.gatewayProxy?.failNext("reply_message", { kind: "drop_before_dispatch" });
+  const nullTurnMessage = k02Message(
+    "message_null_turn_lost_reply",
+    "conversation_null_turn_lost_reply",
+  );
+  nullTurn.enqueue(nullTurnMessage);
+  assert.equal(
+    (await nullTurn.wake(nullTurnMessage.id, Math.floor(nullTurnClock.nowMs() / 1_000))).status,
+    202,
+  );
+  await waitForRetrySchedule(
+    nullTurn,
+    "outcome_lookup",
+    nullTurnClock.nowMs() + 30_000,
+    "null-turn lost reply outcome schedule",
+  );
+  nullTurnClock.advance(30_000);
+  await assert.rejects(nullTurn.connector.waitForIdle(), /connector_test_crash/u);
+  await nullTurn.connector.crash();
+
+  const database = new Database(join(nullTurn.stateDirectory, "correlation.sqlite3"), {
+    readonly: true,
+  });
+  try {
+    assert.deepEqual(
+      database
+        .prepare<
+          [],
+          {
+            conversation_lifecycle: string;
+            message_lifecycle: string;
+            provider_turn_hmac: Buffer | null;
+            terminal_operation: string | null;
+            completion_outcome: string | null;
+            completion_reason: string | null;
+            retry_kind: string | null;
+            retry_not_before_ms: number | null;
+          }
+        >(
+          "SELECT c.lifecycle AS conversation_lifecycle, m.lifecycle AS message_lifecycle, m.provider_turn_hmac, m.terminal_operation, m.completion_outcome, m.completion_reason, m.retry_kind, m.retry_not_before_ms FROM conversations c JOIN messages m USING(conversation_hmac)",
+        )
+        .get(),
+      {
+        conversation_lifecycle: "uncertain",
+        message_lifecycle: "uncertain",
+        provider_turn_hmac: null,
+        terminal_operation: null,
+        completion_outcome: null,
+        completion_reason: null,
+        retry_kind: null,
+        retry_not_before_ms: null,
+      },
+    );
+  } finally {
+    database.close();
+  }
+
+  const nullTurnRestart = await nullTurn.restart([]);
+  await nullTurnRestart.connector.waitForIdle();
+  assert.deepEqual(
+    [...nullTurn.provider.requests, ...nullTurnRestart.provider.requests].map(
+      (request) => request.kind,
+    ),
+    ["start"],
+  );
+  assert.deepEqual(
+    nullTurn.gateway.calls.map((call) => call.name),
+    ["poll_messages", "get_message_outcome", "complete_message", "ack_message"],
+  );
+  assert.deepEqual(nullTurn.gateway.calls.at(-2)?.arguments, {
+    message_id: nullTurnMessage.id,
+    outcome: "uncertain",
+    reason_code: "provider_outcome_unknown",
+  });
+  assert.equal(nullTurn.gateway.tombstone(nullTurnMessage.id)?.acknowledged, true);
 });
 
 test("K02-O04 retains one mailbox-full reply in memory and retries no provider turn", async (t) => {
@@ -1222,6 +1311,94 @@ test("K02-O06 blocks every permanent, authentication, and malformed gateway resu
     assert.equal((await scenario.wake(message.id)).status, 202);
     await assert.rejects(scenario.connector.waitForIdle(), /connector_gateway_operation_failed/u);
     assert.equal(scenario.gateway.tombstone(message.id), undefined);
+  }
+
+  const successfulResultExtensions = [
+    { name: "unknown", member: { unexpected_member: true } },
+    { name: "credential-shaped", member: { access_token: "must_not_pass" } },
+  ] as const;
+  for (const [operationIndex, operation] of deliveryOperations.entries()) {
+    for (const [extensionIndex, extension] of successfulResultExtensions.entries()) {
+      const suffix = `o06_success_shape_${operationIndex}_${extensionIndex}`;
+      const clock = new ManualK02Clock(
+        1_788_350_000_000 + operationIndex * 100_000 + extensionIndex * 10_000,
+      );
+      const scenario = await startK02Scenario(t, "K02-K03:O06", {
+        clock,
+        gatewayProxy: true,
+        scripts: [[...deliveryScript(operation, suffix)]],
+      });
+      const message = k02Message(`${suffix}_message`, `${suffix}_conversation`);
+      let successfulResult: Readonly<Record<string, unknown>>;
+      if (operation === "reply_message") {
+        successfulResult = {
+          message_id: `${suffix}_reply`,
+          conversation_id: message.conversation_id,
+          status: "accepted",
+        };
+      } else if (operation === "complete_message") {
+        successfulResult = {
+          message_id: message.id,
+          outcome: "failed",
+          status: "recorded",
+        };
+      } else if (operation === "get_message_outcome") {
+        scenario.gatewayProxy?.failNext("reply_message", { kind: "drop_after_commit" });
+        successfulResult = {
+          message_id: message.id,
+          conversation_id: message.conversation_id,
+          status: "terminal",
+          outcome: "replied",
+          reply_message_id: "fixture_reply_1",
+        };
+      } else {
+        successfulResult = { message_id: message.id, status: "acked" };
+      }
+      scenario.gatewayProxy?.failNext(operation, {
+        kind: "structured_result",
+        value: { ...successfulResult, ...extension.member },
+      });
+      scenario.enqueue(message);
+      assert.equal(
+        (await scenario.wake(message.id, Math.floor(clock.nowMs() / 1_000))).status,
+        202,
+      );
+      if (operation === "get_message_outcome") {
+        await waitFor(
+          () =>
+            scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length ===
+            1,
+          `${suffix} lost reply`,
+        );
+        await waitForRetrySchedule(
+          scenario,
+          "outcome_lookup",
+          clock.nowMs() + 30_000,
+          `${suffix} outcome schedule`,
+        );
+        clock.advance(30_000);
+      }
+      await assert.rejects(
+        scenario.connector.waitForIdle(),
+        /connector_gateway_operation_failed/u,
+        `${operation} accepted a successful ${extension.name} result extension`,
+      );
+      assertBlockedClass(scenario, "contract");
+      const expectedTools =
+        operation === "get_message_outcome"
+          ? ["poll_messages", "reply_message", "get_message_outcome"]
+          : operation === "ack_message"
+            ? ["poll_messages", "reply_message", "ack_message"]
+            : ["poll_messages", operation];
+      assert.deepEqual(
+        scenario.gatewayProxy?.calls
+          .filter((call) => call.tool !== undefined)
+          .map((call) => call.tool),
+        expectedTools,
+        `${operation} continued after a successful ${extension.name} result extension`,
+      );
+      assert.equal(scenario.gateway.tombstone(message.id)?.acknowledged ?? false, false);
+    }
   }
 
   const uncertainPoll = await startK02Scenario(t, "K02-K03:O06", {
