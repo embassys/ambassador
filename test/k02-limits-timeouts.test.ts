@@ -3,6 +3,8 @@ import test from "node:test";
 
 import Database from "better-sqlite3";
 
+import { GatewayClient } from "../packages/connector-core/src/local-mcp-client.js";
+
 import {
   k02Message,
   loadK02Production,
@@ -19,6 +21,33 @@ async function settleK02Tasks(turns = 4): Promise<void> {
 
 function failureText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function holdGatewayClose(): {
+  entered(): boolean;
+  release(): void;
+  restore(): void;
+} {
+  const original = GatewayClient.prototype.close;
+  let entered = false;
+  let release: (() => void) | undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  GatewayClient.prototype.close = async function close(): Promise<void> {
+    entered = true;
+    await held;
+    await original.call(this);
+  };
+  return {
+    entered: () => entered,
+    release() {
+      release?.();
+    },
+    restore() {
+      GatewayClient.prototype.close = original;
+    },
+  };
 }
 
 test("K02-B00 exports the accepted non-configurable connector limits", async () => {
@@ -633,6 +662,51 @@ test("K02-SD01 bounds SIGINT and SIGTERM-style shutdown to one 15-second budget"
         scenario.releaseContainment();
       }
       assert.equal(scenario.providerPort.containmentAttempts, 1);
+    });
+
+    await check(`${signal} awaits listener and gateway close under one budget`, async () => {
+      const clock = new ManualK02Clock(1_788_200_000_000);
+      const scenario = await startK02Scenario(t, "K02-K03:SD01", {
+        clock,
+        scripts: [
+          [
+            { kind: "session", provider_session_id: `session_transport_${signal}` },
+            { kind: "turn", provider_turn_id: `turn_transport_${signal}` },
+            { kind: "reply", text: "initialize gateway transport before shutdown" },
+          ],
+        ],
+      });
+      const message = k02Message(
+        `shutdown_transport_${signal}`,
+        `shutdown_transport_conversation_${signal}`,
+      );
+      scenario.enqueue(message);
+      assert.equal((await scenario.wake(message.id)).status, 202);
+      await scenario.connector.waitForIdle();
+      const gatewayClose = holdGatewayClose();
+      const shutdown = scenario.connector.shutdown(signal);
+      let settled = false;
+      void shutdown.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      try {
+        await waitFor(() => gatewayClose.entered(), "held gateway transport close");
+        await settleK02Tasks();
+        assert.equal(settled, false, "shutdown returned while gateway close was still pending");
+        clock.advance(14_999);
+        await settleK02Tasks();
+        assert.equal(settled, false, "shutdown returned while gateway close was still pending");
+        clock.advance(1);
+        await assert.rejects(shutdown, /connector_shutdown_incomplete/u);
+      } finally {
+        gatewayClose.release();
+        gatewayClose.restore();
+      }
     });
   }
 
