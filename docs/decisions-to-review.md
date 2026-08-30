@@ -1,5 +1,71 @@
 # Decisions to review
 
+## 2026-08-30: Accepted CX01 Codex App Server preview contract
+
+ADR 0034 is accepted so CX02 and CX03 can proceed without another approval
+turn. The user authorized best-judgment decisions to be recorded for later
+review. That review remains available and non-blocking. Acceptance is limited
+to the preview implementation path and excludes publishing, stable support,
+real-central compatibility claims, and Windows support.
+
+- ADR 0034 selects exact Codex CLI and App Server version `0.149.0`. The
+  inspected macOS arm64 standalone binary reports that version, and two stable
+  schema generations produced the same v2 bundle SHA-256
+  `9b3de71a5a2ffc980b792a18aa8f8dec3f85f48829560222a0264fe494b679a9`.
+  The generated schema is authoritative for this pin when current web examples
+  describe a later wire shape.
+- Exact version stdout, canonical path, and a stable file identity do not prove
+  that a same-version local binary is byte-identical to an official artifact.
+  The inspected macOS arm64 digest is evidence only. The preview accepts this
+  residual local-installation trust after CX04 verifies the schema digest and
+  the complete real-provider behavior matrix on each claimed platform.
+- The adapter uses one direct
+  `codex app-server --listen stdio:// --strict-config`
+  process per provider-port invocation. It enables no experimental API,
+  daemon, proxy, WebSocket, socket, model override, config override, SDK, or
+  new dependency. Input is one structured text item on JSONL stdin and never
+  enters argv, environment, a temporary file, or connector state.
+- A new `thread.id` is published before `turn/start`. The first matching
+  `turn/started` notification or `turn/start` result supplies the exact turn
+  handle. App Server may act before that handle arrives, so the adapter makes
+  no pre-execution claim and never performs session-only recovery after an
+  unbound crash.
+- Exact-turn recovery uses only stable `thread/read` with
+  `includeTurns: true` and the stored thread and turn IDs. It returns only an
+  authoritative terminal result from that turn. Missing, running, interrupted,
+  duplicate, malformed, or oversized history is uncertain and never causes a
+  replacement turn.
+- The first adapter sets `approvalPolicy: never`, keeps
+  `approvalsReviewer: user`, and always creates or resumes a thread with coarse
+  read-only access. Only `turn/start` maps the connector maximum to exact
+  read-only or one-root workspace-write with network disabled. This avoids a
+  thread-start project-trust write. Fake tests prove requests and observable
+  responses; CX04 alone can prove real sandbox behavior and unchanged user
+  configuration.
+- It never accepts or grants an App Server approval. Only the three exact
+  command, file-change, and permission approval request methods become a
+  content-free safe wait until connector cancellation. Version 0.149.0 has no
+  decision-bearing resolved notification that could safely produce
+  `approval_resolved`.
+- Codex owns its existing authentication and content-bearing history under the
+  user's normal account home. The connector copies neither. Connector state
+  retirement does not delete Codex credentials or history, and missing history
+  fails closed.
+- The selected hard-crash candidate is the pinned App Server's stdio lifetime:
+  connector death closes its sole stdin pipe, and real qualification must prove
+  that App Server and all execution descendants stop. This is an explicit
+  unproven assumption, not CX01 evidence. Failure on Linux or macOS leaves that
+  pair unsupported and requires a new containment decision.
+- Before any terminal provider event, the adapter closes stdin and proves the
+  exact App Server unit empty and the child reaped within one 3-second budget,
+  invoking owned containment after 1 second when necessary. Failure emits no
+  terminal provider event and follows the common containment-failure path.
+- Codex is external Apache-2.0 software and is not redistributed. The official
+  App Server documentation currently calls the command experimental and
+  unsupported for production workloads. ADR 0034 therefore permits, at most,
+  the already approved Codex-first preview after CX02 through CX04. It does not
+  approve publishing, stable support, or Windows.
+
 ## 2026-08-30: Version 2 gateway recovery boundaries used by G04
 
 - An acknowledgement whose successful response is lost is recoverable after a
@@ -198,10 +264,10 @@ defaults and record them for review. The user accepted all four records on
   provenance after publication.
 
 This approval completes the provider-neutral D05 foundation decisions. ADR
-0032 permits K01 against the accepted G04 fixture contract. Codex, Claude
-Code, and Gemini still require separate
-executable or SDK, version, protocol, sandbox, approval, history, license, and
-platform ADRs.
+0032 permits K01 against the accepted G04 fixture contract. ADR 0034 now fixes
+the Codex choices for its preview path. Claude Code and Gemini still require
+separate executable or SDK, version, protocol, sandbox, approval, history,
+license, and platform ADRs.
 
 ## K03 test-determinism corrections
 
@@ -362,9 +428,10 @@ central owner and returns a material contract difference for review.
   contract before the external central service is ready.
 - D07 is complete. Gate A and S07 now gate live central qualification,
   activation, and release rather than local implementation.
-- Each Codex, Claude Code, and Gemini adapter still needs its own exact
-  executable or SDK version, protocol schema, dependency decision, sandbox and
-  approval policy, history behavior, supported platforms, and update policy.
+- ADR 0034 now fixes those choices for the Codex preview path. Claude Code and
+  Gemini still need exact executable or SDK versions, protocol schemas,
+  dependency decisions, sandbox and approval policies, history behavior,
+  supported platforms, and update policies.
 - The private package and installation model is accepted. Public-repository
   conversion, publish jobs, preview or stable publication, and support claims
   remain unapproved until their later gates. The gateway CLI stays unchanged.
