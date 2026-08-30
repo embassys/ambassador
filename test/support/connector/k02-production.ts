@@ -52,6 +52,13 @@ export type K02StateFaultBarrier =
   | "first_progress"
   | "approval_required"
   | "terminal_plan";
+export type K02PairedStateFaultBarrier =
+  | "conversation_update"
+  | "uncertain_after_message_update"
+  | "lost_reply_after_message_update"
+  | "completion_after_conversation_update"
+  | "reply_ack_after_conversation_update"
+  | "completion_ack_after_conversation_update";
 export type K02RecoveryStateCrash =
   | "session_binding"
   | "approval_wait"
@@ -106,7 +113,7 @@ export interface K02ConnectorOptions {
   clock?: K02Clock;
   crashAfter?: K02CrashBarrier;
   failStateAfter?: K02StateFaultBarrier;
-  failPairedStateWriteAfter?: "conversation_update";
+  failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
   crashAtUnboundState?: "turn_running" | "waiting_for_approval";
   crashAfterCancellation?: boolean;
   crashAfterLostReplyUncertain?: boolean;
@@ -219,6 +226,7 @@ export interface K02Scenario {
       providerKind?: "codex" | "claude" | "gemini";
       crashForRecoveryState?: K02RecoveryStateCrash;
       proveNoProviderDispatch?: boolean;
+      failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
       cancelResult?: unknown;
     },
   ): Promise<{
@@ -773,7 +781,7 @@ export async function startK02Scenario(
     clock?: K02Clock;
     crashAfter?: K02CrashBarrier;
     failStateAfter?: K02StateFaultBarrier;
-    failPairedStateWriteAfter?: "conversation_update";
+    failPairedStateWriteAfter?: K02PairedStateFaultBarrier;
     crashAtUnboundState?: "turn_running" | "waiting_for_approval";
     crashAfterCancellation?: boolean;
     crashAfterLostReplyUncertain?: boolean;
@@ -943,6 +951,9 @@ export async function startK02Scenario(
         ...(restartOptions.proveNoProviderDispatch === undefined
           ? {}
           : { proveNoProviderDispatch: restartOptions.proveNoProviderDispatch }),
+        ...(restartOptions.failPairedStateWriteAfter === undefined
+          ? {}
+          : { failPairedStateWriteAfter: restartOptions.failPairedStateWriteAfter }),
       });
       connectorsForCleanup.push(restartedConnector);
       return {
