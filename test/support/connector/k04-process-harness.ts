@@ -50,8 +50,23 @@ export interface K04ConnectorProcess {
   readonly webhookUrl: string;
 }
 
+export type K04GatewayFetchBarrier =
+  | "receive_selected"
+  | "wake_before_request"
+  | "reply_accepted_unobserved"
+  | "ack_accepted_unobserved";
+
+export type K04GatewayOperation = "receive" | "wake" | "reply" | "complete" | "outcome" | "ack";
+
+export interface K04GatewayControl {
+  operations(): readonly K04GatewayOperation[];
+  waitForFetchBarrier(barrier: K04GatewayFetchBarrier): Promise<void>;
+  releaseFetchBarrier(barrier: K04GatewayFetchBarrier): void;
+}
+
 export interface K04GatewayProcess {
   readonly process: V2ManagedProcess;
+  readonly control: K04GatewayControl;
   readonly endpoint: string;
 }
 
@@ -175,6 +190,87 @@ function connectorControl(process: V2ManagedProcess): K04ConnectorControl {
   };
 }
 
+function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
+  const operations: K04GatewayOperation[] = [];
+  const arrivals = new Map<K04GatewayFetchBarrier, number[]>();
+  const waiters = new Map<K04GatewayFetchBarrier, Array<() => void>>();
+  const releasable = new Map<K04GatewayFetchBarrier, number[]>();
+  process.child.on("message", (message: unknown) => {
+    if (!isRecord(message) || message.channel !== "k04_gateway_fetch") return;
+    if (
+      message.event === "request" &&
+      ["receive", "wake", "reply", "complete", "outcome", "ack"].includes(String(message.operation))
+    ) {
+      operations.push(message.operation as K04GatewayOperation);
+      return;
+    }
+    if (
+      message.event !== "barrier" ||
+      ![
+        "receive_selected",
+        "wake_before_request",
+        "reply_accepted_unobserved",
+        "ack_accepted_unobserved",
+      ].includes(String(message.barrier)) ||
+      !Number.isSafeInteger(message.sequence) ||
+      (message.sequence as number) < 1
+    ) {
+      return;
+    }
+    const barrier = message.barrier as K04GatewayFetchBarrier;
+    const sequence = message.sequence as number;
+    const waiter = waiters.get(barrier)?.shift();
+    if (waiter !== undefined) {
+      const ready = releasable.get(barrier) ?? [];
+      ready.push(sequence);
+      releasable.set(barrier, ready);
+      waiter();
+      return;
+    }
+    const queued = arrivals.get(barrier) ?? [];
+    queued.push(sequence);
+    arrivals.set(barrier, queued);
+  });
+  return {
+    operations: () => [...operations],
+    waitForFetchBarrier: async (barrier) => {
+      const queued = arrivals.get(barrier)?.shift();
+      if (queued !== undefined) {
+        const ready = releasable.get(barrier) ?? [];
+        ready.push(queued);
+        releasable.set(barrier, ready);
+        return;
+      }
+      await new Promise<void>((resolve, reject) => {
+        const waiter = (): void => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const pending = waiters.get(barrier) ?? [];
+        pending.push(waiter);
+        waiters.set(barrier, pending);
+        const timer = setTimeout(() => {
+          const current = waiters.get(barrier);
+          const index = current?.indexOf(waiter) ?? -1;
+          if (index >= 0) current?.splice(index, 1);
+          reject(new Error(`K04 gateway did not reach ${barrier}`));
+        }, 10_000);
+        timer.unref();
+      });
+    },
+    releaseFetchBarrier: (barrier) => {
+      const sequence = releasable.get(barrier)?.shift();
+      if (sequence === undefined) throw new Error(`${barrier} is not waiting for release`);
+      process.child.send({
+        channel: "k04_gateway_fetch_control",
+        command: "release",
+        barrier,
+        sequence,
+      });
+    },
+  };
+}
+
 export async function startK04Fixture(t: TestContext): Promise<K04Fixture> {
   const rootDirectory = await realpath(await mkdtemp(join(tmpdir(), "a2a-k04-")));
   const gatewayArtifactRoot = join(rootDirectory, "gateway");
@@ -262,7 +358,12 @@ export async function startK04GatewayProcess(
   t: TestContext,
   fixture: K04Fixture,
   webhookUrl: string,
+  options: {
+    readonly observeFetch?: boolean;
+    readonly fetchBarrier?: K04GatewayFetchBarrier;
+  } = {},
 ): Promise<K04GatewayProcess> {
+  const observeFetch = options.observeFetch === true || options.fetchBarrier !== undefined;
   const managed = startV2ManagedProcess(t, {
     command: process.execPath,
     args: [
@@ -277,11 +378,23 @@ export async function startK04GatewayProcess(
       A2A_DEV_CENTRAL_MCP_URL: fixture.central.mcpUrl,
       K04_WEBHOOK_TOKEN,
       XDG_STATE_HOME: join(fixture.gatewayArtifactRoot, "state"),
+      ...(observeFetch
+        ? {
+            NODE_OPTIONS: `--import=${new URL("./k04-gateway-fetch-preload.js", import.meta.url).href}`,
+            K04_GATEWAY_FETCH_PRELOAD: "1",
+            K04_GATEWAY_FETCH_CENTRAL_ORIGIN: new URL(fixture.central.apiUrl).origin,
+            K04_GATEWAY_FETCH_WEBHOOK_ORIGIN: new URL(webhookUrl).origin,
+            ...(options.fetchBarrier === undefined
+              ? {}
+              : { K04_GATEWAY_FETCH_BARRIER: options.fetchBarrier }),
+          }
+        : {}),
     }),
     outputLimitBytes: 65_536,
     gracefulStopMs: 1_000,
     forcedStopMs: 2_000,
   });
+  const control = gatewayControl(managed);
   const endpoint = "http://127.0.0.1:8787/mcp";
   try {
     await managed.waitForOutput("stdout", `MCP endpoint: ${endpoint}\n`);
@@ -292,7 +405,7 @@ export async function startK04GatewayProcess(
     );
   }
   assert.equal(managed.stderr(), "");
-  return { process: managed, endpoint };
+  return { process: managed, control, endpoint };
 }
 
 export async function enrollK04Gateway(
