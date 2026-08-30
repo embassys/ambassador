@@ -62,7 +62,7 @@ async function run(): Promise<void> {
   const gateway = spawn(
     process.execPath,
     [
-      join(process.cwd(), ".test-dist", "src", "cli.js"),
+      join(process.cwd(), ".test-dist", "test", "support", "v2-gateway-process.js"),
       "start",
       `--webhook-url=${webhookUrl}`,
       "--webhook-token-env=A2A_WEBHOOK_TOKEN",

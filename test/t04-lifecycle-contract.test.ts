@@ -13,8 +13,10 @@ import {
   T04_MESSAGE_TEXT,
   T04_REPLY_TEXT,
   T04_USERNAME,
+  T04_WEBHOOK_TOKEN,
   waitForLocalMessage,
 } from "./support/t04-gateway-harness.js";
+import { T04RawMcpClient } from "./support/t04-raw-mcp.js";
 
 const START_PROPERTIES = ["payload", "recipient_username", "request_id"];
 const REPLY_PROPERTIES = ["message_id", "payload"];
@@ -37,7 +39,10 @@ function journalContains(stateRoot: string, messageId: string): boolean {
 
 test("T04-V01 repeats fresh-install activation after a lost committed response", async (t) => {
   const scenario = await startT04GatewayScenario(t, {
-    beforeVerification: (central) => central.failNextV2("activate", "drop_after_commit"),
+    beforeVerification: (central) => {
+      central.failNextV2("activate", "temporarily_unavailable");
+      central.failNextV2("activate", "drop_after_commit");
+    },
   });
   await requireT04Tool(scenario.client, "start_conversation", START_PROPERTIES, "T04-V01");
   assert.equal(scenario.central.pollCount(), 0);
@@ -92,6 +97,17 @@ test("T04-C03 rejects strict start bounds before central application work", asyn
   const scenario = await startT04GatewayScenario(t);
   await requireT04Tool(scenario.client, "start_conversation", START_PROPERTIES, "T04-C03");
   scenario.central.setConversationGrant("fixture_recipient", T04_USERNAME, true);
+  let centralStartCalls = 0;
+  installT04FetchInterceptor(t, async (_request, call) => {
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "POST" &&
+      call.pathname === "/api/v2/conversations"
+    ) {
+      centralStartCalls += 1;
+    }
+    return undefined;
+  });
   scenario.central.failNextV2("start", "temporarily_unavailable");
   await assert.rejects(
     scenario.client.callTool("start_conversation", {
@@ -112,6 +128,15 @@ test("T04-C03 rejects strict start bounds before central application work", asyn
   await assert.rejects(
     scenario.client.callTool("start_conversation", {
       recipient_username: "fixture_recipient",
+      payload: { text: "\0".repeat(100_000) },
+      request_id: "00000000-0000-4000-8000-000000040106",
+    }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(centralStartCalls, 0);
+  await assert.rejects(
+    scenario.client.callTool("start_conversation", {
+      recipient_username: "fixture_recipient",
       payload: { text: "valid" },
       request_id: "00000000-0000-4000-8000-000000040105",
     }),
@@ -125,6 +150,25 @@ test("T04-R03 repeats one reply, rejects changed text, and preserves one outboun
   const inbound = await startInboundConversation(scenario, "00000000-0000-4000-8000-000000040110");
   await scenario.webhook.waitForWake();
   await waitForLocalMessage(scenario.client, inbound.messageId);
+  let centralReplyCalls = 0;
+  installT04FetchInterceptor(t, async (_request, call) => {
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "POST" &&
+      call.pathname === `/api/v2/messages/${inbound.messageId}/reply`
+    ) {
+      centralReplyCalls += 1;
+    }
+    return undefined;
+  });
+  await assert.rejects(
+    scenario.client.callTool("reply_message", {
+      message_id: inbound.messageId,
+      payload: { text: "\0".repeat(100_000) },
+    }),
+    (error: unknown) => error instanceof McpCallError,
+  );
+  assert.equal(centralReplyCalls, 0);
   const input = { message_id: inbound.messageId, payload: { text: T04_REPLY_TEXT } };
   const first = await scenario.client.callTool("reply_message", input);
   assert.deepEqual(await scenario.client.callTool("reply_message", input), first);
@@ -236,7 +280,29 @@ test("T04-A02 rejects acknowledgement before terminal state and deletes only aft
   assert.equal(journalContains(scenario.gateway.stateRoot, inbound.messageId), true);
   await waitForLocalMessage(scenario.client, inbound.messageId);
   interceptor.restore();
-  await scenario.client.callTool("ack_message", { message_id: inbound.messageId });
+  let upstreamAckCalls = 0;
+  installT04FetchInterceptor(t, async (_request, call) => {
+    if (
+      call.origin === scenario.central.apiUrl &&
+      call.method === "POST" &&
+      call.pathname === `/api/v2/messages/${inbound.messageId}/ack`
+    ) {
+      upstreamAckCalls += 1;
+    }
+    return undefined;
+  });
+  const discarded = new T04RawMcpClient(scenario.gateway.endpoint, T04_WEBHOOK_TOKEN);
+  await discarded.initialize();
+  await discarded.callToolAndDiscardResponse("ack_message", { message_id: inbound.messageId });
+  const repeated = await Promise.all([
+    scenario.client.callTool("ack_message", { message_id: inbound.messageId }),
+    scenario.client.callTool("ack_message", { message_id: inbound.messageId }),
+  ]);
+  assert.deepEqual(repeated, [
+    { message_id: inbound.messageId, status: "acked" },
+    { message_id: inbound.messageId, status: "acked" },
+  ]);
+  assert.equal(upstreamAckCalls, 3);
   assert.equal(scenario.central.v2MessageState(inbound.messageId).acknowledged, true);
   assert.equal(journalContains(scenario.gateway.stateRoot, inbound.messageId), false);
   assert.deepEqual(await scenario.client.callTool("poll_messages", { timeout: 0 }), {

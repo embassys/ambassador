@@ -15,14 +15,19 @@ const RETRY_CAP_MS = 60_000;
 const ACCEPTED_REDRIVE_MS = 60_000;
 const IDLE_INTERVAL_MS = 1_000;
 const POLL_RETRY_MS = 1_000;
+const V2_EMPTY_RECEIVE_RETRY_MS = 100;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_JSON_DEPTH = 100;
 const MAX_JSON_STRUCTURAL_TOKENS = 16_384;
 const MAX_MESSAGES_PER_POLL = 256;
 const MAX_LOCAL_POLL_SECONDS = 30;
+const MAX_CONFIRMED_ACKNOWLEDGEMENTS = 1_024;
 
 export type NotificationFetch = (url: URL, init: RequestInit) => Promise<Response>;
 export type McpNotificationPoll = (signal: AbortSignal) => Promise<Record<string, unknown>>;
+export type V2NotificationReceive = (
+  signal: AbortSignal,
+) => Promise<readonly Record<string, unknown>[]>;
 
 export type NotificationRelayErrorCode =
   | "already_running"
@@ -44,14 +49,22 @@ export class NotificationRelayError extends Error {
   }
 }
 
+export class RetryableNotificationReceiveError extends Error {
+  constructor(readonly retryAfterMs?: number) {
+    super("Central notification receive should be retried");
+    this.name = "RetryableNotificationReceiveError";
+  }
+}
+
 export interface NotificationRelayOptions {
   journal: NotificationJournal;
   centralApiUrl: string | URL;
-  centralToken: string;
+  centralToken?: string;
   webhookUrl: string | URL;
   webhookToken: string;
   fetch?: NotificationFetch;
   pollMessagesThroughMcp?: McpNotificationPoll;
+  receiveMessagesThroughV2?: V2NotificationReceive;
   now?: () => number;
   random?: () => number;
   pollDeadlineMs?: number;
@@ -339,13 +352,14 @@ function safeRunError(error: unknown): NotificationRelayError {
 export class NotificationRelay {
   private readonly journal: NotificationJournal;
   private readonly centralPollUrl: URL;
-  private readonly centralToken: string;
-  private readonly centralAuthorization: string;
+  private readonly centralToken: string | undefined;
+  private readonly centralAuthorization: string | undefined;
   private readonly webhookUrl: URL;
   private readonly webhookToken: string;
   private readonly webhookAuthorization: string;
   private readonly request: NotificationFetch;
   private readonly pollMessagesThroughMcp: McpNotificationPoll | undefined;
+  private readonly receiveMessagesThroughV2: V2NotificationReceive | undefined;
   private readonly now: () => number;
   private readonly random: () => number;
   private readonly pollDeadlineMs: number;
@@ -358,6 +372,8 @@ export class NotificationRelay {
   private readonly verboseTranscript: DevelopmentVerboseTranscript | undefined;
   private readonly inbox: BufferedMessage[] = [];
   private readonly volatileWakes = new Map<string, VolatileWake>();
+  private readonly recoverableAcknowledgements = new Set<string>();
+  private readonly confirmedAcknowledgements = new Set<string>();
   private readonly waiters = new Set<() => void>();
   private revision = 0;
   private runController: AbortController | undefined;
@@ -369,13 +385,22 @@ export class NotificationRelay {
     this.journal = options.journal;
     const centralApiUrl = safeUrl(options.centralApiUrl);
     this.centralPollUrl = new URL("/api/poll_messages?timeout=30", centralApiUrl);
-    this.centralToken = safeToken(options.centralToken);
-    this.centralAuthorization = `Bearer ${this.centralToken}`;
+    if (options.receiveMessagesThroughV2 === undefined) {
+      this.centralToken = safeToken(options.centralToken ?? "");
+      this.centralAuthorization = `Bearer ${this.centralToken}`;
+    } else {
+      if (options.centralToken !== undefined || options.pollMessagesThroughMcp !== undefined) {
+        throw new NotificationRelayError("invalid_configuration", "Relay configuration is invalid");
+      }
+      this.centralToken = undefined;
+      this.centralAuthorization = undefined;
+    }
     this.webhookUrl = safeUrl(options.webhookUrl);
     this.webhookToken = safeToken(options.webhookToken);
     this.webhookAuthorization = `Bearer ${this.webhookToken}`;
     this.request = options.fetch ?? fetch;
     this.pollMessagesThroughMcp = options.pollMessagesThroughMcp;
+    this.receiveMessagesThroughV2 = options.receiveMessagesThroughV2;
     this.now = options.now ?? Date.now;
     this.random = options.random ?? Math.random;
     this.pollDeadlineMs = requestTimeout(
@@ -403,6 +428,9 @@ export class NotificationRelay {
     this.pollRetryMs = requestTimeout(options.pollRetryMs, POLL_RETRY_MS, "pollRetryMs");
     this.verboseTranscript = options.verboseTranscript;
     if (this.retryCapMs < this.retryBaseMs) {
+      throw new NotificationRelayError("invalid_configuration", "Relay configuration is invalid");
+    }
+    if (this.pollMessagesThroughMcp !== undefined && this.receiveMessagesThroughV2 !== undefined) {
       throw new NotificationRelayError("invalid_configuration", "Relay configuration is invalid");
     }
   }
@@ -467,15 +495,50 @@ export class NotificationRelay {
   confirmContentAcknowledgement(messageId: string): boolean {
     try {
       const confirmed = this.journal.confirmContentAcknowledgement(messageId);
+      const recovered = this.recoverableAcknowledgements.delete(messageId);
+      const alreadyConfirmed = this.confirmedAcknowledgements.has(messageId);
+      if (
+        (confirmed || recovered || alreadyConfirmed) &&
+        this.receiveMessagesThroughV2 !== undefined
+      ) {
+        this.rememberConfirmedAcknowledgement(messageId);
+      }
       if (confirmed) {
         for (let index = this.inbox.length - 1; index >= 0; index -= 1) {
           if (this.inbox[index]?.id === messageId) this.inbox.splice(index, 1);
         }
         this.notifyWork();
       }
-      return confirmed;
+      return confirmed || recovered || alreadyConfirmed;
     } catch {
       throw new NotificationRelayError("journal_failed", "Notification journal operation failed");
+    }
+  }
+
+  hasCurrentMessage(messageId: string): boolean {
+    return this.inbox.some((message) => message.id === messageId);
+  }
+
+  currentMessageConversationId(messageId: string): string | undefined {
+    const value = this.inbox.find((message) => message.id === messageId)?.message.conversation_id;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  canAcknowledge(messageId: string): boolean {
+    return (
+      this.hasCurrentMessage(messageId) ||
+      this.recoverableAcknowledgements.has(messageId) ||
+      this.confirmedAcknowledgements.has(messageId)
+    );
+  }
+
+  private rememberConfirmedAcknowledgement(messageId: string): void {
+    this.confirmedAcknowledgements.delete(messageId);
+    this.confirmedAcknowledgements.add(messageId);
+    while (this.confirmedAcknowledgements.size > MAX_CONFIRMED_ACKNOWLEDGEMENTS) {
+      const oldest = this.confirmedAcknowledgements.values().next().value;
+      if (oldest === undefined) break;
+      this.confirmedAcknowledgements.delete(oldest);
     }
   }
 
@@ -486,7 +549,12 @@ export class NotificationRelay {
   ): Promise<void> {
     if (signal.aborted) return;
     try {
-      this.journalOperation(() => this.journal.discardUnrecoverable());
+      if (this.receiveMessagesThroughV2 !== undefined) {
+        const recovered = this.journalOperation(() => this.journal.prepareVersionTwoRecoveryIds());
+        for (const messageId of recovered) this.recoverableAcknowledgements.add(messageId);
+      } else {
+        this.journalOperation(() => this.journal.discardUnrecoverable());
+      }
       this.notifyWork();
 
       const loops = [this.pollLoop(signal), this.wakeLoop(signal)];
@@ -509,29 +577,45 @@ export class NotificationRelay {
     while (!signal.aborted) {
       const revision = this.revision;
       try {
-        await this.pollOnce(signal);
+        const received = await this.pollOnce(signal);
+        if (received === 0 && this.receiveMessagesThroughV2 !== undefined && !signal.aborted) {
+          await this.wait(V2_EMPTY_RECEIVE_RETRY_MS, signal, this.revision);
+        }
         while ((this.inbox.length > 0 || this.volatileWakes.size > 0) && !signal.aborted) {
           await this.wait(this.idleIntervalMs, signal, this.revision);
         }
       } catch (error) {
         if (signal.aborted || error instanceof RequestCancelled) return;
         if (error instanceof NotificationRelayError) throw error;
-        await this.wait(this.pollRetryMs, signal, revision);
+        await this.wait(
+          error instanceof RetryableNotificationReceiveError && error.retryAfterMs !== undefined
+            ? error.retryAfterMs
+            : this.pollRetryMs,
+          signal,
+          revision,
+        );
       }
     }
   }
 
-  private async pollOnce(signal: AbortSignal): Promise<void> {
+  private async pollOnce(signal: AbortSignal): Promise<number> {
+    if (this.receiveMessagesThroughV2 !== undefined) {
+      return await this.pollOnceThroughV2(signal);
+    }
     if (this.useMcpPolling) {
-      await this.pollOnceThroughMcp(signal);
-      return;
+      return await this.pollOnceThroughMcp(signal);
+    }
+    const centralToken = this.centralToken;
+    const centralAuthorization = this.centralAuthorization;
+    if (centralToken === undefined || centralAuthorization === undefined) {
+      throw new NotificationRelayError("relay_failed", "Notification relay failed");
     }
     const response = await this.fetchResponse(
       "central_rest",
       this.centralPollUrl,
       {
         method: "GET",
-        headers: { Authorization: this.centralAuthorization },
+        headers: { Authorization: centralAuthorization },
       },
       this.pollDeadlineMs,
       signal,
@@ -553,8 +637,7 @@ export class NotificationRelay {
     if (response.status === 404 && this.pollMessagesThroughMcp !== undefined) {
       await cancelBody(response);
       this.useMcpPolling = true;
-      await this.pollOnceThroughMcp(signal);
-      return;
+      return await this.pollOnceThroughMcp(signal);
     }
     if (!response.ok) {
       await cancelBody(response);
@@ -570,17 +653,43 @@ export class NotificationRelay {
       }
       throw error;
     }
-    const poll = parsePollResponse(bytes, this.centralToken);
+    const poll = parsePollResponse(bytes, centralToken);
     this.ingestPoll(poll);
+    return poll.messages.length;
   }
 
-  private async pollOnceThroughMcp(signal: AbortSignal): Promise<void> {
+  private async pollOnceThroughMcp(signal: AbortSignal): Promise<number> {
     const pollMessages = this.pollMessagesThroughMcp;
-    if (pollMessages === undefined) {
+    const centralToken = this.centralToken;
+    if (pollMessages === undefined || centralToken === undefined) {
       throw new NotificationRelayError("relay_failed", "Notification relay failed");
     }
     const result = await pollMessages(signal);
-    this.ingestPoll(parseMcpPollResponse(result, this.centralToken));
+    const poll = parseMcpPollResponse(result, centralToken);
+    this.ingestPoll(poll);
+    return poll.messages.length;
+  }
+
+  private async pollOnceThroughV2(signal: AbortSignal): Promise<number> {
+    const receiveMessages = this.receiveMessagesThroughV2;
+    if (receiveMessages === undefined) {
+      throw new NotificationRelayError("relay_failed", "Notification relay failed");
+    }
+    const messages = await receiveMessages(signal);
+    const poll: PollResponse = {
+      messages: messages.flatMap((message) => {
+        try {
+          const id = validateNotificationId(message.id);
+          return this.confirmedAcknowledgements.has(id)
+            ? []
+            : [{ message, serialized: JSON.stringify(message), id }];
+        } catch {
+          return invalidPollResponse();
+        }
+      }),
+    };
+    this.ingestPoll(poll);
+    return poll.messages.length;
   }
 
   private ingestPoll(poll: PollResponse): void {
@@ -592,9 +701,15 @@ export class NotificationRelay {
 
     const observedAt = this.currentTime();
     const ids = poll.messages.flatMap(({ id }) => (id === undefined ? [] : [id]));
+    for (const id of ids) {
+      if (!this.recoverableAcknowledgements.has(id)) continue;
+      this.journalOperation(() => this.journal.confirmContentAcknowledgement(id));
+      this.recoverableAcknowledgements.delete(id);
+    }
     this.journalOperation(() => this.journal.ingest(ids, observedAt));
     for (const item of poll.messages) {
       if (item.id !== undefined) {
+        this.recoverableAcknowledgements.delete(item.id);
         const record = this.journalOperation(() => this.journal.get(item.id as string));
         if (
           record?.wakeState === "content_acknowledged" ||

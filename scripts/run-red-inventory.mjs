@@ -41,9 +41,9 @@ const definitions = {
       "t04-outbound-boundaries.test.js",
       "t04-response-observer.test.js",
     ],
-    expected: { tests: 41, pass: 1, fail: 40, skipped: 0, todo: 0 },
+    expected: { tests: 41, pass: 41, fail: 0, skipped: 0, todo: 0 },
     timeoutMs: 120_000,
-    vectorNote: "41 behavior checks: 40 expected red, 1 response-observer support check green",
+    vectorNote: "41 behavior checks: all 41 green after G04 conversation recovery work",
   },
   k02: {
     key: "k02",
