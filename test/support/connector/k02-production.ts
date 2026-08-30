@@ -468,16 +468,28 @@ export function k02RawHead(requestLine: string, headers: Readonly<Record<string,
     .join("\r\n")}\r\n\r\n`;
 }
 
+let rawSocketSetupTail = Promise.resolve();
+
 export async function openK02Socket(webhookUrl: string): Promise<Socket> {
-  const url = new URL(webhookUrl);
-  const socket = connect({ host: "127.0.0.1", port: Number(url.port) });
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("error", reject);
+  const predecessor = rawSocketSetupTail;
+  let release: (() => void) | undefined;
+  rawSocketSetupTail = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  return socket;
+  await predecessor;
+  try {
+    const url = new URL(webhookUrl);
+    const socket = connect({ host: "127.0.0.1", port: Number(url.port) });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return socket;
+  } finally {
+    release?.();
+  }
 }
 
 export async function readK02Response(socket: Socket, timeoutMs = 7_000): Promise<Buffer> {
