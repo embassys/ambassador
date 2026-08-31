@@ -113,7 +113,10 @@ The central server repository is
 reported implemented, but the exact revision and deployment have not been
 pinned. The inspected default branch and hosted routes still show the older
 bearer API. The [server integration status](docs/server-integration-status.md)
-records the I01 API and test refresh plus the I02 live DPoP E2E task.
+records the I01 recheck of every current API and affected flow plus the I02
+live DPoP E2E task. The reported user-email and user-phone request templates
+are candidates for a lower-impact E2E interaction than calendar, subject to
+the pinned contract review.
 
 ## Development
 
@@ -145,7 +148,8 @@ For periodic model-driven acceptance, follow [Live E2E with OpenClaw and Hermes]
 - The [human work queue](docs/human-work.md) lists current reviews, approvals,
   external work, and test gates.
 - [Server integration status](docs/server-integration-status.md) records the
-  central repository, observed API drift, and the I01 and I02 integration work.
+  central repository, observed API drift, the complete I01 API/flow
+  re-baseline, and the I02 contact-template DPoP E2E work.
 - [Product vision and architecture](docs/product-vision-and-architecture.md)
   defines the target process and data boundary.
 - The [protocol](docs/protocol-v1.md) defines startup, MCP, enrollment,

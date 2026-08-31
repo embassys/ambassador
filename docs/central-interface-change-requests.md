@@ -14,8 +14,9 @@ The central repository is
 routes still exposed the older bearer API. The project owner reports that DPoP
 has been implemented in a newer server version, but that version's exact
 commit and deployment have not been identified. I01 and I02 in the gateway
-[implementation plan](implementation-plan.md) track the contract refresh and
-development E2E switch.
+[implementation plan](implementation-plan.md) track a complete current REST,
+MCP, template, and event re-baseline, all resulting flow changes, and the
+development E2E switch. This review is not limited to DPoP or authentication.
 
 Central implementers should use
 [`central-server-implementation-spec.md`](central-server-implementation-spec.md)
@@ -46,10 +47,11 @@ identity, and they do not change the published v1 gateway regression contract.
 checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and
 `expiry_sweep.py`. The newer repository location, user-supplied API snapshot,
 and hosted service still show related bearer-era behavior, but they do not
-identify the reported DPoP implementation. I01 must replace this historical
-baseline with a pinned source revision and generated schemas before client
-integration changes. This repository's independent fixture does not prove the
-behavior of a deployed service.
+identify the reported DPoP implementation or the reported new user-email and
+user-phone request templates. I01 must replace this historical baseline with a
+pinned source revision, a complete client-visible API inventory, and generated
+schemas before client integration changes. This repository's independent
+fixture does not prove the behavior of a deployed service.
 
 ## 1. Redeliver full messages under a lease
 

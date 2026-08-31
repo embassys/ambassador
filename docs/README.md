@@ -44,7 +44,7 @@ owner reports that DPoP has been implemented, but the exact DPoP source
 revision and deployment have not been pinned. The inspected default branch and
 hosted routes still expose the older bearer API. See the
 [server integration status](server-integration-status.md) for the evidence and
-the I01 and I02 tasks.
+the I01 complete-API re-baseline and I02 contact-template DPoP E2E tasks.
 
 Gemini has no selected adapter. ADR 0036 rejected the reviewed Gemini CLI
 interface. Windows is outside the initial release under ADR 0033.

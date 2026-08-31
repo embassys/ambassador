@@ -32,9 +32,13 @@ If your task conflicts with these documents, stop and ask. Do not expand the sco
 - Follow the task gates in `docs/implementation-plan.md`. `docs/v2-fixture-profile.md` supplies test-only stand-ins for unknown central facts. Do not treat it or a development override as a production URL or as evidence that central implements the accepted target. A production central MCP implementation, ACP, hosted-agent connectors, and GUI work stay out of scope.
 - For central integration work, pin the exact `embassys/agent2agent` source
   revision and the deployment built from it. Treat the supplied API snapshot
-  and a health response as background evidence only. Follow I01 and I02 in
-  `docs/server-integration-status.md`; never weaken an accepted contract or add
-  runtime probing to match an unpinned server.
+  and a health response as background evidence only. Inventory the complete
+  current REST, MCP, template, and event surface and trace every affected flow;
+  do not scope the recheck to DPoP or authentication. Confirm the reported
+  user-email and user-phone request templates from pinned schemas before using
+  one with synthetic data as the preferred low-impact E2E interaction. Follow
+  I01 and I02 in `docs/server-integration-status.md`; never weaken an accepted
+  contract or add runtime probing to match an unpinned server.
 - Keep `docs/README.md` navigational, `docs/architecture-overview.md` concise,
   and `docs/human-work.md` current. Normative behavior belongs in the protocol
   or an ADR, not in the wiki summaries.

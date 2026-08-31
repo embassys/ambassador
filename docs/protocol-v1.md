@@ -10,9 +10,12 @@ production endpoint values are known.
 
 The project owner reports that the central server has a DPoP implementation,
 but the inspected `embassys/agent2agent` default branch and hosted routes still
-show the older bearer contract. The exact DPoP revision and deployment must be
-pinned and tested through I01 and I02 before this repository claims live
-compatibility. See [server integration status](server-integration-status.md).
+show the older bearer contract. The exact current revision and deployment must
+be pinned, its entire client-visible API and template surface must be
+re-baselined, and the affected flows must be tested through I01 and I02 before
+this repository claims live compatibility. This work is not limited to DPoP
+or authentication. See
+[server integration status](server-integration-status.md).
 
 ## Startup contract
 

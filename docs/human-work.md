@@ -16,12 +16,17 @@ record.
   deployment for
   [`embassys/agent2agent`](https://github.com/embassys/agent2agent). The
   inspected default branch and hosted routes still show the older bearer API.
-- [ ] Complete I01 by updating the gateway API clients, fixtures, and reviewed
-  tests to the pinned latest server contract. Return material differences to
-  ADRs 0023, 0025, or 0026 for review.
+- [ ] Complete I01 by inventorying the entire current REST, MCP, template, and
+  event surface, tracing every flow impact, and updating gateway API clients,
+  fixtures, and reviewed tests to the pinned latest server contract. Return
+  material differences to ADRs 0023, 0025, or 0026 for review.
+- [ ] Confirm the exact schemas and consent behavior of the new user-email and
+  user-phone request templates. Approve one as the low-impact development E2E
+  interaction instead of calendar only after the pinned contract is reviewed.
 - [ ] Complete I02 by switching a fresh development identity to the pinned
   DPoP deployment and passing the full enrollment, protected transport,
-  reissue, message, reply, acknowledgement, crash, and artifact E2E flow.
+  reissue, contact-request, message, reply, acknowledgement, crash, and
+  artifact E2E flow with synthetic or disposable contact data.
 - [ ] A central owner must publish and review the S01 red failure inventory in
   the central service repository. The gateway T03 and T04 inventories are
   already accepted. Gate A remains open until the central half is accepted.
@@ -71,8 +76,8 @@ qualification plan.
 
 | Work | Owner | State | Next completion evidence |
 | --- | --- | --- | --- |
-| I01 latest server API and test refresh | Gateway and central teams | Server repository found; DPoP revision and deployed schemas unpinned | One pinned server revision, generated REST and MCP schemas, clients, fixtures, and tests agree |
-| I02 DPoP development switch and live E2E | Gateway and central teams | DPoP reported implemented; inspected source and hosted routes still show bearer v1 | Fresh version 2 identity passes DPoP issuance, bearer rejection, protected REST and MCP, reissue, delivery, reply, acknowledgement, restart, and artifact tests |
+| I01 complete server API and test refresh | Gateway and central teams | Server repository found; current revision, complete API inventory, and deployed schemas unpinned | Every REST route, MCP tool, template, callback or event, version, and deprecation is classified; affected flows, clients, fixtures, and tests agree with one pinned revision |
+| I02 DPoP development switch and live E2E | Gateway and central teams | DPoP and new email/phone request templates reported; exact schemas and deployment unpinned | Fresh version 2 identity passes DPoP issuance, bearer rejection, protected REST and MCP, a synthetic contact-request flow, reissue, delivery, reply, acknowledgement, restart, and artifact tests without persisting contact data |
 | S01 central red suite and review | Central team | Server repository located; reviewed red suite absent from inspected `main` | Central owner accepts the exact failure inventory |
 | S02 REST enrollment and native MCP results | Central team | Pending S01 and Gate A | Central contract tests pass |
 | S03 DPoP issuance and enforcement | Central team | Reported implemented, but exact revision, deployment, and enforcement evidence are unpinned | Bearer, wrong-key, replay, and proxy mismatch tests fail before dispatch |
@@ -120,7 +125,8 @@ point to evidence for each row.
 
 | Area | Required evidence | Current position |
 | --- | --- | --- |
-| Server contract | Pinned source commit, deployment identifier, generated REST and MCP schemas, and drift report | I01 pending; attached API snapshot and inspected `main` show older bearer routes |
+| Server contract | Pinned source commit, deployment identifier, exhaustive REST, MCP, template, and event inventory, generated schemas, and flow-impact report | I01 pending; attached API snapshot and inspected `main` show the older bearer-era surface |
+| User-contact templates | Exact email- and phone-request schemas, consent and result behavior, synthetic contract tests, and approved low-impact E2E selection | Reported available on a newer server; identifiers and schemas must be confirmed by I01 before I02 uses them instead of calendar |
 | Enrollment | Real email, issuance proof, token binding, lost response, restart | Fixture coverage only; I02 pending |
 | Protected transport | Real TLS proxy URI, nonce, replay across replicas, bearer rejection | Fixture coverage only; DPoP is reported implemented but not live-qualified |
 | Message custody | Lease expiry, immutable redelivery, reply, completion, acknowledgement | Fixture coverage only |

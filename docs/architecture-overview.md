@@ -222,7 +222,9 @@ Local fixture coverage is substantial, including cross-language gateway tests,
 fake-provider system tests, package scans, and deterministic crash barriers.
 It does not close these gates:
 
-- latest server contract refresh and DPoP development E2E, I01 and I02;
+- complete latest-server API and flow refresh, including the reported email-
+  and phone-request templates, plus DPoP contact-template development E2E, I01
+  and I02;
 - central owner implementation and staging, S01 through S07;
 - real Codex and Claude qualification, CX04 and CL04;
 - gateway live qualification and soak, E01 through E03;

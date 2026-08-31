@@ -82,9 +82,9 @@ D01 + D02 + D03 + D04 + D06 complete
 
 external central S01 red suite --> central-owner review --> S02-S07 implementation
 
-server revision + deployed schemas
-  -> I01 refresh gateway API integrations and tests
-  -> I02 switch a fresh development identity to DPoP and run live E2E
+server revision + complete deployed API and template inventory
+  -> I01 refresh all affected gateway flows, integrations, and tests
+  -> I02 switch a fresh development identity to DPoP and run contact-template E2E
 
 T03/T04 user review + enforcing development central
   -> G01 DPoP and credential v2
@@ -182,13 +182,15 @@ this order.
 
 | ID | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- |
-| I01 | Pin the latest DPoP server revision and update gateway API integrations, fixtures, inventories, and CI tests to its approved contract | Server owner supplies exact source and deployment; ADR review for material differences | Generated REST and MCP schemas, black-box observations, gateway clients, both fixtures, and reviewed tests agree without probing or fallback |
-| I02 | Switch a fresh development identity to DPoP and complete the live gateway E2E flow | I01, Gate A, deployed S02 through S06 behavior | Issuance binding, bearer rejection, nonce, replay, proxy URI, protected REST and MCP, reissue, activation, leased delivery, reply or completion, acknowledgement, restart, packed install, and artifact scans pass |
+| I01 | Pin the latest server revision, inventory its complete REST, MCP, template, and event surface, trace every affected flow, and update gateway integrations, fixtures, inventories, and CI tests to the approved contract | Server owner supplies exact source and deployment; ADR review for material differences | Every current API is classified; generated schemas, black-box observations, end-to-end flow map, gateway clients, both fixtures, and reviewed tests agree without probing or fallback |
+| I02 | Switch a fresh development identity to DPoP and complete the live gateway E2E flow with an approved low-impact user-contact template | I01, Gate A, deployed S02 through S06 behavior | Both email- and phone-request templates have contract coverage; one synthetic contact-request flow passes issuance binding, bearer rejection, nonce, replay, proxy URI, protected REST and MCP, reissue, activation, leased delivery, reply or completion, acknowledgement, restart, packed install, artifact scans, and contact-data boundary checks |
 
-I01 changes tests before production integration code. It must not silently
+I01 changes tests before production integration code. It covers the entire
+client-visible server surface, not only authentication, and must not silently
 change an accepted route or security rule to match the server. I02 uses a fresh
-version 2 identity and never sends its token through a bearer path or MCP tool
-argument. The exact evidence checklist is in
+version 2 identity, never sends its token through a bearer path or MCP tool
+argument, and uses only synthetic or disposable contact data. The exact
+evidence checklist is in
 [server integration status](server-integration-status.md).
 
 ## Phase 4: qualification and cleanup
