@@ -452,8 +452,14 @@ license, and platform ADRs.
   shards, and passes it to the private package checker explicitly. The checker
   revalidates it and gives the same explicit store configuration to both
   `pnpm pack` and the retained offline, ignore-scripts, copy-import install.
-  Synthetic `HOME` and all package gates remain in force; no network or ambient
-  real-home fallback was added.
+  X23 also canonicalizes an already-cached pnpm 11.22.0 CLI and populated pnpm
+  v11 metadata cache, qualifies the exact CLI version and required cache
+  structure under the synthetic environment, and passes both to the checker
+  explicitly. The checker requalifies them, runs only
+  `process.execPath <qualified-cli>` for packaging and installation, and passes
+  the cache as an exact pnpm configuration argument. Synthetic `HOME` and all
+  package gates remain in force; no Corepack shim, network, install,
+  environment fallback, or ambient real-home fallback was added.
 - A failed proof that the pinned version-probe process group is empty maps at
   the production adapter factory boundary to the existing content-free
   `connector_shutdown_incomplete` CLI error. Other preflight failures keep the

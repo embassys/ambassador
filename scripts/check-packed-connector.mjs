@@ -209,19 +209,81 @@ async function validatedStoreDirectory(argument) {
   return canonical;
 }
 
+async function validatedPnpmCli(argument) {
+  if (argument === undefined) return undefined;
+  const prefix = "--pnpm-cli=";
+  if (!argument.startsWith(prefix)) throw new Error("invalid pnpm CLI argument");
+  const requested = argument.slice(prefix.length);
+  if (!isAbsolute(requested)) throw new Error("invalid pnpm CLI argument");
+  const canonical = await realpath(requested);
+  const entry = await lstat(canonical);
+  if (!entry.isFile() || entry.isSymbolicLink()) throw new Error("invalid pnpm CLI argument");
+  const version = await run(process.execPath, [canonical, "--version"], {
+    cwd: repositoryRoot,
+    env: process.env,
+  });
+  if (
+    version.code !== 0 ||
+    version.signal !== null ||
+    version.stdout !== "11.22.0\n" ||
+    version.stderr !== ""
+  ) {
+    throw new Error("invalid pnpm CLI argument");
+  }
+  return canonical;
+}
+
+async function validatedPnpmCache(argument) {
+  if (argument === undefined) return undefined;
+  const prefix = "--cache-dir=";
+  if (!argument.startsWith(prefix)) throw new Error("invalid pnpm cache argument");
+  const requested = argument.slice(prefix.length);
+  if (!isAbsolute(requested)) throw new Error("invalid pnpm cache argument");
+  const canonical = await realpath(requested);
+  const metadataRoot = join(canonical, "v11", "metadata", "registry.npmjs.org");
+  const [cache, metadata, client, sqlite, zod] = await Promise.all([
+    lstat(canonical),
+    lstat(metadataRoot),
+    lstat(join(metadataRoot, "@modelcontextprotocol", "client.jsonl")),
+    lstat(join(metadataRoot, "better-sqlite3.jsonl")),
+    lstat(join(metadataRoot, "zod.jsonl")),
+  ]);
+  if (
+    !cache.isDirectory() ||
+    cache.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    metadata.isSymbolicLink() ||
+    [client, sqlite, zod].some(
+      (entry) => !entry.isFile() || entry.isSymbolicLink() || entry.size < 1,
+    )
+  ) {
+    throw new Error("invalid pnpm cache argument");
+  }
+  return canonical;
+}
+
 async function main() {
-  const [provider, storeArgument, ...rest] = process.argv.slice(2);
+  const [provider, storeArgument, pnpmCliArgument, cacheArgument, ...rest] = process.argv.slice(2);
   if (
     provider === undefined ||
     rest.length !== 0 ||
     !PROVIDERS.includes(provider) ||
-    (storeArgument !== undefined && !storeArgument.startsWith("--store-dir="))
+    (storeArgument !== undefined && !storeArgument.startsWith("--store-dir=")) ||
+    (pnpmCliArgument !== undefined && !pnpmCliArgument.startsWith("--pnpm-cli=")) ||
+    (cacheArgument !== undefined && !cacheArgument.startsWith("--cache-dir="))
   ) {
     throw new Error("invalid provider");
   }
   const storeDirectory = await validatedStoreDirectory(storeArgument);
+  const pnpmCli = await validatedPnpmCli(pnpmCliArgument);
+  const cacheDirectory = await validatedPnpmCache(cacheArgument);
   const pnpmStoreArgument =
     storeDirectory === undefined ? [] : [`--config.store-dir=${storeDirectory}`];
+  const pnpmCacheArgument =
+    cacheDirectory === undefined ? [] : [`--config.cache-dir=${cacheDirectory}`];
+  const pnpmExecutable = pnpmCli === undefined ? "pnpm" : process.execPath;
+  const pnpmArguments = (arguments_) =>
+    pnpmCli === undefined ? arguments_ : [pnpmCli, ...arguments_];
 
   await runRequired(
     process.execPath,
@@ -244,10 +306,14 @@ async function main() {
     const stageRoot = join(repositoryRoot, ".stage", "connectors", provider, "package");
     const staged = await inventory(stageRoot);
     const tarball = join(temporaryRoot, `${provider}-connector.tgz`);
-    await runRequired("pnpm", ["pack", ...pnpmStoreArgument, "--out", tarball], {
-      cwd: stageRoot,
-      env: { ...process.env, npm_config_ignore_scripts: "true" },
-    });
+    await runRequired(
+      pnpmExecutable,
+      pnpmArguments(["pack", ...pnpmStoreArgument, ...pnpmCacheArgument, "--out", tarball]),
+      {
+        cwd: stageRoot,
+        env: { ...process.env, npm_config_ignore_scripts: "true" },
+      },
+    );
     await checkTarball(provider, stageRoot, tarball, staged);
 
     const installRoot = join(temporaryRoot, "install");
@@ -258,15 +324,16 @@ async function main() {
       { encoding: "utf8", mode: 0o600 },
     );
     await runRequired(
-      "pnpm",
-      [
+      pnpmExecutable,
+      pnpmArguments([
         "add",
         ...pnpmStoreArgument,
+        ...pnpmCacheArgument,
         "--offline",
         "--ignore-scripts",
         "--package-import-method=copy",
         tarball,
-      ],
+      ]),
       {
         cwd: installRoot,
         env: {
