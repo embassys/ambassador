@@ -1,6 +1,7 @@
 # Central server implementation specification
 
-Status: implementation-ready handoff for external S01 through S07
+Status: implementation-ready handoff for external S01 through S07; live
+revision alignment pending
 
 Date: 2026-08-30
 
@@ -10,6 +11,14 @@ This document translates accepted ADRs 0023, 0025, 0026, and 0027 into work
 for the central service repository. Those ADRs remain normative. A conflict
 returns this specification for correction rather than changing the accepted
 client contract in server code.
+
+The central repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The project
+owner reports that DPoP is implemented, but the exact DPoP commit and deployed
+revision have not been pinned. I01 in the gateway implementation plan compares
+that exact revision with this specification and returns any material
+client-visible difference for ADR review. I02 then runs the first full DPoP
+development E2E. Neither task weakens S01 through S07.
 
 The target is a fresh version 2 identity. Do not migrate a version 1
 credential, identity, mailbox row, or delivery state. Do not add protocol
