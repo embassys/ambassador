@@ -8,16 +8,36 @@ import type { FakeClaudeProcessPlan, FakeClaudeWireWrite } from "./types.js";
 
 type ControllerMessage =
   | { readonly command: "plan"; readonly plan: FakeClaudeProcessPlan }
-  | { readonly command: "release"; readonly gate: string };
+  | { readonly command: "release"; readonly gate: string }
+  | { readonly command: "signal_ack"; readonly signal: NodeJS.Signals };
 
 const executable = realpathSync(process.argv[1] ?? "");
 const arguments_ = process.argv.slice(2);
 const control = connect(`${executable}.control.sock`);
 const gates = new Map<string, (() => void)[]>();
+const signalAcknowledgements = new Map<NodeJS.Signals, (() => void)[]>();
 let plan: FakeClaudeProcessPlan | undefined;
 
 function send(value: unknown): void {
   control.write(`${JSON.stringify(value)}\n`);
+}
+
+async function sendFully(value: unknown): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    control.write(`${JSON.stringify(value)}\n`, (error?: Error | null) =>
+      error === undefined || error === null ? resolve() : reject(error),
+    );
+  });
+}
+
+async function sendSignal(signal: NodeJS.Signals): Promise<void> {
+  const acknowledged = new Promise<void>((resolve) => {
+    const waiters = signalAcknowledgements.get(signal) ?? [];
+    waiters.push(resolve);
+    signalAcknowledgements.set(signal, waiters);
+  });
+  await sendFully({ channel: "signal", signal });
+  await acknowledged;
 }
 
 function environmentRecord(): Record<string, string> {
@@ -48,26 +68,39 @@ async function waitForGate(name: string | undefined): Promise<void> {
   });
 }
 
+async function writeFully(stream: NodeJS.WriteStream, value: string | Buffer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    stream.write(value, (error?: Error | null) =>
+      error === undefined || error === null ? resolve() : reject(error),
+    );
+  });
+}
+
 async function writeWire(write: FakeClaudeWireWrite): Promise<void> {
   await waitForGate(write.gate);
   if (write.kind === "json") {
-    process.stdout.write(`${JSON.stringify(write.value)}\n`);
+    await writeFully(process.stdout, `${JSON.stringify(write.value)}\n`);
     return;
   }
   if (write.kind === "utf8") {
-    process.stdout.write(write.value);
+    await writeFully(process.stdout, write.value);
     return;
   }
   if (write.kind === "stderr_utf8") {
-    process.stderr.write(write.value);
+    await writeFully(process.stderr, write.value);
     return;
   }
-  process.stdout.write(Buffer.from(write.value, "base64"));
+  await writeFully(process.stdout, Buffer.from(write.value, "base64"));
 }
 
 function failFixture(code: string): never {
   send({ channel: "fixture_error", code });
   process.exit(91);
+}
+
+function exitBySignal(signal: NodeJS.Signals): void {
+  process.removeAllListeners(signal);
+  process.kill(process.pid, signal);
 }
 
 function spawnDescendant(): number | undefined {
@@ -99,27 +132,28 @@ async function runVersion(selected: Extract<FakeClaudeProcessPlan, { kind: "vers
     send({ channel: "descendant", pid: spawnDescendant() });
   }
   if (selected.hold === true) return;
-  if (selected.stdout !== undefined) process.stdout.write(selected.stdout);
-  if (selected.stderr !== undefined) process.stderr.write(selected.stderr);
+  if (selected.stdout !== undefined) await writeFully(process.stdout, selected.stdout);
+  if (selected.stderr !== undefined) await writeFully(process.stderr, selected.stderr);
   if (selected.stderrBytes !== undefined) {
-    process.stderr.write(Buffer.alloc(selected.stderrBytes, 0x78));
+    await writeFully(process.stderr, Buffer.alloc(selected.stderrBytes, 0x78));
   }
   if (selected.exitSignal !== undefined) {
-    process.kill(process.pid, selected.exitSignal);
+    exitBySignal(selected.exitSignal);
     return;
   }
   process.exit(selected.exitCode ?? 0);
 }
 
 async function runTurn(selected: Extract<FakeClaudeProcessPlan, { kind: "turn" }>) {
-  if (selected.stderrBytes !== undefined) {
-    process.stderr.write(Buffer.alloc(selected.stderrBytes, 0x78));
-  }
+  const pendingStderr =
+    selected.stderrBytes === undefined
+      ? Promise.resolve()
+      : writeFully(process.stderr, Buffer.alloc(selected.stderrBytes, 0x78));
   if (selected.spawnDescendant === true) {
     send({ channel: "descendant", pid: spawnDescendant() });
   }
   if (selected.stdoutBytesBeforeInput !== undefined) {
-    process.stdout.write(Buffer.alloc(selected.stdoutBytesBeforeInput, 0x78));
+    await writeFully(process.stdout, Buffer.alloc(selected.stdoutBytesBeforeInput, 0x78));
   }
   for (const write of selected.writesBeforeInput ?? []) await writeWire(write);
   if (selected.exitBeforeInput?.exitSignal !== undefined) {
@@ -142,7 +176,7 @@ async function runTurn(selected: Extract<FakeClaudeProcessPlan, { kind: "turn" }
       if (inputCount === 1) {
         for (const write of selected.writesAfterInput ?? []) await writeWire(write);
         if (selected.stdoutBytesAfterInput !== undefined) {
-          process.stdout.write(Buffer.alloc(selected.stdoutBytesAfterInput, 0x78));
+          await writeFully(process.stdout, Buffer.alloc(selected.stdoutBytesAfterInput, 0x78));
         }
       }
     });
@@ -158,12 +192,13 @@ async function runTurn(selected: Extract<FakeClaudeProcessPlan, { kind: "turn" }
         });
       }
       await waitForGate(selected.stdinEndGate);
+      await pendingStderr;
       if (selected.onStdinEnd === "resist") return;
       if (selected.onStdinEnd === "linger") {
         await new Promise<void>((resolve) => setTimeout(resolve, selected.lingerMs ?? 1_500));
       }
       if (selected.exitSignal !== undefined) {
-        process.kill(process.pid, selected.exitSignal);
+        exitBySignal(selected.exitSignal);
         return;
       }
       process.exit(selected.exitCode ?? 0);
@@ -172,12 +207,14 @@ async function runTurn(selected: Extract<FakeClaudeProcessPlan, { kind: "turn" }
 }
 
 process.on("SIGINT", () => {
-  send({ channel: "signal", signal: "SIGINT" });
-  if (plan?.kind === "turn" && plan.exitOnInterrupt === true) process.exit(130);
+  void sendSignal("SIGINT").then(() => {
+    if (plan?.kind === "turn" && plan.exitOnInterrupt === true) process.exit(130);
+  });
 });
 process.on("SIGTERM", () => {
-  send({ channel: "signal", signal: "SIGTERM" });
-  if (plan?.kind !== "turn" || plan.resistTermination !== true) process.exit(143);
+  void sendSignal("SIGTERM").then(() => {
+    if (plan?.kind !== "turn" || plan.resistTermination !== true) process.exit(143);
+  });
 });
 
 const messages = createInterface({ input: control, crlfDelay: Number.POSITIVE_INFINITY });
@@ -187,6 +224,15 @@ messages.on("line", (line) => {
     message = JSON.parse(line) as ControllerMessage;
   } catch {
     failFixture("controller_json_invalid");
+  }
+  if (message.command === "signal_ack") {
+    const waiters = signalAcknowledgements.get(message.signal) ?? [];
+    const acknowledge = waiters.shift();
+    if (waiters.length === 0) signalAcknowledgements.delete(message.signal);
+    else signalAcknowledgements.set(message.signal, waiters);
+    if (acknowledge === undefined) failFixture("controller_signal_ack_invalid");
+    acknowledge();
+    return;
   }
   if (message.command === "release") {
     releaseGate(message.gate);

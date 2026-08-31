@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, realpath, rm } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,6 +54,7 @@ export interface FakeClaudeCli {
   waitForStdinClosed(count: number): Promise<void>;
   waitForSignals(count: number): Promise<void>;
   waitForBarrier(name: string): Promise<void>;
+  quiesce(): Promise<void>;
   spawnForFixture(
     arguments_: readonly string[],
     options: {
@@ -129,17 +130,19 @@ export async function startFakeClaudeCli(
 ): Promise<FakeClaudeCli> {
   assert.notEqual(process.platform, "win32", "ADR 0033 defers Windows connector support");
   const root = await mkdtemp(join(tmpdir(), "a2a-cl02-claude-"));
-  const executablePath = join(root, "claude");
-  const controlSocketPath = `${executablePath}.control.sock`;
+  const fixturePath = join(root, "claude");
   const compiledWorker = fileURLToPath(new URL("./fake-claude-cli.js", import.meta.url));
-  await copyFile(compiledWorker, executablePath);
-  await chmod(executablePath, 0o700);
+  await copyFile(compiledWorker, fixturePath);
+  await chmod(fixturePath, 0o700);
+  const executablePath = await realpath(fixturePath);
+  const controlSocketPath = `${executablePath}.control.sock`;
 
   const plans = [...initialPlans];
   const records: MutableLaunchRecord[] = [];
   const fixtureErrors: string[] = [];
   const sockets = new Set<Socket>();
   const fixtureChildren = new Set<ChildProcess>();
+  let quiesced = false;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
@@ -194,8 +197,10 @@ export async function startFakeClaudeCli(
       else if (message.channel === "stdin_bytes") {
         record.stdinChunks.push(Buffer.from(message.value, "base64"));
       } else if (message.channel === "stdin_closed") record.stdinClosed = true;
-      else if (message.channel === "signal") record.signals.push(message.signal);
-      else if (message.channel === "descendant") record.descendantPid = message.pid;
+      else if (message.channel === "signal") {
+        record.signals.push(message.signal);
+        socket.write(`${JSON.stringify({ command: "signal_ack", signal: message.signal })}\n`);
+      } else if (message.channel === "descendant") record.descendantPid = message.pid;
       else if (message.channel === "barrier") record.barriers.push(message.name);
       else if (message.channel === "fixture_error") fixtureErrors.push(message.code);
     });
@@ -208,7 +213,9 @@ export async function startFakeClaudeCli(
     });
   });
 
-  t.after(async () => {
+  const quiesce = async (): Promise<void> => {
+    if (quiesced) return;
+    quiesced = true;
     for (const child of fixtureChildren) {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
     }
@@ -218,6 +225,10 @@ export async function startFakeClaudeCli(
     }
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
+
+  t.after(async () => {
+    await quiesce();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -267,6 +278,7 @@ export async function startFakeClaudeCli(
       );
       assert.deepEqual(fixtureErrors, []);
     },
+    quiesce,
     spawnForFixture(arguments_, options) {
       const child = spawn(executablePath, [...arguments_], {
         cwd: options.cwd,

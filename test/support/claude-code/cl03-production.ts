@@ -38,6 +38,7 @@ export interface ClaudeAdapterForTestOptions {
     readonly scope: "version" | "turn";
     readonly observation: ClaudeProcessObservation;
   }) => void;
+  readonly processGroupProbeForTest?: (pgid: number) => "empty" | "accessible" | "denied";
 }
 
 export type ClaudeMonitorSpawnForTest = (
@@ -66,6 +67,7 @@ export interface Cl03MonitorModule {
   runClaudeLifetimeMonitorForTest(
     barrier: ClaudeLifetimeMonitorBarrier,
     beforeFaultForTest?: () => Promise<void>,
+    faultAfterBarrierForTest?: boolean,
   ): Promise<never>;
 }
 

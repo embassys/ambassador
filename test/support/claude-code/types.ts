@@ -100,6 +100,7 @@ export interface FakeMonitorPlan {
   readonly beforeSpawnGate?: string;
   readonly afterSpawnGate?: string;
   readonly beforeChildStartedGate?: string;
+  readonly afterSigtermWrites?: readonly FakeClaudeWireWrite[];
 }
 
 export interface FakeMonitorLaunchRecord {

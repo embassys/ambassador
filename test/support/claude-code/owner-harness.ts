@@ -88,6 +88,7 @@ function processGroupExists(pgid: number): boolean {
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
   }
 }
@@ -95,7 +96,9 @@ function processGroupExists(pgid: number): boolean {
 export async function waitForClaudeProcessGroupEmpty(pgid: number): Promise<void> {
   const deadline = Date.now() + 4_000;
   while (processGroupExists(pgid)) {
-    if (Date.now() >= deadline) throw new Error("CL02 monitor group survived owner death");
+    if (Date.now() >= deadline) {
+      throw new Error(`CL02 monitor group ${pgid} survived owner death`);
+    }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
 }

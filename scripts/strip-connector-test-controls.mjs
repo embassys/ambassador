@@ -2,6 +2,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const forbiddenControls = [
+  "afterVersionProbeForTest",
+  "beforeFaultForTest",
   "connector_test_crash",
   "crashAfter",
   "crashAfterCancellation",
@@ -17,8 +19,12 @@ const forbiddenControls = [
   "proveNoProviderDispatch",
   "providerDispatchDelayMsForTest",
   "processBarrierForTest",
+  "processGroupProbeForTest",
+  "processObserverForTest",
+  "spawnMonitorForTest",
   "stallWebhookResponseAfterCommit",
   "stateActionObserverForTest",
+  "uuidForTest",
 ];
 
 function skipQuoted(source, start, quote) {
@@ -353,6 +359,224 @@ function stripCodexAppServerAdapter(source) {
   return statements.output;
 }
 
+function stripClaudeCodeAdapter(source) {
+  let output = replaceExactly(
+    source,
+    "options.clock ?? SYSTEM_CLOCK",
+    "SYSTEM_CLOCK",
+    1,
+    "Claude adapter test clock",
+  );
+  output = replaceExactly(
+    output,
+    "this.options.clock !== undefined",
+    "false",
+    1,
+    "Claude adapter test-clock branch",
+  );
+  output = replaceExactly(
+    output,
+    `        this.#spawnMonitor =
+            options.spawnMonitorForTest ??
+                ((executable, arguments_, spawnOptions) => spawn(executable, [...arguments_], {
+                    cwd: spawnOptions.cwd,
+                    env: { ...spawnOptions.env },
+                    detached: spawnOptions.detached,
+                    shell: spawnOptions.shell,
+                    stdio: [...spawnOptions.stdio],
+                    windowsHide: true,
+                }));`,
+    `        this.#spawnMonitor = (executable, arguments_, spawnOptions) => spawn(executable, [...arguments_], {
+            cwd: spawnOptions.cwd,
+            env: { ...spawnOptions.env },
+            detached: spawnOptions.detached,
+            shell: spawnOptions.shell,
+            stdio: [...spawnOptions.stdio],
+            windowsHide: true,
+        });`,
+    1,
+    "Claude adapter fixture spawn",
+  );
+  output = replaceNamedBlock(
+    output,
+    "    async ",
+    "#nextUntil",
+    `    async #nextUntil(invocation, deadlineUnixMs, _realFallbackMs) {
+        const waiting = invocation.queue.wait();
+        const delayMs = Math.max(0, deadlineUnixMs - this.#clock.nowMs());
+        const clockTimer = timerPromise(this.#clock, delayMs);
+        const timeout = Symbol("timeout");
+        const result = await Promise.race([
+            waiting.promise,
+            clockTimer.promise.then(() => timeout),
+        ]);
+        clockTimer.cancel();
+        if (result === timeout) {
+            waiting.cancel();
+            throw new DeadlineFailure();
+        }
+        return result;
+    }
+`,
+  );
+  output = replaceNamedBlock(
+    output,
+    "    ",
+    "#uuid",
+    `    #uuid(_kind) {
+        const value = randomUUID();
+        if (!SESSION_ID.test(value))
+            throw new ProtocolFailure();
+        return value;
+    }
+`,
+  );
+  output = replaceNamedBlock(
+    output,
+    "    async ",
+    "#barrier",
+    `    async #barrier(_scope, _barrier) {
+    }
+`,
+  );
+  output = replaceNamedBlock(
+    output,
+    "    ",
+    "#observe",
+    `    #observe(_scope, _observation) {
+    }
+`,
+  );
+  output = replaceExactly(
+    output,
+    "resolveExecutable(options.fixtureExecutablePath, environment)",
+    "resolveExecutable(undefined, environment)",
+    1,
+    "Claude adapter fixture executable",
+  );
+  output = replaceExactly(
+    output,
+    `await executableIdentity(canonicalExecutable, options.fixtureExecutablePath === undefined
+            ? canonicalExecutable
+            : (executable ?? canonicalExecutable))`,
+    "await executableIdentity(canonicalExecutable, canonicalExecutable)",
+    1,
+    "Claude adapter fixture launch path",
+  );
+  output = removeNamedBlock(output, "export async function ", "createClaudeCodeAdapterForTest");
+  output = replaceNamedBlock(
+    output,
+    "    ",
+    "#groupProbe",
+    `    #groupProbe(pgid) {
+        return processGroupProbe(pgid);
+    }
+`,
+  );
+  const statements = removeForbiddenIfStatements(output);
+  if (statements.removed !== 1) {
+    throw new Error(`unexpected emitted Claude adapter test branches: ${statements.removed}`);
+  }
+  assertProductionOnly(statements.output);
+  return statements.output;
+}
+
+function stripClaudeLifetimeMonitor(source) {
+  let output = removeNamedBlock(
+    source,
+    "export async function ",
+    "runClaudeLifetimeMonitorForTest",
+  );
+  output = replaceExactly(
+    output,
+    "class InjectedMonitorFault extends Error {\n}\n",
+    "",
+    1,
+    "Claude monitor injected-fault class",
+  );
+  output = replaceExactly(
+    output,
+    "async function runMonitor(faultInjection) {",
+    "async function runMonitor() {",
+    1,
+    "Claude monitor fault argument",
+  );
+  output = replaceExactly(
+    output,
+    `    const atBarrier = async (barrier) => {
+        if (faultInjection?.barrier !== barrier)
+            return;
+        await faultInjection.beforeFault?.();
+        if (faultInjection.faultAfterBarrier)
+            throw new InjectedMonitorFault();
+    };
+`,
+    "",
+    1,
+    "Claude monitor fault barrier",
+  );
+  output = replaceExactly(
+    output,
+    `        await atBarrier("during_start_record");
+`,
+    "",
+    1,
+    "Claude monitor start-record barrier",
+  );
+  output = replaceExactly(
+    output,
+    `        await atBarrier("before_claude_spawn");
+`,
+    "",
+    1,
+    "Claude monitor before-spawn barrier",
+  );
+  output = replaceExactly(
+    output,
+    `        await atBarrier("after_claude_spawn");
+`,
+    "",
+    1,
+    "Claude monitor after-spawn barrier",
+  );
+  output = replaceExactly(
+    output,
+    `        await atBarrier("before_child_started");
+`,
+    "",
+    1,
+    "Claude monitor child-started barrier",
+  );
+  output = replaceExactly(
+    output,
+    `        await atBarrier("before_monitor_ready");
+`,
+    "",
+    1,
+    "Claude monitor ready barrier",
+  );
+  output = replaceExactly(
+    output,
+    `    catch (error) {
+        fault(error instanceof InjectedMonitorFault ? "internal_failure" : "internal_failure");
+    }`,
+    `    catch {
+        fault("internal_failure");
+    }`,
+    1,
+    "Claude monitor ready fault mapping",
+  );
+  output = replaceExactly(
+    output,
+    `            fault(error instanceof InjectedMonitorFault ? "internal_failure" : "invalid_control");`,
+    `            fault("invalid_control");`,
+    1,
+    "Claude monitor control fault mapping",
+  );
+  assertProductionOnly(output);
+  return output;
+}
+
 async function strip(path, transform) {
   const source = await readFile(path, "utf8");
   const output = transform(source);
@@ -373,5 +597,15 @@ if (provider === "codex") {
   await strip(
     join(buildRoot, "codex-connector", "src", "app-server-adapter.js"),
     stripCodexAppServerAdapter,
+  );
+}
+if (provider === "claude") {
+  await strip(
+    join(buildRoot, "claude-connector", "src", "claude-code-adapter.js"),
+    stripClaudeCodeAdapter,
+  );
+  await strip(
+    join(buildRoot, "claude-connector", "src", "claude-lifetime-monitor.js"),
+    stripClaudeLifetimeMonitor,
   );
 }
