@@ -921,14 +921,15 @@ class CodexAppServerAdapter implements ProviderPort {
     return await this.#containAndProve(invocation, this.#clock.nowMs() + TERMINAL_CLEANUP_MS);
   }
 
-  async close(): Promise<void> {
+  async close(deadlineUnixMs?: number): Promise<void> {
     this.#closed = true;
+    const cleanupDeadline = deadlineUnixMs ?? this.#clock.nowMs() + TERMINAL_CLEANUP_MS;
     await Promise.all(
       [...this.#active.values()].map(async (invocation) => {
         invocation.transport.closeStdin();
         if (
           !(await this.#unitEmpty(invocation)) &&
-          !(await this.#containAndProve(invocation, this.#clock.nowMs() + TERMINAL_CLEANUP_MS))
+          !(await this.#containAndProve(invocation, cleanupDeadline))
         ) {
           throw new ContainmentFailure("provider unit cleanup failed");
         }
@@ -1616,6 +1617,8 @@ class CodexAppServerAdapter implements ProviderPort {
   }
 
   async #containAndProve(invocation: ActiveInvocation, deadlineMs: number): Promise<boolean> {
+    if (await this.#unitEmpty(invocation)) return true;
+    if (this.#clock.nowMs() >= deadlineMs) return false;
     this.#containmentAttempts += 1;
     let contained: boolean;
     if (this.options.containmentForTest !== undefined) {
@@ -1672,7 +1675,7 @@ export async function createCodexAppServerAdapter(options: {
   readonly inheritedEnvironment: Readonly<Record<string, string | undefined>>;
   readonly webhookTokenEnvironmentName: string;
   readonly connectorPackageVersion: string;
-}): Promise<ProviderPort & { close(): Promise<void> }> {
+}): Promise<ProviderPort & { close(deadlineUnixMs?: number): Promise<void> }> {
   try {
     return await createAdapter(options);
   } catch (error) {
@@ -1683,6 +1686,6 @@ export async function createCodexAppServerAdapter(options: {
 
 export async function createCodexAppServerAdapterForTest(
   options: AdapterOptions,
-): Promise<ProviderPort & { close(): Promise<void> }> {
+): Promise<ProviderPort & { close(deadlineUnixMs?: number): Promise<void> }> {
   return await createAdapter(options);
 }

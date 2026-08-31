@@ -433,11 +433,20 @@ license, and platform ADRs.
   seams needed to exercise protocol and containment failures deterministically.
 - The Codex entrypoint injects one fixed async App Server factory after public
   argument parsing, singleton reservation, retirement handling, and webhook
-  token validation. The fixed package version is compiled into that entrypoint;
+  token validation. The connector foundation invokes it only after canonical
+  working-directory, correlation-state, and startup-recovery preparation have
+  all succeeded. The fixed package version is compiled into that entrypoint;
   no CLI, environment, or configuration selector was added. `retire-state`
   returns before the factory can probe Codex, Claude and Gemini retain their
-  dormant providers, and the Codex adapter is closed before releasing the
-  singleton reservation on every foreground exit path.
+  dormant providers, and the foundation owns the constructed Codex adapter
+  until it is closed before the singleton reservation is released.
+- Listener-start failure closes a constructed adapter within the existing
+  three-second containment bound. Signal shutdown passes the same absolute
+  15-second deadline used for admission, cancellation, containment, transport,
+  state, and adapter cleanup; it never starts another adapter-close budget.
+  An already-expired adapter close performs only an emptiness proof and sends
+  no late signal. Any close failure remains the existing content-free
+  `connector_shutdown_incomplete` instead of replacing it with provider detail.
 - A failed proof that the pinned version-probe process group is empty maps at
   the production adapter factory boundary to the existing content-free
   `connector_shutdown_incomplete` CLI error. Other preflight failures keep the
