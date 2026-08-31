@@ -394,6 +394,17 @@ license, and platform ADRs.
   so it expects `failed/provider_start_failed` consistently with X08b and ADR
   0034. A 1,025-byte turn ID remains post-dispatch uncertainty. Both exact
   1,024-byte IDs remain accepted.
+- X25 derives its exact expected App Server `cwd` from the connector
+  foundation's canonical working directory. On macOS, `tmpdir()` can expose
+  the `/var` alias while `realpath` correctly produces `/private/var`; the
+  earlier fixture compared the alias against the canonical production value.
+  The connector still receives the alias so the test proves canonicalization,
+  and every launch and protocol request remains byte-exact after that boundary.
+- X25 now asserts the fake gateway's exact per-message UTF-8 reply byte counts
+  after its in-memory provider observations have already proved each exact
+  reply. The earlier assertion read a nonexistent raw `text` field even though
+  the security fixture intentionally records only `payload_text_bytes` to keep
+  reply content out of diagnostics. The fixture remains content-free.
 - X06 uses the existing `session_binding` recovery crash seam for the
   post-session-publication case. The earlier `binding_published` seam runs
   before the provider-port call and therefore cannot observe the one

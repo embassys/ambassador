@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -316,18 +316,19 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   const stateDirectory = join(root, "state");
   await mkdir(workingDirectory, { recursive: true, mode: 0o700 });
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const canonicalWorkingDirectory = await realpath(workingDirectory);
   const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN });
   const threadTwo = "019c0000-0000-7000-8000-000000000011";
   const turnTwo = "019c0000-0000-7000-8000-000000000012";
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X25", {
-    appPlan: terminalPlan(workingDirectory, {
+    appPlan: terminalPlan(canonicalWorkingDirectory, {
       responseText: "first reply",
       requestText: "first input",
       terminalGate: "parallel_release",
     }),
   });
   fake.enqueue(
-    terminalPlan(workingDirectory, {
+    terminalPlan(canonicalWorkingDirectory, {
       threadId: threadTwo,
       turnId: turnTwo,
       responseText: "parallel reply",
@@ -389,12 +390,16 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
       ...handshakeExchanges(),
       {
         expectMethod: "thread/resume",
-        expectRequest: exactThreadResumeRequest(workingDirectory),
-        result: threadSettingsResponse(workingDirectory),
+        expectRequest: exactThreadResumeRequest(canonicalWorkingDirectory),
+        result: threadSettingsResponse(canonicalWorkingDirectory),
       },
       {
         expectMethod: "turn/start",
-        expectRequest: exactTurnStartRequest(workingDirectory, CX02_THREAD_ID, "second input"),
+        expectRequest: exactTurnStartRequest(
+          canonicalWorkingDirectory,
+          CX02_THREAD_ID,
+          "second input",
+        ),
         result: { turn: validTurn("019c0000-0000-7000-8000-000000000003") },
         afterResponse: [
           {
@@ -433,8 +438,8 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
       ["thread/resume", "turn/start"].includes(String(request.method)),
     ),
     [
-      exactThreadResumeRequest(workingDirectory),
-      exactTurnStartRequest(workingDirectory, CX02_THREAD_ID, "second input"),
+      exactThreadResumeRequest(canonicalWorkingDirectory),
+      exactTurnStartRequest(canonicalWorkingDirectory, CX02_THREAD_ID, "second input"),
     ],
   );
   assert.equal(providerInvocations.length, 3);
@@ -534,12 +539,14 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   assert.equal(replyCalls.length, 3);
   assert.deepEqual(
     Object.fromEntries(
-      replyCalls.map((call) => [call.arguments.message_id, call.arguments.text] as const),
+      replyCalls.map(
+        (call) => [call.arguments.message_id, call.arguments.payload_text_bytes] as const,
+      ),
     ),
     {
-      cx02_chain_1: "first reply",
-      cx02_parallel_1: "parallel reply",
-      cx02_chain_2: "second reply",
+      cx02_chain_1: 11,
+      cx02_parallel_1: 14,
+      cx02_chain_2: 12,
     },
   );
   for (const messageId of ["cx02_chain_1", "cx02_parallel_1", "cx02_chain_2"]) {
