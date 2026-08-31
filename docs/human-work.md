@@ -1,6 +1,6 @@
 # Human work queue
 
-Status: current action view as of 2026-08-31
+Status: current action view as of 2026-09-01
 
 This page answers two questions: what needs a person, and what remains before a
 release claim is honest. The [architecture PR backlog](architecture-pr-backlog.md)
@@ -77,7 +77,7 @@ qualification plan.
 | Work | Owner | State | Next completion evidence |
 | --- | --- | --- | --- |
 | I01 complete server API and test refresh | Gateway and central teams | Server repository found; current revision, complete API inventory, and deployed schemas unpinned | Every REST route, MCP tool, template, callback or event, version, and deprecation is classified; affected flows, clients, fixtures, and tests agree with one pinned revision |
-| I02 DPoP development switch and live E2E | Gateway and central teams | DPoP and new email/phone request templates reported; exact schemas and deployment unpinned | Fresh version 2 identity passes DPoP issuance, bearer rejection, protected REST and MCP, a synthetic contact-request flow, reissue, delivery, reply, acknowledgement, restart, and artifact tests without persisting contact data |
+| I02 DPoP development switch and live E2E | Gateway and central teams | Machine-local Mailosaur access and unique-address lookup pass; DPoP deployment and email/phone template schemas remain unpinned | Fresh version 2 identity passes DPoP issuance, bearer rejection, protected REST and MCP, a synthetic contact-request flow, reissue, delivery, reply, acknowledgement, restart, and artifact tests without persisting contact data |
 | S01 central red suite and review | Central team | Server repository located; reviewed red suite absent from inspected `main` | Central owner accepts the exact failure inventory |
 | S02 REST enrollment and native MCP results | Central team | Pending S01 and Gate A | Central contract tests pass |
 | S03 DPoP issuance and enforcement | Central team | Reported implemented, but exact revision, deployment, and enforcement evidence are unpinned | Bearer, wrong-key, replay, and proxy mismatch tests fail before dispatch |

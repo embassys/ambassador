@@ -1,6 +1,6 @@
 # Central server integration status
 
-Status: evidence snapshot as of 2026-08-31
+Status: evidence snapshot as of 2026-09-01
 
 This page tracks which central server source and deployment the gateway should
 integrate with. It is evidence and planning context, not a protocol
@@ -79,6 +79,28 @@ as intentionally out of scope. A hosted health response or an unpinned API
 document is not enough.
 
 ## I02: switch to DPoP and complete development E2E
+
+### Local email-capture preparation
+
+The development machine has Mailosaur API access and catch-all inbox details
+in the macOS login Keychain. The service name is
+`ai.embassys.ambassador.development.mailosaur`; the three accounts are
+`api-key`, `server-id`, and `inbox-domain`. The values do not belong in this
+repository, shell startup files, `.env` files, command arguments, logs, or test
+output.
+
+On 2026-09-01, a read-only server lookup authenticated successfully. One
+uniquely addressed synthetic message then passed API creation, address search,
+full retrieval, content matching, and deletion. The check consumed one message
+from the 2,000-email daily allowance and left no message behind. It proves that
+the machine-local API credential and unique-address lookup work. It does not
+prove that the central deployment sends its verification email correctly;
+I01 must first pin that deployment and its email format, and I02 must exercise
+the real outbound path.
+
+Conserve the daily allowance by completing every compatible I02 check with one
+authenticated identity. Create another identity only for a case whose contract
+requires fresh issuance or email-control recovery.
 
 - [ ] After I01 confirms the current template contract, qualify both
   user-contact templates at the contract boundary and select a low-impact
