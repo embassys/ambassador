@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -36,39 +36,107 @@ test("CX04 manual runner requires the exact opt-in before any action", async () 
 });
 
 test("CX04 pack and install commands disable lifecycle scripts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-cx04-package-inputs-"));
+  const pnpmCli = join(root, "tooling", "pnpm.mjs");
+  const pnpmStore = join(root, "store", "v11");
+  const pnpmCache = join(root, "cache", "pnpm");
+  await Promise.all([
+    mkdir(join(pnpmStore, "files", "00"), { recursive: true }),
+    mkdir(
+      join(pnpmCache, "v11", "metadata", "registry.npmjs.org", "@modelcontextprotocol"),
+      { recursive: true },
+    ),
+    mkdir(join(root, "tooling"), { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(pnpmCli, "// pinned pnpm fixture\n"),
+    writeFile(join(pnpmStore, "index.db"), "fixture-index\n"),
+    writeFile(
+      join(
+        pnpmCache,
+        "v11",
+        "metadata",
+        "registry.npmjs.org",
+        "@modelcontextprotocol",
+        "client.jsonl",
+      ),
+      "fixture metadata\n",
+    ),
+    writeFile(
+      join(pnpmCache, "v11", "metadata", "registry.npmjs.org", "better-sqlite3.jsonl"),
+      "fixture metadata\n",
+    ),
+    writeFile(
+      join(pnpmCache, "v11", "metadata", "registry.npmjs.org", "zod.jsonl"),
+      "fixture metadata\n",
+    ),
+  ]);
   const calls: Array<{
     executable: string;
     arguments: readonly string[];
     environment: Readonly<Record<string, string>>;
   }> = [];
-  await preparePackedConnector(
-    {
-      repositoryRoot: "/repo",
-      temporaryRoot: "/tmp/cx04",
-      pnpmExecutable: "pnpm",
-      nodeExecutable: "/node",
-      environment: { PATH: "/bin" },
-    },
-    async (request) => {
-      calls.push({
-        executable: request.executable,
-        arguments: [...request.arguments],
-        environment: { ...request.environment },
-      });
-      return { code: 0, signal: null, stdout: "", stderr: "" };
-    },
-  );
+  try {
+    await preparePackedConnector(
+      {
+        repositoryRoot: "/repo",
+        temporaryRoot: "/tmp/cx04",
+        nodeExecutable: process.execPath,
+        pnpmCli,
+        pnpmStore,
+        pnpmCache,
+        environment: { PATH: "/bin" },
+      },
+      async (request) => {
+        calls.push({
+          executable: request.executable,
+          arguments: [...request.arguments],
+          environment: { ...request.environment },
+        });
+        return request.arguments[1] === "--version"
+          ? { code: 0, signal: null, stdout: "11.22.0\n", stderr: "" }
+          : { code: 0, signal: null, stdout: "", stderr: "" };
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const canonicalNode = await realpath(process.execPath);
+  const canonicalCli = await realpath(pnpmCli).catch(() => pnpmCli);
+  const canonicalStore = await realpath(pnpmStore).catch(() => pnpmStore);
+  const canonicalCache = await realpath(pnpmCache).catch(() => pnpmCache);
 
   assert.deepEqual(
     calls.map((call) => [call.executable, ...call.arguments]),
     [
-      ["/node", "/repo/scripts/build-connector.mjs", "codex"],
-      ["/node", "/repo/scripts/stage-connector.mjs", "codex"],
-      ["/node", "/repo/scripts/check-packed-connector.mjs", "codex"],
-      ["pnpm", "pack", "--ignore-scripts", "--out", "/tmp/cx04/codex-connector.tgz"],
+      [canonicalNode, canonicalCli, "--version"],
+      [canonicalNode, "/repo/scripts/build-connector.mjs", "codex"],
+      [canonicalNode, "/repo/scripts/stage-connector.mjs", "codex"],
       [
-        "pnpm",
+        canonicalNode,
+        "/repo/scripts/check-packed-connector.mjs",
+        "codex",
+        `--store-dir=${canonicalStore}`,
+        `--pnpm-cli=${canonicalCli}`,
+        `--cache-dir=${canonicalCache}`,
+      ],
+      [
+        canonicalNode,
+        canonicalCli,
+        "pack",
+        `--config.store-dir=${canonicalStore}`,
+        `--config.cache-dir=${canonicalCache}`,
+        "--ignore-scripts",
+        "--out",
+        "/tmp/cx04/codex-connector.tgz",
+      ],
+      [
+        canonicalNode,
+        canonicalCli,
         "add",
+        `--config.store-dir=${canonicalStore}`,
+        `--config.cache-dir=${canonicalCache}`,
         "--offline",
         "--ignore-scripts",
         "--package-import-method=copy",
@@ -77,8 +145,33 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
     ],
   );
   assert.ok(calls.every((call) => call.environment.npm_config_ignore_scripts === "true"));
-  assert.equal(calls[3]?.environment.npm_config_offline, "true");
-  assert.equal(calls[4]?.environment.npm_config_offline, "true");
+  assert.ok(calls.every((call) => call.environment.npm_config_offline === "true"));
+});
+
+test("CX04 rejects unqualified package inputs before packaging", async () => {
+  let calls = 0;
+  await assert.rejects(
+    preparePackedConnector(
+      {
+        repositoryRoot: "/repo",
+        temporaryRoot: "/tmp/cx04",
+        nodeExecutable: "relative-node",
+        pnpmCli: "relative-pnpm",
+        pnpmStore: "relative-store",
+        pnpmCache: "relative-cache",
+        environment: { PATH: "/bin" },
+      },
+      async () => {
+        calls += 1;
+        return { code: 0, signal: null, stdout: "", stderr: "" };
+      },
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      (error as Error & { phase?: unknown }).phase === "precondition" &&
+      error.message === "CX04 qualification phase failed",
+  );
+  assert.equal(calls, 0);
 });
 
 test("CX04 matrix evidence is closed and fake-safe", async () => {
