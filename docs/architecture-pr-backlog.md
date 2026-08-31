@@ -106,8 +106,8 @@ S04 -> S05 idempotent reply and terminal outcomes
 S03 -> S06 token lifecycle and recovery
 S02/S03/S04/S05/S06 -> S07 staging contract gate
 
-server revision + schemas -> I01 integration and test refresh
-I01 + deployed DPoP contract -> I02 development E2E
+server revision + complete API/template inventory -> I01 flow, integration, and test refresh
+I01 + deployed DPoP contract -> I02 contact-template development E2E
 
 S07 + I02 + G04 -> E01/E02/E03 gateway qualification
 
@@ -247,8 +247,8 @@ them in that order. Do not ask parallel agents to edit
 
 | ID | Type | Proposed task or PR | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| I01 | Red contract refresh, then implementation | `test: align gateway integrations with the pinned central revision` | Exact DPoP server commit, deployed schemas, and material-difference review | REST and MCP drift inventory is accepted; both fixtures, gateway clients, failure inventories, and CI tests match one approved revision without runtime discovery or fallback |
-| I02 | Development E2E | `test: switch the development gateway to central DPoP` | I01, Gate A, deployed S02 through S06 behavior | A fresh version 2 identity passes issuance binding, bearer rejection, nonce and replay, protected REST and MCP, reissue, activation, leased delivery, terminal result, acknowledgement, restart, packed install, and artifact scans |
+| I01 | Red contract refresh, then implementation | `test: align gateway integrations with the pinned central revision` | Exact current server commit, deployed schemas and catalogs, and material-difference review | The complete REST, MCP, template, event, version, and deprecation inventory is classified; affected flows, both fixtures, gateway clients, failure inventories, and CI tests match one approved revision without runtime discovery or fallback |
+| I02 | Development E2E | `test: switch the development gateway to central DPoP` | I01, Gate A, deployed S02 through S06 behavior | Both reported user-contact templates have contract tests; a fresh version 2 identity uses an approved email- or phone-request template with synthetic data and passes issuance binding, bearer rejection, nonce and replay, protected REST and MCP, reissue, activation, leased delivery, terminal result, acknowledgement, restart, packed install, artifact scans, and content-boundary checks |
 
 The evidence baseline and safe hosted probes are recorded in
 [server integration status](server-integration-status.md). I02 is development

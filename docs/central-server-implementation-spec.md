@@ -15,10 +15,14 @@ client contract in server code.
 The central repository is
 [`embassys/agent2agent`](https://github.com/embassys/agent2agent). The project
 owner reports that DPoP is implemented, but the exact DPoP commit and deployed
-revision have not been pinned. I01 in the gateway implementation plan compares
-that exact revision with this specification and returns any material
-client-visible difference for ADR review. I02 then runs the first full DPoP
-development E2E. Neither task weakens S01 through S07.
+revision have not been pinned. The owner also reports new templates for asking
+a user for an email address or phone number. I01 in the gateway implementation
+plan inventories the complete current REST, MCP, template, and event surface,
+traces flow impacts, compares that exact revision with this specification, and
+returns any material client-visible difference for ADR review. I02 then runs
+the first full DPoP development E2E using an approved low-impact contact
+template and synthetic or disposable data. Neither task weakens S01 through
+S07.
 
 The target is a fresh version 2 identity. Do not migrate a version 1
 credential, identity, mailbox row, or delivery state. Do not add protocol

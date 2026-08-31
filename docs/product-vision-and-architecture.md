@@ -221,7 +221,11 @@ or connector durable state.
   credential.
 
 I01 and I02 in the [implementation plan](implementation-plan.md) track the
-latest-server contract refresh and the first real DPoP development E2E run.
+complete latest-server API and flow refresh, including the reported new
+user-email and user-phone request templates, and the first real DPoP
+development E2E run. The re-baseline is not limited to authentication. After
+the pinned schemas confirm their behavior, a low-impact contact-request
+template is preferred to a calendar action for that E2E.
 
 Tests may use the accepted test-only
 [version 2 fixture profile](v2-fixture-profile.md) for these missing facts.

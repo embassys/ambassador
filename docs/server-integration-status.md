@@ -40,30 +40,51 @@ The DPoP implementation may exist outside the inspected default branch or may
 await deployment. Until its revision and endpoint are identified, this
 repository must describe it as reported, not live-qualified.
 
-## I01: refresh the server contract and client tests
+## I01: re-baseline the complete server API and client tests
 
-- [ ] Obtain the exact server commit containing DPoP and the exact development
-  deployment built from it.
+- [ ] Obtain the exact current server commit and the exact development
+  deployment built from it, including the reported DPoP work and every API
+  added or changed since the inspected bearer-era snapshot.
 - [ ] Record the canonical issuer, API origin and resource, MCP endpoint and
   resource, proxy path, deployment identifier, and rollout state without
   recording credentials or verification data.
-- [ ] Export or inspect the exact REST OpenAPI and MCP schemas from that
-  revision and deployment.
-- [ ] Diff routes, methods, request and response shapes, authentication,
-  errors, limits, idempotency, leases, and token lifecycle against ADRs 0023,
-  0025, and 0026.
+- [ ] Export or inspect the exact REST OpenAPI, MCP schemas, template catalog,
+  and other client-visible registries from that revision and deployment.
+- [ ] Produce an exhaustive inventory of current REST routes, MCP tools,
+  templates, events or callbacks, authentication rules, versioning, and
+  deprecations. Classify each item as required by an accepted gateway flow,
+  flow-affecting, optional, or out of scope.
+- [ ] Diff methods, request and response shapes, sequencing, authentication,
+  permissions and consent, errors, retries, limits, idempotency, leases,
+  message lifecycle, and token lifecycle against ADRs 0023, 0025, and 0026.
+- [ ] Identify the two new templates for requesting a user's email address and
+  phone number. Confirm their exact identifiers, schemas, consent behavior,
+  availability rules, and result handling from the pinned contract rather
+  than guessing names from an older document.
+- [ ] Trace how every material addition or change affects enrollment,
+  verification, protected calls, message receipt, user interaction, replies,
+  completion, outcomes, acknowledgement, reissue, recovery, and failure
+  handling. The review is not limited to authentication.
 - [ ] Return any material client-visible difference for ADR review. Do not add
   a route probe, compatibility fallback, or runtime contract selection.
 - [ ] Update the Node fixture, independent Python fixture, gateway integration
   clients, and reviewed test inventories to the approved latest server
   contract. Tests and CI change before production integration code.
 
-I01 is complete when one pinned server revision, its generated schemas, the
-gateway clients, both fixtures, and the gateway tests agree. A hosted health
-response or an unpinned API document is not enough.
+I01 is complete when one pinned server revision, its complete client-visible
+API inventory and generated schemas, the gateway clients, both fixtures, and
+the gateway tests agree. Every new API is classified and every flow impact is
+either implemented behind accepted tests, returned for ADR review, or recorded
+as intentionally out of scope. A hosted health response or an unpinned API
+document is not enough.
 
 ## I02: switch to DPoP and complete development E2E
 
+- [ ] After I01 confirms the current template contract, qualify both
+  user-contact templates at the contract boundary and select a low-impact
+  email- or phone-request flow for live E2E instead of a calendar action. Use
+  only synthetic or disposable contact data and preserve the repository's
+  content-free persistence and logging boundary.
 - [ ] Enroll a fresh version 2 identity against the pinned development
   deployment through the fixed REST bootstrap routes.
 - [ ] Prove issuance binds the token to the gateway P-256 key and that the
@@ -77,9 +98,10 @@ response or an unpinned API document is not enough.
   against that deployment without recording tokens, keys, proofs, nonces,
   email addresses, verification codes, messages, or replies.
 
-I02 is complete when the full development flow passes against the pinned DPoP
-deployment with bearer rejection. S07 and E01 through E03 still provide the
-later staging, soak, and release evidence.
+I02 is complete when the full development flow, including the selected
+contact-request template, passes against the pinned DPoP deployment with
+bearer rejection and no persisted or logged contact value. S07 and E01 through
+E03 still provide the later staging, soak, and release evidence.
 
 ## Evidence rules
 
