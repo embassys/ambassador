@@ -321,6 +321,7 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   const threadTwo = "019c0000-0000-7000-8000-000000000011";
   const turnTwo = "019c0000-0000-7000-8000-000000000012";
   const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X25", {
+    workingDirectory: canonicalWorkingDirectory,
     appPlan: terminalPlan(canonicalWorkingDirectory, {
       responseText: "first reply",
       requestText: "first input",

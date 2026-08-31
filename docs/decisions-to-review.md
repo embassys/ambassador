@@ -394,12 +394,14 @@ license, and platform ADRs.
   so it expects `failed/provider_start_failed` consistently with X08b and ADR
   0034. A 1,025-byte turn ID remains post-dispatch uncertainty. Both exact
   1,024-byte IDs remain accepted.
-- X25 derives its exact expected App Server `cwd` from the connector
-  foundation's canonical working directory. On macOS, `tmpdir()` can expose
+- X25 supplies the adapter factory and exact App Server expectations with the
+  same canonical working directory. On macOS, `tmpdir()` can expose
   the `/var` alias while `realpath` correctly produces `/private/var`; the
   earlier fixture compared the alias against the canonical production value.
-  The connector still receives the alias so the test proves canonicalization,
-  and every launch and protocol request remains byte-exact after that boundary.
+  The connector foundation still receives the alias and proves its own
+  canonicalization; the sealed adapter constructor remains the only provider
+  `cwd` source, matching the fixed production factory wiring. Every launch and
+  protocol request remains byte-exact after that boundary.
 - X25 now asserts the fake gateway's exact per-message UTF-8 reply byte counts
   after its in-memory provider observations have already proved each exact
   reply. The earlier assertion read a nonexistent raw `text` field even though
