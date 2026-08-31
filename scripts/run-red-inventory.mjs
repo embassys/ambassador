@@ -84,6 +84,24 @@ const definitions = {
     boundaryKind: "marker",
     vectorNote: "31 checks: the complete CX03 Codex App Server boundary is green",
   },
+  cl02: {
+    key: "cl02",
+    label: "CL02 Claude Code adapter",
+    filePrefix: "cl02-",
+    files: [
+      "cl02-fixture-integrity.test.js",
+      "cl02-loader-boundary.test.js",
+      "cl02-monitor-containment.test.js",
+      "cl02-process-lifecycle.test.js",
+      "cl02-security-integration.test.js",
+      "cl02-startup-session.test.js",
+      "cl02-stream-contract.test.js",
+    ],
+    expected: { tests: 30, pass: 3, fail: 27, skipped: 0, todo: 0 },
+    timeoutMs: 180_000,
+    boundaryKind: "marker",
+    vectorNote: "30 checks: 3 fixture guards green and 27 reviewed CL03 production boundaries red",
+  },
   "packaged-docker": {
     key: "packaged-docker",
     label: "Packaged gateway and independent Docker v2 fixture",
@@ -99,19 +117,25 @@ const definitions = {
 const requested = process.argv.slice(2);
 let selected;
 if (requested.length === 0) {
-  selected = [definitions.t03, definitions.t04, definitions.k02, definitions.cx02];
+  selected = [
+    definitions.t03,
+    definitions.t04,
+    definitions.k02,
+    definitions.cx02,
+    definitions.cl02,
+  ];
 } else if (requested.length === 1 && requested[0]?.startsWith("--suite=")) {
   const key = requested[0].slice("--suite=".length);
   const definition = definitions[key];
   if (definition === undefined) {
     throw new Error(
-      "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|packaged-docker]",
+      "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|cl02|packaged-docker]",
     );
   }
   selected = [definition];
 } else {
   throw new Error(
-    "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|packaged-docker]",
+    "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|cl02|packaged-docker]",
   );
 }
 
