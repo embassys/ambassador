@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
+import { type ChildProcess, spawn } from "node:child_process";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createInterface } from "node:readline";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   CL02_EXECUTION_ID,
@@ -7,6 +13,7 @@ import {
   cancelRequest,
   collectEvents,
   createCl02Adapter,
+  exactClaudeArguments,
   initRecord,
   loadCl03Production,
   replayRecord,
@@ -34,7 +41,34 @@ function groupExists(pgid: number): boolean {
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
+  }
+}
+
+function writableFd(child: ChildProcess, index: number): NodeJS.WritableStream {
+  const stream = child.stdio[index];
+  assert.ok(stream !== undefined && stream !== null && "write" in stream);
+  return stream;
+}
+
+function readableFd(child: ChildProcess, index: number): NodeJS.ReadableStream {
+  const stream = child.stdio[index];
+  assert.ok(stream !== undefined && stream !== null && "read" in stream);
+  return stream;
+}
+
+async function waitForRecorded(
+  values: readonly string[],
+  expected: string,
+  child: ChildProcess,
+): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!values.includes(expected)) {
+    if (child.exitCode !== null || child.signalCode !== null || Date.now() >= deadline) {
+      throw new Error(`CL02 production monitor did not record ${expected}`);
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 }
 
@@ -122,13 +156,105 @@ test("CL02-L15 owner EOF seals the known group across every startup and executio
     const pgid = monitorMessages.at(-1)?.pid;
     assert.equal(typeof pgid, "number");
     await stopWorker(owner.worker);
-    await waitForGroupEmpty(pgid as number);
+    await waitForGroupEmpty(pgid as number).catch((error: unknown) => {
+      throw new Error(`CL02 owner-death phase ${phase.name} failed`, { cause: error });
+    });
     assert.equal(
       owner.messages.some(
         (entry) => entry.channel === "event" && eventName(entry.value) === "reply",
       ),
       false,
     );
+  }
+
+  const root = await mkdtemp(join(tmpdir(), "a2a-cl02-owner-production-"));
+  t.after(async () => await rm(root, { recursive: true, force: true }));
+  const spawnMarker = join(root, "provider-started");
+  const versionedClaude = join(root, "claude-2.1.251");
+  await writeFile(
+    versionedClaude,
+    [
+      "#!/usr/bin/env node",
+      `require("node:fs").appendFileSync(${JSON.stringify(spawnMarker)}, "started\\n");`,
+      "setInterval(() => {}, 60_000);",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  await chmod(versionedClaude, 0o700);
+  const canonicalVersionedClaude = await realpath(versionedClaude);
+  const monitorWorker = fileURLToPath(
+    new URL("./support/claude-code/production-monitor-fault-worker.js", import.meta.url),
+  );
+  const productionBarriers = [
+    "during_start_record",
+    "before_claude_spawn",
+    "after_claude_spawn",
+    "before_child_started",
+  ] as const;
+  for (const barrier of productionBarriers) {
+    await rm(spawnMarker, { force: true });
+    const productionMonitor = spawn(process.execPath, [monitorWorker, barrier, "continue"], {
+      cwd: process.cwd(),
+      env: syntheticCl02Environment(`owner-production-monitor-${barrier}`),
+      detached: true,
+      shell: false,
+      stdio: ["pipe", "pipe", "pipe", "pipe", "pipe", "pipe"],
+    });
+    assert.ok(productionMonitor.pid !== undefined);
+    const productionPgid = productionMonitor.pid;
+    t.after(() => {
+      if (!groupExists(productionPgid)) return;
+      try {
+        process.kill(-productionPgid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    });
+    const lifecycle: string[] = [];
+    const stderr: string[] = [];
+    createInterface({
+      input: readableFd(productionMonitor, 5),
+      crlfDelay: Number.POSITIVE_INFINITY,
+    }).on("line", (line) => lifecycle.push(line));
+    createInterface({
+      input: readableFd(productionMonitor, 2),
+      crlfDelay: Number.POSITIVE_INFINITY,
+    }).on("line", (line) => stderr.push(line));
+    await waitForRecorded(lifecycle, '{"type":"ready"}', productionMonitor);
+    writableFd(productionMonitor, 4).write(
+      `${JSON.stringify({
+        type: "start",
+        executable: canonicalVersionedClaude,
+        arguments: exactClaudeArguments("start"),
+      })}\n`,
+    );
+    await waitForRecorded(stderr, `barrier:${barrier}`, productionMonitor);
+    if (["after_claude_spawn", "before_child_started"].includes(barrier)) {
+      const deadline = Date.now() + 2_000;
+      for (;;) {
+        try {
+          if ((await readFile(spawnMarker, "utf8")) === "started\n") break;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (Date.now() >= deadline) throw new Error(`provider did not start at ${barrier}`);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+    writableFd(productionMonitor, 3).end();
+    await waitForRecorded(stderr, "sealed", productionMonitor);
+    process.kill(productionMonitor.pid, "SIGUSR2");
+    await waitForGroupEmpty(productionPgid);
+    if (productionMonitor.exitCode === null && productionMonitor.signalCode === null) {
+      await new Promise<void>((resolve) => productionMonitor.once("close", () => resolve()));
+    }
+    if (["during_start_record", "before_claude_spawn"].includes(barrier)) {
+      await assert.rejects(readFile(spawnMarker), /ENOENT/u, barrier);
+    } else {
+      assert.equal(await readFile(spawnMarker, "utf8"), "started\n", barrier);
+    }
+    assert.equal(lifecycle.includes('{"type":"child_started"}'), false, barrier);
   }
 });
 
@@ -192,6 +318,14 @@ test("CL02-L17 interrupt signals only the known monitor group and never claims s
           { kind: "json", value: replayRecord("CL02 untrusted input") },
           { kind: "json", value: resultRecord("held cancellation candidate") },
         ],
+        onStdinEnd: [
+          "before_init",
+          "after_session_bound",
+          "during_stdin_write",
+          "after_replay",
+        ].includes(phase.name)
+          ? "resist"
+          : "exit",
         exitOnInterrupt: true,
       },
       async processBarrierForTest(event) {
@@ -211,19 +345,26 @@ test("CL02-L17 interrupt signals only the known monitor group and never claims s
         );
       }),
     ]).finally(() => clearTimeout(barrierTimeout));
+    await fake.waitForLaunches(2);
     const cancellation = await adapter.cancel(cancelRequest());
     assert.deepEqual(cancellation, { status: phase.status });
     releaseBarrier?.();
     const events = await eventsPromise;
     const turn = fake.launches.filter((entry) => entry.mode === "turn").at(-1);
-    assert.deepEqual(turn?.signals ?? [], phase.interrupts === 1 ? ["SIGINT"] : []);
     assert.equal(
       monitor.launches
         .at(-1)
         ?.commands.filter((entry) => (entry as { type?: unknown }).type === "interrupt").length ??
         0,
       phase.interrupts,
+      `${phase.name} monitor command count`,
     );
+    assert.deepEqual(
+      monitor.launches.at(-1)?.signals.filter((signal) => signal === "SIGINT") ?? [],
+      phase.interrupts === 1 ? ["SIGINT"] : [],
+      `${phase.name} monitor signal count`,
+    );
+    assert.deepEqual(turn?.signals ?? [], phase.interrupts === 1 ? ["SIGINT"] : [], phase.name);
     assert.equal(
       events.some((event) => eventName(event) === "cancelled"),
       false,
@@ -438,6 +579,29 @@ test("CL02-L19 invalidates a terminal candidate on every late provider or monito
       conflict.name,
     );
   }
+
+  const cleanupConflictMonitor = await startFakeClaudeMonitor(t, [
+    {},
+    {
+      selfSealOnContain: false,
+      afterSigtermWrites: [{ kind: "json", value: { type: "fault", code: "internal_failure" } }],
+    },
+  ]);
+  const cleanupConflict = await createCl02Adapter(t, "CL02-CL03:L19", {
+    turnPlan: {
+      kind: "turn",
+      writesBeforeInput: [{ kind: "json", value: initRecord(process.cwd()) }],
+      writesAfterInput: [
+        { kind: "json", value: replayRecord("CL02 untrusted input") },
+        { kind: "json", value: resultRecord("candidate") },
+      ],
+      onStdinEnd: "resist",
+      resistTermination: true,
+    },
+    spawnMonitorForTest: cleanupConflictMonitor.spawnForAdapter,
+  });
+  const cleanupConflictEvents = await collectEvents(cleanupConflict.adapter.start(startRequest()));
+  assert.equal(eventName(cleanupConflictEvents.at(-1)), "uncertain", "cleanup drain fault");
 
   const descendantDetail = "CL02_DESCENDANT_PRIVATE_OUTPUT\n";
   const descendant = await createCl02Adapter(t, "CL02-CL03:L19", {

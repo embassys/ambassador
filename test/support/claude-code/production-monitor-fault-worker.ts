@@ -10,7 +10,12 @@ const barriers = new Set<ClaudeLifetimeMonitorBarrier>([
 ]);
 
 const candidate = process.argv[2];
-if (!barriers.has(candidate as ClaudeLifetimeMonitorBarrier) || process.argv.length !== 3) {
+const mode = process.argv[3] ?? "fault";
+if (
+  !barriers.has(candidate as ClaudeLifetimeMonitorBarrier) ||
+  !["fault", "continue"].includes(mode) ||
+  ![3, 4].includes(process.argv.length)
+) {
   throw new Error("invalid CL02 production monitor fault barrier");
 }
 const barrier = candidate as ClaudeLifetimeMonitorBarrier;
@@ -25,8 +30,17 @@ let releaseFault: (() => void) | undefined;
 const faultRelease = new Promise<void>((resolve) => {
   releaseFault = resolve;
 });
-if (postSpawn) process.once("SIGUSR2", () => releaseFault?.());
+if (postSpawn || mode === "continue") process.once("SIGUSR2", () => releaseFault?.());
+if (mode === "continue") {
+  process.on("SIGTERM", () => process.stderr.write("sealed\n"));
+}
 await monitor.runClaudeLifetimeMonitorForTest(
   barrier,
-  postSpawn ? async () => await faultRelease : undefined,
+  postSpawn || mode === "continue"
+    ? async () => {
+        if (mode === "continue") process.stderr.write(`barrier:${barrier}\n`);
+        await faultRelease;
+      }
+    : undefined,
+  mode !== "continue",
 );
