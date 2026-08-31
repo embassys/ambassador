@@ -1071,7 +1071,9 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     const preparationDatabase = new Database(join(preparationState, "correlation.sqlite3"));
     try {
       assert.equal(
-        preparationDatabase.prepare("UPDATE messages SET lifecycle='blocked'").run().changes,
+        preparationDatabase
+          .prepare("UPDATE messages SET lifecycle='blocked', blocked_class='cleanup'")
+          .run().changes,
         1,
       );
     } finally {
@@ -1175,6 +1177,30 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     );
     assert.deepEqual(await readFile(containmentAttempt, "utf8"), "attempted\n");
     await assertLoopbackPortReusable(guardedStartPort);
+    const prePackEntries = await readdir(".stage/connectors/codex/package", {
+      recursive: true,
+    });
+    assert.ok(prePackEntries.every((entry) => !String(entry).includes("schemas.json")));
+    assert.ok(prePackEntries.every((entry) => !String(entry).includes("fixture")));
+    for (const entry of prePackEntries) {
+      const path = join(".stage/connectors/codex/package", String(entry));
+      let body: Buffer;
+      try {
+        body = await readFile(path);
+      } catch {
+        continue;
+      }
+      const serialized = body.toString("utf8");
+      for (const marker of markers) assert.ok(!serialized.includes(marker));
+      for (const control of [
+        "ForTest",
+        "fixtureExecutablePath",
+        "afterVersionProbeForTest",
+        "codex-app-server/0.149.0",
+      ]) {
+        assert.ok(!serialized.includes(control));
+      }
+    }
     await runCommand(
       process.execPath,
       [join("scripts", "check-packed-connector.mjs"), provider, `--store-dir=${pnpmStore}`],
