@@ -18,7 +18,7 @@ interface ProviderFactoryOptions {
   readonly webhookTokenEnvironmentName: string;
 }
 
-type ManagedProvider = ProviderPort & { close(): Promise<void> };
+type ManagedProvider = ProviderPort & { close(deadlineUnixMs: number): Promise<void> };
 type ProviderFactory = (options: ProviderFactoryOptions) => Promise<ManagedProvider>;
 
 const EXIT_CODES: Readonly<Record<string, number>> = {
@@ -54,7 +54,6 @@ export async function runConnectorCli(
     const parsed = parseConnectorArguments(process.argv.slice(2));
     const stateDirectory = accountStateDirectory(userInfo().homedir, provider);
     const reservation = reserveConnectorState(stateDirectory, parsed.command === "retire-state");
-    let managedProvider: ManagedProvider | undefined;
     try {
       if (parsed.command === "retire-state") {
         const result = await retireConnectorState({
@@ -71,12 +70,6 @@ export async function runConnectorCli(
       if (token === undefined || !WEBHOOK_TOKEN_PATTERN.test(token)) {
         connectorError("webhook_token_unavailable");
       }
-      managedProvider = await providerFactory?.({
-        workingDirectory: parsed.workingDirectory,
-        policy: parsed.policy,
-        inheritedEnvironment: process.env,
-        webhookTokenEnvironmentName: parsed.webhookTokenEnvironmentName,
-      });
       const connector = await startConnector({
         providerKind: provider,
         webhookPort: parsed.webhookPort,
@@ -84,7 +77,16 @@ export async function runConnectorCli(
         workingDirectory: parsed.workingDirectory,
         policy: parsed.policy,
         stateReservation: reservation,
-        ...(managedProvider === undefined ? {} : { provider: managedProvider }),
+        ...(providerFactory === undefined
+          ? {}
+          : {
+              providerFactory: async (options) =>
+                await providerFactory({
+                  ...options,
+                  inheritedEnvironment: process.env,
+                  webhookTokenEnvironmentName: parsed.webhookTokenEnvironmentName,
+                }),
+            }),
       });
       const signal = new Promise<"SIGINT" | "SIGTERM">((resolve) => {
         process.once("SIGINT", () => resolve("SIGINT"));
@@ -94,11 +96,7 @@ export async function runConnectorCli(
       const received = await Promise.race([signal, connector.waitForFatal()]);
       await connector.shutdown(received);
     } finally {
-      try {
-        await managedProvider?.close();
-      } finally {
-        reservation.close();
-      }
+      reservation.close();
     }
   } catch (error) {
     publicError(error);

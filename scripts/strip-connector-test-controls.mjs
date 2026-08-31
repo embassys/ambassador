@@ -329,6 +329,10 @@ function stripCodexAppServerAdapter(source) {
     "    async ",
     "#containAndProve",
     `    async #containAndProve(invocation, deadlineMs) {
+        if (await this.#unitEmpty(invocation))
+            return true;
+        if (this.#clock.nowMs() >= deadlineMs)
+            return false;
         this.#containmentAttempts += 1;
         const contained = await stopOwnedUnit(invocation.transport.child, invocation.processGroupId, this.#clock, deadlineMs);
         if (contained && (await this.#unitEmpty(invocation)))
