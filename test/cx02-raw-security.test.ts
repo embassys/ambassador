@@ -1297,6 +1297,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       [
         'import fs from "node:fs";',
         'import os from "node:os";',
+        'import { syncBuiltinESMExports } from "node:module";',
         `const containmentAttempt = ${JSON.stringify(containmentAttempt)};`,
         `const containmentHome = ${JSON.stringify(containmentHome)};`,
         "const realKill = process.kill.bind(process);",
@@ -1311,6 +1312,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
         "};",
         "const realUserInfo = os.userInfo;",
         "os.userInfo = () => ({ ...realUserInfo(), homedir: containmentHome });",
+        "syncBuiltinESMExports();",
         "",
       ].join("\n"),
       { encoding: "utf8", mode: 0o600 },
