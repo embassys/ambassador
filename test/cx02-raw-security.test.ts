@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
@@ -210,7 +210,8 @@ async function runCommand(
 async function runCapturedCommand(
   executable: string,
   arguments_: readonly string[],
-  environment: Readonly<Record<string, string>>,
+  environment: Readonly<Record<string, string | undefined>>,
+  workingDirectory = process.cwd(),
 ): Promise<{
   readonly code: number | null;
   readonly signal: NodeJS.Signals | null;
@@ -218,7 +219,7 @@ async function runCapturedCommand(
   stderr: string;
 }> {
   const child = spawn(executable, [...arguments_], {
-    cwd: process.cwd(),
+    cwd: workingDirectory,
     env: { ...environment },
     shell: false,
     stdio: ["ignore", "pipe", "pipe"],
@@ -239,6 +240,35 @@ async function runCapturedCommand(
       });
     });
   });
+}
+
+async function discoverPopulatedPnpmStore(): Promise<string> {
+  const searchDirectories = [process.env.PNPM_HOME, process.cwd()].filter(
+    (candidate): candidate is string => candidate !== undefined && isAbsolute(candidate),
+  );
+  for (const searchDirectory of searchDirectories) {
+    const searchMetadata = await stat(searchDirectory).catch(() => undefined);
+    if (searchMetadata === undefined || !searchMetadata.isDirectory()) continue;
+    const result = await runCapturedCommand(
+      "pnpm",
+      ["store", "path"],
+      process.env,
+      searchDirectory,
+    );
+    if (result.code !== 0 || result.signal !== null || result.stderr !== "") continue;
+    const lines = result.stdout.trimEnd().split("\n");
+    if (lines.length !== 1 || !isAbsolute(lines[0] ?? "")) continue;
+    const store = await realpath(lines[0] as string);
+    const [storeMetadata, indexMetadata, fileShards] = await Promise.all([
+      stat(store),
+      stat(join(store, "index.db")),
+      readdir(join(store, "files")),
+    ]);
+    if (storeMetadata.isDirectory() && indexMetadata.isFile() && fileShards.length > 0) {
+      return store;
+    }
+  }
+  throw new Error("CX02 populated pnpm store unavailable");
 }
 
 async function runDiagnosticWorker(request: {
@@ -796,6 +826,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
 
   for (const provider of ["codex"] as const) {
     const commandEnvironment = syntheticCx02Environment("artifact-check");
+    const pnpmStore = await discoverPopulatedPnpmStore();
     await runCommand(
       process.execPath,
       [join("scripts", "build-connector.mjs"), provider],
@@ -934,7 +965,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     assert.deepEqual(await readFile(containmentAttempt, "utf8"), "attempted\n");
     await runCommand(
       process.execPath,
-      [join("scripts", "check-packed-connector.mjs"), provider],
+      [join("scripts", "check-packed-connector.mjs"), provider, `--store-dir=${pnpmStore}`],
       commandEnvironment,
     );
   }
