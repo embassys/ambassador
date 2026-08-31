@@ -438,6 +438,11 @@ license, and platform ADRs.
   returns before the factory can probe Codex, Claude and Gemini retain their
   dormant providers, and the Codex adapter is closed before releasing the
   singleton reservation on every foreground exit path.
+- A failed proof that the pinned version-probe process group is empty maps at
+  the production adapter factory boundary to the existing content-free
+  `connector_shutdown_incomplete` CLI error. Other preflight failures keep the
+  unavailable-provider behavior; the private adapter containment error and OS
+  detail never cross the provider boundary.
 - On supported POSIX platforms, the pinned version probe and every App Server
   launch create a detached process group whose positive group ID is the exact
   root child PID returned by `spawn`. Terminal cleanup checks that recorded
