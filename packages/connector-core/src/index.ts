@@ -2,12 +2,24 @@ import { userInfo } from "node:os";
 import { startConnector } from "./connector.js";
 import {
   ConnectorError,
+  type ConnectorPolicy,
   connectorError,
   type ProviderKind,
   WEBHOOK_TOKEN_PATTERN,
 } from "./constants.js";
 import { parseConnectorArguments } from "./public-cli.js";
+import type { ProviderPort } from "./runtime-types.js";
 import { accountStateDirectory, reserveConnectorState, retireConnectorState } from "./state.js";
+
+interface ProviderFactoryOptions {
+  readonly workingDirectory: string;
+  readonly policy: ConnectorPolicy;
+  readonly inheritedEnvironment: Readonly<Record<string, string | undefined>>;
+  readonly webhookTokenEnvironmentName: string;
+}
+
+type ManagedProvider = ProviderPort & { close(deadlineUnixMs: number): Promise<void> };
+type ProviderFactory = (options: ProviderFactoryOptions) => Promise<ManagedProvider>;
 
 const EXIT_CODES: Readonly<Record<string, number>> = {
   connector_internal_error: 1,
@@ -34,7 +46,10 @@ function publicError(error: unknown): never {
   process.exit(EXIT_CODES[code] as number);
 }
 
-export async function runConnectorCli(provider: ProviderKind): Promise<void> {
+export async function runConnectorCli(
+  provider: ProviderKind,
+  providerFactory?: ProviderFactory,
+): Promise<void> {
   try {
     const parsed = parseConnectorArguments(process.argv.slice(2));
     const stateDirectory = accountStateDirectory(userInfo().homedir, provider);
@@ -62,6 +77,16 @@ export async function runConnectorCli(provider: ProviderKind): Promise<void> {
         workingDirectory: parsed.workingDirectory,
         policy: parsed.policy,
         stateReservation: reservation,
+        ...(providerFactory === undefined
+          ? {}
+          : {
+              providerFactory: async (options) =>
+                await providerFactory({
+                  ...options,
+                  inheritedEnvironment: process.env,
+                  webhookTokenEnvironmentName: parsed.webhookTokenEnvironmentName,
+                }),
+            }),
       });
       const signal = new Promise<"SIGINT" | "SIGTERM">((resolve) => {
         process.once("SIGINT", () => resolve("SIGINT"));

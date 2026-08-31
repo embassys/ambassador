@@ -79,11 +79,10 @@ const definitions = {
       "cx02-startup-handshake.test.js",
       "cx02-turn-events.test.js",
     ],
-    expected: { tests: 31, pass: 3, fail: 28, skipped: 0, todo: 0 },
+    expected: { tests: 31, pass: 31, fail: 0, skipped: 0, todo: 0 },
     timeoutMs: 300_000,
     boundaryKind: "marker",
-    vectorNote:
-      "31 checks: 3 fixture/loader guards green and all 28 ADR 0034 CX03 behaviors reviewed red",
+    vectorNote: "31 checks: the complete CX03 Codex App Server boundary is green",
   },
   "packaged-docker": {
     key: "packaged-docker",

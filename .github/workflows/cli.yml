@@ -41,6 +41,8 @@ jobs:
         run: node scripts/run-red-inventory.mjs --suite=t03
       - name: Validate classified T04 conversation recovery inventory
         run: node scripts/run-red-inventory.mjs --suite=t04
+      - name: Validate classified CX02 Codex App Server adapter inventory
+        run: node scripts/run-red-inventory.mjs --suite=cx02
       - if: always()
         run: pnpm audit --prod --audit-level=high
       - if: always()

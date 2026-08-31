@@ -133,7 +133,7 @@ async function main() {
   );
   await run(
     process.execPath,
-    [join(repositoryRoot, "scripts", "strip-connector-test-controls.mjs"), temporaryRoot],
+    [join(repositoryRoot, "scripts", "strip-connector-test-controls.mjs"), temporaryRoot, provider],
     repositoryRoot,
   );
 

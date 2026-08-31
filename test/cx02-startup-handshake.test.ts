@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
-import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
+import { type ProviderPort, SYSTEM_CLOCK } from "../packages/connector-core/src/runtime-types.js";
 import {
   type CodexAppServerSpawnOptionsForTest,
   CX02_DEADLINE_MS,
@@ -15,6 +15,7 @@ import {
   CX02_TURN_ID,
   collectEvents,
   createCx02Adapter,
+  createCx02Clock,
   type FakeCodexAppServer,
   type FakeCodexExchange,
   type FakeCodexProcessPlan,
@@ -191,12 +192,13 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
     { kind: "version", stdout: "codex-cli 0.150.0\n" },
     { kind: "version", stdout: `${"x".repeat(65)}\n` },
     { kind: "version", stderr: "probe failed", exitCode: 1 },
-    { kind: "version", hold: true },
+    { kind: "version", hold: true, spawnDescendant: true },
   ];
   for (const versionPlan of versions) {
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X01", {
       versionPlan,
       appPlan: validStartPlan(cwd),
+      ...(versionPlan.hold === true ? { clock: SYSTEM_CLOCK } : {}),
     });
     assert.deepEqual(await collectEvents(adapter.start(startRequest())), [
       {
@@ -206,6 +208,10 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
       },
     ]);
     assert.equal(fake.launches.filter((launch) => launch.mode === "app-server").length, 0);
+    if (versionPlan.spawnDescendant === true) {
+      assert.ok(fake.launches[0]?.descendantPid !== undefined);
+      assert.equal(fake.isLatestUnitEmpty(), true);
+    }
   }
 
   const noExecutable = await createCx02Adapter(t, "CX02-CX03:X01", {
@@ -230,6 +236,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
     inheritedEnvironment: syntheticCx02Environment("identity-mutation"),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
+    clock: createCx02Clock(),
     fixtureExecutablePath: fakeForMutation.executablePath,
     afterVersionProbeForTest: async () => {
       assert.ok(fakeForMutation !== undefined);
@@ -269,6 +276,7 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
       return spawn(executable, [...arguments_], {
         cwd: options.cwd,
         env: { ...options.env },
+        detached: options.detached,
         shell: options.shell,
         stdio: [...options.stdio],
       });
@@ -283,6 +291,7 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
       options: {
         cwd,
         env: expectedEnvironment,
+        detached: true,
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
       },
@@ -378,13 +387,14 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
     },
     {
       name: "config warning after initialized",
-      exchanges: [
-        ...handshakeExchanges(),
-        {
-          expectMethod: "thread/start",
-          beforeResponse: [{ kind: "json", value: configWarning }],
-        },
-      ],
+      exchanges: handshakeExchanges().map((exchange, index) =>
+        index === 1
+          ? {
+              ...exchange,
+              afterResponse: [{ kind: "json", value: configWarning }],
+            }
+          : exchange,
+      ),
       valid: false,
     },
     {
@@ -458,7 +468,14 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
               ],
             },
           ]
-        : variant.exchanges,
+        : ["config warning after initialized", "duplicate response"].includes(variant.name)
+          ? [
+              ...variant.exchanges,
+              {
+                expectMethod: "thread/start",
+              },
+            ]
+          : variant.exchanges,
     };
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X04", { appPlan: plan });
     const events = await collectEvents(adapter.start(startRequest()));
@@ -468,13 +485,29 @@ test("CX02-X04 enforces the exact initialize ordering and warning opt-out matrix
         { event: "failed", execution_id: CX02_EXECUTION_ID, reason_code: "provider_start_failed" },
       ]);
       const requests = fake.launches.at(-1)?.requests ?? [];
-      assert.equal(
-        requests.some((request) =>
-          ["thread/start", "thread/resume", "turn/start"].includes(String(request.method)),
-        ),
-        false,
-        variant.name,
-      );
+      if (["config warning after initialized", "duplicate response"].includes(variant.name)) {
+        assert.deepEqual(
+          requests.filter((request) => request.method === "thread/start"),
+          requests.some((request) => request.method === "thread/start")
+            ? [threadStartRequest(cwd)]
+            : [],
+        );
+        assert.equal(
+          requests.some((request) =>
+            ["thread/resume", "turn/start"].includes(String(request.method)),
+          ),
+          false,
+          variant.name,
+        );
+      } else {
+        assert.equal(
+          requests.some((request) =>
+            ["thread/start", "thread/resume", "turn/start"].includes(String(request.method)),
+          ),
+          false,
+          variant.name,
+        );
+      }
       assert.ok(!JSON.stringify(requests).includes("CX02 untrusted input"), variant.name);
     }
   }
@@ -604,7 +637,7 @@ test("CX02-X06 never writes input before session publication or replays after ei
 
   for (const vector of [
     { name: "before session publication", failStateAfter: "session_bound" as const },
-    { name: "after session publication", crashAfter: "binding_published" as const },
+    { name: "after session publication", crashForRecoveryState: "session_binding" as const },
   ]) {
     const root = await mkdtemp(join(tmpdir(), "a2a-cx02-session-crash-"));
     t.after(async () => await rm(root, { recursive: true, force: true }));
@@ -627,7 +660,7 @@ test("CX02-X06 never writes input before session publication or replays after ei
       stateDirectory,
       provider: initial.adapter as unknown as ProviderPort,
       ...(vector.failStateAfter === undefined
-        ? { crashAfter: vector.crashAfter }
+        ? { crashForRecoveryState: vector.crashForRecoveryState }
         : { failStateAfter: vector.failStateAfter }),
     });
     t.after(async () => await connector.close());
@@ -639,7 +672,9 @@ test("CX02-X06 never writes input before session publication or replays after ei
     assert.equal((await gateway.sendWake(connector.webhookUrl, message.id)).status, 202);
     await assert.rejects(
       connector.waitForIdle(),
-      vector.crashAfter === undefined ? /connector_state_unavailable/u : /connector_test_crash/u,
+      vector.failStateAfter === undefined
+        ? /connector_test_crash/u
+        : /connector_state_unavailable/u,
     );
     await connector.crash();
     assert.equal(
@@ -750,6 +785,7 @@ test("CX02-X08a sends only exact coarse thread and turn authority under both pol
       inheritedEnvironment: syntheticCx02Environment(`policy-${policy}`),
       webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
       connectorPackageVersion: "0.0.0-private",
+      clock: createCx02Clock(),
       fixtureExecutablePath: fake.executablePath,
     });
     t.after(async () => await adapter.close());
@@ -761,7 +797,14 @@ test("CX02-X08a sends only exact coarse thread and turn authority under both pol
       threadStartRequest(cwd),
       turnStartRequest(cwd, text, policy),
     ]);
-    const serialized = JSON.stringify(requests);
+    const settingsOnly = structuredClone(requests) as Record<string, unknown>[];
+    const turn = settingsOnly.find((request) => request.method === "turn/start");
+    assert.ok(turn !== undefined && typeof turn.params === "object" && turn.params !== null);
+    const params = turn.params as { input?: { text?: string }[] };
+    assert.equal(params.input?.length, 1);
+    assert.equal(params.input?.[0]?.text, text);
+    if (params.input?.[0] !== undefined) params.input[0].text = "<input_text>";
+    const serialized = JSON.stringify(settingsOnly);
     for (const forbidden of [
       "dangerFullAccess",
       '"model"',
@@ -786,10 +829,24 @@ test("CX02-X08b validates every observable thread response without inventing tur
     exact,
     {},
     { ...exact, thread: validThread(cwd, "wrong_thread") },
+    { ...exact, model: 7 },
+    { ...exact, modelProvider: 7 },
     { ...exact, cwd: `${cwd}/other` },
     { ...exact, approvalPolicy: "on-request" },
     { ...exact, approvalsReviewer: "guardian_subagent" },
     { ...exact, sandbox: { type: "dangerFullAccess" } },
+    { ...exact, sandbox: { type: "readOnly", networkAccess: false, unknown: true } },
+    { ...exact, thread: { ...validThread(cwd), preview: 7 } },
+    { ...exact, thread: { ...validThread(cwd), modelProvider: 7 } },
+    { ...exact, thread: { ...validThread(cwd), createdAt: "invalid" } },
+    { ...exact, thread: { ...validThread(cwd), updatedAt: 1.5 } },
+    { ...exact, thread: { ...validThread(cwd), status: { type: "idle", unknown: true } } },
+    { ...exact, thread: { ...validThread(cwd), cwd: "\ud800" } },
+    { ...exact, thread: { ...validThread(cwd), cliVersion: 7 } },
+    { ...exact, thread: { ...validThread(cwd), source: "cli" } },
+    { ...exact, thread: { ...validThread(cwd), sessionId: 7 } },
+    { ...exact, thread: { ...validThread(cwd), turns: {} } },
+    { ...exact, thread: { ...validThread(cwd), projectId: 7 } },
     { ...exact, unknown: true },
   ];
   for (const response of variants) {
@@ -859,6 +916,26 @@ test("CX02-X08b validates every observable thread response without inventing tur
     { name: "missing turn", result: {}, valid: false },
     { name: "malformed turn", result: { turn: "bad" }, valid: false },
     { name: "wrong turn ID", result: { turn: validTurn("different_turn") }, valid: false },
+    {
+      name: "malformed turn status",
+      result: { turn: { ...validTurn(), status: 7 } },
+      valid: false,
+    },
+    {
+      name: "malformed turn items",
+      result: { turn: { ...validTurn(), items: {} } },
+      valid: false,
+    },
+    {
+      name: "malformed turn items view",
+      result: { turn: { ...validTurn(), itemsView: 7 } },
+      valid: false,
+    },
+    {
+      name: "unknown nested turn field",
+      result: { turn: { ...validTurn(), unknown: true } },
+      valid: false,
+    },
     {
       name: "unknown turn response field",
       result: { turn: validTurn(), unknown: true },

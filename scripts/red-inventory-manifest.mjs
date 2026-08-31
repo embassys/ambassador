@@ -829,6 +829,6 @@ const cx02 = [
   ...fail("cx02-turn-events.test.js", 0, "CX02-CX03:X15", [
     "CX02-X15 never invents approval resolution and rejects every unsupported server control",
   ]),
-];
+].map((entry) => ({ ...entry, status: "pass" }));
 
 export const reviewedRedInventory = { t03, t04, k02, cx02, "packaged-docker": packagedDocker };

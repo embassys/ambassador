@@ -135,18 +135,19 @@ async function runAppServer(
     });
   });
   input.on("close", () => {
-    tail = tail.then(async () => {
+    void (async () => {
       send({ channel: "stdin_closed" });
       if (plan.killDescendantOnStdinEnd === true && descendant?.pid !== undefined) {
         descendant.kill("SIGTERM");
       }
       for (const write of plan.writesAfterStdinEnd ?? []) await writeWire(write);
+      await waitForGate(plan.stdinEndGate);
       if (plan.onStdinEnd === "resist") return;
       if (plan.onStdinEnd === "linger") {
         await new Promise<void>((resolve) => setTimeout(resolve, plan.lingerMs ?? 1_500));
       }
       process.exit(0);
-    });
+    })();
   });
   if (plan.spawnDescendant === true) {
     descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
@@ -163,6 +164,15 @@ async function run(plan: FakeCodexProcessPlan): Promise<void> {
   const selectedMode = mode();
   if (selectedMode !== plan.kind) failFixture("plan_mode_mismatch");
   if (plan.kind === "version") {
+    if (plan.spawnDescendant === true) {
+      const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+        detached: false,
+        env: {},
+        shell: false,
+        stdio: "ignore",
+      });
+      send({ channel: "descendant", pid: descendant.pid });
+    }
     if (plan.hold === true) return;
     if (plan.stdout !== undefined) process.stdout.write(plan.stdout);
     if (plan.stderr !== undefined) process.stderr.write(plan.stderr);

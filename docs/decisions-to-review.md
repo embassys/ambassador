@@ -330,6 +330,192 @@ license, and platform ADRs.
   committed it. The earlier test selected the crash seam without producing
   the uncertain transport observation the seam represents.
 
+## CX02 test-determinism corrections
+
+- X04 now emits `configWarning` after the fake App Server receives
+  `initialized` and before the adapter sends `thread/start`. The earlier fake
+  attached the warning to the `thread/start` response while also requiring
+  that no `thread/start` request occur, so no implementation could satisfy
+  both observations. Because JSONL `initialized` is a notification with no
+  response, the adapter cannot prove that the server has finished sending
+  post-initialization notifications before it writes the next request. X04
+  therefore permits zero or one exact coarse read-only `thread/start` for this
+  vector only. The same constraint applies to the duplicate initialize
+  response written immediately after the valid response: separate stdout
+  callbacks can expose that duplicate only after the client has written the
+  notification and coarse request. Both vectors still require failure, no
+  `thread/resume`, no `turn/start`, and no A2A input dispatch. Every
+  pre-initialized invalid handshake vector retains the stricter
+  no-thread-request check. The fake gives each race an optional trailing
+  no-response `thread/start` exchange so it records rather than masks the
+  permitted write.
+- The fake App Server now handles stdin EOF independently of a blocked exchange
+  tail. The earlier ordering put default EOF exit behind a gated provider
+  write, so X04's manual deadline could not complete teardown without an
+  unrelated test timeout killing the child. The independent EOF task still
+  records stdin closure, terminates a configured descendant, emits configured
+  late writes, and preserves explicit `resist` and `linger` behavior. This also
+  matches X27's requirement that teardown observations remain independent of
+  an in-flight provider exchange.
+- X08a keeps its byte-exact outbound request assertion, then replaces only the
+  cloned text item's contents with a neutral sentinel before scanning local
+  setting fields. The earlier scan required the sender's literal
+  `dangerFullAccess` text both present and absent in the same serialized
+  request list. X09 continues to prove byte-exact input preservation.
+- X09 retains the exact structured-input equality check, then replaces only
+  the cloned input text with a sentinel and recursively inspects every other
+  request, argument, and environment string. The earlier `JSON.stringify`
+  substring count could not find a sender newline because JSON must escape it,
+  even though the structured value was preserved. The recursive leaf check
+  proves that input is absent from every other carrier without depending on
+  JSON escaping.
+- Default direct-adapter CX02 paths now use a deterministic manual clock
+  anchored 100 seconds before the fixed fixture deadline; vectors that supply
+  an explicit clock remain authoritative. The fixed timestamp had passed in
+  wall-clock time, so production's required absolute-deadline enforcement
+  would otherwise make unrelated protocol vectors time-dependent. Owner and
+  diagnostic workers and the two direct factory cases use the same clock.
+  X01's deliberately held version process explicitly uses the system clock so
+  the independent five-second preflight timeout can elapse without advancing
+  the invocation clock.
+- X20's unterminated-final-record vector now closes the fake App Server stdout
+  after writing the partial record. An open JSONL stream cannot distinguish a
+  final unterminated record from a valid record split across chunks; EOF is the
+  protocol evidence that makes the record final and invalid. The vector still
+  requires uncertainty and preserves every byte, depth, and parser bound.
+- X21 now states the expected terminal kind for every limit vector and expects
+  exact `failed/provider_result_invalid` for a 262,145-byte final reply. The
+  earlier generic `accepted: false` mapping required uncertainty for that same
+  terminal value while X12 and ADR 0034 classify an over-limit authoritative
+  final result as `provider_result_invalid`. Event, stdout, stderr, and other
+  transport excesses remain uncertain.
+- X21 now also distinguishes the provider-ID limit by dispatch state. A
+  1,025-byte thread ID returned by `thread/start` is an exact pre-turn failure,
+  so it expects `failed/provider_start_failed` consistently with X08b and ADR
+  0034. A 1,025-byte turn ID remains post-dispatch uncertainty. Both exact
+  1,024-byte IDs remain accepted.
+- X25 supplies the adapter factory and exact App Server expectations with the
+  same canonical working directory. On macOS, `tmpdir()` can expose
+  the `/var` alias while `realpath` correctly produces `/private/var`; the
+  earlier fixture compared the alias against the canonical production value.
+  The connector foundation still receives the alias and proves its own
+  canonicalization; the sealed adapter constructor remains the only provider
+  `cwd` source, matching the fixed production factory wiring. Every launch and
+  protocol request remains byte-exact after that boundary.
+- X25 now asserts the fake gateway's exact per-message UTF-8 reply byte counts
+  after its in-memory provider observations have already proved each exact
+  reply. The earlier assertion read a nonexistent raw `text` field even though
+  the security fixture intentionally records only `payload_text_bytes` to keep
+  reply content out of diagnostics. The fixture remains content-free.
+- The fake App Server reserves an injected child's queued plan against its
+  positive PID at spawn-call time. Concurrent children can connect to the
+  control socket in either order, so assigning plans on `hello` intermittently
+  swapped X25's two exact request contracts. External workers that bypass the
+  injected spawn retain FIFO assignment. Request comparison, fixture errors,
+  launch records, and content-free diagnostics are unchanged.
+- X25 holds only its second adapter iteration until the first exact message has
+  published `session_bound`, then proves both turns are simultaneously active
+  behind the shared terminal gate. Provider session allocation order is not a
+  production contract; this test-only handshake barrier preserves the fixed
+  per-message session, turn, input, reply, continuation, and gateway-byte
+  assertions without imposing a production launch-order guarantee.
+- X23 likewise asserts the exact 17-byte reply observation instead of reading
+  a nonexistent raw `text` field from the content-free fake gateway call
+  record. The adapter terminal path still proves the exact in-memory reply,
+  while every persistence, diagnostic, and staged-artifact marker scan remains
+  unchanged.
+- X06 uses the existing `session_binding` recovery crash seam for the
+  post-session-publication case. The earlier `binding_published` seam runs
+  before the provider-port call and therefore cannot observe the one
+  `thread/start` required by X06. This retains one thread start, no turn start,
+  and null-turn uncertainty after restart, and matches the recorded K03/K04
+  barrier ordering.
+- The CX02 adapter factory now preserves an explicit null fixture executable
+  while it still defaults an omitted value to the fake executable. The earlier
+  nullish-coalescing expression replaced null with the fake path, so X01's
+  no-executable case launched a valid fake process instead of exercising the
+  reviewed unavailable-adapter path.
+
+## CX03 implementation judgments
+
+- The App Server adapter compiles the reviewed 0.149.0 ignored-notification
+  set as 22 exact methods covering status and usage, hook and tool detail,
+  plan, diff, reasoning, and non-config warnings. Ignored payload detail stays
+  shallow and transient, but every envelope is exact and every present thread
+  or turn ID must match. Standalone command/process notifications, dynamic
+  tools, auto-review, account mutation, config, and server controls remain
+  rejected. Selected thread, turn, agent-item, completion, delta, and approval
+  records use closed Zod schemas. Historical turns and stable non-agent item
+  detail are the only deliberately shallow selected fields; non-agent completed
+  detail is discarded immediately and never retained for corroboration.
+- Broad CI lint excludes only the exact Codex 0.149.0 generated schema fixture.
+  Formatting that byte-pinned upstream artifact would change its approved
+  digest; CX02 continues to verify the exact SHA-256 before using it.
+- The Codex production build strips the private adapter factory, deterministic
+  clock, fixture executable, injectable spawn, and injectable containment
+  seams from the emitted App Server adapter with exact-count transforms. Any
+  emitted-shape drift fails the build, while source-level CX02 tests retain the
+  seams needed to exercise protocol and containment failures deterministically.
+- The Codex entrypoint injects one fixed async App Server factory after public
+  argument parsing, singleton reservation, retirement handling, and webhook
+  token validation. The connector foundation invokes it only after canonical
+  working-directory, correlation-state, and startup-recovery preparation have
+  all succeeded. The fixed package version is compiled into that entrypoint;
+  no CLI, environment, or configuration selector was added. `retire-state`
+  returns before the factory can probe Codex, Claude and Gemini retain their
+  dormant providers, and the foundation owns the constructed Codex adapter
+  until it is closed before the singleton reservation is released.
+- Listener-start failure and direct close use the existing absolute three-second
+  containment bound. Signal shutdown passes the same absolute 15-second
+  deadline used for admission, cancellation, containment, transport, state,
+  and adapter cleanup; it never starts another adapter-close budget. An
+  already-expired adapter close performs only an emptiness proof and sends no
+  late signal. Failure on these startup, direct-close, or signal-shutdown paths
+  remains the existing content-free `connector_shutdown_incomplete` instead of
+  exposing provider detail. Runtime fatal cleanup starts its one-second
+  receiver close and three-second provider cleanup concurrently. If the latter
+  fails, it replaces the ordinary process error with the content-free
+  `connector_provider_cleanup_incomplete` before releasing the state
+  reservation.
+- X23 discovers one populated pnpm store outside its synthetic runtime
+  environment, validates its canonical absolute directory, index, and content
+  shards, and passes it to the private package checker explicitly. The checker
+  revalidates it and gives the same explicit store configuration to both
+  `pnpm pack` and the retained offline, ignore-scripts, copy-import install.
+  X23 also canonicalizes an already-cached pnpm 11.22.0 CLI and populated pnpm
+  v11 metadata cache, qualifies the exact CLI version and required cache
+  structure under the synthetic environment, and passes both to the checker
+  explicitly. The checker requalifies them, runs only
+  `process.execPath <qualified-cli>` for packaging and installation, and passes
+  the cache as an exact pnpm configuration argument. Synthetic `HOME` and all
+  package gates remain in force; no Corepack shim, network, install,
+  environment fallback, or ambient real-home fallback was added.
+- A failed proof that the pinned version-probe process group is empty maps at
+  the production adapter factory boundary to the existing content-free
+  `connector_shutdown_incomplete` CLI error. Other preflight failures keep the
+  unavailable-provider behavior; the private adapter containment error and OS
+  detail never cross the provider boundary.
+- On supported POSIX platforms, the pinned version probe and every App Server
+  launch create a detached process group whose positive group ID is the exact
+  root child PID returned by `spawn`. Terminal cleanup checks that recorded
+  group directly, sends `SIGTERM` to the negative group ID, and escalates to
+  `SIGKILL` within the existing three-second budget. It never searches by
+  name, command line, directory, or a guessed PID. CX04 still has to prove that
+  real Codex descendants remain in this owned group and that the selected
+  stdin owner-death behavior works on each supported macOS/Linux pair. The
+  group ID is captured once immediately after spawn and never recomputed. A
+  narrow POSIX PGID-reuse race between that capture and a later containment
+  signal remains for CX04 stress qualification; the adapter does not widen the
+  unit by searching for replacement processes.
+- Recently terminal execution IDs are retained only in a content-free,
+  insertion-ordered set capped at 100 entries. This preserves
+  `already_terminal` for the connector's immediate cancellation race without
+  allowing process-lifetime growth; an evicted older ID returns `not_found`.
+- A conflicting control record received during terminal teardown invalidates
+  the held terminal candidate. After the exact process unit is proven empty,
+  the adapter maps that dispatch-sensitive protocol failure to uncertainty;
+  a containment failure still rejects the stream with no terminal event.
+
 ## K03 implementation judgments
 
 - The local gateway client uses the approved

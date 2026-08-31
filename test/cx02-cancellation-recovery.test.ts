@@ -206,6 +206,8 @@ test("CX02-X16 interrupts only a bound exact turn and never extends cancellation
       threadId: CX02_THREAD_ID,
       turnId: CX02_TURN_ID,
       itemId: "approval_item",
+      startedAtMs: 1_788_000_000_500,
+      environmentId: null,
       reason: "private",
     },
   };

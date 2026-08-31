@@ -9,6 +9,7 @@ import type {
   ProviderResumeRequest,
   ProviderStartRequest,
 } from "../connector/index.js";
+import { ManualK02Clock } from "../connector/k02-production.js";
 import type { CodexAdapterPort, CodexAppServerSpawnForTest } from "./cx03-production.js";
 import { loadCx03Production } from "./cx03-production.js";
 import { type FakeCodexAppServer, startFakeCodexAppServer } from "./fake-app-server.js";
@@ -18,6 +19,10 @@ export const CX02_THREAD_ID = "019c0000-0000-7000-8000-000000000001";
 export const CX02_TURN_ID = "019c0000-0000-7000-8000-000000000002";
 export const CX02_EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 export const CX02_DEADLINE_MS = 1_788_000_900_000;
+
+export function createCx02Clock(): ManualK02Clock {
+  return new ManualK02Clock(CX02_DEADLINE_MS - 100_000);
+}
 
 export function syntheticCx02Environment(
   home = joinSyntheticHome("default"),
@@ -195,8 +200,11 @@ export async function createCx02Adapter(
     inheritedEnvironment: options.inheritedEnvironment ?? syntheticCx02Environment(caseId),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
-    fixtureExecutablePath: options.fixtureExecutablePath ?? fake.executablePath,
-    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    clock: options.clock ?? createCx02Clock(),
+    fixtureExecutablePath:
+      options.fixtureExecutablePath === undefined
+        ? fake.executablePath
+        : options.fixtureExecutablePath,
     ...(options.afterVersionProbeForTest === undefined
       ? {}
       : { afterVersionProbeForTest: options.afterVersionProbeForTest }),

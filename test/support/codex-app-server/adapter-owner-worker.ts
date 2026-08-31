@@ -1,5 +1,5 @@
 import { loadCx03Production } from "./cx03-production.js";
-import { startRequest, syntheticCx02Environment } from "./scenarios.js";
+import { createCx02Clock, startRequest, syntheticCx02Environment } from "./scenarios.js";
 
 const executablePath = process.argv[2];
 const workingDirectory = process.argv[3];
@@ -12,6 +12,7 @@ const adapter = await module.createCodexAppServerAdapterForTest({
   inheritedEnvironment: syntheticCx02Environment("owner-worker"),
   webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
   connectorPackageVersion: "0.0.0-private",
+  clock: createCx02Clock(),
   fixtureExecutablePath: executablePath,
 });
 

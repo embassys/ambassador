@@ -33,6 +33,7 @@ export interface CodexAdapterForTestOptions {
 export interface CodexAppServerSpawnOptionsForTest {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly detached: true;
   readonly shell: false;
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
 }
@@ -49,7 +50,7 @@ export interface CodexAdapterPort
   resume(request: ProviderResumeRequest): AsyncIterable<unknown>;
   recover(request: ProviderRecoverRequest): AsyncIterable<unknown>;
   cancel(request: ProviderCancelRequest): Promise<ProviderCancelResult>;
-  close(): Promise<void>;
+  close(deadlineUnixMs?: number): Promise<void>;
 }
 
 export interface Cx03ProductionModule {

@@ -26,12 +26,14 @@ export type FakeCodexProcessPlan =
       readonly stderr?: string;
       readonly exitCode?: number;
       readonly hold?: boolean;
+      readonly spawnDescendant?: boolean;
     }
   | {
       readonly kind: "app-server";
       readonly exchanges: readonly FakeCodexExchange[];
       readonly onStdinEnd?: "exit" | "linger" | "resist";
       readonly lingerMs?: number;
+      readonly stdinEndGate?: string;
       readonly writesAfterStdinEnd?: readonly FakeCodexWireWrite[];
       readonly spawnDescendant?: boolean;
       readonly killDescendantOnStdinEnd?: boolean;

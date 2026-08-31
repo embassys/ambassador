@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 
 import { loadCx03Production } from "./cx03-production.js";
-import { startRequest, syntheticCx02Environment } from "./scenarios.js";
+import { createCx02Clock, startRequest, syntheticCx02Environment } from "./scenarios.js";
 
 interface DiagnosticRequest {
   readonly executablePath: string;
@@ -30,6 +30,7 @@ try {
     inheritedEnvironment: syntheticCx02Environment(request.homeDirectory),
     webhookTokenEnvironmentName: "CX02_WEBHOOK_TOKEN",
     connectorPackageVersion: "0.0.0-private",
+    clock: createCx02Clock(),
     fixtureExecutablePath: request.executablePath,
   });
   try {
