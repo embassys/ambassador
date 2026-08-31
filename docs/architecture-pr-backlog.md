@@ -313,9 +313,11 @@ Every terminal path seals the group. A living connector proves it empty;
 hard-crash qualification externally proves that the orphaned group
 disappears. The monitor adds no new dependency or provider executable. The
 reviewed CL02 suite now passes all 30 nodes against CL03, including package
-artifact scans and the shared K04 chain. Real provider support remains pending
-CL04's authenticated disposable-environment,
-sandbox, protocol-timing, and hard-crash containment evidence. The private
+artifact scans and the shared K04 chain. The CL04 manual packed-artifact runner
+and disposable-account procedure are implemented in
+`docs/cl04-claude-code-manual-qualification.md`. No authenticated run has
+occurred, so real provider support remains pending its sandbox,
+protocol-timing, history, and hard-crash containment evidence. The private
 monitor protocol remains unobservable in the packed artifact: CL02 and CL03
 own exact internal ordering, barrier, and fault-injection proofs, while CL04
 owns externally observable real-runtime process, policy, history, and
