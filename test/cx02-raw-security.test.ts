@@ -645,7 +645,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     gateway.calls
       .filter((call) => call.name === "reply_message")
       .map((call) => call.arguments.payload_text_bytes),
-    [18],
+    [17],
   );
   const launch = fake.launches.at(-1);
   assert.ok(launch !== undefined);
