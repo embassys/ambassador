@@ -27,6 +27,15 @@ history because ADR 0034 requires persistent threads. The runner never copies
 that history into its own artifacts. A normal account should not be used as a
 shortcut around this boundary.
 
+Provision the disposable account independently before running CX04. It needs
+the approved Node 24 release, the cached Corepack pnpm 11.22.0 CLI, a complete
+pnpm store for this checkout, the pnpm v11 registry metadata cache, Codex
+0.149.0, and its own normal Codex authentication. Populate the checkout's pnpm
+store and cache before the qualification window; the runner is offline and
+does not install or download missing tooling or dependencies. Do not copy a
+normal account's Codex credentials, provider history, or connector state to
+satisfy this precondition.
+
 ## Run
 
 From the repository root, with the approved Node and pnpm versions available
@@ -48,10 +57,16 @@ The runner performs these checks in order:
 
 1. Require macOS or Linux, Node 24.19 or later within major 24, a fresh fixed
    connector state location, and a canonical executable named `codex` on the
-   current `PATH`.
-2. Build and stage only the Codex connector, run the repository's packed-file
-   check, pack the private artifact, and install that tarball offline. Every
-   pack and install path disables lifecycle scripts.
+   current `PATH`. Resolve only the fixed pnpm 11.22.0 Corepack-cache location,
+   obtain this checkout's store from that CLI, and canonicalize and validate
+   the executing Node binary, pnpm CLI, populated store, and pnpm v11 metadata
+   cache. Missing or malformed prerequisites fail the precondition without
+   starting packaging.
+2. Build and stage only the Codex connector, then pass those exact qualified
+   Node, pnpm, store, and cache paths to the repository's existing packed-file
+   checker. Use the same inputs to pack the private artifact and install that
+   tarball offline. Lifecycle scripts stay disabled throughout, and the clean
+   install uses copy mode. CX04 does not duplicate the packed-file checker.
 3. Fingerprint `~/.codex/config.toml` in memory as either absent or SHA-256.
    Require exact version output `codex-cli 0.149.0`, while retaining the exact
    canonical executable identity. Generate the stable schema

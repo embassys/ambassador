@@ -31,8 +31,10 @@ export function preparePackedConnector(
   options: {
     repositoryRoot: string;
     temporaryRoot: string;
-    pnpmExecutable: string;
     nodeExecutable: string;
+    pnpmCli: string;
+    pnpmStore: string;
+    pnpmCache: string;
     environment: Readonly<Record<string, string>>;
   },
   run: (request: CommandRequest) => Promise<CommandResult>,
@@ -75,7 +77,6 @@ export interface QualificationEvidence {
 export function executeSystemQualification(options: {
   repositoryRoot: string;
   temporaryParent: string;
-  pnpmExecutable: string;
   environment: Readonly<Record<string, string>>;
 }): Promise<QualificationEvidence>;
 
