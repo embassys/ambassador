@@ -7,8 +7,18 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { startConnectorRuntime } from "../packages/connector-core/src/connector.js";
+import Database from "better-sqlite3";
+import { startConnector, startConnectorRuntime } from "../packages/connector-core/src/connector.js";
+import type { ConnectorPolicy, ProviderKind } from "../packages/connector-core/src/constants.js";
 import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
+import {
+  accountStateDirectory,
+  type ConnectorStateReservation,
+  initializeConnectorStateForTest,
+  reserveConnectorState,
+  retireConnectorStateForTest,
+  seedConnectorConversationsForTest,
+} from "../packages/connector-core/src/state.js";
 
 import {
   CX02_EXECUTION_ID,
@@ -41,6 +51,53 @@ async function unusedLoopbackPort(): Promise<number> {
   assert.ok(address !== null && typeof address === "object");
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
+}
+
+async function assertLoopbackPortReusable(port: number): Promise<void> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
+  });
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+type ManagedProviderForTest = ProviderPort & { close(deadlineUnixMs: number): Promise<void> };
+
+type InternalStartConnector = (options: {
+  providerKind: ProviderKind;
+  webhookPort: number;
+  webhookToken: string;
+  workingDirectory: string;
+  policy: ConnectorPolicy;
+  stateReservation: ConnectorStateReservation;
+  providerFactory: (options: {
+    readonly workingDirectory: string;
+    readonly policy: ConnectorPolicy;
+  }) => Promise<ManagedProviderForTest>;
+}) => ReturnType<typeof startConnector>;
+
+const startConnectorWithProviderFactory = startConnector as unknown as InternalStartConnector;
+
+function managedProviderForTest(
+  close: (deadlineUnixMs: number) => Promise<void>,
+): ManagedProviderForTest {
+  const unavailable = async function* (): AsyncIterable<unknown> {};
+  return {
+    spawnRecord: { executable: "managed-provider", arguments: [], environment: {}, shell: false },
+    containmentAttempts: 0,
+    postTerminalDeliveries: 0,
+    start: unavailable,
+    resume: unavailable,
+    recover: unavailable,
+    async cancel() {
+      return { status: "not_found" };
+    },
+    async contain() {
+      return true;
+    },
+    close,
+  };
 }
 
 function eventName(value: unknown): unknown {
@@ -824,6 +881,81 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   ]);
   for (const marker of markers) assert.ok(!captures.includes(marker));
 
+  const canonicalCwd = await realpath(cwd);
+  const occupiedListener = createServer();
+  await new Promise<void>((resolve, reject) => {
+    occupiedListener.once("error", reject);
+    occupiedListener.listen(0, "127.0.0.1", () => resolve());
+  });
+  const occupiedAddress = occupiedListener.address();
+  assert.ok(occupiedAddress !== null && typeof occupiedAddress === "object");
+  const listenerHome = join(root, "listener-home");
+  await mkdir(listenerHome, { mode: 0o700 });
+  const listenerState = accountStateDirectory(await realpath(listenerHome), "codex");
+  const listenerReservation = reserveConnectorState(listenerState, false);
+  const listenerCloseDeadlines: number[] = [];
+  const listenerFailureStartedAt = Date.now();
+  try {
+    await assert.rejects(
+      startConnectorWithProviderFactory({
+        providerKind: "codex",
+        webhookPort: occupiedAddress.port,
+        webhookToken: K02_TOKEN,
+        workingDirectory: canonicalCwd,
+        policy: "read-only",
+        stateReservation: listenerReservation,
+        async providerFactory(options) {
+          assert.deepEqual(options, { workingDirectory: canonicalCwd, policy: "read-only" });
+          return managedProviderForTest(async (deadlineUnixMs) => {
+            listenerCloseDeadlines.push(deadlineUnixMs);
+          });
+        },
+      }),
+      /connector_listener_unavailable/u,
+    );
+  } finally {
+    listenerReservation.close();
+    await new Promise<void>((resolve) => occupiedListener.close(() => resolve()));
+  }
+  assert.equal(listenerCloseDeadlines.length, 1);
+  assert.ok((listenerCloseDeadlines[0] ?? 0) >= listenerFailureStartedAt);
+  assert.ok((listenerCloseDeadlines[0] ?? Number.POSITIVE_INFINITY) <= Date.now() + 3_000);
+
+  const shutdownHome = join(root, "shutdown-home");
+  await mkdir(shutdownHome, { mode: 0o700 });
+  const shutdownState = accountStateDirectory(await realpath(shutdownHome), "codex");
+  const shutdownReservation = reserveConnectorState(shutdownState, false);
+  const shutdownCloseDeadlines: number[] = [];
+  const shutdownConnector = await startConnectorWithProviderFactory({
+    providerKind: "codex",
+    webhookPort: await unusedLoopbackPort(),
+    webhookToken: K02_TOKEN,
+    workingDirectory: canonicalCwd,
+    policy: "read-only",
+    stateReservation: shutdownReservation,
+    async providerFactory() {
+      return managedProviderForTest(async (deadlineUnixMs) => {
+        shutdownCloseDeadlines.push(deadlineUnixMs);
+        throw new Error("private managed-provider close detail");
+      });
+    },
+  });
+  const shutdownStartedAt = Date.now();
+  try {
+    await assert.rejects(
+      shutdownConnector.shutdown("SIGTERM"),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "connector_shutdown_incomplete" &&
+        !error.message.includes("managed-provider"),
+    );
+  } finally {
+    shutdownReservation.close();
+  }
+  assert.equal(shutdownCloseDeadlines.length, 1);
+  assert.ok((shutdownCloseDeadlines[0] ?? 0) >= shutdownStartedAt + 14_900);
+  assert.ok((shutdownCloseDeadlines[0] ?? Number.POSITIVE_INFINITY) <= shutdownStartedAt + 15_100);
+
   for (const provider of ["codex"] as const) {
     const commandEnvironment = syntheticCx02Environment("artifact-check");
     const pnpmStore = await discoverPopulatedPnpmStore();
@@ -883,9 +1015,10 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       ].join("\n"),
       { encoding: "utf8", mode: 0o600 },
     );
+    const guardedStartPort = await unusedLoopbackPort();
     const guardedStartArguments = [
       "start",
-      `--webhook-port=${await unusedLoopbackPort()}`,
+      `--webhook-port=${guardedStartPort}`,
       "--webhook-token-env=CX02_WEBHOOK_TOKEN",
       `--working-directory=${await realpath(cwd)}`,
       "--policy=read-only",
@@ -915,6 +1048,84 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       commandEnvironment,
     );
     await assert.rejects(readFile(providerAttempt), /ENOENT/u);
+
+    const preparationHome = join(root, "home-preparation");
+    const preparationAttempt = join(root, "preparation-provider-attempted");
+    const preparationPreload = join(root, "preparation-provider-guard.mjs");
+    await mkdir(preparationHome, { mode: 0o700 });
+    const preparationState = accountStateDirectory(await realpath(preparationHome), "codex");
+    const preparationStateOptions = {
+      stateDirectory: preparationState,
+      webhookToken: K02_TOKEN,
+      providerKind: "codex" as const,
+      workingDirectory: canonicalCwd,
+    };
+    await initializeConnectorStateForTest(preparationStateOptions);
+    await seedConnectorConversationsForTest({
+      ...preparationStateOptions,
+      count: 1,
+      activeConversationId: "cx02_preparation_conversation",
+      activeProviderSessionId: "cx02_preparation_session",
+      openMessageCount: 1,
+    });
+    const preparationDatabase = new Database(join(preparationState, "correlation.sqlite3"));
+    try {
+      assert.equal(
+        preparationDatabase.prepare("UPDATE messages SET lifecycle='blocked'").run().changes,
+        1,
+      );
+    } finally {
+      preparationDatabase.close();
+    }
+    await writeFile(
+      preparationPreload,
+      [
+        'import childProcess from "node:child_process";',
+        'import fs from "node:fs";',
+        'import os from "node:os";',
+        'import { syncBuiltinESMExports } from "node:module";',
+        `const preparationAttempt = ${JSON.stringify(preparationAttempt)};`,
+        `const preparationHome = ${JSON.stringify(preparationHome)};`,
+        "const rejectProviderProcess = () => {",
+        '  fs.writeFileSync(preparationAttempt, "attempted\\n", { mode: 0o600 });',
+        '  throw new Error("provider process attempted before startup recovery validation");',
+        "};",
+        'for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]) {',
+        "  childProcess[name] = rejectProviderProcess;",
+        "}",
+        "const realUserInfo = os.userInfo;",
+        "os.userInfo = () => ({ ...realUserInfo(), homedir: preparationHome });",
+        "syncBuiltinESMExports();",
+        "",
+      ].join("\n"),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    assert.deepEqual(
+      await runCapturedCommand(
+        process.execPath,
+        [`--import=${preparationPreload}`, stagedCli, ...guardedStartArguments],
+        {
+          ...commandEnvironment,
+          PATH: dirname(fake.executablePath),
+          CX02_WEBHOOK_TOKEN: K02_TOKEN,
+        },
+      ),
+      {
+        code: 1,
+        signal: null,
+        stdout: "",
+        stderr: "a2a connector: connector_message_blocked\n",
+      },
+    );
+    await assert.rejects(readFile(preparationAttempt), /ENOENT/u);
+    assert.deepEqual(
+      await retireConnectorStateForTest({
+        stateDirectory: preparationState,
+        providerKind: "codex",
+        arguments: ["retire-state", "--confirm=retire-all-correlation"],
+      }),
+      { exitCode: 0, stdout: "Connector correlation state retired.\n", stderr: "" },
+    );
 
     const containmentHome = join(root, "home-containment");
     const containmentAttempt = join(root, "containment-attempted");
@@ -963,6 +1174,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       },
     );
     assert.deepEqual(await readFile(containmentAttempt, "utf8"), "attempted\n");
+    await assertLoopbackPortReusable(guardedStartPort);
     await runCommand(
       process.execPath,
       [join("scripts", "check-packed-connector.mjs"), provider, `--store-dir=${pnpmStore}`],

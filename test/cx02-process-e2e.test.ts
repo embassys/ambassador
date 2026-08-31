@@ -746,4 +746,34 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
   assert.equal(eventName((await groupTerminal).value), "reply");
   assert.equal(group.adapter.containmentAttempts, 1);
   assert.equal(group.fake.isLatestUnitEmpty(), true);
+
+  const expiredClock = new ManualK02Clock(CX02_DEADLINE_MS - 100_000);
+  let expiredContainCalls = 0;
+  let expiredFake: Awaited<ReturnType<typeof createCx02Adapter>>["fake"] | undefined;
+  const expired = await createCx02Adapter(t, "CX02-CX03:X27", {
+    appPlan: terminalPlan(cwd, {
+      terminalGate: "expired_close_terminal",
+      onStdinEnd: "resist",
+      spawnDescendant: true,
+    }),
+    clock: expiredClock,
+    containmentForTest: {
+      async contain() {
+        expiredContainCalls += 1;
+        assert.ok(expiredFake !== undefined);
+        return await expiredFake.containLatestUnit();
+      },
+      isEmpty() {
+        return expiredFake?.isLatestUnitEmpty() ?? false;
+      },
+    },
+  });
+  expiredFake = expired.fake;
+  const expiredIterator = expired.adapter.start(startRequest())[Symbol.asyncIterator]();
+  assert.equal(eventName((await expiredIterator.next()).value), "session_bound");
+  assert.equal(eventName((await expiredIterator.next()).value), "turn_bound");
+  await expired.fake.waitForDescendants(1);
+  await assert.rejects(expired.adapter.close(expiredClock.nowMs()), /contain|cleanup|unit/u);
+  assert.equal(expiredContainCalls, 0, "expired close attempted a late containment signal");
+  expired.fake.release("expired_close_terminal");
 });
