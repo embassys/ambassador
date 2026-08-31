@@ -1,5 +1,35 @@
 # Decisions to review
 
+## 2026-08-31: Central repository and integration refresh
+
+The user identified the central server repository as
+`https://github.com/embassys/agent2agent`, reported that the server has a DPoP
+implementation, and directed the gateway project to update its API
+integrations and tests to the latest server version before completing real
+DPoP E2E. The recheck covers the entire server API, not only authentication,
+because new APIs may alter the gateway's end-to-end flows. The user also
+reported two new templates for requesting a user's email address and phone
+number as lower-impact E2E candidates than a calendar action.
+
+The supplied API document is version `1.0.0`, dated 2026-08-30, and describes
+the older bearer, `/api/register_agent`, and consuming-poll contract. The
+inspected server `main` at `4690319` has the same broad contract and no DPoP or
+version 2 implementation. Safe hosted probes also found `/api/register_agent`
+but not `/api/register` or `/api/v2/messages/receive`. The exact DPoP source
+revision and deployment therefore remain to be identified.
+
+This direction creates I01 and I02. I01 pins the server revision, inventories
+every REST route, MCP tool, template, event or callback, version, and
+deprecation, compares the complete client-visible contract with ADRs 0023,
+0025, and 0026, traces flow impacts, and updates tests before integration code.
+It also confirms the exact identifiers, schemas, consent rules, and results for
+the reported email- and phone-request templates. I02 switches a fresh
+development identity to the pinned DPoP deployment and runs the full live E2E,
+preferably with an approved contact-request template and synthetic data rather
+than a calendar action. This is an integration direction, not approval to
+weaken an accepted route, security rule, data boundary, or release gate. A
+material server difference returns the affected ADR for review.
+
 ## 2026-08-31: Public source repository approved
 
 The user approved making the source public at

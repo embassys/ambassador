@@ -108,6 +108,16 @@ SQLite remains ID-only. Registration data, verification codes, central JWT plain
 
 The source tree and `0.2.6` package implement the single-webhook gateway. The development flow requires `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` because production endpoint constants are not available yet. It includes bounded normalization for the development central server's Python-literal result wrapper and a memory-only inbox capped at 256 messages and 512 KiB of normalized result JSON. Production use remains blocked on stable central API and MCP URLs, restart-safe central message recovery, and central JWT reissue.
 
+The central server repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). DPoP is
+reported implemented, but the exact revision and deployment have not been
+pinned. The inspected default branch and hosted routes still show the older
+bearer API. The [server integration status](docs/server-integration-status.md)
+records the I01 recheck of every current API and affected flow plus the I02
+live DPoP E2E task. The reported user-email and user-phone request templates
+are candidates for a lower-impact E2E interaction than calendar, subject to
+the pinned contract review.
+
 ## Development
 
 ```sh
@@ -132,8 +142,21 @@ For periodic model-driven acceptance, follow [Live E2E with OpenClaw and Hermes]
 
 ## Design records
 
-- `docs/product-vision-and-architecture.md` defines the target process and data boundary.
-- `docs/protocol-v1.md` defines startup, MCP, enrollment, polling, and webhook behavior.
-- `docs/implementation-plan.md` is the active task list and approval gate.
-- `docs/decisions-to-review.md` lists provisional and proposed choices.
-- `docs/adr/0017-single-webhook-gateway.md` records the approved design.
+- The [project wiki](docs/README.md) is the human and LLM documentation map.
+- The [architecture overview](docs/architecture-overview.md) is the short
+  system and edge-case guide.
+- The [human work queue](docs/human-work.md) lists current reviews, approvals,
+  external work, and test gates.
+- [Server integration status](docs/server-integration-status.md) records the
+  central repository, observed API drift, the complete I01 API/flow
+  re-baseline, and the I02 contact-template DPoP E2E work.
+- [Product vision and architecture](docs/product-vision-and-architecture.md)
+  defines the target process and data boundary.
+- The [protocol](docs/protocol-v1.md) defines startup, MCP, enrollment,
+  polling, and webhook behavior.
+- The [implementation plan](docs/implementation-plan.md) owns task order and
+  approval gates.
+- [Decisions to review](docs/decisions-to-review.md) records delegated choices
+  that remain available for human review.
+- The [ADR index](docs/adr/README.md) links every accepted or rejected design
+  record.

@@ -1,6 +1,11 @@
 # Implementation status
 
-Status as of August 27, 2026.
+Status: historical `0.2.6` compatibility snapshot from August 27, 2026.
+
+This page predates the local version 2 gateway and connector implementation.
+Use the [project wiki](README.md) for navigation and the
+[human work queue](human-work.md) for current status. The shipped `0.2.6`
+details below remain useful as a compatibility record.
 
 ## Approved target
 

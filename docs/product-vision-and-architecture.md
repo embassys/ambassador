@@ -7,8 +7,11 @@ Read this before working on the project.
 Version `0.2.6` is the shipped compatibility implementation. ADRs 0023, 0025,
 0026, and 0027 define the accepted next gateway contract as of 2026-08-29. ADR
 0024 defines the accepted provider-neutral connector boundary as of 2026-08-30.
-The production central service does not yet advertise the next gateway
-contract. Tests use the test-only
+The central source repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The project
+owner reports that DPoP is implemented, but the exact DPoP revision and
+deployment have not been pinned. The inspected default branch and hosted
+service still advertise the older bearer contract. Tests use the test-only
 [version 2 fixture profile](v2-fixture-profile.md) for missing deployment
 facts, but fixture URLs and policies are not production defaults.
 
@@ -131,7 +134,7 @@ ADR 0024 does not choose the connector executable, CLI or configuration,
 working-directory interface, store format, access controls, encryption,
 deletion, limits, runtime, dependencies, provider port, approval policy,
 package layout, supported platforms, installation, publishing, or release
-model. D05 keeps those choices pending.
+model. ADRs 0028 through 0031 now fix those connector foundation choices.
 
 ### Startup
 
@@ -206,6 +209,8 @@ or connector durable state.
 
 ## Deployment facts still needed
 
+- Exact DPoP server commit, generated REST and MCP schemas, deployment
+  identifier, and proof that the hosted environment runs that commit.
 - Stable production issuer, API resource, API origin, MCP resource, and MCP
   endpoint values for package constants.
 - Central implementation and staging evidence for REST bootstrap, DPoP
@@ -214,6 +219,13 @@ or connector durable state.
   compatibility parser can be removed.
 - An approved local interface for intentional identity reset and an unreadable
   credential.
+
+I01 and I02 in the [implementation plan](implementation-plan.md) track the
+complete latest-server API and flow refresh, including the reported new
+user-email and user-phone request templates, and the first real DPoP
+development E2E run. The re-baseline is not limited to authentication. After
+the pinned schemas confirm their behavior, a low-impact contact-request
+template is preferred to a calendar action for that E2E.
 
 Tests may use the accepted test-only
 [version 2 fixture profile](v2-fixture-profile.md) for these missing facts.

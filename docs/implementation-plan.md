@@ -2,7 +2,14 @@
 
 Status: active for the accepted version 2 architecture
 
-Updated: 2026-08-30
+Updated: 2026-08-31
+
+This document owns task order and gates. The shorter
+[human work queue](human-work.md) owns the current action view. Local fixture
+implementation has completed G01 through G04, K01 through K04, CX01 through
+CX03, CL01 through CL03, and Q01. Real central qualification, real provider
+qualification, compatibility cleanup, and release work remain open. I01 and
+I02 now track the latest-server contract refresh and DPoP development E2E.
 
 ## Rules
 
@@ -54,6 +61,13 @@ capacity, proxy trust, and rollout dates. Tests use
 profile is test-only. It does not authorize production constants or claim that
 the real service implements the contract.
 
+The central source repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The project
+owner reports a DPoP implementation, but its exact commit and deployment have
+not been pinned. The inspected default branch and hosted routes still expose
+the older bearer contract. The dated evidence is in
+[server integration status](server-integration-status.md).
+
 ## Dependency order
 
 ```text
@@ -67,6 +81,10 @@ D01 + D02 + D03 + D04 + D06 complete
                               +--> T04 red conversation and recovery suite
 
 external central S01 red suite --> central-owner review --> S02-S07 implementation
+
+server revision + complete deployed API and template inventory
+  -> I01 refresh all affected gateway flows, integrations, and tests
+  -> I02 switch a fresh development identity to DPoP and run contact-template E2E
 
 T03/T04 user review + enforcing development central
   -> G01 DPoP and credential v2
@@ -121,6 +139,12 @@ Central work is required before the gateway can honestly claim DPoP or durable
 message recovery. It belongs in the central repository and stays behind a
 server-owned rollout control until staging passes.
 
+The repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). DPoP is
+reported implemented, but S03 remains unverified until the exact source
+revision is deployed and its bearer-rejection, wrong-key, replay, nonce, and
+proxy tests pass. Do not mark S03 complete from the report alone.
+
 | ID | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- |
 | S02 | Publish the exact REST enrollment routes and native MCP results | GATE-A | Central contract tests pass for schemas, limits, errors, and no-store responses |
@@ -154,11 +178,26 @@ MCP, relay, journal, fixture, and documentation files. An implementation agent
 may split non-overlapping modules, but one owner must integrate shared files in
 this order.
 
+## Phase 3A: refresh and switch the live server integration
+
+| ID | Task | Depends on | Completion evidence |
+| --- | --- | --- | --- |
+| I01 | Pin the latest server revision, inventory its complete REST, MCP, template, and event surface, trace every affected flow, and update gateway integrations, fixtures, inventories, and CI tests to the approved contract | Server owner supplies exact source and deployment; ADR review for material differences | Every current API is classified; generated schemas, black-box observations, end-to-end flow map, gateway clients, both fixtures, and reviewed tests agree without probing or fallback |
+| I02 | Switch a fresh development identity to DPoP and complete the live gateway E2E flow with an approved low-impact user-contact template | I01, Gate A, deployed S02 through S06 behavior | Both email- and phone-request templates have contract coverage; one synthetic contact-request flow passes issuance binding, bearer rejection, nonce, replay, proxy URI, protected REST and MCP, reissue, activation, leased delivery, reply or completion, acknowledgement, restart, packed install, artifact scans, and contact-data boundary checks |
+
+I01 changes tests before production integration code. It covers the entire
+client-visible server surface, not only authentication, and must not silently
+change an accepted route or security rule to match the server. I02 uses a fresh
+version 2 identity, never sends its token through a bearer path or MCP tool
+argument, and uses only synthetic or disposable contact data. The exact
+evidence checklist is in
+[server integration status](server-integration-status.md).
+
 ## Phase 4: qualification and cleanup
 
 | ID | Task | Depends on | Completion evidence |
 | --- | --- | --- | --- |
-| E01 | Qualify REST enrollment, DPoP, reissue, recovery, and bearer rejection | G01-G03, S07 | Node, Docker, packed-install, and staging checks pass |
+| E01 | Qualify REST enrollment, DPoP, reissue, recovery, and bearer rejection | I02, S07 | Node, Docker, packed-install, and staging checks pass |
 | E02 | Qualify lease, reply, completion, acknowledgement, and every crash barrier | G04, S07 | One logical message, provider turn, reply, and terminal acknowledgement survive each tested interruption |
 | E03 | Run bounded soak, outage, quota, shutdown, and complete artifact scans | E01, E02 | No credential, proof, nonce, code, message, reply, or tool content crosses its approved boundary |
 | W01 | Deferred: qualify Windows under a new approved plan | ADR 0033 | Closed as deferred, not passed; supplies no initial-release evidence |
@@ -237,7 +276,10 @@ artifact tests.
   external S01 inventory and central-owner review. ADR 0032 allows local
   implementation to proceed but not production central claims or activation.
 - The central implementation repository and owners must complete S01 through
-  S07. This gateway workspace does not contain that production service.
+  S07 in `embassys/agent2agent`. This gateway workspace does not contain that
+  production service.
+- The exact server revision containing the reported DPoP implementation and
+  the deployment built from it are not yet pinned. I01 and I02 remain open.
 - Production issuer, API resource, MCP resource, API base, and MCP endpoint
   values are unresolved. The fixture profile supplies test-only values.
 - Central must confirm its signing, shared replay, nonce, revocation,
