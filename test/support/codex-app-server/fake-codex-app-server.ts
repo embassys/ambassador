@@ -47,6 +47,7 @@ function releaseGate(name: string): void {
 
 async function waitForGate(name: string | undefined): Promise<void> {
   if (name === undefined) return;
+  send({ channel: "barrier", name });
   await new Promise<void>((resolve) => {
     const waiters = gates.get(name) ?? [];
     waiters.push(resolve);

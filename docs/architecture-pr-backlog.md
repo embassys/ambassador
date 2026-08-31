@@ -354,6 +354,15 @@ failure blocks that adapter's release but does not block the other two tracks.
 | Q04 | Combined qualification task | `record cross-provider soak and release evidence` | CX04, CL04, GM04, Q03 | Repeated multi-turn conversations, mixed concurrent conversations, provider restarts, gateway restarts, connector restarts, central outages, and reply uncertainty complete without duplicate turns, duplicate replies, leaked credentials, or persisted content |
 | Q05 | Stable distribution decision and release PR | `release: promote qualified connectors to stable` | Q04, explicit stable-publishing approval | The first `1.0.0` artifacts publish on `latest` only after every claimed provider and platform has passed its packed-install, hard-crash, real-runtime, security, license, and soak gates |
 
+Q01 is complete for every implemented provider adapter: Codex App Server and
+Claude Code run the same credential-free full-chain scenario with new-session,
+exact-session continuation, independent-conversation, reply-before-ack,
+process-unit teardown, provider-protocol, and artifact-containment assertions.
+The test is part of the ordinary Linux and macOS repository suite and rejects
+Windows under ADR 0033. Gemini has no Q01 row because ADR 0036 blocks GM02 and
+GM03; adding a Gemini row remains coupled to a later compliant interface and
+implemented adapter rather than a simulated production implementation.
+
 R01 is a gateway release and does not wait for provider adapters. Connector
 previews follow Q03; a stable release follows Q05. This keeps central security
 and message recovery from being blocked by provider integration work.
