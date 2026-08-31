@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { startConnector, startConnectorRuntime } from "../packages/connector-core/src/connector.js";
 import type { ConnectorPolicy, ProviderKind } from "../packages/connector-core/src/constants.js";
-import type { ProviderPort } from "../packages/connector-core/src/runtime-types.js";
+import type { ConnectorClock, ProviderPort } from "../packages/connector-core/src/runtime-types.js";
 import {
   accountStateDirectory,
   type ConnectorStateReservation,
@@ -39,7 +39,7 @@ import {
   validTurn,
 } from "./support/codex-app-server/index.js";
 import { startFakeConnectorGateway } from "./support/connector/index.js";
-import { K02_TOKEN, k02Message } from "./support/connector/k02-production.js";
+import { K02_TOKEN, k02Message, ManualK02Clock } from "./support/connector/k02-production.js";
 
 async function unusedLoopbackPort(): Promise<number> {
   const server = createServer();
@@ -71,6 +71,7 @@ type InternalStartConnector = (options: {
   workingDirectory: string;
   policy: ConnectorPolicy;
   stateReservation: ConnectorStateReservation;
+  clock?: ConnectorClock;
   providerFactory: (options: {
     readonly workingDirectory: string;
     readonly policy: ConnectorPolicy;
@@ -992,6 +993,61 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   assert.equal(shutdownCloseDeadlines.length, 1);
   assert.ok((shutdownCloseDeadlines[0] ?? 0) >= shutdownStartedAt + 14_900);
   assert.ok((shutdownCloseDeadlines[0] ?? Number.POSITIVE_INFINITY) <= shutdownStartedAt + 15_100);
+
+  const hangingClock = new ManualK02Clock(1_788_700_000_000);
+  const hangingHome = join(root, "hanging-close-home");
+  await mkdir(hangingHome, { mode: 0o700 });
+  const hangingState = accountStateDirectory(await realpath(hangingHome), "codex");
+  const hangingReservation = reserveConnectorState(hangingState, false);
+  const hangingCloseDeadlines: number[] = [];
+  const hangingConnector = await startConnectorWithProviderFactory({
+    providerKind: "codex",
+    webhookPort: await unusedLoopbackPort(),
+    webhookToken: K02_TOKEN,
+    workingDirectory: canonicalCwd,
+    policy: "read-only",
+    stateReservation: hangingReservation,
+    clock: hangingClock,
+    async providerFactory() {
+      return managedProviderForTest(async (deadlineUnixMs) => {
+        hangingCloseDeadlines.push(deadlineUnixMs);
+        await new Promise<never>(() => undefined);
+      });
+    },
+  });
+  try {
+    const hangingClose = hangingConnector.close();
+    let hangingCloseSettled = false;
+    void hangingClose.then(
+      () => {
+        hangingCloseSettled = true;
+      },
+      () => {
+        hangingCloseSettled = true;
+      },
+    );
+    await Promise.resolve();
+    assert.deepEqual(hangingCloseDeadlines, [hangingClock.nowMs() + 3_000]);
+    hangingClock.advance(2_999);
+    await Promise.resolve();
+    assert.equal(hangingCloseSettled, false);
+    hangingClock.advance(1);
+    let hangingAssertionTimeout: NodeJS.Timeout | undefined;
+    await assert.rejects(
+      Promise.race([
+        hangingClose,
+        new Promise<never>((_resolve, reject) => {
+          hangingAssertionTimeout = setTimeout(
+            () => reject(new Error("managed provider close exceeded its absolute deadline")),
+            1_000,
+          );
+        }),
+      ]).finally(() => clearTimeout(hangingAssertionTimeout)),
+      /connector_shutdown_incomplete/u,
+    );
+  } finally {
+    hangingReservation.close();
+  }
 
   const fatalGateway = await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
   const fatalHome = join(root, "fatal-home");
