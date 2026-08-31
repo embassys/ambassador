@@ -831,4 +831,160 @@ const cx02 = [
   ]),
 ].map((entry) => ({ ...entry, status: "pass" }));
 
-export const reviewedRedInventory = { t03, t04, k02, cx02, "packaged-docker": packagedDocker };
+function cl02Failure(file, id, name) {
+  return fail(file, 0, `CL02-CL03:${id}`, [name]);
+}
+
+const cl02 = [
+  ...pass("cl02-fixture-integrity.test.js", 0, [
+    "CL02 support runs the fake Claude version and stream-JSON turn without real credentials",
+    "CL02 support runs the six-pipe detached monitor and same-group fake Claude topology",
+  ]),
+  ...pass("cl02-loader-boundary.test.js", 0, [
+    "CL02 support classifies only the exact absent CL03 adapter entry as reviewed red",
+  ]),
+  ...cl02Failure(
+    "cl02-loader-boundary.test.js",
+    "L23",
+    "CL02-L23 rejects partial adapter and monitor modules at the strict production loader",
+  ),
+  ...cl02Failure(
+    "cl02-monitor-containment.test.js",
+    "L24",
+    "CL02-L24 rejects every malformed command lifecycle overflow and forged group claim",
+  ),
+  ...cl02Failure(
+    "cl02-monitor-containment.test.js",
+    "L25",
+    "CL02-L25 prompt EOF then owner death seals the monitor Claude and descendant group",
+  ),
+  ...cl02Failure(
+    "cl02-monitor-containment.test.js",
+    "L26",
+    "CL02-L26 owner death after terminal output discards the candidate and seals descendants",
+  ),
+  ...cl02Failure(
+    "cl02-monitor-containment.test.js",
+    "L27",
+    "CL02-L27 orders PGID ready start lifecycle sealing reap and connector emptiness proof",
+  ),
+  ...cl02Failure(
+    "cl02-process-lifecycle.test.js",
+    "L15",
+    "CL02-L15 owner EOF seals the known group across every startup and execution barrier",
+  ),
+  ...cl02Failure(
+    "cl02-process-lifecycle.test.js",
+    "L16",
+    "CL02-L16 recovery starts no Claude or monitor and always returns uncertainty",
+  ),
+  ...cl02Failure(
+    "cl02-process-lifecycle.test.js",
+    "L17",
+    "CL02-L17 interrupt signals only the known monitor group and never claims safe cancellation",
+  ),
+  ...cl02Failure(
+    "cl02-process-lifecycle.test.js",
+    "L18",
+    "CL02-L18 seals and proves the full group before every terminal provider event",
+  ),
+  ...cl02Failure(
+    "cl02-process-lifecycle.test.js",
+    "L19",
+    "CL02-L19 invalidates a terminal candidate on every late provider or monitor conflict",
+  ),
+  ...cl02Failure(
+    "cl02-security-integration.test.js",
+    "L20",
+    "CL02-L20 excludes content credentials history and fake controls from runtime and package artifacts",
+  ),
+  ...cl02Failure(
+    "cl02-security-integration.test.js",
+    "L21",
+    "CL02-L21 never opens mutates repairs or deletes provider-owned Claude history",
+  ),
+  ...cl02Failure(
+    "cl02-security-integration.test.js",
+    "L22",
+    "CL02-L22 preserves one resumed session and concurrent conversations through the K04 chain",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L01",
+    "CL02-L01 pins the monitored executable identity and exact 2.1.251 version",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L02",
+    "CL02-L02 launches the exact detached monitor and same-group Claude child",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L03",
+    "CL02-L03 accepts only one exact init before provider input",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L04",
+    "CL02-L04 leaves stdin empty until the durable session-bound pull barrier",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L05",
+    "CL02-L05 resumes only the exact stored session and never starts a replacement",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L06",
+    "CL02-L06 places adversarial A2A bytes only in one structured stdin text block",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L07",
+    "CL02-L07 requires one byte-exact replay and derives no recovery handle from it",
+  ),
+  ...cl02Failure(
+    "cl02-startup-session.test.js",
+    "L08",
+    "CL02-L08 fixes restricted safe dontAsk tool ceilings for both connector policies",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L09",
+    "CL02-L09 denies permission and rejects every approval or unsupported control record",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L10",
+    "CL02-L10 keeps supported assistant tool retry and status content transient",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L11",
+    "CL02-L11 normalizes only one exact terminal result",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L12",
+    "CL02-L12 separates definite pre-input failure from every post-input unknown",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L13",
+    "CL02-L13 enforces raw UTF-8 JSONL record and depth boundaries",
+  ),
+  ...cl02Failure(
+    "cl02-stream-contract.test.js",
+    "L14",
+    "CL02-L14 preserves the common ID event output reply and deadline limits",
+  ),
+];
+
+export const reviewedRedInventory = {
+  t03,
+  t04,
+  k02,
+  cx02,
+  cl02,
+  "packaged-docker": packagedDocker,
+};
