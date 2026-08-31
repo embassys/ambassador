@@ -185,6 +185,7 @@ export async function startFakeCodexAppServer(
   });
 
   const plans = [...initialPlans];
+  const injectedPlans = new Map<number, FakeCodexProcessPlan | undefined>();
   const records: MutableLaunchRecord[] = [];
   const fixtureErrors: string[] = [];
   const sockets = new Set<Socket>();
@@ -209,7 +210,9 @@ export async function startFakeCodexAppServer(
           socket.destroy();
           return;
         }
-        const plan = plans.shift();
+        const injected = injectedPlans.has(message.pid);
+        const plan = injected ? injectedPlans.get(message.pid) : plans.shift();
+        if (injected) injectedPlans.delete(message.pid);
         if (plan === undefined || plan.kind !== message.mode) {
           fixtureErrors.push("fake process did not match the queued plan");
           socket.destroy();
@@ -357,6 +360,7 @@ export async function startFakeCodexAppServer(
       return await readFile(configSentinelPath);
     },
     spawnForFixture(arguments_, options) {
+      const plan = plans.shift();
       const child = spawn(executablePath, [...arguments_], {
         cwd: options.cwd,
         env: { ...options.environment },
@@ -364,6 +368,11 @@ export async function startFakeCodexAppServer(
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
+      if (child.pid === undefined || child.pid <= 0) {
+        fixtureErrors.push("fake process did not return a positive pid");
+      } else {
+        injectedPlans.set(child.pid, plan);
+      }
       const completion = new Promise<void>((resolve) => {
         child.once("error", () => resolve());
         child.once("close", () => resolve());

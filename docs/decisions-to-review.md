@@ -407,6 +407,12 @@ license, and platform ADRs.
   reply. The earlier assertion read a nonexistent raw `text` field even though
   the security fixture intentionally records only `payload_text_bytes` to keep
   reply content out of diagnostics. The fixture remains content-free.
+- The fake App Server reserves an injected child's queued plan against its
+  positive PID at spawn-call time. Concurrent children can connect to the
+  control socket in either order, so assigning plans on `hello` intermittently
+  swapped X25's two exact request contracts. External workers that bypass the
+  injected spawn retain FIFO assignment. Request comparison, fixture errors,
+  launch records, and content-free diagnostics are unchanged.
 - X23 likewise asserts the exact 17-byte reply observation instead of reading
   a nonexistent raw `text` field from the content-free fake gateway call
   record. The adapter terminal path still proves the exact in-memory reply,
