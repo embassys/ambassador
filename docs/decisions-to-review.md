@@ -438,6 +438,9 @@ license, and platform ADRs.
 
 ## CX03 implementation judgments
 
+- Broad CI lint excludes only the exact Codex 0.149.0 generated schema fixture.
+  Formatting that byte-pinned upstream artifact would change its approved
+  digest; CX02 continues to verify the exact SHA-256 before using it.
 - The Codex production build strips the private adapter factory, deterministic
   clock, fixture executable, injectable spawn, and injectable containment
   seams from the emitted App Server adapter with exact-count transforms. Any

@@ -11,11 +11,11 @@ const compiledTests = entries
 const files = compiledTests
   .filter(
     (file) =>
-       !basename(file).startsWith("t03-") &&
-       !basename(file).startsWith("t04-") &&
-       !basename(file).startsWith("k02-") &&
-       !basename(file).startsWith("cx02-") &&
-       !basename(file).startsWith("k04-"),
+      !basename(file).startsWith("t03-") &&
+      !basename(file).startsWith("t04-") &&
+      !basename(file).startsWith("k02-") &&
+      !basename(file).startsWith("cx02-") &&
+      !basename(file).startsWith("k04-"),
   )
   .sort();
 const k04Files = compiledTests.filter((file) => basename(file).startsWith("k04-"));
