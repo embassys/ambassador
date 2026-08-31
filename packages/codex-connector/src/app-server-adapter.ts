@@ -712,6 +712,7 @@ interface ActiveInvocation {
   readonly deltas: Map<string, string>;
   readonly completedItems: Map<string, Record<string, unknown>>;
   approvalPending: boolean;
+  normalizedEvents: number;
 }
 
 class CodexAppServerAdapter implements ProviderPort {
@@ -924,6 +925,7 @@ class CodexAppServerAdapter implements ProviderPort {
       deltas: new Map(),
       completedItems: new Map(),
       approvalPending: false,
+      normalizedEvents: 0,
     };
     this.#active.set(request.execution_id, invocation);
     return invocation;
@@ -997,6 +999,7 @@ class CodexAppServerAdapter implements ProviderPort {
       if (!bindingEmitted && invocation.sessionId !== null) {
         bindingEmitted = true;
         if (operation === "start") {
+          this.#normalized(invocation);
           yield {
             event: "session_bound",
             execution_id: invocation.executionId,
@@ -1100,6 +1103,7 @@ class CodexAppServerAdapter implements ProviderPort {
       }
       if (!bindingEmitted && invocation.turnId !== null) {
         bindingEmitted = true;
+        this.#normalized(invocation);
         yield {
           event: "turn_bound",
           execution_id: invocation.executionId,
@@ -1113,15 +1117,25 @@ class CodexAppServerAdapter implements ProviderPort {
           } else if (normalized !== undefined) buffered.push(normalized);
         }
         for (const event of buffered.splice(0)) {
+          this.#normalized(invocation);
           yield event;
         }
       } else if (bindingEmitted) {
         for (const event of buffered.splice(0)) {
+          this.#normalized(invocation);
           yield event;
         }
       }
-      if (terminal !== undefined && responseSeen && bindingEmitted) return terminal;
+      if (terminal !== undefined && responseSeen && bindingEmitted) {
+        this.#normalized(invocation);
+        return terminal;
+      }
     }
+  }
+
+  #normalized(invocation: ActiveInvocation): void {
+    invocation.normalizedEvents += 1;
+    if (invocation.normalizedEvents > CONNECTOR_LIMITS.normalizedEvents) throw new OutputFailure();
   }
 
   #handleTurnNotification(
@@ -1129,6 +1143,10 @@ class CodexAppServerAdapter implements ProviderPort {
     record: Record<string, unknown>,
   ): unknown | undefined {
     const method = eventMethod(record);
+    if (method === "thread/started") {
+      this.#handleThreadNotification(invocation, record);
+      return undefined;
+    }
     if (method === "turn/started") {
       if (
         !hasExactKeys(record, ["method", "params"]) ||
