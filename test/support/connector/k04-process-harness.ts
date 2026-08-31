@@ -83,6 +83,7 @@ export interface K04ConnectorProcess {
 export type K04GatewayFetchBarrier =
   | "receive_selected"
   | "wake_before_request"
+  | "reply_before_request"
   | "reply_accepted_unobserved"
   | "ack_accepted_unobserved";
 
@@ -379,7 +380,7 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
     reasonCode: "provider_start_failed";
   }> = [];
   const arrivals = new Map<K04GatewayFetchBarrier, number[]>();
-  const arrivedBarriers = new Set<K04GatewayFetchBarrier>();
+  const arrivalSequences = new Map<K04GatewayFetchBarrier, number>();
   const waiters = new Map<
     K04GatewayFetchBarrier,
     Array<{ readonly resolve: () => void; readonly reject: (error: Error) => void }>
@@ -429,21 +430,27 @@ function gatewayControl(process: V2ManagedProcess): K04GatewayControl {
       ![
         "receive_selected",
         "wake_before_request",
+        "reply_before_request",
         "reply_accepted_unobserved",
         "ack_accepted_unobserved",
       ].includes(String(message.barrier)) ||
-      message.sequence !== 1
+      !Number.isSafeInteger(message.sequence) ||
+      (message.sequence as number) < 1
     ) {
       failProtocol("unexpected message shape");
       return;
     }
     const barrier = message.barrier as K04GatewayFetchBarrier;
     const sequence = message.sequence as number;
-    if (arrivedBarriers.has(barrier)) {
-      failProtocol("duplicate fetch barrier");
+    const previousSequence = arrivalSequences.get(barrier) ?? 0;
+    if (
+      sequence !== previousSequence + 1 ||
+      (barrier !== "reply_before_request" && sequence !== 1)
+    ) {
+      failProtocol("invalid fetch barrier sequence");
       return;
     }
-    arrivedBarriers.add(barrier);
+    arrivalSequences.set(barrier, sequence);
     const waiter = waiters.get(barrier)?.shift();
     if (waiter !== undefined) {
       const ready = releasable.get(barrier) ?? [];
@@ -583,11 +590,9 @@ export async function startK04ConnectorProcess(
     await managed.waitForOutput("stdout", `Connector webhook: ${webhookUrl}\n`);
   } catch {
     const exit = await managed.waitForExit();
-    throw new Error(
-      `K04 connector exited before readiness (${exit.code ?? exit.signal}): ${managed.stderr()}`,
-    );
+    throw new Error(`K04 connector exited before readiness (${exit.code ?? exit.signal})`);
   }
-  assert.equal(managed.stderr(), "");
+  assert.equal(managed.stderr().length === 0, true, "K04 connector emitted startup stderr");
   await control.waitForProviderSpawnProof();
   assert.equal(control.providerSpawnSha256(), expectedK04ProviderSpawnSha256());
   t.after(() => control.assertProtocol());
@@ -640,11 +645,9 @@ export async function startK04GatewayProcess(
     await managed.waitForOutput("stdout", `MCP endpoint: ${endpoint}\n`);
   } catch {
     const exit = await managed.waitForExit();
-    throw new Error(
-      `K04 gateway exited before readiness (${exit.code ?? exit.signal}): ${managed.stderr()}`,
-    );
+    throw new Error(`K04 gateway exited before readiness (${exit.code ?? exit.signal})`);
   }
-  assert.equal(managed.stderr(), "");
+  assert.equal(managed.stderr().length === 0, true, "K04 gateway emitted startup stderr");
   control.assertProtocol();
   t.after(() => control.assertProtocol());
   return { process: managed, control, endpoint };

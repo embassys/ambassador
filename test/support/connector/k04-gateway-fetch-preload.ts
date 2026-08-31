@@ -3,6 +3,7 @@ import { parseK04IpcEnvelope } from "./k04-ipc.js";
 type K04GatewayFetchBarrier =
   | "receive_selected"
   | "wake_before_request"
+  | "reply_before_request"
   | "reply_accepted_unobserved"
   | "ack_accepted_unobserved";
 
@@ -11,6 +12,7 @@ type K04GatewayOperation = "receive" | "wake" | "reply" | "complete" | "outcome"
 const BARRIER_NAMES = new Set<K04GatewayFetchBarrier>([
   "receive_selected",
   "wake_before_request",
+  "reply_before_request",
   "reply_accepted_unobserved",
   "ack_accepted_unobserved",
 ]);
@@ -134,8 +136,10 @@ function installK04GatewayFetchPreload(): void {
   });
 
   const arrive = async (name: K04GatewayFetchBarrier): Promise<void> => {
-    if (barrierUsed) return;
-    barrierUsed = true;
+    if (name !== "reply_before_request") {
+      if (barrierUsed) return;
+      barrierUsed = true;
+    }
     sequence += 1;
     const arrivalSequence = sequence;
     await new Promise<void>((resolve, reject) => {
@@ -178,6 +182,8 @@ function installK04GatewayFetchPreload(): void {
       });
     }
     if (barrier === "wake_before_request" && operation === "wake") {
+      await arrive(barrier);
+    } else if (barrier === "reply_before_request" && operation === "reply") {
       await arrive(barrier);
     }
 
