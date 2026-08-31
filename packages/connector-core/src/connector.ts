@@ -324,8 +324,11 @@ class ConnectorRuntime implements ConnectorHandle {
       return;
     }
     if (this.#closed) return;
-    await this.#stop(false);
-    if (!(await this.#closeManagedProvider(cleanupDeadline))) {
+    const [stopped, providerClosed] = await Promise.all([
+      this.#settlesBy(this.#stop(false), cleanupDeadline),
+      this.#closeManagedProvider(cleanupDeadline),
+    ]);
+    if (!stopped || !providerClosed || this.#clock.nowMs() > cleanupDeadline) {
       throw new ConnectorError("connector_shutdown_incomplete");
     }
   }
@@ -419,12 +422,12 @@ class ConnectorRuntime implements ConnectorHandle {
     const provider = this.#managedProvider;
     if (provider === undefined) return true;
     this.#managedProvider = undefined;
-    try {
-      await provider.close(deadlineUnixMs);
-      return this.#clock.nowMs() <= deadlineUnixMs;
-    } catch {
-      return false;
-    }
+    const close = Promise.resolve().then(async () => await provider.close(deadlineUnixMs));
+    return await this.#settlesBy(
+      close,
+      deadlineUnixMs,
+      () => this.#clock.nowMs() <= deadlineUnixMs,
+    );
   }
 
   async #shutdownExecution(work: Work, shutdownProviderDeadline: number): Promise<boolean> {
@@ -1820,21 +1823,24 @@ class ConnectorRuntime implements ConnectorHandle {
     this.#queue.length = 0;
     this.#queued.clear();
     this.#starting.clear();
-    try {
-      this.#closeState();
-    } catch {}
     const publicError =
       normalized instanceof ConnectorError
         ? normalized
         : new ConnectorError("connector_internal_error");
-    const cleanupDeadline = this.#clock.nowMs() + 1_000;
+    const cleanupStartedAt = this.#clock.nowMs();
+    const receiverDeadline = cleanupStartedAt + 1_000;
+    const providerDeadline = cleanupStartedAt + CONNECTOR_LIMITS.containmentCleanupMs;
     this.#closeAdmissionAndGateway();
-    this.#fatalCleanup = this.#settlesBy(
-      this.#receiverClose as Promise<void>,
-      cleanupDeadline,
-    ).then(async () => {
-      await this.#closeManagedProvider(cleanupDeadline);
-      this.#rejectFatal?.(publicError);
+    this.#fatalCleanup = Promise.all([
+      this.#settlesBy(this.#receiverClose as Promise<void>, receiverDeadline),
+      this.#closeManagedProvider(providerDeadline),
+    ]).then(([, providerClosed]) => {
+      try {
+        this.#closeState();
+      } catch {}
+      this.#rejectFatal?.(
+        providerClosed ? publicError : new ConnectorError("connector_provider_cleanup_incomplete"),
+      );
       this.#rejectFatal = undefined;
     });
     for (const waiter of this.#idleWaiters) waiter.reject(normalized);
