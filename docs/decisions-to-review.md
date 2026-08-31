@@ -419,6 +419,29 @@ license, and platform ADRs.
   no-executable case launched a valid fake process instead of exercising the
   reviewed unavailable-adapter path.
 
+## CX03 implementation judgments
+
+- On supported POSIX platforms, the pinned version probe and every App Server
+  launch create a detached process group whose positive group ID is the exact
+  root child PID returned by `spawn`. Terminal cleanup checks that recorded
+  group directly, sends `SIGTERM` to the negative group ID, and escalates to
+  `SIGKILL` within the existing three-second budget. It never searches by
+  name, command line, directory, or a guessed PID. CX04 still has to prove that
+  real Codex descendants remain in this owned group and that the selected
+  stdin owner-death behavior works on each supported macOS/Linux pair. The
+  group ID is captured once immediately after spawn and never recomputed. A
+  narrow POSIX PGID-reuse race between that capture and a later containment
+  signal remains for CX04 stress qualification; the adapter does not widen the
+  unit by searching for replacement processes.
+- Recently terminal execution IDs are retained only in a content-free,
+  insertion-ordered set capped at 100 entries. This preserves
+  `already_terminal` for the connector's immediate cancellation race without
+  allowing process-lifetime growth; an evicted older ID returns `not_found`.
+- A conflicting control record received during terminal teardown invalidates
+  the held terminal candidate. After the exact process unit is proven empty,
+  the adapter maps that dispatch-sensitive protocol failure to uncertainty;
+  a containment failure still rejects the stream with no terminal event.
+
 ## K03 implementation judgments
 
 - The local gateway client uses the approved

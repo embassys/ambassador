@@ -24,12 +24,15 @@ const RAW_RECORD_BYTES = 1_048_576;
 const RAW_DEPTH = 100;
 const TERMINAL_GRACE_MS = 1_000;
 const TERMINAL_CLEANUP_MS = 3_000;
+const OWNED_TERM_WAIT_MS = 500;
+const TERMINAL_EXECUTION_MEMORY = 100;
 
 type Policy = "read-only" | "workspace-write";
 
 interface SpawnOptions {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly detached: true;
   readonly shell: false;
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
 }
@@ -315,7 +318,6 @@ class JsonlTransport {
     this.#exitPromise = new Promise<void>((resolve) => {
       child.once("error", (error) => {
         this.#fail(error instanceof Error ? error : new ProcessEnded());
-        resolve();
       });
       child.once("close", () => {
         if (this.#line.byteLength > 0 && this.#failure === undefined) {
@@ -376,6 +378,10 @@ class JsonlTransport {
 
   async waitForExit(): Promise<void> {
     await this.#exitPromise;
+  }
+
+  isClosed(): boolean {
+    return this.#ended;
   }
 
   #stdout(chunk: Buffer): void {
@@ -504,16 +510,94 @@ function sameIdentity(left: ExecutableIdentity, right: ExecutableIdentity | null
   );
 }
 
-async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  const graceful = await Promise.race([
-    new Promise<boolean>((resolve) => child.once("close", () => resolve(true))),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
-  ]);
-  if (graceful) return;
-  child.kill("SIGKILL");
-  await new Promise<void>((resolve) => child.once("close", () => resolve()));
+async function stopChild(
+  child: ChildProcessWithoutNullStreams,
+  groupId: number | null,
+  clock: ConnectorClock,
+  deadlineMs: number,
+): Promise<boolean> {
+  return await stopOwnedUnit(child, groupId, clock, deadlineMs);
+}
+
+function processGroupId(child: ChildProcessWithoutNullStreams): number | null {
+  if (process.platform === "win32") return null;
+  if (child.pid === undefined || child.pid <= 0) {
+    throw new ContainmentFailure("owned process group unavailable");
+  }
+  return child.pid;
+}
+
+function processGroupExists(groupId: number | null): boolean {
+  if (groupId === null) return false;
+  try {
+    process.kill(-groupId, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    return true;
+  }
+}
+
+function childReaped(child: ChildProcessWithoutNullStreams): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function ownedUnitEmpty(child: ChildProcessWithoutNullStreams, groupId: number | null): boolean {
+  return childReaped(child) && !processGroupExists(groupId);
+}
+
+function signalOwnedUnit(
+  child: ChildProcessWithoutNullStreams,
+  groupId: number | null,
+  signal: NodeJS.Signals,
+): void {
+  if (groupId !== null) {
+    try {
+      process.kill(-groupId, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        throw new ContainmentFailure("owned process group signal failed");
+      }
+    }
+    return;
+  }
+  if (!childReaped(child)) child.kill(signal);
+}
+
+async function waitForOwnedUnitEmpty(
+  child: ChildProcessWithoutNullStreams,
+  groupId: number | null,
+  clock: ConnectorClock,
+  delayMs: number,
+): Promise<boolean> {
+  const cancellation = { cancelled: false };
+  const observation = (async () => {
+    while (!cancellation.cancelled) {
+      if (ownedUnitEmpty(child, groupId)) return true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    return false;
+  })();
+  const result = await waitBounded(clock, observation, delayMs);
+  cancellation.cancelled = true;
+  return !result.timedOut && result.value;
+}
+
+async function stopOwnedUnit(
+  child: ChildProcessWithoutNullStreams,
+  groupId: number | null,
+  clock: ConnectorClock,
+  deadlineMs: number,
+): Promise<boolean> {
+  if (ownedUnitEmpty(child, groupId)) return true;
+  if (clock.nowMs() >= deadlineMs) return false;
+  signalOwnedUnit(child, groupId, "SIGTERM");
+  const termWait = Math.min(OWNED_TERM_WAIT_MS, Math.max(0, deadlineMs - clock.nowMs()));
+  if (await waitForOwnedUnitEmpty(child, groupId, clock, termWait)) return true;
+  const remaining = Math.max(0, deadlineMs - clock.nowMs());
+  if (remaining === 0) return ownedUnitEmpty(child, groupId);
+  signalOwnedUnit(child, groupId, "SIGKILL");
+  return await waitForOwnedUnitEmpty(child, groupId, clock, remaining);
 }
 
 async function preflight(
@@ -525,10 +609,13 @@ async function preflight(
   const child = spawn(identity.path, ["--version"], {
     cwd,
     env: { ...environment },
+    detached: true,
     shell: false,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
+  child.once("error", () => undefined);
+  const groupId = processGroupId(child);
   child.stdin.end();
   const stdout: Buffer[] = [];
   let stdoutBytes = 0;
@@ -551,15 +638,31 @@ async function preflight(
   );
   const result = await waitBounded(clock, completion, VERSION_TIMEOUT_MS);
   if (result.timedOut) {
-    await stopChild(child);
+    const cleanupDeadline = clock.nowMs() + TERMINAL_CLEANUP_MS;
+    if (!(await stopChild(child, groupId, clock, cleanupDeadline))) {
+      throw new ContainmentFailure("version probe cleanup failed");
+    }
+    const closed = await waitBounded(
+      clock,
+      completion,
+      Math.max(0, cleanupDeadline - clock.nowMs()),
+    );
+    if (closed.timedOut) throw new ContainmentFailure("version probe cleanup failed");
     return false;
   }
-  return (
+  const exact =
     !overflow &&
     result.value.code === 0 &&
     result.value.signal === null &&
-    Buffer.concat(stdout).toString("utf8") === VERSION_STDOUT
-  );
+    Buffer.concat(stdout).toString("utf8") === VERSION_STDOUT;
+  if (!ownedUnitEmpty(child, groupId)) {
+    const cleanupDeadline = clock.nowMs() + TERMINAL_CLEANUP_MS;
+    if (!(await stopChild(child, groupId, clock, cleanupDeadline))) {
+      throw new ContainmentFailure("version probe cleanup failed");
+    }
+    return false;
+  }
+  return exact;
 }
 
 function initializeRequest(version: string): Readonly<Record<string, unknown>> {
@@ -701,6 +804,7 @@ interface ActiveInvocation {
   readonly executionId: string;
   readonly request: InvocationRequest;
   readonly transport: JsonlTransport;
+  readonly processGroupId: number | null;
   sessionId: string | null;
   turnId: string | null;
   turnWritten: boolean;
@@ -804,14 +908,17 @@ class CodexAppServerAdapter implements ProviderPort {
 
   async #expireCancellation(invocation: ActiveInvocation): Promise<void> {
     if (invocation.terminal) return;
-    const contained = await this.#contain(invocation);
+    const contained = await this.#containAndProve(
+      invocation,
+      this.#clock.nowMs() + TERMINAL_CLEANUP_MS,
+    );
     invocation.transport.abort(contained ? new ProcessEnded() : new ContainmentFailure());
   }
 
   async contain(executionId: string): Promise<boolean> {
     const invocation = this.#active.get(executionId);
     if (invocation === undefined) return true;
-    return await this.#contain(invocation);
+    return await this.#containAndProve(invocation, this.#clock.nowMs() + TERMINAL_CLEANUP_MS);
   }
 
   async close(): Promise<void> {
@@ -819,7 +926,12 @@ class CodexAppServerAdapter implements ProviderPort {
     await Promise.all(
       [...this.#active.values()].map(async (invocation) => {
         invocation.transport.closeStdin();
-        if (!(await this.#unitEmpty(invocation))) await this.#contain(invocation);
+        if (
+          !(await this.#unitEmpty(invocation)) &&
+          !(await this.#containAndProve(invocation, this.#clock.nowMs() + TERMINAL_CLEANUP_MS))
+        ) {
+          throw new ContainmentFailure("provider unit cleanup failed");
+        }
       }),
     );
   }
@@ -846,7 +958,7 @@ class CodexAppServerAdapter implements ProviderPort {
         const terminal = await this.#recoverTerminal(invocation);
         await this.#teardownOnce(invocation, terminal);
         invocation.terminal = true;
-        this.#terminalExecutions.add(invocation.executionId);
+        this.#rememberTerminal(invocation.executionId);
         yield terminal;
         return;
       }
@@ -857,11 +969,17 @@ class CodexAppServerAdapter implements ProviderPort {
       const terminal = yield* this.#turnPhase(invocation);
       await this.#teardownOnce(invocation, terminal);
       invocation.terminal = true;
-      this.#terminalExecutions.add(invocation.executionId);
+      this.#rememberTerminal(invocation.executionId);
       yield terminal;
     } catch (error) {
       if (invocation !== undefined) {
-        await this.#teardownOnce(invocation, undefined);
+        try {
+          await this.#teardownOnce(invocation, undefined);
+        } catch (teardownError) {
+          if (teardownError instanceof ContainmentFailure || !(await this.#unitEmpty(invocation))) {
+            throw teardownError;
+          }
+        }
       }
       if (invocation === undefined || !invocation.terminal) {
         const preTurn = invocation === undefined || !invocation.turnWritten;
@@ -872,7 +990,7 @@ class CodexAppServerAdapter implements ProviderPort {
               : failedStart(request.execution_id)
             : uncertain(request.execution_id);
         if (invocation !== undefined) invocation.terminal = true;
-        this.#terminalExecutions.add(request.execution_id);
+        this.#rememberTerminal(request.execution_id);
         yield terminal;
       }
     } finally {
@@ -881,6 +999,15 @@ class CodexAppServerAdapter implements ProviderPort {
         if (!invocation.terminal) await this.#teardownOnce(invocation, undefined);
         this.#active.delete(invocation.executionId);
       }
+    }
+  }
+
+  #rememberTerminal(executionId: string): void {
+    this.#terminalExecutions.add(executionId);
+    while (this.#terminalExecutions.size > TERMINAL_EXECUTION_MEMORY) {
+      const oldest = this.#terminalExecutions.values().next().value;
+      if (oldest === undefined) return;
+      this.#terminalExecutions.delete(oldest);
     }
   }
 
@@ -900,6 +1027,7 @@ class CodexAppServerAdapter implements ProviderPort {
         spawn(executable, [...arguments_], {
           cwd: options.cwd,
           env: { ...options.env },
+          detached: options.detached,
           shell: options.shell,
           stdio: [...options.stdio],
           windowsHide: true,
@@ -907,13 +1035,17 @@ class CodexAppServerAdapter implements ProviderPort {
     const child = spawnAppServer(this.identity.launchPath, APP_SERVER_ARGUMENTS, {
       cwd: this.options.workingDirectory,
       env: this.environment,
+      detached: true,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const transport = new JsonlTransport(child);
+    const groupId = processGroupId(child);
     const invocation: ActiveInvocation = {
       executionId: request.execution_id,
       request,
-      transport: new JsonlTransport(child),
+      transport,
+      processGroupId: groupId,
       sessionId: null,
       turnId: null,
       turnWritten: false,
@@ -1428,22 +1560,19 @@ class CodexAppServerAdapter implements ProviderPort {
     candidate: TerminalEvent | undefined,
   ): Promise<void> {
     invocation.transport.closeStdin();
+    const cleanupDeadline = this.#clock.nowMs() + TERMINAL_CLEANUP_MS;
+    const gracefulWait = { cancelled: false };
     const first = await waitBounded(
       this.#clock,
-      Promise.all([invocation.transport.waitForExit(), this.#waitForUnitEmpty(invocation)]),
+      this.#waitForUnitEmpty(invocation, gracefulWait),
       TERMINAL_GRACE_MS,
     );
-    if (!first.timedOut && (await this.#unitEmpty(invocation))) {
+    gracefulWait.cancelled = true;
+    if (!first.timedOut && first.value) {
       this.#inspectLate(invocation, candidate);
       return;
     }
-    const cleanup = this.#contain(invocation);
-    const remaining = await waitBounded(
-      this.#clock,
-      cleanup,
-      TERMINAL_CLEANUP_MS - TERMINAL_GRACE_MS,
-    );
-    if (remaining.timedOut || !remaining.value || !(await this.#unitEmpty(invocation))) {
+    if (!(await this.#containAndProve(invocation, cleanupDeadline))) {
       throw new ContainmentFailure("provider unit cleanup failed");
     }
     this.#inspectLate(invocation, candidate);
@@ -1464,27 +1593,50 @@ class CodexAppServerAdapter implements ProviderPort {
     }
   }
 
-  async #waitForUnitEmpty(invocation: ActiveInvocation): Promise<void> {
-    await invocation.transport.waitForExit();
+  async #waitForUnitEmpty(
+    invocation: ActiveInvocation,
+    cancellation: { cancelled: boolean },
+  ): Promise<boolean> {
+    while (!cancellation.cancelled) {
+      if (await this.#unitEmpty(invocation)) return true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    return false;
   }
 
   async #unitEmpty(invocation: ActiveInvocation): Promise<boolean> {
     if (this.options.containmentForTest !== undefined) {
-      return this.options.containmentForTest.isEmpty(invocation.executionId);
+      const providerEmpty = this.options.containmentForTest.isEmpty(invocation.executionId);
+      return invocation.transport.isClosed() && providerEmpty;
     }
     return (
-      invocation.transport.child.exitCode !== null || invocation.transport.child.signalCode !== null
+      invocation.transport.isClosed() &&
+      ownedUnitEmpty(invocation.transport.child, invocation.processGroupId)
     );
   }
 
-  async #contain(invocation: ActiveInvocation): Promise<boolean> {
+  async #containAndProve(invocation: ActiveInvocation, deadlineMs: number): Promise<boolean> {
     this.#containmentAttempts += 1;
+    let contained: boolean;
     if (this.options.containmentForTest !== undefined) {
-      const contained = await this.options.containmentForTest.contain(invocation.executionId);
-      return contained && this.options.containmentForTest.isEmpty(invocation.executionId);
+      contained = await this.options.containmentForTest.contain(invocation.executionId);
+    } else {
+      contained = await stopOwnedUnit(
+        invocation.transport.child,
+        invocation.processGroupId,
+        this.#clock,
+        deadlineMs,
+      );
     }
-    await stopChild(invocation.transport.child);
-    return await this.#unitEmpty(invocation);
+    if (contained && (await this.#unitEmpty(invocation))) return true;
+    const cleanupWait = { cancelled: false };
+    const remaining = await waitBounded(
+      this.#clock,
+      this.#waitForUnitEmpty(invocation, cleanupWait),
+      Math.max(0, deadlineMs - this.#clock.nowMs()),
+    );
+    cleanupWait.cancelled = true;
+    return !remaining.timedOut && remaining.value;
   }
 }
 
