@@ -272,6 +272,7 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
       return spawn(executable, [...arguments_], {
         cwd: options.cwd,
         env: { ...options.env },
+        detached: options.detached,
         shell: options.shell,
         stdio: [...options.stdio],
       });
@@ -286,6 +287,7 @@ test("CX02-X02 launches one exact direct App Server child with scrubbed sealed s
       options: {
         cwd,
         env: expectedEnvironment,
+        detached: true,
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
       },

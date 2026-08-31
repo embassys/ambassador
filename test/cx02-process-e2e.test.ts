@@ -713,4 +713,22 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
     assert.ok(emptyChecks >= 1, vector.name);
     assert.equal(containCalls > 0, vector.containmentExpected, vector.name);
   }
+
+  const groupClock = new ManualK02Clock(CX02_DEADLINE_MS - 100_000);
+  const group = await createCx02Adapter(t, "CX02-CX03:X27", {
+    appPlan: terminalPlan(cwd, {
+      onStdinEnd: "resist",
+      spawnDescendant: true,
+    }),
+    clock: groupClock,
+  });
+  const groupIterator = group.adapter.start(startRequest())[Symbol.asyncIterator]();
+  assert.equal(eventName((await groupIterator.next()).value), "session_bound");
+  assert.equal(eventName((await groupIterator.next()).value), "turn_bound");
+  const groupTerminal = groupIterator.next();
+  await Promise.all([group.fake.waitForStdinClosed(1), group.fake.waitForDescendants(1)]);
+  groupClock.advance(1_000);
+  assert.equal(eventName((await groupTerminal).value), "reply");
+  assert.equal(group.adapter.containmentAttempts, 1);
+  assert.equal(group.fake.isLatestUnitEmpty(), true);
 });
