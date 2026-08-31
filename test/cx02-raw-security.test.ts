@@ -366,6 +366,39 @@ async function discoverPopulatedPnpmStore(): Promise<string> {
   throw new Error("CX02 populated pnpm store unavailable");
 }
 
+async function discoverCachedPnpmCli(): Promise<string> {
+  const roots = [
+    process.env.COREPACK_HOME,
+    process.env.HOME === undefined
+      ? undefined
+      : join(process.env.HOME, ".cache", "node", "corepack"),
+    process.env.HOME === undefined
+      ? undefined
+      : join(process.env.HOME, "Library", "Caches", "node", "corepack"),
+  ].filter((candidate): candidate is string => candidate !== undefined && isAbsolute(candidate));
+  for (const root of roots) {
+    const candidate = join(root, "v1", "pnpm", "11.22.0", "bin", "pnpm.mjs");
+    const canonical = await realpath(candidate).catch(() => undefined);
+    if (canonical === undefined || !isAbsolute(canonical)) continue;
+    const metadata = await stat(canonical).catch(() => undefined);
+    if (metadata === undefined || !metadata.isFile()) continue;
+    const qualified = await runCapturedCommand(
+      process.execPath,
+      [canonical, "--version"],
+      syntheticCx02Environment("pnpm-cli-qualification"),
+    );
+    if (
+      qualified.code === 0 &&
+      qualified.signal === null &&
+      qualified.stdout === "11.22.0\n" &&
+      qualified.stderr === ""
+    ) {
+      return canonical;
+    }
+  }
+  throw new Error("CX02 cached pnpm CLI unavailable");
+}
+
 async function runDiagnosticWorker(request: {
   readonly executablePath: string;
   readonly workingDirectory: string;
@@ -1118,6 +1151,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   for (const provider of ["codex"] as const) {
     const commandEnvironment = syntheticCx02Environment("artifact-check");
     const pnpmStore = await discoverPopulatedPnpmStore();
+    const pnpmCli = await discoverCachedPnpmCli();
     await runCommand(
       process.execPath,
       [join("scripts", "build-connector.mjs"), provider],
@@ -1364,7 +1398,12 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     }
     await runCommand(
       process.execPath,
-      [join("scripts", "check-packed-connector.mjs"), provider, `--store-dir=${pnpmStore}`],
+      [
+        join("scripts", "check-packed-connector.mjs"),
+        provider,
+        `--store-dir=${pnpmStore}`,
+        `--pnpm-cli=${pnpmCli}`,
+      ],
       commandEnvironment,
     );
   }
