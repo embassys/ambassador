@@ -1843,12 +1843,13 @@ export async function startConnector(options: {
   workingDirectory: string;
   policy: ConnectorPolicy;
   stateReservation: ConnectorStateReservation;
+  provider?: ProviderPort;
 }): Promise<ConnectorHandle> {
   return await ConnectorRuntime.start({
     ...options,
     gatewayEndpoint: "http://127.0.0.1:8787/mcp",
     stateDirectory: options.stateReservation.stateDirectory,
-    provider: dormantProvider(options.providerKind),
+    provider: options.provider ?? dormantProvider(options.providerKind),
   });
 }
 
