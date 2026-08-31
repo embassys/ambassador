@@ -26,7 +26,7 @@
   the message in cleanup. Never put a Keychain value, generated address, email
   body, or verification code in the repository, a `.env` file, command
   arguments, logs, or test output.
-- [ ] Keep the Mailosaur-assisted I02 loop within its 2,000-email daily
+- [ ] Keep the Mailosaur-assisted I02 loop within its 500-email daily
   allowance. Treat one authenticated central identity as a qualification
   session and run every compatible issuance-binding, bearer-rejection,
   protected REST and MCP, reissue, activation, message-lifecycle, restart, and
