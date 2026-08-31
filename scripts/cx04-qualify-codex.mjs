@@ -19,7 +19,6 @@ const exitCode = await runCx04Qualification(process.argv.slice(2), {
     return await executeSystemQualification({
       repositoryRoot,
       temporaryParent: tmpdir(),
-      pnpmExecutable: "pnpm",
       environment: Object.fromEntries(
         Object.entries(process.env).filter((entry) => entry[1] !== undefined),
       ),

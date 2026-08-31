@@ -42,10 +42,9 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
   const pnpmCache = join(root, "cache", "pnpm");
   await Promise.all([
     mkdir(join(pnpmStore, "files", "00"), { recursive: true }),
-    mkdir(
-      join(pnpmCache, "v11", "metadata", "registry.npmjs.org", "@modelcontextprotocol"),
-      { recursive: true },
-    ),
+    mkdir(join(pnpmCache, "v11", "metadata", "registry.npmjs.org", "@modelcontextprotocol"), {
+      recursive: true,
+    }),
     mkdir(join(root, "tooling"), { recursive: true }),
   ]);
   await Promise.all([
@@ -76,6 +75,12 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
     arguments: readonly string[];
     environment: Readonly<Record<string, string>>;
   }> = [];
+  const [canonicalNode, canonicalCli, canonicalStore, canonicalCache] = await Promise.all([
+    realpath(process.execPath),
+    realpath(pnpmCli),
+    realpath(pnpmStore),
+    realpath(pnpmCache),
+  ]);
   try {
     await preparePackedConnector(
       {
@@ -101,11 +106,6 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-
-  const canonicalNode = await realpath(process.execPath);
-  const canonicalCli = await realpath(pnpmCli).catch(() => pnpmCli);
-  const canonicalStore = await realpath(pnpmStore).catch(() => pnpmStore);
-  const canonicalCache = await realpath(pnpmCache).catch(() => pnpmCache);
 
   assert.deepEqual(
     calls.map((call) => [call.executable, ...call.arguments]),

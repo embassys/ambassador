@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -15,7 +16,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 
 export const CODEX_SCHEMA_SHA256 =
   "9b3de71a5a2ffc980b792a18aa8f8dec3f85f48829560222a0264fe494b679a9";
@@ -112,6 +113,7 @@ async function requiredCommand(run, request, phase) {
 }
 
 export async function preparePackedConnector(options, run) {
+  const packaging = await qualifyPackagingInputs(options, run);
   const tarball = join(options.temporaryRoot, "codex-connector.tgz");
   const installRoot = join(options.temporaryRoot, "install");
   const environment = {
@@ -123,7 +125,7 @@ export async function preparePackedConnector(options, run) {
   await requiredCommand(
     run,
     {
-      executable: options.nodeExecutable,
+      executable: packaging.nodeExecutable,
       arguments: [join(options.repositoryRoot, "scripts", "build-connector.mjs"), "codex"],
       cwd: options.repositoryRoot,
       environment,
@@ -133,7 +135,7 @@ export async function preparePackedConnector(options, run) {
   await requiredCommand(
     run,
     {
-      executable: options.nodeExecutable,
+      executable: packaging.nodeExecutable,
       arguments: [join(options.repositoryRoot, "scripts", "stage-connector.mjs"), "codex"],
       cwd: options.repositoryRoot,
       environment,
@@ -143,8 +145,14 @@ export async function preparePackedConnector(options, run) {
   await requiredCommand(
     run,
     {
-      executable: options.nodeExecutable,
-      arguments: [join(options.repositoryRoot, "scripts", "check-packed-connector.mjs"), "codex"],
+      executable: packaging.nodeExecutable,
+      arguments: [
+        join(options.repositoryRoot, "scripts", "check-packed-connector.mjs"),
+        "codex",
+        `--store-dir=${packaging.pnpmStore}`,
+        `--pnpm-cli=${packaging.pnpmCli}`,
+        `--cache-dir=${packaging.pnpmCache}`,
+      ],
       cwd: options.repositoryRoot,
       environment,
     },
@@ -153,8 +161,16 @@ export async function preparePackedConnector(options, run) {
   await requiredCommand(
     run,
     {
-      executable: options.pnpmExecutable,
-      arguments: ["pack", "--ignore-scripts", "--out", tarball],
+      executable: packaging.nodeExecutable,
+      arguments: [
+        packaging.pnpmCli,
+        "pack",
+        `--config.store-dir=${packaging.pnpmStore}`,
+        `--config.cache-dir=${packaging.pnpmCache}`,
+        "--ignore-scripts",
+        "--out",
+        tarball,
+      ],
       cwd: join(options.repositoryRoot, ".stage", "connectors", "codex", "package"),
       environment,
     },
@@ -163,8 +179,17 @@ export async function preparePackedConnector(options, run) {
   await requiredCommand(
     run,
     {
-      executable: options.pnpmExecutable,
-      arguments: ["add", "--offline", "--ignore-scripts", "--package-import-method=copy", tarball],
+      executable: packaging.nodeExecutable,
+      arguments: [
+        packaging.pnpmCli,
+        "add",
+        `--config.store-dir=${packaging.pnpmStore}`,
+        `--config.cache-dir=${packaging.pnpmCache}`,
+        "--offline",
+        "--ignore-scripts",
+        "--package-import-method=copy",
+        tarball,
+      ],
       cwd: installRoot,
       environment,
     },
@@ -298,6 +323,187 @@ async function resolveExecutable(name, environment) {
     }
   }
   throw phaseError("precondition");
+}
+
+async function canonicalFile(path, executable = false) {
+  if (!isAbsolute(path)) throw phaseError("precondition");
+  try {
+    const canonical = await realpath(path);
+    const entry = await lstat(canonical);
+    if (
+      !isAbsolute(canonical) ||
+      entry.isSymbolicLink() ||
+      !entry.isFile() ||
+      (executable && (entry.mode & 0o111) === 0)
+    ) {
+      throw phaseError("precondition");
+    }
+    return canonical;
+  } catch {
+    throw phaseError("precondition");
+  }
+}
+
+async function canonicalDirectory(path) {
+  if (!isAbsolute(path)) throw phaseError("precondition");
+  try {
+    const canonical = await realpath(path);
+    const entry = await lstat(canonical);
+    if (!isAbsolute(canonical) || entry.isSymbolicLink() || !entry.isDirectory()) {
+      throw phaseError("precondition");
+    }
+    return canonical;
+  } catch {
+    throw phaseError("precondition");
+  }
+}
+
+async function validatePnpmStore(path) {
+  const canonical = await canonicalDirectory(path);
+  try {
+    const [index, shards] = await Promise.all([
+      lstat(join(canonical, "index.db")),
+      readdir(join(canonical, "files"), { withFileTypes: true }),
+    ]);
+    if (
+      index.isSymbolicLink() ||
+      !index.isFile() ||
+      !shards.some((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    ) {
+      throw phaseError("precondition");
+    }
+    return canonical;
+  } catch {
+    throw phaseError("precondition");
+  }
+}
+
+async function validatePnpmCache(path) {
+  const canonical = await canonicalDirectory(path);
+  const metadata = join(canonical, "v11", "metadata", "registry.npmjs.org");
+  const required = [
+    join(metadata, "@modelcontextprotocol", "client.jsonl"),
+    join(metadata, "better-sqlite3.jsonl"),
+    join(metadata, "zod.jsonl"),
+  ];
+  try {
+    const [metadataEntry, ...files] = await Promise.all([
+      lstat(metadata),
+      ...required.map(async (path) => await lstat(path)),
+    ]);
+    if (
+      metadataEntry.isSymbolicLink() ||
+      !metadataEntry.isDirectory() ||
+      files.some((entry) => entry.isSymbolicLink() || !entry.isFile() || entry.size < 1)
+    ) {
+      throw phaseError("precondition");
+    }
+    return canonical;
+  } catch {
+    throw phaseError("precondition");
+  }
+}
+
+async function qualifyPackagingInputs(options, run) {
+  const [nodeExecutable, currentNode, pnpmCli, pnpmStore, pnpmCache] = await Promise.all([
+    canonicalFile(options.nodeExecutable, true),
+    canonicalFile(process.execPath, true),
+    canonicalFile(options.pnpmCli),
+    validatePnpmStore(options.pnpmStore),
+    validatePnpmCache(options.pnpmCache),
+  ]);
+  if (nodeExecutable !== currentNode) throw phaseError("precondition");
+  const environment = {
+    ...options.environment,
+    CI: "true",
+    npm_config_ignore_scripts: "true",
+    npm_config_offline: "true",
+  };
+  const version = await requiredCommand(
+    run,
+    {
+      executable: nodeExecutable,
+      arguments: [pnpmCli, "--version"],
+      cwd: options.repositoryRoot,
+      environment,
+      timeoutMs: 5_000,
+    },
+    "precondition",
+  );
+  if (version.stdout !== "11.22.0\n" || version.stderr !== "") {
+    throw phaseError("precondition");
+  }
+  return { nodeExecutable, pnpmCli, pnpmStore, pnpmCache };
+}
+
+async function discoverPackagingInputs(options, run) {
+  const home = options.environment.HOME;
+  if (typeof home !== "string" || !isAbsolute(home)) throw phaseError("precondition");
+  const cliRoots = [
+    options.environment.COREPACK_HOME,
+    join(home, ".cache", "node", "corepack"),
+    join(home, "Library", "Caches", "node", "corepack"),
+  ].filter((candidate) => typeof candidate === "string" && isAbsolute(candidate));
+  let pnpmCli;
+  for (const root of cliRoots) {
+    try {
+      pnpmCli = await canonicalFile(join(root, "v1", "pnpm", "11.22.0", "bin", "pnpm.mjs"));
+      break;
+    } catch {
+      // Continue through the fixed versioned Corepack-cache locations.
+    }
+  }
+  if (pnpmCli === undefined) throw phaseError("precondition");
+  const nodeExecutable = await canonicalFile(process.execPath, true);
+  const environment = {
+    ...options.environment,
+    CI: "true",
+    npm_config_ignore_scripts: "true",
+    npm_config_offline: "true",
+  };
+  const store = await requiredCommand(
+    run,
+    {
+      executable: nodeExecutable,
+      arguments: [pnpmCli, "store", "path"],
+      cwd: options.repositoryRoot,
+      environment,
+      timeoutMs: 5_000,
+    },
+    "precondition",
+  );
+  const storeLines = store.stdout.trimEnd().split("\n");
+  if (
+    store.stderr !== "" ||
+    storeLines.length !== 1 ||
+    !isAbsolute(storeLines[0] ?? "") ||
+    store.stdout !== `${storeLines[0]}\n`
+  ) {
+    throw phaseError("precondition");
+  }
+  const cacheCandidates = [
+    typeof options.environment.XDG_CACHE_HOME === "string"
+      ? join(options.environment.XDG_CACHE_HOME, "pnpm")
+      : undefined,
+    join(home, "Library", "Caches", "pnpm"),
+    join(home, ".cache", "pnpm"),
+  ].filter((candidate) => typeof candidate === "string" && isAbsolute(candidate));
+  let pnpmCache;
+  for (const candidate of cacheCandidates) {
+    try {
+      pnpmCache = await validatePnpmCache(candidate);
+      break;
+    } catch {
+      // Continue through the fixed platform cache locations.
+    }
+  }
+  if (pnpmCache === undefined) throw phaseError("precondition");
+  return {
+    nodeExecutable,
+    pnpmCli,
+    pnpmStore: storeLines[0],
+    pnpmCache,
+  };
 }
 
 function providerStateDirectory(accountHome) {
@@ -449,6 +655,10 @@ export async function executeSystemQualification(options) {
   const codexEnvironment = providerEnvironment(options.environment);
   if (codexEnvironment.HOME !== accountHome) throw phaseError("precondition");
   const codexExecutable = await resolveExecutable("codex", codexEnvironment);
+  const packaging = await discoverPackagingInputs(
+    { repositoryRoot: options.repositoryRoot, environment: options.environment },
+    runBoundedCommand,
+  );
   const temporaryRoot = await mkdtemp(join(options.temporaryParent, "a2a-cx04-codex-"));
   await chmod(temporaryRoot, 0o700);
   try {
@@ -463,8 +673,7 @@ export async function executeSystemQualification(options) {
       {
         repositoryRoot: options.repositoryRoot,
         temporaryRoot,
-        pnpmExecutable: options.pnpmExecutable,
-        nodeExecutable: process.execPath,
+        ...packaging,
         environment: options.environment,
       },
       runBoundedCommand,
