@@ -100,6 +100,43 @@ function managedProviderForTest(
   };
 }
 
+function activeManagedProviderForTest(
+  active: () => void,
+  close: (deadlineUnixMs: number) => Promise<void>,
+): ManagedProviderForTest {
+  const unavailable = async function* (): AsyncIterable<unknown> {};
+  return {
+    spawnRecord: { executable: "managed-provider", arguments: [], environment: {}, shell: false },
+    containmentAttempts: 0,
+    postTerminalDeliveries: 0,
+    async *start(request) {
+      const executionId = request.execution_id;
+      assert.equal(typeof executionId, "string");
+      yield {
+        event: "session_bound",
+        execution_id: executionId,
+        provider_session_id: "cx02_fatal_session",
+      };
+      yield {
+        event: "turn_bound",
+        execution_id: executionId,
+        provider_turn_id: "cx02_fatal_turn",
+      };
+      active();
+      await new Promise<never>(() => undefined);
+    },
+    resume: unavailable,
+    recover: unavailable,
+    async cancel() {
+      return { status: "not_found" };
+    },
+    async contain() {
+      return true;
+    },
+    close,
+  };
+}
+
 function eventName(value: unknown): unknown {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as { event?: unknown }).event
@@ -955,6 +992,72 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
   assert.equal(shutdownCloseDeadlines.length, 1);
   assert.ok((shutdownCloseDeadlines[0] ?? 0) >= shutdownStartedAt + 14_900);
   assert.ok((shutdownCloseDeadlines[0] ?? Number.POSITIVE_INFINITY) <= shutdownStartedAt + 15_100);
+
+  const fatalGateway = await startFakeConnectorGateway(t, { token: K02_TOKEN, port: 8787 });
+  const fatalHome = join(root, "fatal-home");
+  await mkdir(fatalHome, { mode: 0o700 });
+  const fatalState = accountStateDirectory(await realpath(fatalHome), "codex");
+  const fatalReservation = reserveConnectorState(fatalState, false);
+  const fatalCloseDeadlines: number[] = [];
+  let markProviderActive: (() => void) | undefined;
+  const providerActive = new Promise<void>((resolve) => {
+    markProviderActive = resolve;
+  });
+  const fatalConnector = await startConnectorWithProviderFactory({
+    providerKind: "codex",
+    webhookPort: await unusedLoopbackPort(),
+    webhookToken: K02_TOKEN,
+    workingDirectory: canonicalCwd,
+    policy: "read-only",
+    stateReservation: fatalReservation,
+    async providerFactory() {
+      return activeManagedProviderForTest(
+        () => markProviderActive?.(),
+        async (deadlineUnixMs) => {
+          fatalCloseDeadlines.push(deadlineUnixMs);
+          throw new Error("private fatal managed-provider close detail");
+        },
+      );
+    },
+  });
+  try {
+    const activeMessage = k02Message("cx02_fatal_active", "cx02_fatal_conversation");
+    fatalGateway.enqueueMessage(activeMessage);
+    assert.equal(
+      (await fatalGateway.sendWake(fatalConnector.webhookUrl, activeMessage.id)).status,
+      202,
+    );
+    let activeWait: NodeJS.Timeout | undefined;
+    await Promise.race([
+      providerActive,
+      new Promise<never>((_resolve, reject) => {
+        activeWait = setTimeout(() => reject(new Error("active provider was not reached")), 5_000);
+      }),
+    ]).finally(() => clearTimeout(activeWait));
+    const malformedMessage = {
+      ...k02Message("cx02_fatal_invalid", "cx02_fatal_invalid_conversation"),
+      unexpected: true,
+    };
+    fatalGateway.setNextPollResultForTest({ messages: [malformedMessage] });
+    const fatalStartedAt = Date.now();
+    assert.equal(
+      (await fatalGateway.sendWake(fatalConnector.webhookUrl, malformedMessage.id)).status,
+      202,
+    );
+    await assert.rejects(
+      fatalConnector.waitForFatal(),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === "connector_provider_cleanup_incomplete" &&
+        !error.message.includes("managed-provider"),
+    );
+    assert.equal(fatalCloseDeadlines.length, 1);
+    assert.ok((fatalCloseDeadlines[0] ?? 0) >= fatalStartedAt + 2_900);
+    assert.ok((fatalCloseDeadlines[0] ?? Number.POSITIVE_INFINITY) <= fatalStartedAt + 3_100);
+    await fatalConnector.close();
+  } finally {
+    fatalReservation.close();
+  }
 
   for (const provider of ["codex"] as const) {
     const commandEnvironment = syntheticCx02Environment("artifact-check");
