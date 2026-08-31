@@ -7,12 +7,13 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
@@ -184,11 +185,43 @@ async function checkTarball(provider, stageRoot, tarball, staged) {
   }
 }
 
+async function validatedStoreDirectory(argument) {
+  if (argument === undefined) return undefined;
+  const prefix = "--store-dir=";
+  if (!argument.startsWith(prefix)) throw new Error("invalid pnpm store argument");
+  const requested = argument.slice(prefix.length);
+  if (!isAbsolute(requested)) throw new Error("invalid pnpm store argument");
+  const canonical = await realpath(requested);
+  const [store, index, fileShards] = await Promise.all([
+    lstat(canonical),
+    lstat(join(canonical, "index.db")),
+    readdir(join(canonical, "files"), { withFileTypes: true }),
+  ]);
+  if (
+    !store.isDirectory() ||
+    store.isSymbolicLink() ||
+    !index.isFile() ||
+    index.isSymbolicLink() ||
+    !fileShards.some((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+  ) {
+    throw new Error("invalid pnpm store argument");
+  }
+  return canonical;
+}
+
 async function main() {
-  const [provider, ...rest] = process.argv.slice(2);
-  if (provider === undefined || rest.length !== 0 || !PROVIDERS.includes(provider)) {
+  const [provider, storeArgument, ...rest] = process.argv.slice(2);
+  if (
+    provider === undefined ||
+    rest.length !== 0 ||
+    !PROVIDERS.includes(provider) ||
+    (storeArgument !== undefined && !storeArgument.startsWith("--store-dir="))
+  ) {
     throw new Error("invalid provider");
   }
+  const storeDirectory = await validatedStoreDirectory(storeArgument);
+  const pnpmStoreArgument =
+    storeDirectory === undefined ? [] : [`--config.store-dir=${storeDirectory}`];
 
   await runRequired(
     process.execPath,
@@ -211,7 +244,7 @@ async function main() {
     const stageRoot = join(repositoryRoot, ".stage", "connectors", provider, "package");
     const staged = await inventory(stageRoot);
     const tarball = join(temporaryRoot, `${provider}-connector.tgz`);
-    await runRequired("pnpm", ["pack", "--out", tarball], {
+    await runRequired("pnpm", ["pack", ...pnpmStoreArgument, "--out", tarball], {
       cwd: stageRoot,
       env: { ...process.env, npm_config_ignore_scripts: "true" },
     });
@@ -226,7 +259,14 @@ async function main() {
     );
     await runRequired(
       "pnpm",
-      ["add", "--offline", "--ignore-scripts", "--package-import-method=copy", tarball],
+      [
+        "add",
+        ...pnpmStoreArgument,
+        "--offline",
+        "--ignore-scripts",
+        "--package-import-method=copy",
+        tarball,
+      ],
       {
         cwd: installRoot,
         env: {
