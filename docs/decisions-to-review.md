@@ -407,7 +407,7 @@ license, and platform ADRs.
   reply. The earlier assertion read a nonexistent raw `text` field even though
   the security fixture intentionally records only `payload_text_bytes` to keep
   reply content out of diagnostics. The fixture remains content-free.
-- X23 likewise asserts the exact 18-byte reply observation instead of reading
+- X23 likewise asserts the exact 17-byte reply observation instead of reading
   a nonexistent raw `text` field from the content-free fake gateway call
   record. The adapter terminal path still proves the exact in-memory reply,
   while every persistence, diagnostic, and staged-artifact marker scan remains
