@@ -399,6 +399,39 @@ async function discoverCachedPnpmCli(): Promise<string> {
   throw new Error("CX02 cached pnpm CLI unavailable");
 }
 
+async function discoverPopulatedPnpmCache(): Promise<string> {
+  const candidates = [
+    process.env.XDG_CACHE_HOME === undefined ? undefined : join(process.env.XDG_CACHE_HOME, "pnpm"),
+    process.env.HOME === undefined
+      ? undefined
+      : join(process.env.HOME, "Library", "Caches", "pnpm"),
+    process.env.HOME === undefined ? undefined : join(process.env.HOME, ".cache", "pnpm"),
+  ].filter((candidate): candidate is string => candidate !== undefined && isAbsolute(candidate));
+  for (const candidate of candidates) {
+    const canonical = await realpath(candidate).catch(() => undefined);
+    if (canonical === undefined || !isAbsolute(canonical)) continue;
+    const metadataRoot = join(canonical, "v11", "metadata", "registry.npmjs.org");
+    const requiredMetadata = [
+      join(metadataRoot, "@modelcontextprotocol", "client.jsonl"),
+      join(metadataRoot, "better-sqlite3.jsonl"),
+      join(metadataRoot, "zod.jsonl"),
+    ];
+    const [cacheMetadata, metadataDirectory, ...metadataFiles] = await Promise.all([
+      stat(canonical).catch(() => undefined),
+      stat(metadataRoot).catch(() => undefined),
+      ...requiredMetadata.map(async (path) => await stat(path).catch(() => undefined)),
+    ]);
+    if (
+      cacheMetadata?.isDirectory() === true &&
+      metadataDirectory?.isDirectory() === true &&
+      metadataFiles.every((entry) => entry?.isFile() === true && entry.size > 0)
+    ) {
+      return canonical;
+    }
+  }
+  throw new Error("CX02 populated pnpm metadata cache unavailable");
+}
+
 async function runDiagnosticWorker(request: {
   readonly executablePath: string;
   readonly workingDirectory: string;
@@ -1152,6 +1185,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
     const commandEnvironment = syntheticCx02Environment("artifact-check");
     const pnpmStore = await discoverPopulatedPnpmStore();
     const pnpmCli = await discoverCachedPnpmCli();
+    const pnpmCache = await discoverPopulatedPnpmCache();
     await runCommand(
       process.execPath,
       [join("scripts", "build-connector.mjs"), provider],
@@ -1403,6 +1437,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
         provider,
         `--store-dir=${pnpmStore}`,
         `--pnpm-cli=${pnpmCli}`,
+        `--cache-dir=${pnpmCache}`,
       ],
       commandEnvironment,
     );
