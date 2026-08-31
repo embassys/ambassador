@@ -788,7 +788,7 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       2,
       "the staged Codex CLI does not have one fixed adapter factory",
     );
-    assert.ok(stagedCliSource.includes('await runConnectorCli("codex", async (options) =>'));
+    assert.match(stagedCliSource, /await runConnectorCli\(\s*"codex",\s*async \(options\) =>/u);
     assert.ok(stagedCliSource.includes('connectorPackageVersion: "0.0.0-private"'));
 
     const retirementHome = join(root, "home-retirement");
