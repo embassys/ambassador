@@ -92,7 +92,7 @@ output.
 On 2026-09-01, a read-only server lookup authenticated successfully. One
 uniquely addressed synthetic message then passed API creation, address search,
 full retrieval, content matching, and deletion. The check consumed one message
-from the 2,000-email daily allowance and left no message behind. It proves that
+from the 500-email daily allowance and left no message behind. It proves that
 the machine-local API credential and unique-address lookup work. It does not
 prove that the central deployment sends its verification email correctly;
 I01 must first pin that deployment and its email format, and I02 must exercise
