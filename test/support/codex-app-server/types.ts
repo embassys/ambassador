@@ -26,6 +26,7 @@ export type FakeCodexProcessPlan =
       readonly stderr?: string;
       readonly exitCode?: number;
       readonly hold?: boolean;
+      readonly spawnDescendant?: boolean;
     }
   | {
       readonly kind: "app-server";

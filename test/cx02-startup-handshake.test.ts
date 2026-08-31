@@ -192,7 +192,7 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
     { kind: "version", stdout: "codex-cli 0.150.0\n" },
     { kind: "version", stdout: `${"x".repeat(65)}\n` },
     { kind: "version", stderr: "probe failed", exitCode: 1 },
-    { kind: "version", hold: true },
+    { kind: "version", hold: true, spawnDescendant: true },
   ];
   for (const versionPlan of versions) {
     const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X01", {
@@ -208,6 +208,10 @@ test("CX02-X01 pins executable identity and rejects every unavailable version pr
       },
     ]);
     assert.equal(fake.launches.filter((launch) => launch.mode === "app-server").length, 0);
+    if (versionPlan.spawnDescendant === true) {
+      assert.ok(fake.launches[0]?.descendantPid !== undefined);
+      assert.equal(fake.isLatestUnitEmpty(), true);
+    }
   }
 
   const noExecutable = await createCx02Adapter(t, "CX02-CX03:X01", {
