@@ -16,6 +16,13 @@ export interface CommandResult {
   stderr: string;
 }
 
+export function runBoundedCommand(
+  request: CommandRequest & {
+    timeoutMs?: number;
+    phase?: string;
+  },
+): Promise<CommandResult>;
+
 export function configFingerprint(
   path: string,
 ): Promise<{ kind: "absent" } | { kind: "sha256"; value: string }>;
@@ -64,6 +71,13 @@ export interface QualificationEvidence {
     artifactsClean: boolean;
   };
 }
+
+export function executeSystemQualification(options: {
+  repositoryRoot: string;
+  temporaryParent: string;
+  pnpmExecutable: string;
+  environment: Readonly<Record<string, string>>;
+}): Promise<QualificationEvidence>;
 
 export function runCx04Qualification(
   arguments_: readonly string[],

@@ -64,13 +64,8 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
     [
       ["/node", "/repo/scripts/build-connector.mjs", "codex"],
       ["/node", "/repo/scripts/stage-connector.mjs", "codex"],
-      [
-        "pnpm",
-        "pack",
-        "--ignore-scripts",
-        "--out",
-        "/tmp/cx04/codex-connector.tgz",
-      ],
+      ["/node", "/repo/scripts/check-packed-connector.mjs", "codex"],
+      ["pnpm", "pack", "--ignore-scripts", "--out", "/tmp/cx04/codex-connector.tgz"],
       [
         "pnpm",
         "add",
@@ -82,8 +77,28 @@ test("CX04 pack and install commands disable lifecycle scripts", async () => {
     ],
   );
   assert.ok(calls.every((call) => call.environment.npm_config_ignore_scripts === "true"));
-  assert.equal(calls[2]?.environment.npm_config_offline, "true");
   assert.equal(calls[3]?.environment.npm_config_offline, "true");
+  assert.equal(calls[4]?.environment.npm_config_offline, "true");
+});
+
+test("CX04 matrix evidence is closed and fake-safe", async () => {
+  const { validateMatrixObservation } = (await import(
+    pathToFileURL(join(process.cwd(), "scripts", "cx04-real-codex-driver.mjs")).href
+  )) as { validateMatrixObservation(value: unknown): boolean };
+  const accepted = {
+    twoTurnResume: true,
+    readOnlySandbox: true,
+    workspaceWriteSandbox: true,
+    outOfRootDenied: true,
+    networkDenied: true,
+    cancellation: true,
+    hardCrashContainment: true,
+    exactRecovery: true,
+    artifactsClean: true,
+  };
+  assert.equal(validateMatrixObservation(accepted), true);
+  assert.equal(validateMatrixObservation({ ...accepted, exactRecovery: false }), false);
+  assert.equal(validateMatrixObservation({ ...accepted, unreviewed: true }), false);
 });
 
 test("CX04 verifies the exact version and two independent stable schema generations", async () => {
