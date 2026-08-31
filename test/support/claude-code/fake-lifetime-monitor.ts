@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream, realpathSync } from "node:fs";
 import { connect } from "node:net";
 import { constants } from "node:os";
 import { createInterface } from "node:readline";
+import { pipeline } from "node:stream/promises";
 
 import type { FakeClaudeWireWrite, FakeMonitorPlan } from "./types.js";
 
@@ -51,15 +52,27 @@ async function waitForGate(name: string | undefined): Promise<void> {
 async function writeLifecycle(write: FakeClaudeWireWrite): Promise<void> {
   await waitForGate(write.gate);
   if (write.kind === "json") {
-    lifecycle.write(`${JSON.stringify(write.value)}\n`);
+    await new Promise<void>((resolve, reject) => {
+      lifecycle.write(`${JSON.stringify(write.value)}\n`, (error?: Error | null) =>
+        error === undefined || error === null ? resolve() : reject(error),
+      );
+    });
     return;
   }
   if (write.kind === "utf8") {
-    lifecycle.write(write.value);
+    await new Promise<void>((resolve, reject) => {
+      lifecycle.write(write.value, (error?: Error | null) =>
+        error === undefined || error === null ? resolve() : reject(error),
+      );
+    });
     return;
   }
   if (write.kind === "base64") {
-    lifecycle.write(Buffer.from(write.value, "base64"));
+    await new Promise<void>((resolve, reject) => {
+      lifecycle.write(Buffer.from(write.value, "base64"), (error?: Error | null) =>
+        error === undefined || error === null ? resolve() : reject(error),
+      );
+    });
     return;
   }
   process.stderr.write(write.value);
@@ -93,7 +106,12 @@ function seal(reason: string): void {
 }
 
 process.on("SIGINT", () => sendFixture({ channel: "signal", signal: "SIGINT" }));
-process.on("SIGTERM", () => sendFixture({ channel: "signal", signal: "SIGTERM" }));
+process.on("SIGTERM", () => {
+  sendFixture({ channel: "signal", signal: "SIGTERM" });
+  void (async () => {
+    for (const write of plan?.afterSigtermWrites ?? []) await writeLifecycle(write);
+  })().catch(() => seal("sigterm_write_failed"));
+});
 process.on("uncaughtException", () => seal("uncaught_exception"));
 process.on("unhandledRejection", () => seal("unhandled_rejection"));
 
@@ -104,6 +122,7 @@ owner.once("end", () => {
 owner.once("error", () => seal("owner_error"));
 commands.once("error", () => seal("command_error"));
 lifecycle.once("error", () => seal("lifecycle_error"));
+owner.resume();
 process.stdin.pause();
 
 async function startClaude(command: StartCommand): Promise<void> {
@@ -118,14 +137,26 @@ async function startClaude(command: StartCommand): Promise<void> {
     shell: false,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  if (child.stdout === null || child.stderr === null) {
+    seal("child_stream_missing");
+    return;
+  }
+  let startForwarding: (() => void) | undefined;
+  const forwarding = new Promise<void>((resolve, reject) => {
+    startForwarding = () => {
+      void Promise.all([
+        pipeline(child?.stdout as NodeJS.ReadableStream, process.stdout),
+        pipeline(child?.stderr as NodeJS.ReadableStream, process.stderr),
+      ]).then(() => resolve(), reject);
+    };
+  });
   child.once("spawn", () => {
     void (async () => {
       await waitForGate(plan?.afterSpawnGate);
       await waitForGate(plan?.beforeChildStartedGate);
-      lifecycle.write('{"type":"child_started"}\n');
+      await writeLifecycle({ kind: "json", value: { type: "child_started" } });
+      startForwarding?.();
       process.stdin.pipe(child?.stdin ?? process.stdout);
-      child?.stdout?.pipe(process.stdout);
-      child?.stderr?.pipe(process.stderr);
     })().catch(() => seal("child_started_failed"));
   });
   child.once("error", () => {
@@ -133,9 +164,14 @@ async function startClaude(command: StartCommand): Promise<void> {
     seal("spawn_failed");
   });
   child.once("close", (code, signal) => {
-    lifecycle.write(
-      `${JSON.stringify({ type: "child_exited", code, signal: signalNumber(signal) })}\n`,
-    );
+    void forwarding
+      .then(async () => {
+        await writeLifecycle({
+          kind: "json",
+          value: { type: "child_exited", code, signal: signalNumber(signal) },
+        });
+      })
+      .catch(() => seal("child_exit_failed"));
   });
 }
 

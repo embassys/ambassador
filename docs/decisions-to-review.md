@@ -636,14 +636,36 @@ central owner and returns a material contract difference for review.
 - ADR 0034 fixes the Codex preview path. ADR 0035 selects Claude Code `2.1.251`
   and its packaged lifetime-monitor contract. ADR 0036 rejects Gemini CLI
   `0.57.0`; no compliant stable replacement was available on 2026-08-31.
-  Claude implementation and real qualification remain pending, and Gemini
-  implementation remains blocked on a new provider interface.
+  Claude fake-provider implementation is complete, real qualification remains
+  pending, and Gemini implementation remains blocked on a new provider
+  interface.
 - ADR 0035 assigns private monitor-protocol ordering, internal barrier, and
   injected-fault evidence to the CL02 and CL03 fake full-process suite. CL04
   uses the exact packed artifact and records only externally observable
   real-runtime evidence. It does not add a production observation or
   fault-injection seam, change the public CLI, or expose test controls to the
   provider process.
+- CL03 adds no dependency. The fixed Claude artifact resolves and pins one
+  executable identity, launches one packaged monitor per probe or turn, sends
+  prompts only through stream-JSON stdin, and closes provider stdout only
+  after bounded backpressure-aware forwarding drains. The production emit
+  strips every fake executable, clock, spawn, UUID, barrier, observer, and
+  injected-fault seam.
+- The CL03 independent review requires owner-pipe sealing to stop every
+  in-flight startup transition before any later spawn, lifecycle publication,
+  or input forwarding. Cleanup now waits for the direct monitor `close` event,
+  accepts only signal-0 `ESRCH` as exact group-emptiness proof, shares one
+  absolute three-second budget across reaping and group proof, and drains
+  queued provider and lifecycle records before releasing a terminal result.
+- The monitor accepts the adapter-pinned canonical executable regardless of
+  the canonical file's basename, but rejects a noncanonical symlink path in a
+  start record. This preserves user-managed `claude` symlinks to versioned
+  native files without weakening the adapter's identity revalidation.
+- The CL02 fixtures now await large pipe writes and signal acknowledgements,
+  keep live cancellation cases alive until SIGINT, and treat `EPERM` from a
+  signal-0 probe as nonempty until the owned process unit is otherwise proven
+  gone. These changes remove process and pipe nondeterminism without changing
+  production limits or expected classifications.
 - The private package and installation model is accepted. Public-repository
   conversion, publish jobs, preview or stable publication, and support claims
   remain unapproved until their later gates. The gateway CLI stays unchanged.

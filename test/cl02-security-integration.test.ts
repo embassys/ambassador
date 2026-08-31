@@ -42,10 +42,16 @@ async function unusedLoopbackPort(): Promise<number> {
   return address.port;
 }
 
-function turnPlan(sessionId: string, inputUuid: string, input: string, reply: string) {
+function turnPlan(
+  sessionId: string,
+  inputUuid: string,
+  input: string,
+  reply: string,
+  cwd = process.cwd(),
+) {
   return {
     kind: "turn" as const,
-    writesBeforeInput: [{ kind: "json" as const, value: initRecord(process.cwd(), { sessionId }) }],
+    writesBeforeInput: [{ kind: "json" as const, value: initRecord(cwd, { sessionId }) }],
     writesAfterInput: [
       { kind: "json" as const, value: inputRecord(input, sessionId, inputUuid) },
       { kind: "json" as const, value: resultRecord(reply, { sessionId }) },
@@ -334,6 +340,7 @@ test("CL02-L20 excludes content credentials history and fake controls from runti
   for (const marker of markers) {
     assert.ok(captures.every((capture) => !capture.value.includes(marker)));
   }
+  await Promise.all([fake.quiesce(), approval.fake.quiesce(), diagnosticFake.quiesce()]);
   await runCl02ArtifactScan({
     roots: [
       root,
@@ -463,10 +470,18 @@ test("CL02-L22 preserves one resumed session and concurrent conversations throug
       kind === "session"
         ? (sessionIds[sessionIndex++] as string)
         : (inputIds[inputIndex++] as string),
-    turnPlan: turnPlan(sessionIds[0] as string, inputIds[0] as string, "first", "one"),
+    turnPlan: {
+      ...turnPlan(sessionIds[0] as string, inputIds[0] as string, "first", "one", workspace),
+      onStdinEnd: "linger",
+      lingerMs: 1_500,
+    },
   });
-  fake.enqueue(turnPlan(sessionIds[1] as string, inputIds[1] as string, "parallel", "two"));
-  fake.enqueue(turnPlan(sessionIds[0] as string, inputIds[2] as string, "followup", "three"));
+  fake.enqueue(
+    turnPlan(sessionIds[1] as string, inputIds[1] as string, "parallel", "two", workspace),
+  );
+  fake.enqueue(
+    turnPlan(sessionIds[0] as string, inputIds[2] as string, "followup", "three", workspace),
+  );
   const gateway = await startFakeConnectorGateway(t, { token: K02_TOKEN });
   const connector = await startConnectorRuntime({
     providerKind: "claude",
@@ -483,12 +498,17 @@ test("CL02-L22 preserves one resumed session and concurrent conversations throug
   const parallel = k02Message("cl02_chain_2", "cl02_conversation_b", "parallel");
   gateway.enqueueMessage(first);
   gateway.enqueueMessage(parallel);
-  await Promise.all([
-    gateway.sendWake(connector.webhookUrl, first.id),
-    gateway.sendWake(connector.webhookUrl, parallel.id),
-  ]);
+  await gateway.sendWake(connector.webhookUrl, first.id);
+  await fake.waitForLaunches(2);
+  await fake.waitForInputRecords(1);
+  await gateway.sendWake(connector.webhookUrl, parallel.id);
+  await fake.waitForInputRecords(2);
   await connector.waitForIdle();
-  const followup = k02Message("cl02_chain_3", "cl02_conversation_a", "followup");
+  assert.deepEqual(
+    [first.id, parallel.id].map((id) => gateway.tombstone(id)?.outcome),
+    ["replied", "replied"],
+  );
+  const followup = k02Message("cl02_chain_3", "cl02_conversation_a", "followup", first.id);
   gateway.enqueueMessage(followup);
   await gateway.sendWake(connector.webhookUrl, followup.id);
   await connector.waitForIdle();
