@@ -27,7 +27,7 @@ test("package metadata exposes the approved public gateway", async () => {
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
   assert.deepEqual(packageJson.repository, {
     type: "git",
-    url: "git+https://github.com/nikrooz/a2a.git",
+    url: "git+https://github.com/embassys/ambassador.git",
   });
 
   const workspace = await readFile(join(process.cwd(), "pnpm-workspace.yaml"), "utf8");
