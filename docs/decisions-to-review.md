@@ -413,6 +413,12 @@ license, and platform ADRs.
   swapped X25's two exact request contracts. External workers that bypass the
   injected spawn retain FIFO assignment. Request comparison, fixture errors,
   launch records, and content-free diagnostics are unchanged.
+- X25 holds only its second adapter iteration until the first exact message has
+  published `session_bound`, then proves both turns are simultaneously active
+  behind the shared terminal gate. Provider session allocation order is not a
+  production contract; this test-only handshake barrier preserves the fixed
+  per-message session, turn, input, reply, continuation, and gateway-byte
+  assertions without imposing a production launch-order guarantee.
 - X23 likewise asserts the exact 17-byte reply observation instead of reading
   a nonexistent raw `text` field from the content-free fake gateway call
   record. The adapter terminal path still proves the exact in-memory reply,
