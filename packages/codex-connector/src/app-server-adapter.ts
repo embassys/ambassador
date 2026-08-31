@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 
-import { CONNECTOR_LIMITS } from "../../connector-core/src/constants.js";
+import { CONNECTOR_LIMITS, connectorError } from "../../connector-core/src/constants.js";
 import { buildProviderChildEnvironment } from "../../connector-core/src/provider-boundary.js";
 import {
   type ConnectorClock,
@@ -1673,7 +1673,12 @@ export async function createCodexAppServerAdapter(options: {
   readonly webhookTokenEnvironmentName: string;
   readonly connectorPackageVersion: string;
 }): Promise<ProviderPort & { close(): Promise<void> }> {
-  return await createAdapter(options);
+  try {
+    return await createAdapter(options);
+  } catch (error) {
+    if (error instanceof ContainmentFailure) connectorError("connector_shutdown_incomplete");
+    throw error;
+  }
 }
 
 export async function createCodexAppServerAdapterForTest(
