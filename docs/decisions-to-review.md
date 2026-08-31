@@ -440,13 +440,18 @@ license, and platform ADRs.
   returns before the factory can probe Codex, Claude and Gemini retain their
   dormant providers, and the foundation owns the constructed Codex adapter
   until it is closed before the singleton reservation is released.
-- Listener-start failure closes a constructed adapter within the existing
-  three-second containment bound. Signal shutdown passes the same absolute
-  15-second deadline used for admission, cancellation, containment, transport,
-  state, and adapter cleanup; it never starts another adapter-close budget.
-  An already-expired adapter close performs only an emptiness proof and sends
-  no late signal. Any close failure remains the existing content-free
-  `connector_shutdown_incomplete` instead of replacing it with provider detail.
+- Listener-start failure and direct close use the existing absolute three-second
+  containment bound. Signal shutdown passes the same absolute 15-second
+  deadline used for admission, cancellation, containment, transport, state,
+  and adapter cleanup; it never starts another adapter-close budget. An
+  already-expired adapter close performs only an emptiness proof and sends no
+  late signal. Failure on these startup, direct-close, or signal-shutdown paths
+  remains the existing content-free `connector_shutdown_incomplete` instead of
+  exposing provider detail. Runtime fatal cleanup starts its one-second
+  receiver close and three-second provider cleanup concurrently. If the latter
+  fails, it replaces the ordinary process error with the content-free
+  `connector_provider_cleanup_incomplete` before releasing the state
+  reservation.
 - X23 discovers one populated pnpm store outside its synthetic runtime
   environment, validates its canonical absolute directory, index, and content
   shards, and passes it to the private package checker explicitly. The checker
