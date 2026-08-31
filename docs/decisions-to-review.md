@@ -282,9 +282,11 @@ defaults and record them for review. The user accepted all four records on
 
 This approval completes the provider-neutral D05 foundation decisions. ADR
 0032 permits K01 against the accepted G04 fixture contract. ADR 0034 now fixes
-the Codex choices for its preview path. Claude Code and Gemini still require
-separate executable or SDK, version, protocol, sandbox, approval, history,
-license, and platform ADRs.
+the Codex choices for its preview path. ADR 0035 selects Claude Code `2.1.251`
+with no SDK dependency and with real protocol and containment qualification
+still pending. ADR 0036 rejects Gemini CLI `0.57.0`; the approved wider
+interface review found no compliant stable replacement, so GM02 and GM03 stay
+blocked without weakening the existing requirements.
 
 ## K03 test-determinism corrections
 
@@ -631,10 +633,11 @@ central owner and returns a material contract difference for review.
   contract before the external central service is ready.
 - D07 is complete. Gate A and S07 now gate live central qualification,
   activation, and release rather than local implementation.
-- ADR 0034 now fixes those choices for the Codex preview path. Claude Code and
-  Gemini still need exact executable or SDK versions, protocol schemas,
-  dependency decisions, sandbox and approval policies, history behavior,
-  supported platforms, and update policies.
+- ADR 0034 fixes the Codex preview path. ADR 0035 selects Claude Code `2.1.251`
+  and its packaged lifetime-monitor contract. ADR 0036 rejects Gemini CLI
+  `0.57.0`; no compliant stable replacement was available on 2026-08-31.
+  Claude implementation and real qualification remain pending, and Gemini
+  implementation remains blocked on a new provider interface.
 - The private package and installation model is accepted. Public-repository
   conversion, publish jobs, preview or stable publication, and support claims
   remain unapproved until their later gates. The gateway CLI stays unchanged.

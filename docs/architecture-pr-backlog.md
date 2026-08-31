@@ -320,10 +320,17 @@ sandbox, protocol-timing, and hard-crash containment evidence.
 
 | ID | Type | Proposed PR or task | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| GM01 | Docs and spike PR | `docs: approve the Gemini CLI stream-json adapter contract` | K03 | Pin the CLI version and event subset; fix non-TTY stdin, UUID capture, resume, sandbox, approval, recovery, retention, license, and update policy; experimental ACP remains excluded |
+| GM01 | Docs and spike PR | `docs: approve the Gemini CLI stream-json adapter contract` | K03 | Pin the CLI version and event subset; fix non-TTY stdin, UUID capture, resume, sandbox, approval, recovery, retention, license, and update policy; ACP remains excluded |
 | GM02 | Draft red PR | `test: specify the Gemini CLI adapter` | GM01 | A fake CLI covers initialization UUID, new session, resume, result event, approval and sandbox flags, malformed JSONL, output limits, missing session, retention cleanup, cancellation, and uncertain turn |
 | GM03 | Implementation PR | `feat: add the Gemini CLI provider adapter` | GM02 failure review | The adapter passes the fake protocol and K04 chain, sends content through stdin, records the session UUID before stateful work, resumes the exact UUID, and never selects unrestricted approval mode |
 | GM04 | Manual qualification task | `qualify Gemini CLI with an authenticated local installation` | GM03 | The full local chain completes two turns in one session under the approved sandbox policy and isolated workspace; provider history and cleanup match the documentation |
+
+GM01 evaluated Gemini CLI `0.57.0` and rejected it in ADR 0036. Its headless
+input is not structured, its effective policy cannot enforce the connector
+maximum, its sandbox exposes stdin through child argv, and it has no qualified
+hard-death containment path. A user-approved wider review of the repository
+SDK, core backend, and A2A server found no compliant stable replacement. GM02
+through GM04 remain blocked. ACP remains outside scope.
 
 Real-provider tasks are manual and opt-in. CI must never download credentials,
 sign into a provider, or depend on a user's provider history. A real-provider
