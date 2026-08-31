@@ -1621,7 +1621,7 @@ test("K02-D03 keeps connector-core unpackaged and fixes every private provider m
       license: "MIT",
       repository: {
         type: "git",
-        url: "git+https://github.com/nikrooz/a2a.git",
+        url: "git+https://github.com/embassys/ambassador.git",
         directory: `packages/${provider}-connector`,
       },
       publishConfig: { access: "public" },

@@ -1,5 +1,12 @@
 # Decisions to review
 
+## 2026-08-31: Public source repository approved
+
+The user approved making the source public at
+`https://github.com/embassys/ambassador`. The repository relocation does not
+approve an npm publish job, preview or stable publication, or any new support
+claim. Those remain behind their existing release and qualification gates.
+
 ## 2026-08-30: Accepted CX01 Codex App Server preview contract
 
 ADR 0034 is accepted so CX02 and CX03 can proceed without another approval
@@ -677,9 +684,10 @@ central owner and returns a material contract difference for review.
   signal-0 probe as nonempty until the owned process unit is otherwise proven
   gone. These changes remove process and pipe nondeterminism without changing
   production limits or expected classifications.
-- The private package and installation model is accepted. Public-repository
-  conversion, publish jobs, preview or stable publication, and support claims
-  remain unapproved until their later gates. The gateway CLI stays unchanged.
+- The private package and installation model is accepted. The source is public
+  at `https://github.com/embassys/ambassador`; publish jobs, preview or stable
+  publication, and support claims remain unapproved until their later gates.
+  The gateway CLI stays unchanged.
 - The local user-authorized interface for intentional identity reset,
   unreadable credentials, and uncertain revocation remains undecided. Ordinary
   authentication or key failure must not enter recovery or overwrite a
