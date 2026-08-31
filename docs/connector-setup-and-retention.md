@@ -14,7 +14,7 @@ connector lifecycle and is not compatible with the setup below.
 | Provider | Local status | Real qualification |
 | --- | --- | --- |
 | Codex | The `0.149.0` App Server adapter and fake protocol are implemented. CX04 supplies an offline manual runner. | Not run |
-| Claude Code | ADR 0035 selects headless CLI `2.1.251`. The fake protocol and adapter remain CL02 and CL03 work. | Not run |
+| Claude Code | The headless CLI `2.1.251` fake protocol and adapter are implemented. CL04 supplies an offline manual runner. | Not run |
 | Gemini CLI | ADR 0036 rejects CLI `0.57.0` and the reviewed alternatives. No adapter is selected. | Blocked |
 
 Users install and authenticate an approved provider runtime through that
@@ -208,7 +208,7 @@ As of 2026-08-31:
 
 - the provider-neutral fake connector chain is implemented;
 - the Codex fake App Server adapter is implemented;
-- the Claude fake and production adapters remain in progress;
+- the Claude fake and production adapters are implemented, and the CL04 manual runner is available;
 - Gemini has no selected interface;
 - no real provider qualification has succeeded;
 - production central compatibility remains blocked on external deployment;
