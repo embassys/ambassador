@@ -350,7 +350,7 @@ export async function startFakeCodexAppServer(
       return await waitForUnitEmpty(record);
     },
     isLatestUnitEmpty() {
-      const record = records.findLast((candidate) => candidate.mode === "app-server");
+      const record = records.at(-1);
       return record === undefined || unitIsEmpty(record);
     },
     async readConfigSentinel() {

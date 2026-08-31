@@ -163,6 +163,15 @@ async function run(plan: FakeCodexProcessPlan): Promise<void> {
   const selectedMode = mode();
   if (selectedMode !== plan.kind) failFixture("plan_mode_mismatch");
   if (plan.kind === "version") {
+    if (plan.spawnDescendant === true) {
+      const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+        detached: false,
+        env: {},
+        shell: false,
+        stdio: "ignore",
+      });
+      send({ channel: "descendant", pid: descendant.pid });
+    }
     if (plan.hold === true) return;
     if (plan.stdout !== undefined) process.stdout.write(plan.stdout);
     if (plan.stderr !== undefined) process.stderr.write(plan.stderr);
