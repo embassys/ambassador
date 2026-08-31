@@ -56,6 +56,19 @@ review, CX03. Later user review remains available but is not a blocker. The
 record does not authorize publication, stable support, real-central
 compatibility claims, or Windows support.
 
+ADR 0035 was accepted on 2026-08-31. It selects the separately installed
+Claude Code headless CLI at exactly `2.1.251`, with structured JSONL input,
+exact session resume, fixed restricted policy, no exact-turn recovery, and a
+packaged Node lifetime monitor. The monitor leads a connector-known process
+group and keeps a separate owner pipe open after prompt EOF. CL02 and CL03 may
+proceed in order, but provider and platform support remain pending CL04.
+
+ADR 0036 was accepted on 2026-08-31 as a rejection. Gemini CLI `0.57.0` does
+not meet the structured-input, policy, sandbox, or hard-death containment
+requirements. A wider review found no compliant stable Gemini CLI SDK, core,
+or server interface. GM02 and GM03 remain blocked until a new stable interface
+meets the existing requirements and receives approval.
+
 Accepted target architecture is not evidence that the central service has
 implemented or deployed it. Until central owners provide production URLs and
 deployment facts, tests use only the stand-ins in
