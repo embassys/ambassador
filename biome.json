@@ -1,7 +1,15 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
   "files": {
-    "includes": ["**", "!dist", "!.test-dist", "!.build", "!.stage", "!node_modules"]
+    "includes": [
+      "**",
+      "!dist",
+      "!.test-dist",
+      "!.build",
+      "!.stage",
+      "!node_modules",
+      "!test/fixtures/codex-app-server/0.149.0/codex_app_server_protocol.v2.schemas.json"
+    ]
   },
   "formatter": {
     "enabled": true,

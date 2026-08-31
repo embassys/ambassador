@@ -25,6 +25,16 @@ function eventName(value: unknown): unknown {
     : undefined;
 }
 
+function collectStringLeaves(value: unknown, leaves: string[] = []): string[] {
+  if (typeof value === "string") leaves.push(value);
+  else if (Array.isArray(value)) {
+    for (const item of value) collectStringLeaves(item, leaves);
+  } else if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) collectStringLeaves(item, leaves);
+  }
+  return leaves;
+}
+
 function agentMessage(
   text: string,
   phase: "commentary" | "final_answer" | null = "final_answer",
@@ -58,6 +68,38 @@ function turnCompleted(
         itemsView: options.itemsView ?? "full",
       },
     },
+  };
+}
+
+type SupportedApprovalMethod =
+  | "item/commandExecution/requestApproval"
+  | "item/fileChange/requestApproval"
+  | "item/permissions/requestApproval";
+
+function approvalParams(
+  method: SupportedApprovalMethod,
+  cwd: string,
+  itemId: string,
+  reason: string,
+): Readonly<Record<string, unknown>> {
+  const common = {
+    threadId: CX02_THREAD_ID,
+    turnId: CX02_TURN_ID,
+    itemId,
+    startedAtMs: 1_788_000_000_500,
+    reason,
+  };
+  if (method === "item/commandExecution/requestApproval") {
+    return { ...common, environmentId: null };
+  }
+  if (method === "item/fileChange/requestApproval") {
+    return { ...common, grantRoot: null };
+  }
+  return {
+    ...common,
+    environmentId: null,
+    cwd,
+    permissions: { network: null, fileSystem: null },
   };
 }
 
@@ -120,7 +162,22 @@ test("CX02-X09 preserves adversarial A2A bytes only in one structured text input
     assert.deepEqual((turn.params as { input?: unknown }).input, [
       { type: "text", text, text_elements: [] },
     ]);
-    assert.equal(JSON.stringify(launch.requests).split(text).length - 1, 1);
+    const withoutInput = structuredClone(launch.requests) as Record<string, unknown>[];
+    const clonedTurn = withoutInput.find((request) => request.method === "turn/start");
+    assert.ok(clonedTurn !== undefined && clonedTurn.params !== null);
+    const clonedParams = clonedTurn.params as { input?: { text?: string }[] };
+    assert.equal(clonedParams.input?.length, 1);
+    assert.equal(clonedParams.input?.[0]?.text, text);
+    if (clonedParams.input?.[0] !== undefined) clonedParams.input[0].text = "<input_text>";
+    const remainingStrings = [
+      ...collectStringLeaves(withoutInput),
+      ...launch.arguments,
+      ...Object.values(launch.environment),
+    ];
+    assert.equal(
+      remainingStrings.some((value) => value === text || value.includes(text)),
+      false,
+    );
   }
 });
 
@@ -333,6 +390,226 @@ test("CX02-X11 treats deltas as progress and the corroborated full terminal snap
       vector.name,
     );
   }
+
+  const stableOpaqueItemTypes = [
+    "userMessage",
+    "hookPrompt",
+    "plan",
+    "reasoning",
+    "commandExecution",
+    "fileChange",
+    "mcpToolCall",
+    "collabAgentToolCall",
+    "subAgentActivity",
+    "webSearch",
+    "imageView",
+    "sleep",
+    "imageGeneration",
+    "enteredReviewMode",
+    "exitedReviewMode",
+    "contextCompaction",
+  ] as const;
+  const opaqueItems = stableOpaqueItemTypes.map((type, index) => ({
+    id: `opaque_item_${index}`,
+    type,
+    providerOwnedDetail: { ignored: true },
+  }));
+  const opaqueCompleted = await createCx02Adapter(t, "CX02-CX03:X11", {
+    appPlan: {
+      kind: "app-server",
+      exchanges: startExchanges(cwd, [
+        ...opaqueItems.map((opaqueItem, index) => ({
+          kind: "json" as const,
+          value: {
+            method: "item/completed",
+            params: {
+              threadId: CX02_THREAD_ID,
+              turnId: CX02_TURN_ID,
+              completedAtMs: 1_788_000_001_000 + index,
+              item: opaqueItem,
+            },
+          },
+        })),
+        { kind: "json", value: turnCompleted("completed", [item]) },
+      ]),
+    },
+  });
+  assert.equal(
+    eventName((await collectEvents(opaqueCompleted.adapter.start(startRequest()))).at(-1)),
+    "reply",
+    "stable non-agent completed items remain opaque",
+  );
+
+  for (const malformedItem of [
+    { id: "malformed_agent_type", type: "agentMessage", phase: "final_answer", text: 7 },
+    {
+      id: "malformed_agent_phase",
+      type: "agentMessage",
+      phase: "future_phase",
+      text: "not authoritative",
+    },
+    {
+      id: "malformed_agent_unknown",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "not authoritative",
+      unknown: true,
+    },
+    {
+      id: "over_limit_completed_agent",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "x".repeat(262_145),
+    },
+    { id: "unsupported_dynamic", type: "dynamicToolCall", providerOwnedDetail: true },
+  ]) {
+    const malformed = await createCx02Adapter(t, "CX02-CX03:X11", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          {
+            kind: "json",
+            value: {
+              method: "item/completed",
+              params: {
+                threadId: CX02_THREAD_ID,
+                turnId: CX02_TURN_ID,
+                completedAtMs: 1_788_000_001_000,
+                item: malformedItem,
+              },
+            },
+          },
+          { kind: "json", value: turnCompleted("completed", [item]) },
+        ]),
+      },
+    });
+    assert.equal(
+      eventName((await collectEvents(malformed.adapter.start(startRequest()))).at(-1)),
+      "uncertain",
+      String(malformedItem.id),
+    );
+  }
+
+  const ignoredNotificationGroups = [
+    {
+      name: "status and usage",
+      methods: [
+        "thread/status/changed",
+        "thread/tokenUsage/updated",
+        "account/rateLimits/updated",
+        "mcpServer/startupStatus/updated",
+      ],
+    },
+    {
+      name: "hook and tool detail",
+      methods: [
+        "hook/started",
+        "hook/completed",
+        "item/started",
+        "item/commandExecution/outputDelta",
+        "item/commandExecution/terminalInteraction",
+        "item/fileChange/outputDelta",
+        "item/fileChange/patchUpdated",
+        "item/mcpToolCall/progress",
+      ],
+    },
+    {
+      name: "plan diff and reasoning",
+      methods: [
+        "turn/diff/updated",
+        "turn/plan/updated",
+        "item/plan/delta",
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/summaryPartAdded",
+        "item/reasoning/textDelta",
+      ],
+    },
+    {
+      name: "non-config warnings",
+      methods: ["warning", "guardianWarning", "deprecationNotice", "windows/worldWritableWarning"],
+    },
+  ] as const;
+  for (const group of ignoredNotificationGroups) {
+    const accepted = await createCx02Adapter(t, "CX02-CX03:X11", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          ...group.methods.map((method) => ({
+            kind: "json" as const,
+            value: {
+              method,
+              params: {
+                threadId: CX02_THREAD_ID,
+                turnId: CX02_TURN_ID,
+                providerOwnedDetail: { ignored: true },
+              },
+            },
+          })),
+          { kind: "json", value: turnCompleted("completed", [item]) },
+        ]),
+      },
+    });
+    assert.equal(
+      eventName((await collectEvents(accepted.adapter.start(startRequest()))).at(-1)),
+      "reply",
+      `${group.name} accepted`,
+    );
+
+    for (const mismatch of [
+      { threadId: "different_thread", turnId: CX02_TURN_ID },
+      { threadId: CX02_THREAD_ID, turnId: "different_turn" },
+    ]) {
+      const rejected = await createCx02Adapter(t, "CX02-CX03:X11", {
+        appPlan: {
+          kind: "app-server",
+          exchanges: startExchanges(cwd, [
+            {
+              kind: "json",
+              value: {
+                method: group.methods[0],
+                params: { ...mismatch, providerOwnedDetail: true },
+              },
+            },
+          ]),
+        },
+      });
+      assert.equal(
+        eventName((await collectEvents(rejected.adapter.start(startRequest()))).at(-1)),
+        "uncertain",
+        `${group.name} mismatched context`,
+      );
+    }
+  }
+
+  const preBinding = await createCx02Adapter(t, "CX02-CX03:X11", {
+    appPlan: {
+      kind: "app-server",
+      exchanges: startExchanges(
+        cwd,
+        [{ kind: "json", value: turnCompleted("completed", [item]) }],
+        {
+          turnBeforeResponse: [
+            {
+              kind: "json",
+              value: {
+                method: "item/started",
+                params: {
+                  threadId: CX02_THREAD_ID,
+                  turnId: CX02_TURN_ID,
+                  providerOwnedDetail: true,
+                },
+              },
+            },
+          ],
+        },
+      ),
+    },
+  });
+  assert.equal(
+    eventName((await collectEvents(preBinding.adapter.start(startRequest()))).at(-1)),
+    "reply",
+    "turn-scoped ignored notification before binding",
+  );
 });
 
 test("CX02-X12 selects one final_answer before phase-null and rejects remaining ambiguities", async (t) => {
@@ -439,6 +716,35 @@ test("CX02-X13 maps only an exact failed turn definitely and every executed unkn
       event: "uncertain",
       reason: "provider_outcome_unknown",
     },
+    {
+      name: "failed turn with malformed scalar item",
+      writes: [
+        {
+          kind: "json",
+          value: turnCompleted("failed", [42 as unknown as Readonly<Record<string, unknown>>]),
+        },
+      ],
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
+    {
+      name: "failed turn with malformed agent item",
+      writes: [
+        {
+          kind: "json",
+          value: turnCompleted("failed", [
+            {
+              id: "malformed_failed_agent",
+              type: "agentMessage",
+              phase: "final_answer",
+              text: 7,
+            },
+          ]),
+        },
+      ],
+      event: "uncertain",
+      reason: "provider_outcome_unknown",
+    },
   ];
   for (const vector of vectors) {
     const exchanges = startExchanges(cwd, vector.writes);
@@ -471,7 +777,7 @@ test("CX02-X13 maps only an exact failed turn definitely and every executed unkn
 
 test("CX02-X14 normalizes only three supported approval requests and sends no response or grant", async (t) => {
   const cwd = process.cwd();
-  const methods = [
+  const methods: readonly SupportedApprovalMethod[] = [
     "item/commandExecution/requestApproval",
     "item/fileChange/requestApproval",
     "item/permissions/requestApproval",
@@ -482,12 +788,7 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
       const approval = {
         id,
         method,
-        params: {
-          threadId: CX02_THREAD_ID,
-          turnId: CX02_TURN_ID,
-          itemId: "approval_item",
-          reason: "fixture detail must stay private",
-        },
+        params: approvalParams(method, cwd, "approval_item", "fixture detail must stay private"),
       };
       const { fake, adapter } = await createCx02Adapter(t, "CX02-CX03:X14", {
         appPlan: {
@@ -509,6 +810,145 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
       await adapter.cancel(cancelRequest());
       await iterator.return?.();
     }
+  }
+
+  const malformedApprovals: readonly {
+    name: string;
+    method: SupportedApprovalMethod;
+    params: Readonly<Record<string, unknown>>;
+  }[] = [
+    {
+      name: "unknown command field",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        unknown: true,
+      },
+    },
+    {
+      name: "malformed command actions",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        commandActions: {},
+      },
+    },
+    {
+      name: "malformed command action element",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        commandActions: [{ type: "read", command: "cat", name: 7, path: cwd }],
+      },
+    },
+    {
+      name: "unknown network approval context field",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        networkApprovalContext: { host: "example.com", protocol: "https", unknown: true },
+      },
+    },
+    {
+      name: "future network approval protocol",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        networkApprovalContext: { host: "example.com", protocol: "future" },
+      },
+    },
+    {
+      name: "malformed exec policy amendment",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        proposedExecpolicyAmendment: { command: "allow" },
+      },
+    },
+    {
+      name: "malformed network policy amendment",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        proposedNetworkPolicyAmendments: [{ host: "example.com", action: "future" }],
+      },
+    },
+    {
+      name: "missing file timestamp",
+      method: "item/fileChange/requestApproval",
+      params: {
+        threadId: CX02_THREAD_ID,
+        turnId: CX02_TURN_ID,
+        itemId: "approval_item",
+        reason: "private",
+        grantRoot: null,
+      },
+    },
+    {
+      name: "malformed file grant root",
+      method: "item/fileChange/requestApproval",
+      params: {
+        ...approvalParams("item/fileChange/requestApproval", cwd, "approval_item", "private"),
+        grantRoot: 7,
+      },
+    },
+    {
+      name: "malformed permission network flag",
+      method: "item/permissions/requestApproval",
+      params: {
+        ...approvalParams("item/permissions/requestApproval", cwd, "approval_item", "private"),
+        permissions: { network: { enabled: "yes" }, fileSystem: null },
+      },
+    },
+    {
+      name: "unknown nested permission field",
+      method: "item/permissions/requestApproval",
+      params: {
+        ...approvalParams("item/permissions/requestApproval", cwd, "approval_item", "private"),
+        permissions: { network: { enabled: null, unknown: true }, fileSystem: null },
+      },
+    },
+    {
+      name: "malformed permission entry",
+      method: "item/permissions/requestApproval",
+      params: {
+        ...approvalParams("item/permissions/requestApproval", cwd, "approval_item", "private"),
+        permissions: {
+          network: null,
+          fileSystem: {
+            read: [cwd],
+            write: null,
+            entries: [
+              {
+                path: { type: "special", value: { kind: "root", unknown: true } },
+                access: "read",
+              },
+            ],
+          },
+        },
+      },
+    },
+  ];
+  for (const vector of malformedApprovals) {
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X14", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          { kind: "json", value: { id: 42, method: vector.method, params: vector.params } },
+          {
+            kind: "json",
+            value: turnCompleted("completed", [agentMessage("must not be observed")]),
+          },
+        ]),
+      },
+    });
+    const events = await collectEvents(adapter.start(startRequest()));
+    assert.equal(
+      events.some((event) => eventName(event) === "approval_required"),
+      false,
+      vector.name,
+    );
+    assert.equal(eventName(events.at(-1)), "uncertain", vector.name);
   }
 });
 
@@ -551,15 +991,42 @@ test("CX02-X15 never invents approval resolution and rejects every unsupported s
     );
   }
 
+  for (const method of [
+    "account/updated",
+    "thread/settings/updated",
+    "serverRequest/resolved",
+    "configWarning",
+  ]) {
+    const { adapter } = await createCx02Adapter(t, "CX02-CX03:X15", {
+      appPlan: {
+        kind: "app-server",
+        exchanges: startExchanges(cwd, [
+          {
+            kind: "json",
+            value: {
+              method,
+              params: { threadId: CX02_THREAD_ID, turnId: CX02_TURN_ID },
+            },
+          },
+        ]),
+      },
+    });
+    assert.equal(
+      eventName((await collectEvents(adapter.start(startRequest()))).at(-1)),
+      "uncertain",
+      `${method} notification remains rejected`,
+    );
+  }
+
   const approval = {
     id: 42,
     method: "item/commandExecution/requestApproval",
-    params: {
-      threadId: CX02_THREAD_ID,
-      turnId: CX02_TURN_ID,
-      itemId: "pending_approval",
-      reason: "private pending detail",
-    },
+    params: approvalParams(
+      "item/commandExecution/requestApproval",
+      cwd,
+      "pending_approval",
+      "private pending detail",
+    ),
   };
   for (const vector of [
     {

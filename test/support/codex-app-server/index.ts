@@ -20,6 +20,7 @@ export {
   cancelRequest,
   collectEvents,
   createCx02Adapter,
+  createCx02Clock,
   handshakeExchanges,
   initializeRequest,
   recoverRequest,

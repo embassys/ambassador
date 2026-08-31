@@ -54,6 +54,19 @@ type Terminal =
   | { operation: "reply"; text: string }
   | { operation: "complete"; outcome: string; reason: string };
 
+interface ManagedProviderPort extends ProviderPort {
+  close(deadlineUnixMs: number): Promise<void>;
+}
+
+interface InternalProviderFactoryOptions {
+  readonly workingDirectory: string;
+  readonly policy: ConnectorPolicy;
+}
+
+type InternalProviderFactory = (
+  options: InternalProviderFactoryOptions,
+) => Promise<ManagedProviderPort>;
+
 interface ConnectorHandle {
   readonly webhookUrl: string;
   close(): Promise<void>;
@@ -184,12 +197,13 @@ class ConnectorRuntime implements ConnectorHandle {
   #gatewayClose: Promise<void> | undefined;
   #transportClose: Promise<void> | undefined;
   #shutdownPromise: Promise<void> | undefined;
+  #managedProvider: ManagedProviderPort | undefined;
   #stateClosed = false;
   #closed = false;
   #stopping = false;
 
   private constructor(
-    private readonly options: ConnectorFoundationOptions,
+    private options: ConnectorFoundationOptions,
     state: ConnectorState,
   ) {
     this.#fatalSignal = new Promise<never>((_resolve, reject) => {
@@ -208,7 +222,10 @@ class ConnectorRuntime implements ConnectorHandle {
     );
   }
 
-  static async start(options: ConnectorFoundationOptions): Promise<ConnectorRuntime> {
+  static async start(
+    options: ConnectorFoundationOptions,
+    providerFactory?: InternalProviderFactory,
+  ): Promise<ConnectorRuntime> {
     let workingDirectory: string;
     try {
       workingDirectory = realpathSync.native(options.workingDirectory);
@@ -237,10 +254,32 @@ class ConnectorRuntime implements ConnectorHandle {
       state.close();
       throw error;
     }
+    if (providerFactory !== undefined) {
+      let managedProvider: ManagedProviderPort;
+      try {
+        managedProvider = await providerFactory({
+          workingDirectory: canonicalOptions.workingDirectory,
+          policy: canonicalOptions.policy,
+        });
+      } catch (error) {
+        state.close();
+        throw error;
+      }
+      runtime.options = { ...canonicalOptions, provider: managedProvider };
+      runtime.#managedProvider = managedProvider;
+    }
     try {
       await runtime.#receiver.listen();
     } catch {
-      state.close();
+      const cleanupDeadline = runtime.#clock.nowMs() + CONNECTOR_LIMITS.containmentCleanupMs;
+      const providerClosed = await runtime.#closeManagedProvider(cleanupDeadline);
+      let stateClosed = true;
+      try {
+        state.close();
+      } catch {
+        stateClosed = false;
+      }
+      if (!providerClosed || !stateClosed) connectorError("connector_shutdown_incomplete");
       connectorError("connector_listener_unavailable");
     }
     queueMicrotask(() => {
@@ -278,13 +317,20 @@ class ConnectorRuntime implements ConnectorHandle {
   }
 
   async close(): Promise<void> {
+    const cleanupDeadline = this.#clock.nowMs() + CONNECTOR_LIMITS.containmentCleanupMs;
     if (this.#fatalCleanup !== undefined) {
       await this.#fatalCleanup;
       await this.#transportClose;
       return;
     }
     if (this.#closed) return;
-    await this.#stop(false);
+    const [stopped, providerClosed] = await Promise.all([
+      this.#settlesBy(this.#stop(false), cleanupDeadline),
+      this.#closeManagedProvider(cleanupDeadline),
+    ]);
+    if (!stopped || !providerClosed || this.#clock.nowMs() > cleanupDeadline) {
+      throw new ConnectorError("connector_shutdown_incomplete");
+    }
   }
   async crash(): Promise<void> {
     if (this.#fatalCleanup !== undefined) {
@@ -328,6 +374,7 @@ class ConnectorRuntime implements ConnectorHandle {
       active.map(async (work) => await this.#shutdownExecution(work, containmentDeadline)),
     );
     const transportClosed = await this.#settlesBy(transportClose, absoluteDeadline);
+    const providerClosed = await this.#closeManagedProvider(absoluteDeadline);
     this.#closed = true;
     this.#active.clear();
     let stateClosed = true;
@@ -339,6 +386,7 @@ class ConnectorRuntime implements ConnectorHandle {
     if (
       !transportClosed ||
       !admissionClosed ||
+      !providerClosed ||
       !stateClosed ||
       cleanup.some((contained) => !contained) ||
       this.#clock.nowMs() > absoluteDeadline
@@ -368,6 +416,18 @@ class ConnectorRuntime implements ConnectorHandle {
       );
     }
     this.#closeState();
+  }
+
+  async #closeManagedProvider(deadlineUnixMs: number): Promise<boolean> {
+    const provider = this.#managedProvider;
+    if (provider === undefined) return true;
+    this.#managedProvider = undefined;
+    const close = Promise.resolve().then(async () => await provider.close(deadlineUnixMs));
+    return await this.#settlesBy(
+      close,
+      deadlineUnixMs,
+      () => this.#clock.nowMs() <= deadlineUnixMs,
+    );
   }
 
   async #shutdownExecution(work: Work, shutdownProviderDeadline: number): Promise<boolean> {
@@ -1763,20 +1823,24 @@ class ConnectorRuntime implements ConnectorHandle {
     this.#queue.length = 0;
     this.#queued.clear();
     this.#starting.clear();
-    try {
-      this.#closeState();
-    } catch {}
     const publicError =
       normalized instanceof ConnectorError
         ? normalized
         : new ConnectorError("connector_internal_error");
-    const cleanupDeadline = this.#clock.nowMs() + 1_000;
+    const cleanupStartedAt = this.#clock.nowMs();
+    const receiverDeadline = cleanupStartedAt + 1_000;
+    const providerDeadline = cleanupStartedAt + CONNECTOR_LIMITS.containmentCleanupMs;
     this.#closeAdmissionAndGateway();
-    this.#fatalCleanup = this.#settlesBy(
-      this.#receiverClose as Promise<void>,
-      cleanupDeadline,
-    ).then(() => {
-      this.#rejectFatal?.(publicError);
+    this.#fatalCleanup = Promise.all([
+      this.#settlesBy(this.#receiverClose as Promise<void>, receiverDeadline),
+      this.#closeManagedProvider(providerDeadline),
+    ]).then(([, providerClosed]) => {
+      try {
+        this.#closeState();
+      } catch {}
+      this.#rejectFatal?.(
+        providerClosed ? publicError : new ConnectorError("connector_provider_cleanup_incomplete"),
+      );
       this.#rejectFatal = undefined;
     });
     for (const waiter of this.#idleWaiters) waiter.reject(normalized);
@@ -1843,13 +1907,18 @@ export async function startConnector(options: {
   workingDirectory: string;
   policy: ConnectorPolicy;
   stateReservation: ConnectorStateReservation;
+  providerFactory?: InternalProviderFactory;
 }): Promise<ConnectorHandle> {
-  return await ConnectorRuntime.start({
-    ...options,
-    gatewayEndpoint: "http://127.0.0.1:8787/mcp",
-    stateDirectory: options.stateReservation.stateDirectory,
-    provider: dormantProvider(options.providerKind),
-  });
+  const { providerFactory, ...foundation } = options;
+  return await ConnectorRuntime.start(
+    {
+      ...foundation,
+      gatewayEndpoint: "http://127.0.0.1:8787/mcp",
+      stateDirectory: options.stateReservation.stateDirectory,
+      provider: dormantProvider(options.providerKind),
+    },
+    providerFactory,
+  );
 }
 
 export async function startConnectorRuntime(
