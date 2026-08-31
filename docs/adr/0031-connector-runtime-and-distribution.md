@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-08-30
 
+Updated: 2026-08-31 for the approved public repository relocation
+
 ## Problem
 
 ADR 0024 accepts provider connectors as products separate from the gateway.
@@ -161,7 +163,7 @@ The staging script copies it without changing those fields. Each manifest has:
 
 - `type` set to `module`, license `MIT`, and Node engine
   `>=24.19.0 <25`;
-- repository URL `git+https://github.com/nikrooz/a2a.git` and its own
+- repository URL `git+https://github.com/embassys/ambassador.git` and its own
   `packages/<provider>-connector` repository directory;
 - `publishConfig.access` set to `public`;
 - one `bin` entry and no other executable;
@@ -188,7 +190,7 @@ closed provider substitutions from the table above:
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nikrooz/a2a.git",
+    "url": "git+https://github.com/embassys/ambassador.git",
     "directory": "packages/<provider>-connector"
   },
   "publishConfig": {
@@ -416,8 +418,10 @@ qualification rules. With ADRs 0028 through 0030, it completes D05. K01
 through K03 were originally gated on G04. ADR 0032 now permits that local work
 against the accepted fixture contract.
 
-This approval does not authorize a public-repository change, publish job,
-preview or stable publication, or provider/platform support claim. Those stay
-behind Q03, Q05, and the provider qualification gates. It adds no state
-migration; a later state-schema change requires a separate reviewed plan and
-cannot migrate a first-release store automatically.
+The user separately approved making the source public at
+`https://github.com/embassys/ambassador` on 2026-08-31. That approval changes
+the repository location only. It does not authorize a publish job, preview or
+stable publication, or provider/platform support claim. Those stay behind
+Q03, Q05, and the provider qualification gates. It adds no state migration; a
+later state-schema change requires a separate reviewed plan and cannot migrate
+a first-release store automatically.
