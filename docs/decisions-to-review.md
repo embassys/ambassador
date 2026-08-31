@@ -651,6 +651,17 @@ central owner and returns a material contract difference for review.
   after bounded backpressure-aware forwarding drains. The production emit
   strips every fake executable, clock, spawn, UUID, barrier, observer, and
   injected-fault seam.
+- CL04 uses the exact packed Claude artifact and a disposable authenticated OS
+  account. Its runner is manual-only, offline, script-disabled, and gated by
+  the exact `2.1.251` confirmation. It observes detached monitor-led process
+  groups through the OS process table, retains identifiers only in memory, and
+  records only a closed content-free result. It never opens Claude credentials
+  or provider history. Active-turn crash recovery must be uncertain and spawn
+  no replacement Claude unit. When provider policy permitted the pre-crash
+  write, its file fingerprint must also remain unchanged. Exact-result recovery
+  and blind replay remain forbidden. No suitable authenticated environment was
+  available for this implementation, so real Claude qualification evidence and
+  any support claim remain pending.
 - The CL03 independent review requires owner-pipe sealing to stop every
   in-flight startup transition before any later spawn, lifecycle publication,
   or input forwarding. Cleanup now waits for the direct monitor `close` event,
