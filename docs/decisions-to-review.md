@@ -1,5 +1,28 @@
 # Decisions to review
 
+## 2026-08-31: Central repository and integration refresh
+
+The user identified the central server repository as
+`https://github.com/embassys/agent2agent`, reported that the server has a DPoP
+implementation, and directed the gateway project to update its API
+integrations and tests to the latest server version before completing real
+DPoP E2E.
+
+The supplied API document is version `1.0.0`, dated 2026-08-30, and describes
+the older bearer, `/api/register_agent`, and consuming-poll contract. The
+inspected server `main` at `4690319` has the same broad contract and no DPoP or
+version 2 implementation. Safe hosted probes also found `/api/register_agent`
+but not `/api/register` or `/api/v2/messages/receive`. The exact DPoP source
+revision and deployment therefore remain to be identified.
+
+This direction creates I01 and I02. I01 pins the server revision, compares its
+generated REST and MCP schemas with ADRs 0023, 0025, and 0026, and updates
+tests before integration code. I02 switches a fresh development identity to
+the pinned DPoP deployment and runs the full live E2E. This is an integration
+direction, not approval to weaken an accepted route, security rule, data
+boundary, or release gate. A material server difference returns the affected
+ADR for review.
+
 ## 2026-08-31: Public source repository approved
 
 The user approved making the source public at

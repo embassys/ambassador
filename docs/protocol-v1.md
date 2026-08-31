@@ -8,6 +8,12 @@ supersedes that behavior as the implementation target. It does not claim that
 the production central service already implements the target or that stable
 production endpoint values are known.
 
+The project owner reports that the central server has a DPoP implementation,
+but the inspected `embassys/agent2agent` default branch and hosted routes still
+show the older bearer contract. The exact DPoP revision and deployment must be
+pinned and tested through I01 and I02 before this repository claims live
+compatibility. See [server integration status](server-integration-status.md).
+
 ## Startup contract
 
 The public command is:
@@ -355,6 +361,13 @@ production hostnames, signing keys, proxy trust, capacity, or evidence of
 central deployment. Development endpoint overrides and fixture values remain
 non-production inputs. A release cannot claim central interoperability until
 the deployment owners provide and stage those facts.
+
+The central repository location is known, and DPoP is reported implemented.
+That report does not identify the source commit or prove which contract the
+hosted service runs. I01 refreshes the gateway integrations and tests against
+one pinned latest server revision. I02 then runs a fresh-identity DPoP
+development E2E with bearer rejection. Neither task changes the protocol in
+this document without ADR review.
 
 ## Deadlines and limits
 
