@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -203,6 +203,40 @@ async function runCommand(
     child.once("close", (code, signal) => {
       if (code === 0 && signal === null) resolve();
       else reject(new Error("CX02 artifact command failed"));
+    });
+  });
+}
+
+async function runCapturedCommand(
+  executable: string,
+  arguments_: readonly string[],
+  environment: Readonly<Record<string, string>>,
+): Promise<{
+  readonly code: number | null;
+  readonly signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+}> {
+  const child = spawn(executable, [...arguments_], {
+    cwd: process.cwd(),
+    env: { ...environment },
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => stdout.push(Buffer.from(chunk)));
+  child.stderr.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
+  return await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      resolve({
+        code,
+        signal,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
     });
   });
 }
@@ -818,6 +852,27 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       ].join("\n"),
       { encoding: "utf8", mode: 0o600 },
     );
+    const guardedStartArguments = [
+      "start",
+      `--webhook-port=${await unusedLoopbackPort()}`,
+      "--webhook-token-env=CX02_WEBHOOK_TOKEN",
+      `--working-directory=${await realpath(cwd)}`,
+      "--policy=read-only",
+    ];
+    assert.deepEqual(
+      await runCapturedCommand(
+        process.execPath,
+        [`--import=${retirementPreload}`, stagedCli, ...guardedStartArguments],
+        commandEnvironment,
+      ),
+      {
+        code: 4,
+        signal: null,
+        stdout: "",
+        stderr: "a2a connector: webhook_token_unavailable\n",
+      },
+    );
+    await assert.rejects(readFile(providerAttempt), /ENOENT/u);
     await runCommand(
       process.execPath,
       [
@@ -829,6 +884,54 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       commandEnvironment,
     );
     await assert.rejects(readFile(providerAttempt), /ENOENT/u);
+
+    const containmentHome = join(root, "home-containment");
+    const containmentAttempt = join(root, "containment-attempted");
+    const containmentPreload = join(root, "containment-guard.mjs");
+    await mkdir(containmentHome, { mode: 0o700 });
+    await writeFile(
+      containmentPreload,
+      [
+        'import fs from "node:fs";',
+        'import os from "node:os";',
+        `const containmentAttempt = ${JSON.stringify(containmentAttempt)};`,
+        `const containmentHome = ${JSON.stringify(containmentHome)};`,
+        "const realKill = process.kill.bind(process);",
+        "process.kill = (pid, signal) => {",
+        "  if (pid < 0) {",
+        '    fs.writeFileSync(containmentAttempt, "attempted\\n", { mode: 0o600 });',
+        '    const error = new Error("owned process group signal failed");',
+        '    error.code = "EPERM";',
+        "    throw error;",
+        "  }",
+        "  return realKill(pid, signal);",
+        "};",
+        "const realUserInfo = os.userInfo;",
+        "os.userInfo = () => ({ ...realUserInfo(), homedir: containmentHome });",
+        "",
+      ].join("\n"),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    const containmentFake = await startFakeCodexAppServer(t, [{ kind: "version", hold: true }]);
+    const containmentEnvironment = {
+      ...commandEnvironment,
+      PATH: `${dirname(containmentFake.executablePath)}:${commandEnvironment.PATH}`,
+      CX02_WEBHOOK_TOKEN: "a".repeat(48),
+    };
+    assert.deepEqual(
+      await runCapturedCommand(
+        process.execPath,
+        [`--import=${containmentPreload}`, stagedCli, ...guardedStartArguments],
+        containmentEnvironment,
+      ),
+      {
+        code: 1,
+        signal: null,
+        stdout: "",
+        stderr: "a2a connector: connector_shutdown_incomplete\n",
+      },
+    );
+    assert.deepEqual(await readFile(containmentAttempt, "utf8"), "attempted\n");
     await runCommand(
       process.execPath,
       [join("scripts", "check-packed-connector.mjs"), provider],
