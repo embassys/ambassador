@@ -426,6 +426,11 @@ license, and platform ADRs.
 
 ## CX03 implementation judgments
 
+- The Codex production build strips the private adapter factory, deterministic
+  clock, fixture executable, injectable spawn, and injectable containment
+  seams from the emitted App Server adapter with exact-count transforms. Any
+  emitted-shape drift fails the build, while source-level CX02 tests retain the
+  seams needed to exercise protocol and containment failures deterministically.
 - On supported POSIX platforms, the pinned version probe and every App Server
   launch create a detached process group whose positive group ID is the exact
   root child PID returned by `spawn`. Terminal cleanup checks that recorded

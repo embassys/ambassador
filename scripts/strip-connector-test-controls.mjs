@@ -13,6 +13,7 @@ const forbiddenControls = [
   "failPairedStateWriteAfter",
   "failStateAfter",
   "filesystemQualification",
+  "fixtureExecutablePath",
   "proveNoProviderDispatch",
   "providerDispatchDelayMsForTest",
   "processBarrierForTest",
@@ -131,6 +132,18 @@ function removeNamedBlock(source, prefix, name) {
   if (bodyStart === -1) throw new Error(`missing emitted block body ${name}`);
   const bodyEnd = matchingDelimiter(source, bodyStart, "{", "}") + 1;
   return `${source.slice(0, lineStart(source, start))}${source.slice(lineEnd(source, bodyEnd))}`;
+}
+
+function replaceNamedBlock(source, prefix, name, replacement) {
+  const marker = `${prefix}${name}(`;
+  const start = source.indexOf(marker);
+  if (start === -1 || source.indexOf(marker, start + 1) !== -1) {
+    throw new Error(`unexpected emitted block ${name}`);
+  }
+  const bodyStart = source.indexOf("{", start + marker.length);
+  if (bodyStart === -1) throw new Error(`missing emitted block body ${name}`);
+  const bodyEnd = matchingDelimiter(source, bodyStart, "{", "}") + 1;
+  return `${source.slice(0, lineStart(source, start))}${replacement}${source.slice(lineEnd(source, bodyEnd))}`;
 }
 
 function forbidden(source) {
@@ -264,13 +277,97 @@ function stripState(source) {
   return statements.output;
 }
 
+function stripCodexAppServerAdapter(source) {
+  let output = replaceExactly(
+    source,
+    "options.clock ?? SYSTEM_CLOCK",
+    "SYSTEM_CLOCK",
+    2,
+    "Codex adapter test clocks",
+  );
+  output = replaceExactly(
+    output,
+    "options.fixtureExecutablePath",
+    "undefined",
+    1,
+    "Codex adapter fixture executable",
+  );
+  output = replaceExactly(
+    output,
+    `        const spawnAppServer = this.options.spawnAppServerForTest ??
+            ((executable, arguments_, options) => spawn(executable, [...arguments_], {
+                cwd: options.cwd,
+                env: { ...options.env },
+                detached: options.detached,
+                shell: options.shell,
+                stdio: [...options.stdio],
+                windowsHide: true,
+            }));`,
+    `        const spawnAppServer = (executable, arguments_, options) => spawn(executable, [...arguments_], {
+            cwd: options.cwd,
+            env: { ...options.env },
+            detached: options.detached,
+            shell: options.shell,
+            stdio: [...options.stdio],
+            windowsHide: true,
+        });`,
+    1,
+    "Codex adapter fixture spawn",
+  );
+  output = replaceNamedBlock(
+    output,
+    "    async ",
+    "#unitEmpty",
+    `    async #unitEmpty(invocation) {
+        return (invocation.transport.isClosed() &&
+            ownedUnitEmpty(invocation.transport.child, invocation.processGroupId));
+    }
+`,
+  );
+  output = replaceNamedBlock(
+    output,
+    "    async ",
+    "#containAndProve",
+    `    async #containAndProve(invocation, deadlineMs) {
+        this.#containmentAttempts += 1;
+        const contained = await stopOwnedUnit(invocation.transport.child, invocation.processGroupId, this.#clock, deadlineMs);
+        if (contained && (await this.#unitEmpty(invocation)))
+            return true;
+        const cleanupWait = { cancelled: false };
+        const remaining = await waitBounded(this.#clock, this.#waitForUnitEmpty(invocation, cleanupWait), Math.max(0, deadlineMs - this.#clock.nowMs()));
+        cleanupWait.cancelled = true;
+        return !remaining.timedOut && remaining.value;
+    }
+`,
+  );
+  output = removeNamedBlock(output, "export async function ", "createCodexAppServerAdapterForTest");
+  const statements = removeForbiddenIfStatements(output);
+  if (statements.removed !== 1) {
+    throw new Error(`unexpected emitted Codex adapter test branches: ${statements.removed}`);
+  }
+  assertProductionOnly(statements.output);
+  return statements.output;
+}
+
 async function strip(path, transform) {
   const source = await readFile(path, "utf8");
   const output = transform(source);
   await writeFile(path, output, { encoding: "utf8", mode: 0o600 });
 }
 
-const [buildRoot, ...rest] = process.argv.slice(2);
-if (buildRoot === undefined || rest.length !== 0) throw new Error("invalid connector build root");
+const [buildRoot, provider, ...rest] = process.argv.slice(2);
+if (
+  buildRoot === undefined ||
+  !["codex", "claude", "gemini"].includes(provider ?? "") ||
+  rest.length !== 0
+) {
+  throw new Error("invalid connector build root");
+}
 await strip(join(buildRoot, "connector-core", "src", "connector.js"), stripConnector);
 await strip(join(buildRoot, "connector-core", "src", "state.js"), stripState);
+if (provider === "codex") {
+  await strip(
+    join(buildRoot, "codex-connector", "src", "app-server-adapter.js"),
+    stripCodexAppServerAdapter,
+  );
+}
