@@ -51,6 +51,14 @@ real-central compatibility claims, and Windows support.
   user's normal account home. The connector copies neither. Connector state
   retirement does not delete Codex credentials or history, and missing history
   fails closed.
+- CX04 requires a fresh disposable authenticated OS account, or an equivalent
+  disposable account home with its own normal Codex authentication, because
+  the packed connector uses the fixed account-owned state location and binds
+  it to CX04's temporary workspace. The runner fails closed if Codex connector
+  state already exists, adds no state-path override, never invokes
+  `retire-state`, and never reads, copies, or deletes Codex credentials or
+  provider-owned history. After qualification, the disposable account is
+  discarded.
 - The selected hard-crash candidate is the pinned App Server's stdio lifetime:
   connector death closes its sole stdin pipe, and real qualification must prove
   that App Server and all execution descendants stop. This is an explicit
