@@ -51,6 +51,23 @@ real-central compatibility claims, and Windows support.
   user's normal account home. The connector copies neither. Connector state
   retirement does not delete Codex credentials or history, and missing history
   fails closed.
+- CX04 requires a fresh disposable authenticated OS account, or an equivalent
+  disposable account home with its own normal Codex authentication, because
+  the packed connector uses the fixed account-owned state location and binds
+  it to CX04's temporary workspace. The runner fails closed if Codex connector
+  state already exists, adds no state-path override, never invokes
+  `retire-state`, and never reads, copies, or deletes Codex credentials or
+  provider-owned history. After qualification, the disposable account is
+  discarded.
+- CX04 reuses the existing packed-connector checker instead of duplicating its
+  package inventory. The disposable account must pre-provision the approved
+  Node 24 release, cached pnpm 11.22.0 CLI, complete checkout store, and pnpm
+  v11 metadata cache. The manual runner privately canonicalizes and validates
+  those inputs, supplies them explicitly to the checker, and uses the same
+  offline store and cache for its own script-disabled pack and copy-mode
+  install. Missing or malformed tooling is a fixed precondition failure; a
+  packaging command failure remains the fixed package failure. This adds no
+  public option, environment interface, network path, or dependency.
 - The selected hard-crash candidate is the pinned App Server's stdio lifetime:
   connector death closes its sole stdin pipe, and real qualification must prove
   that App Server and all execution descendants stop. This is an explicit
