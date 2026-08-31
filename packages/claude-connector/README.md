@@ -19,6 +19,9 @@ lowercase hexadecimal webhook token in the named environment variable. The
 connector accepts authenticated webhook wakes only on the selected loopback
 port.
 
+Provider-neutral setup, policy, history, retention, and retirement guidance is
+in [connector setup and retention](../../docs/connector-setup-and-retention.md).
+
 The selected adapter contract will start one packaged Node lifetime monitor
 per turn with the monitor detached as the exact connector-known POSIX process
 group leader. The monitor starts one `claude` child into that same group.
