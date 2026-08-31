@@ -223,11 +223,16 @@ export async function verifyCodexInstallation(options, dependencies) {
 }
 
 export async function configFingerprint(path) {
+  try {
+    await lstat(path);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return { kind: "absent" };
+    throw phaseError("config");
+  }
   let before;
   try {
     before = await stat(path);
-  } catch (error) {
-    if (error && typeof error === "object" && error.code === "ENOENT") return { kind: "absent" };
+  } catch {
     throw phaseError("config");
   }
   if (!before.isFile() || before.size > CONFIG_BYTES) throw phaseError("config");
@@ -442,6 +447,7 @@ export async function executeSystemQualification(options) {
   const stateDirectory = providerStateDirectory(accountHome);
   await requireAbsent(stateDirectory);
   const codexEnvironment = providerEnvironment(options.environment);
+  if (codexEnvironment.HOME !== accountHome) throw phaseError("precondition");
   const codexExecutable = await resolveExecutable("codex", codexEnvironment);
   const temporaryRoot = await mkdtemp(join(options.temporaryParent, "a2a-cx04-codex-"));
   await chmod(temporaryRoot, 0o700);
@@ -466,7 +472,12 @@ export async function executeSystemQualification(options) {
     const packageRoot = await validateInstalledPackage(packed.installRoot);
     const schemaA = join(temporaryRoot, "schema-a");
     const schemaB = join(temporaryRoot, "schema-b");
-    await Promise.all([mkdir(schemaA, { mode: 0o700 }), mkdir(schemaB, { mode: 0o700 })]);
+    const providerTemporaryRoot = join(temporaryRoot, "provider-tmp");
+    await Promise.all([
+      mkdir(schemaA, { mode: 0o700 }),
+      mkdir(schemaB, { mode: 0o700 }),
+      mkdir(providerTemporaryRoot, { mode: 0o700 }),
+    ]);
     const configPath = join(accountHome, ".codex", "config.toml");
     const initialConfig = await configFingerprint(configPath);
     const assertConfigUnchanged = async () => {
@@ -482,7 +493,7 @@ export async function executeSystemQualification(options) {
         executable: codexExecutable,
         schemaDirectories: [schemaA, schemaB],
         expectedSchemaSha256: CODEX_SCHEMA_SHA256,
-        environment: codexEnvironment,
+        environment: { ...codexEnvironment, TMPDIR: providerTemporaryRoot },
       },
       { run: runBoundedCommand, readSchema: readFile },
     );
@@ -499,8 +510,9 @@ export async function executeSystemQualification(options) {
       packageRoot,
       stateDirectory,
       environment: options.environment,
+      providerTemporaryRoot,
       assertConfigUnchanged,
-      artifactRoots: [schemaA, schemaB],
+      artifactRoots: [schemaA, schemaB, providerTemporaryRoot],
     });
     await assertConfigUnchanged();
     const tarballHandle = await open(packed.tarball, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);

@@ -69,9 +69,11 @@ The runner performs these checks in order:
 6. Prove the exact connector process group is empty after cancellation and
    hard death. This uses the process group created for that one connector run,
    not a process-name or PID search.
-7. Scan the connector state and bounded process captures for the webhook token,
-   prompts, replies, and probe values. Package inventory and clean installation
-   are checked independently by the existing packed-artifact checker.
+7. Pin the provider `TMPDIR` to the runner-owned temporary tree. Scan that tree,
+   the workspace, schema outputs, connector state, and bounded process captures
+   for the webhook token, prompts, replies, and probe values. Package inventory
+   and clean installation are checked independently by the existing
+   packed-artifact checker.
 
 The temporary package, schema, and workspace tree is removed whether the run
 passes or fails. The fixed connector state and Codex-owned history remain in

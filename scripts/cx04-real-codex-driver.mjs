@@ -724,7 +724,7 @@ export async function runRealCodexMatrix(options) {
       executable: options.connectorExecutable,
       workingDirectory,
       policy,
-      environment: options.environment,
+      environment: { ...options.environment, TMPDIR: options.providerTemporaryRoot },
       sequence,
     });
     connectors.push(connector);
@@ -805,11 +805,11 @@ export async function runRealCodexMatrix(options) {
       () => undefined,
     );
 
-    await access("/usr/bin/curl");
     const network = await startNetworkProbe();
     try {
       const networkReply = `network-${randomBytes(8).toString("hex")}`;
-      const networkPrompt = `Use the terminal to run /usr/bin/curl --fail --max-time 3 http://127.0.0.1:${network.port}/cx04. Then reply with exactly ${networkReply}.`;
+      const networkProgram = `await fetch("http://127.0.0.1:${network.port}/cx04")`;
+      const networkPrompt = `Use the terminal to run ${JSON.stringify(process.execPath)} --input-type=module --eval ${JSON.stringify(networkProgram)}. Then reply with exactly ${networkReply}.`;
       markers.push(networkReply, networkPrompt);
       await deliver(gateway, connector, {
         id: "cx04-network-denied",
