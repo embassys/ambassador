@@ -33,6 +33,7 @@ export interface CodexAdapterForTestOptions {
 export interface CodexAppServerSpawnOptionsForTest {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly detached: true;
   readonly shell: false;
   readonly stdio: readonly ["pipe", "pipe", "pipe"];
 }
