@@ -141,6 +141,7 @@ async function runAppServer(
         descendant.kill("SIGTERM");
       }
       for (const write of plan.writesAfterStdinEnd ?? []) await writeWire(write);
+      await waitForGate(plan.stdinEndGate);
       if (plan.onStdinEnd === "resist") return;
       if (plan.onStdinEnd === "linger") {
         await new Promise<void>((resolve) => setTimeout(resolve, plan.lingerMs ?? 1_500));

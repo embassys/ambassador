@@ -167,6 +167,7 @@ function terminalPlan(
     requestText?: string;
     terminalStatus?: "completed" | "failed" | "interrupted";
     terminalGate?: string;
+    stdinEndGate?: string;
     onStdinEnd?: "exit" | "linger" | "resist";
     spawnDescendant?: boolean;
     killDescendantOnStdinEnd?: boolean;
@@ -217,6 +218,7 @@ function terminalPlan(
       },
     ],
     ...(options.onStdinEnd === undefined ? {} : { onStdinEnd: options.onStdinEnd }),
+    ...(options.stdinEndGate === undefined ? {} : { stdinEndGate: options.stdinEndGate }),
     ...(options.spawnDescendant === undefined ? {} : { spawnDescendant: options.spawnDescendant }),
     ...(options.killDescendantOnStdinEnd === undefined
       ? {}
@@ -571,6 +573,7 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
     containmentEmpty: boolean;
     terminal: "reply" | "failed" | "uncertain" | null;
     containmentExpected: boolean;
+    releaseAfterStdin?: string;
   }[] = [
     {
       name: "normal",
@@ -606,6 +609,14 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
       containmentEmpty: true,
       terminal: "reply",
       containmentExpected: true,
+    },
+    {
+      name: "close and drain gate",
+      plan: terminalPlan(cwd, { stdinEndGate: "close_and_drain" }),
+      containmentEmpty: true,
+      terminal: "reply",
+      containmentExpected: false,
+      releaseAfterStdin: "close_and_drain",
     },
     {
       name: "late conflicting control",
@@ -674,6 +685,10 @@ test("CX02-X27 proves child and descendant teardown before releasing any termina
     );
     await fake.waitForStdinClosed(1);
     await new Promise<void>((resolve) => setImmediate(resolve));
+    if (vector.releaseAfterStdin !== undefined) {
+      assert.equal(terminalSettled, false, vector.name);
+      fake.release(vector.releaseAfterStdin);
+    }
     if (vector.containmentExpected) {
       assert.equal(terminalSettled, false, vector.name);
       clock.advance(999);

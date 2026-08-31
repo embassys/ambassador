@@ -33,6 +33,7 @@ export type FakeCodexProcessPlan =
       readonly exchanges: readonly FakeCodexExchange[];
       readonly onStdinEnd?: "exit" | "linger" | "resist";
       readonly lingerMs?: number;
+      readonly stdinEndGate?: string;
       readonly writesAfterStdinEnd?: readonly FakeCodexWireWrite[];
       readonly spawnDescendant?: boolean;
       readonly killDescendantOnStdinEnd?: boolean;
