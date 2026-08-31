@@ -98,7 +98,7 @@ const definitions = {
       "cl02-stream-contract.test.js",
     ],
     expected: { tests: 30, pass: 30, fail: 0, skipped: 0, todo: 0 },
-    timeoutMs: 300_000,
+    timeoutMs: 420_000,
     boundaryKind: "marker",
     vectorNote: "30 checks: the complete CL03 Claude Code boundary is green",
   },

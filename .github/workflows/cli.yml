@@ -17,7 +17,7 @@ jobs:
   check:
     name: Check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +43,8 @@ jobs:
         run: node scripts/run-red-inventory.mjs --suite=t04
       - name: Validate classified CX02 Codex App Server adapter inventory
         run: node scripts/run-red-inventory.mjs --suite=cx02
+      - name: Validate classified CL02 Claude Code adapter inventory
+        run: node scripts/run-red-inventory.mjs --suite=cl02
       - if: always()
         run: pnpm audit --prod --audit-level=high
       - if: always()
