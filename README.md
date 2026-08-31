@@ -59,6 +59,7 @@ Beginner walkthroughs:
 
 - [OpenClaw development setup](docs/getting-started-openclaw.md)
 - [Hermes Agent development setup](docs/getting-started-hermes.md)
+- [Unreleased version 2 provider connector setup and retention](docs/connector-setup-and-retention.md), incompatible with shipped `0.2.6` and prepared with real-provider qualification still pending
 
 ## Connect OpenClaw
 
