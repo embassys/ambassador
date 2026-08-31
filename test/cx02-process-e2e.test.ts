@@ -38,9 +38,15 @@ interface ObservedProviderInvocation {
   readonly events: unknown[];
 }
 
+interface ProviderObservationHooks {
+  beforeIteration?(invocation: ObservedProviderInvocation): void | Promise<void>;
+  observeEvent?(invocation: ObservedProviderInvocation, event: unknown): void;
+}
+
 function observeProviderEvents(
   adapter: CodexAdapterPort,
   observed: ObservedProviderInvocation[],
+  hooks?: ProviderObservationHooks,
 ): ProviderPort {
   const observe = async function* (
     method: ObservedProviderInvocation["method"],
@@ -53,8 +59,10 @@ function observeProviderEvents(
       events: [],
     };
     observed.push(invocation);
+    await hooks?.beforeIteration?.(invocation);
     for await (const event of source) {
       invocation.events.push(structuredClone(event));
+      hooks?.observeEvent?.(invocation, event);
       yield event;
     }
   };
@@ -340,6 +348,15 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     }),
   );
   const providerInvocations: ObservedProviderInvocation[] = [];
+  let publishChainSession: (() => void) | undefined;
+  const chainSessionPublished = new Promise<void>((resolve) => {
+    publishChainSession = resolve;
+  });
+  const turnBoundMessages = new Set<unknown>();
+  let publishBothTurns: (() => void) | undefined;
+  const bothTurnsBound = new Promise<void>((resolve) => {
+    publishBothTurns = resolve;
+  });
   const connector = await startConnectorRuntime({
     providerKind: "codex",
     webhookPort: await unusedLoopbackPort(),
@@ -348,7 +365,29 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     policy: "read-only",
     gatewayEndpoint: gateway.endpoint,
     stateDirectory,
-    provider: observeProviderEvents(adapter, providerInvocations),
+    provider: observeProviderEvents(adapter, providerInvocations, {
+      async beforeIteration(invocation) {
+        if (invocation.request.message_id === "cx02_parallel_1") {
+          await chainSessionPublished;
+        }
+      },
+      observeEvent(invocation, event) {
+        if (
+          invocation.request.message_id === "cx02_chain_1" &&
+          eventName(event) === "session_bound"
+        ) {
+          publishChainSession?.();
+          publishChainSession = undefined;
+        }
+        if (eventName(event) === "turn_bound") {
+          turnBoundMessages.add(invocation.request.message_id);
+          if (turnBoundMessages.size === 2) {
+            publishBothTurns?.();
+            publishBothTurns = undefined;
+          }
+        }
+      },
+    }),
   });
   t.after(async () => await connector.close());
   gateway.enqueueMessage(k02Message("cx02_chain_1", "cx02_conversation_a", "first input"));
@@ -365,6 +404,13 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
   );
   await fake.waitForLaunches(3);
   await fake.waitForRequests(8);
+  let turnBoundTimeout: NodeJS.Timeout | undefined;
+  await Promise.race([
+    bothTurnsBound,
+    new Promise<never>((_resolve, reject) => {
+      turnBoundTimeout = setTimeout(() => reject(new Error("both turns were not bound")), 5_000);
+    }),
+  ]).finally(() => clearTimeout(turnBoundTimeout));
   assert.equal(
     fake.launches.filter(
       (launch) =>
@@ -373,6 +419,21 @@ test("CX02-X25 runs two turns in one thread and two conversations through the fo
     ).length,
     2,
   );
+  assert.equal(providerInvocations.length, 2);
+  assert.deepEqual(
+    Object.fromEntries(
+      providerInvocations.map((invocation) => [
+        invocation.request.message_id,
+        invocation.events.map(eventName),
+      ]),
+    ),
+    {
+      cx02_chain_1: ["session_bound", "turn_bound"],
+      cx02_parallel_1: ["session_bound", "turn_bound"],
+    },
+  );
+  assert.equal(gateway.tombstone("cx02_chain_1"), undefined);
+  assert.equal(gateway.tombstone("cx02_parallel_1"), undefined);
   fake.releaseAll("parallel_release");
   await connector.waitForIdle();
   const firstTombstone = gateway.tombstone("cx02_chain_1");
