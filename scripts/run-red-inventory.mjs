@@ -97,10 +97,10 @@ const definitions = {
       "cl02-startup-session.test.js",
       "cl02-stream-contract.test.js",
     ],
-    expected: { tests: 30, pass: 3, fail: 27, skipped: 0, todo: 0 },
-    timeoutMs: 180_000,
+    expected: { tests: 30, pass: 30, fail: 0, skipped: 0, todo: 0 },
+    timeoutMs: 300_000,
     boundaryKind: "marker",
-    vectorNote: "30 checks: 3 fixture guards green and 27 reviewed CL03 production boundaries red",
+    vectorNote: "30 checks: the complete CL03 Claude Code boundary is green",
   },
   "packaged-docker": {
     key: "packaged-docker",

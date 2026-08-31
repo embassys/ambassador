@@ -1,27 +1,24 @@
-# CL02 reviewed failure inventory
+# CL02 implementation inventory
 
 Review date: 2026-08-31
 
 The selected-interface suite contains 30 top-level nodes across seven files.
-Three fake-interface and loader guards pass. L01 through L27 each fail at one
-exact missing CL03 production boundary, with no infrastructure failure,
-timeout, skip, or todo. No Claude executable, credential, account, or provider
-history was used.
+After the reviewed CL02 red phase, CL03 makes all 30 nodes pass with no skip or
+todo. No real Claude executable, credential, account, or provider history is
+used.
 
-| File | Green nodes | Reviewed red nodes |
-| --- | ---: | --- |
-| `cl02-fixture-integrity.test.js` | 2 | none |
-| `cl02-loader-boundary.test.js` | 1 | L23 |
-| `cl02-monitor-containment.test.js` | 0 | L24-L27 |
-| `cl02-process-lifecycle.test.js` | 0 | L15-L19 |
-| `cl02-security-integration.test.js` | 0 | L20-L22 |
-| `cl02-startup-session.test.js` | 0 | L01-L08 |
-| `cl02-stream-contract.test.js` | 0 | L09-L14 |
+| File | Green nodes |
+| --- | ---: |
+| `cl02-fixture-integrity.test.js` | 2 |
+| `cl02-loader-boundary.test.js` | 2 |
+| `cl02-monitor-containment.test.js` | 4 |
+| `cl02-process-lifecycle.test.js` | 5 |
+| `cl02-security-integration.test.js` | 3 |
+| `cl02-startup-session.test.js` | 8 |
+| `cl02-stream-contract.test.js` | 6 |
 
-Each red marker is `[CL02-CL03:Lnn] CL03 Claude Code adapter production
-boundary is absent`, where `nn` matches the test ID. The shared structured
-runner verifies the exact filename, nesting, name, directive state, marker,
-and totals: 30 tests, 3 pass, 27 fail, 0 skipped, and 0 todo.
+The shared structured runner verifies the exact filename, nesting, name,
+directive state, and totals: 30 tests, 30 pass, 0 fail, 0 skipped, and 0 todo.
 
 The review rejected the first draft because several node names claimed more
 coverage than their bodies proved. The amended suite makes these cases
@@ -49,5 +46,5 @@ explicit:
   overflow, malformed resume, exact depth, exact record, stdout, stderr,
   event-count, progress, ID, reply, and absolute-deadline boundaries.
 
-This inventory authorizes CL03 implementation only. It is not real-provider
-qualification evidence and makes no provider or platform support claim.
+This inventory is fake-provider implementation evidence only. It is not
+real-provider qualification evidence and makes no provider support claim.

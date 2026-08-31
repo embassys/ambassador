@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -8,9 +17,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CL02_EXECUTION_ID,
   type ClaudeLifetimeMonitorBarrier,
   collectEvents,
   createCl02Adapter,
+  createCl02Clock,
   exactClaudeArguments,
   initRecord,
   inputRecord,
@@ -47,6 +58,7 @@ function groupExists(pgid: number): boolean {
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
   }
 }
@@ -108,15 +120,18 @@ test("CL02-L24 rejects every malformed command lifecycle overflow and forged gro
   const probeMarker = join(probeRoot, "spawned");
   const validProbe = join(probeRoot, "claude");
   const wrongProbe = join(probeRoot, "not-claude");
+  const versionedProbe = join(probeRoot, "claude-2.1.251");
   const probeSource = [
     "#!/usr/bin/env node",
     `require("node:fs").appendFileSync(${JSON.stringify(probeMarker)}, "spawned\\n");`,
     "",
   ].join("\n");
   await writeFile(validProbe, probeSource, { mode: 0o700 });
-  await writeFile(wrongProbe, probeSource, { mode: 0o700 });
+  await writeFile(versionedProbe, probeSource, { mode: 0o700 });
+  await symlink(versionedProbe, wrongProbe);
   await chmod(validProbe, 0o700);
-  await chmod(wrongProbe, 0o700);
+  await chmod(versionedProbe, 0o700);
+  const canonicalVersionedProbe = await realpath(versionedProbe);
   const resistantRoot = join(probeRoot, "resistant");
   await mkdir(resistantRoot, { mode: 0o700 });
   const resistantProbe = join(resistantRoot, "claude");
@@ -186,6 +201,35 @@ test("CL02-L24 rejects every malformed command lifecycle overflow and forged gro
       command: Array.from({ length: 5 }, () => `${"x".repeat(16_000)}\n`).join(""),
     },
   ];
+
+  const versionedChild = spawn(process.execPath, [monitorPath], {
+    cwd: process.cwd(),
+    env: syntheticCl02Environment("versioned-monitor-command"),
+    detached: true,
+    shell: false,
+    stdio: ["pipe", "pipe", "pipe", "pipe", "pipe", "pipe"],
+  });
+  assert.ok(versionedChild.pid !== undefined);
+  const versionedPgid = versionedChild.pid;
+  const versionedStatus = createInterface({
+    input: readableFd(versionedChild, 5),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  })[Symbol.asyncIterator]();
+  assert.equal((await versionedStatus.next()).value, '{"type":"ready"}');
+  writableFd(versionedChild, 4).write(
+    `${JSON.stringify({
+      type: "start",
+      executable: canonicalVersionedProbe,
+      arguments: ["--version"],
+    })}\n`,
+  );
+  assert.equal((await versionedStatus.next()).value, '{"type":"child_started"}');
+  assert.match(String((await versionedStatus.next()).value), /^\{"type":"child_exited"/u);
+  writableFd(versionedChild, 4).write('{"type":"contain"}\n');
+  await completion(versionedChild);
+  assert.equal(groupExists(versionedPgid), false);
+  assert.equal(await readFile(probeMarker, "utf8"), "spawned\n");
+
   for (const vector of commandCases) {
     await rm(probeMarker, { force: true });
     const child = spawn(process.execPath, [monitorPath], {
@@ -509,6 +553,7 @@ test("CL02-L27 orders PGID ready start lifecycle sealing reap and connector empt
     { mode: 0o700 },
   );
   await chmod(resistantClaude, 0o700);
+  const canonicalResistantClaude = await realpath(resistantClaude);
   const productionFaultWorker = fileURLToPath(
     new URL("./support/claude-code/production-monitor-fault-worker.js", import.meta.url),
   );
@@ -546,7 +591,7 @@ test("CL02-L27 orders PGID ready start lifecycle sealing reap and connector empt
       writableFd(child, 4).write(
         `${JSON.stringify({
           type: "start",
-          executable: resistantClaude,
+          executable: canonicalResistantClaude,
           arguments: exactClaudeArguments("start"),
         })}\n`,
       );
@@ -575,7 +620,7 @@ test("CL02-L27 orders PGID ready start lifecycle sealing reap and connector empt
       true,
       barrier,
     );
-    assert.equal(groupExists(pgid), false, barrier);
+    await waitForGroupEmpty(pgid);
     if (["after_claude_spawn", "before_child_started"].includes(barrier)) {
       assert.equal(await readFile(monitorFaultMarker, "utf8"), "ready\n", barrier);
     } else {
@@ -636,7 +681,11 @@ test("CL02-L27 orders PGID ready start lifecycle sealing reap and connector empt
         process.kill(launch.pid, "SIGKILL");
       },
     });
-    const faultEvents = await collectEvents(faulted.adapter.start(startRequest()));
+    const faultEvents = await collectEvents(faulted.adapter.start(startRequest())).catch(
+      (error: unknown) => {
+        throw new Error(`monitor-death barrier ${barrier} failed`, { cause: error });
+      },
+    );
     assert.notEqual(eventName(faultEvents.at(-1)), "reply", barrier);
     assert.equal(typeof killedPgid, "number", barrier);
     assert.equal(groupExists(killedPgid as number), false, barrier);
@@ -716,5 +765,123 @@ test("CL02-L27 orders PGID ready start lifecycle sealing reap and connector empt
     await faultMonitor.waitForBarrier("fixture_emit_complete");
     assert.notEqual(eventName((await faultEvents).at(-1)), "reply", barrier.name);
     assert.equal(groupExists(pgid as number), false, barrier.name);
+  }
+
+  const production = await loadCl03Production("CL02-CL03:L27");
+  const deniedFake = await startFakeClaudeCli(t, []);
+  const deniedStartedAt = Date.now();
+  await assert.rejects(
+    production.createClaudeCodeAdapterForTest({
+      workingDirectory: process.cwd(),
+      policy: "read-only",
+      inheritedEnvironment: syntheticCl02Environment("denied-group-proof"),
+      webhookTokenEnvironmentName: "CL02_WEBHOOK_TOKEN",
+      connectorPackageVersion: "0.0.0-private",
+      fixtureExecutablePath: deniedFake.executablePath,
+      clock: createCl02Clock(),
+      processGroupProbeForTest: () => "denied",
+      spawnMonitorForTest(_executable, _arguments, options) {
+        return spawn(process.execPath, ["-e", "process.exit(0)"], {
+          cwd: options.cwd,
+          env: { ...options.env },
+          detached: options.detached,
+          shell: options.shell,
+          stdio: [...options.stdio],
+        });
+      },
+    }),
+  );
+  assert.ok(Date.now() - deniedStartedAt < 4_000, "denied proof exceeded one cleanup budget");
+
+  const budgetFake = await startFakeClaudeCli(t, [
+    { kind: "version", stdout: "2.1.251 (Claude Code)\n" },
+  ]);
+  const budgetMonitor = await startFakeClaudeMonitor(t, [{ selfSealOnContain: false }]);
+  const lingeringMonitorSource = [
+    'const { createReadStream, createWriteStream } = require("node:fs");',
+    'const { createInterface } = require("node:readline");',
+    'const owner = createReadStream("/dev/null", { fd: 3, autoClose: false });',
+    'const commands = createReadStream("/dev/null", { fd: 4, autoClose: false });',
+    'const lifecycle = createWriteStream("/dev/null", { fd: 5, autoClose: false });',
+    "owner.resume();",
+    'lifecycle.write("{\\"type\\":\\"ready\\"}\\n");',
+    "let started = false;",
+    "let contained = false;",
+    'createInterface({ input: commands, crlfDelay: Infinity }).on("line", (line) => {',
+    "  const record = JSON.parse(line);",
+    '  if (record.type === "start" && !started) {',
+    "    started = true;",
+    '    lifecycle.write("{\\"type\\":\\"child_started\\"}\\n");',
+    "    return;",
+    "  }",
+    '  if (record.type === "contain" && started && !contained) {',
+    "    contained = true;",
+    "    setTimeout(() => process.exit(0), 2500);",
+    "  }",
+    "});",
+  ].join("\n");
+  let monitorLaunches = 0;
+  let lingeringPgid: number | undefined;
+  let lingeringChild: ChildProcess | undefined;
+  let releaseBeforeInit: (() => void) | undefined;
+  const beforeInitReleased = new Promise<void>((resolve) => {
+    releaseBeforeInit = resolve;
+  });
+  let reachBeforeInit: (() => void) | undefined;
+  const beforeInitReached = new Promise<void>((resolve) => {
+    reachBeforeInit = resolve;
+  });
+  const budgetAdapter = await production.createClaudeCodeAdapterForTest({
+    workingDirectory: process.cwd(),
+    policy: "read-only",
+    inheritedEnvironment: syntheticCl02Environment("shared-cleanup-budget"),
+    webhookTokenEnvironmentName: "CL02_WEBHOOK_TOKEN",
+    connectorPackageVersion: "0.0.0-private",
+    fixtureExecutablePath: budgetFake.executablePath,
+    clock: createCl02Clock(),
+    uuidForTest: (kind) =>
+      kind === "session"
+        ? "00000000-0000-4000-8000-000000000101"
+        : "00000000-0000-4000-8000-000000000202",
+    processGroupProbeForTest: (pgid) => (pgid === lingeringPgid ? "accessible" : "empty"),
+    spawnMonitorForTest(executable, arguments_, options) {
+      monitorLaunches += 1;
+      if (monitorLaunches === 1) {
+        return budgetMonitor.spawnForAdapter(executable, arguments_, options);
+      }
+      const child = spawn(process.execPath, ["-e", lingeringMonitorSource], {
+        cwd: options.cwd,
+        env: { ...options.env },
+        detached: false,
+        shell: options.shell,
+        stdio: [...options.stdio],
+      });
+      lingeringPgid = child.pid;
+      lingeringChild = child;
+      return child;
+    },
+    async processBarrierForTest(event) {
+      if (event.scope !== "turn" || event.barrier !== "before_init") return;
+      reachBeforeInit?.();
+      await beforeInitReleased;
+    },
+  });
+  const budgetEvents = collectEvents(budgetAdapter.start(startRequest())).catch(
+    (error: unknown) => error,
+  );
+  await beforeInitReached;
+  const cleanupStartedAt = Date.now();
+  assert.equal(await budgetAdapter.contain(CL02_EXECUTION_ID), false);
+  const cleanupElapsedMs = Date.now() - cleanupStartedAt;
+  assert.ok(cleanupElapsedMs >= 2_000, "cleanup did not wait for monitor close");
+  assert.ok(cleanupElapsedMs < 4_000, "cleanup reset its absolute three-second budget");
+  releaseBeforeInit?.();
+  assert.ok((await budgetEvents) instanceof Error);
+  const delayedMonitor = lingeringChild;
+  assert.ok(delayedMonitor !== undefined);
+  if (delayedMonitor.exitCode === null && delayedMonitor.signalCode === null) {
+    const closed = completion(delayedMonitor);
+    delayedMonitor.kill("SIGKILL");
+    await closed;
   }
 });

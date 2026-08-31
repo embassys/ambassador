@@ -978,7 +978,7 @@ const cl02 = [
     "L14",
     "CL02-L14 preserves the common ID event output reply and deadline limits",
   ),
-];
+].map((entry) => ({ ...entry, status: "pass" }));
 
 export const reviewedRedInventory = {
   t03,
