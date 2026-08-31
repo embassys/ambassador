@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -154,6 +154,19 @@ test("CX04 config fingerprint retains only absence or SHA-256", async () => {
       value: createHash("sha256").update("sensitive configuration\n").digest("hex"),
     });
     assert.ok(!JSON.stringify(fingerprint).includes("sensitive configuration"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CX04 config fingerprint does not mistake a dangling config link for absence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-cx04-config-link-"));
+  try {
+    const path = join(root, "config.toml");
+    await symlink(join(root, "missing.toml"), path);
+    await assert.rejects(configFingerprint(path), (error: unknown) => {
+      return error instanceof Error && !error.message.includes(root);
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
