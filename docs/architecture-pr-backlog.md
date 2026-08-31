@@ -303,6 +303,19 @@ implementation, and real-runtime qualification.
 | CL03 | Implementation PR | `feat: add the Claude Code provider adapter` | CL02 failure review | The adapter passes the fake protocol and K04 chain, stores `session_id` before stateful work, applies the approved tool policy, and never passes prompts in argv or provider credentials in copied environment fields |
 | CL04 | Manual qualification task | `qualify Claude Code with an authenticated local installation` | CL03 | The full local chain completes two turns in one session under the approved permission policy and isolated workspace; provider-managed history behavior matches the documentation |
 
+CL01 is complete. ADR 0035 selects the separately installed official Claude
+Code headless CLI at exactly `2.1.251`, structured stream-JSON stdin and
+stdout, caller-generated session IDs, restricted safe mode with `dontAsk`, no
+exact-turn recovery, and a packaged connector-owned Node lifetime monitor with
+a separate content-free owner pipe. The detached monitor leads the exact
+connector-known process group before it starts Claude in that same group.
+Every terminal path seals the group. A living connector proves it empty;
+hard-crash qualification externally proves that the orphaned group
+disappears. The monitor adds no new dependency or provider executable. CL02
+must review its complete red failure inventory before CL03 begins. Real
+provider support remains pending CL04's authenticated disposable-environment,
+sandbox, protocol-timing, and hard-crash containment evidence.
+
 ### Gemini CLI track
 
 | ID | Type | Proposed PR or task | Depends on | Completion evidence |
