@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -772,6 +772,63 @@ test("CX02-X23 excludes content auth schemas and test controls from state and st
       [join("scripts", "stage-connector.mjs"), provider],
       commandEnvironment,
     );
+    const stagedCli = join(
+      ".stage",
+      "connectors",
+      provider,
+      "package",
+      "dist",
+      `${provider}-connector`,
+      "src",
+      "cli.js",
+    );
+    const stagedCliSource = await readFile(stagedCli, "utf8");
+    assert.equal(
+      stagedCliSource.match(/createCodexAppServerAdapter/gu)?.length,
+      2,
+      "the staged Codex CLI does not have one fixed adapter factory",
+    );
+    assert.ok(stagedCliSource.includes('await runConnectorCli("codex", async (options) =>'));
+    assert.ok(stagedCliSource.includes('connectorPackageVersion: "0.0.0-private"'));
+
+    const retirementHome = join(root, "home-retirement");
+    const providerAttempt = join(root, "retirement-provider-attempted");
+    const retirementPreload = join(root, "retirement-provider-guard.mjs");
+    await mkdir(retirementHome, { mode: 0o700 });
+    await writeFile(
+      retirementPreload,
+      [
+        'import childProcess from "node:child_process";',
+        'import fs from "node:fs";',
+        'import os from "node:os";',
+        'import { syncBuiltinESMExports } from "node:module";',
+        `const providerAttempt = ${JSON.stringify(providerAttempt)};`,
+        `const retirementHome = ${JSON.stringify(retirementHome)};`,
+        "const rejectProviderProcess = () => {",
+        '  fs.writeFileSync(providerAttempt, "attempted\\n", { mode: 0o600 });',
+        '  throw new Error("provider process attempted during retirement");',
+        "};",
+        'for (const name of ["exec", "execFile", "execFileSync", "execSync", "fork", "spawn", "spawnSync"]) {',
+        "  childProcess[name] = rejectProviderProcess;",
+        "}",
+        "const realUserInfo = os.userInfo;",
+        "os.userInfo = () => ({ ...realUserInfo(), homedir: retirementHome });",
+        "syncBuiltinESMExports();",
+        "",
+      ].join("\n"),
+      { encoding: "utf8", mode: 0o600 },
+    );
+    await runCommand(
+      process.execPath,
+      [
+        `--import=${retirementPreload}`,
+        stagedCli,
+        "retire-state",
+        "--confirm=retire-all-correlation",
+      ],
+      commandEnvironment,
+    );
+    await assert.rejects(readFile(providerAttempt), /ENOENT/u);
     await runCommand(
       process.execPath,
       [join("scripts", "check-packed-connector.mjs"), provider],
