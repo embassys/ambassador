@@ -447,6 +447,13 @@ license, and platform ADRs.
   An already-expired adapter close performs only an emptiness proof and sends
   no late signal. Any close failure remains the existing content-free
   `connector_shutdown_incomplete` instead of replacing it with provider detail.
+- X23 discovers one populated pnpm store outside its synthetic runtime
+  environment, validates its canonical absolute directory, index, and content
+  shards, and passes it to the private package checker explicitly. The checker
+  revalidates it and gives the same explicit store configuration to both
+  `pnpm pack` and the retained offline, ignore-scripts, copy-import install.
+  Synthetic `HOME` and all package gates remain in force; no network or ambient
+  real-home fallback was added.
 - A failed proof that the pinned version-probe process group is empty maps at
   the production adapter factory boundary to the existing content-free
   `connector_shutdown_incomplete` CLI error. Other preflight failures keep the
