@@ -850,6 +850,19 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
       },
     },
     {
+      name: "future network approval protocol",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams(
+          "item/commandExecution/requestApproval",
+          cwd,
+          "approval_item",
+          "private",
+        ),
+        networkApprovalContext: { host: "example.com", protocol: "future" },
+      },
+    },
+    {
       name: "malformed exec policy amendment",
       method: "item/commandExecution/requestApproval",
       params: {
