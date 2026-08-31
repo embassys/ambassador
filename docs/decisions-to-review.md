@@ -438,6 +438,16 @@ license, and platform ADRs.
 
 ## CX03 implementation judgments
 
+- The App Server adapter compiles the reviewed 0.149.0 ignored-notification
+  set as 22 exact methods covering status and usage, hook and tool detail,
+  plan, diff, reasoning, and non-config warnings. Ignored payload detail stays
+  shallow and transient, but every envelope is exact and every present thread
+  or turn ID must match. Standalone command/process notifications, dynamic
+  tools, auto-review, account mutation, config, and server controls remain
+  rejected. Selected thread, turn, agent-item, completion, delta, and approval
+  records use closed Zod schemas. Historical turns and stable non-agent item
+  detail are the only deliberately shallow selected fields; non-agent completed
+  detail is discarded immediately and never retained for corroboration.
 - Broad CI lint excludes only the exact Codex 0.149.0 generated schema fixture.
   Formatting that byte-pinned upstream artifact would change its approved
   digest; CX02 continues to verify the exact SHA-256 before using it.

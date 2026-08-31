@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
+import { z } from "zod";
 
 import { CONNECTOR_LIMITS, connectorError } from "../../connector-core/src/constants.js";
 import { buildProviderChildEnvironment } from "../../connector-core/src/provider-boundary.js";
@@ -145,6 +146,252 @@ function validBoundedString(value: unknown, maximumBytes: number): value is stri
     Buffer.byteLength(value, "utf8") <= maximumBytes
   );
 }
+
+const IGNORED_NOTIFICATION_METHODS = new Set([
+  "thread/status/changed",
+  "thread/tokenUsage/updated",
+  "account/rateLimits/updated",
+  "mcpServer/startupStatus/updated",
+  "hook/started",
+  "hook/completed",
+  "item/started",
+  "item/commandExecution/outputDelta",
+  "item/commandExecution/terminalInteraction",
+  "item/fileChange/outputDelta",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
+  "turn/diff/updated",
+  "turn/plan/updated",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/summaryPartAdded",
+  "item/reasoning/textDelta",
+  "warning",
+  "guardianWarning",
+  "deprecationNotice",
+  "windows/worldWritableWarning",
+]);
+
+const scalarStringSchema = z.string().refine(isUnicodeScalarString);
+const providerIdSchema = scalarStringSchema.refine((value) =>
+  validBoundedString(value, CONNECTOR_LIMITS.providerIdBytes),
+);
+const safeIntegerSchema = z.number().refine(Number.isSafeInteger);
+const threadStatusSchema = z.union([
+  z.strictObject({ type: z.enum(["notLoaded", "idle", "systemError"]) }),
+  z.strictObject({
+    type: z.literal("active"),
+    activeFlags: z.array(z.enum(["waitingOnApproval", "waitingOnUserInput"])),
+  }),
+]);
+const threadSchema = z.strictObject({
+  id: providerIdSchema,
+  preview: z.string(),
+  modelProvider: z.string(),
+  createdAt: safeIntegerSchema,
+  updatedAt: safeIntegerSchema,
+  status: threadStatusSchema,
+  cwd: scalarStringSchema,
+  cliVersion: z.string(),
+  source: z.literal("appServer"),
+  sessionId: providerIdSchema,
+  turns: z.array(z.unknown()),
+  ephemeral: z.literal(false),
+  projectId: z.union([z.string(), z.null()]),
+});
+const turnSchema = z.strictObject({
+  id: providerIdSchema,
+  items: z.array(z.unknown()),
+  itemsView: z.literal("full"),
+  status: z.enum(["completed", "interrupted", "failed", "inProgress"]),
+});
+const threadSettingsSchema = z.strictObject({
+  thread: threadSchema,
+  model: z.string(),
+  modelProvider: z.string(),
+  cwd: scalarStringSchema,
+  approvalPolicy: z.literal("never"),
+  approvalsReviewer: z.literal("user"),
+  sandbox: z.strictObject({ type: z.literal("readOnly"), networkAccess: z.literal(false) }),
+});
+const threadReadResultSchema = z.strictObject({ thread: threadSchema });
+const threadStartedSchema = z.strictObject({
+  method: z.literal("thread/started"),
+  params: z.strictObject({ thread: threadSchema }),
+});
+const turnStartedSchema = z.strictObject({
+  method: z.literal("turn/started"),
+  params: z.strictObject({ threadId: providerIdSchema, turn: turnSchema }),
+});
+const turnCompletedSchema = z.strictObject({
+  method: z.literal("turn/completed"),
+  params: z.strictObject({ threadId: providerIdSchema, turn: turnSchema }),
+});
+const agentMessageSchema = z.strictObject({
+  id: providerIdSchema,
+  type: z.literal("agentMessage"),
+  phase: z.union([z.literal("final_answer"), z.literal("commentary"), z.null()]),
+  text: scalarStringSchema.refine(
+    (value) => Buffer.byteLength(value, "utf8") <= CONNECTOR_LIMITS.finalReplyBytes,
+  ),
+});
+const opaqueCompletedItemSchema = z
+  .object({
+    id: providerIdSchema,
+    type: z.enum([
+      "userMessage",
+      "hookPrompt",
+      "plan",
+      "reasoning",
+      "commandExecution",
+      "fileChange",
+      "mcpToolCall",
+      "collabAgentToolCall",
+      "subAgentActivity",
+      "webSearch",
+      "imageView",
+      "sleep",
+      "imageGeneration",
+      "enteredReviewMode",
+      "exitedReviewMode",
+      "contextCompaction",
+    ]),
+  })
+  .passthrough();
+const completedItemSchema = z.union([agentMessageSchema, opaqueCompletedItemSchema]);
+const itemCompletedSchema = z.strictObject({
+  method: z.literal("item/completed"),
+  params: z.strictObject({
+    threadId: providerIdSchema,
+    turnId: providerIdSchema,
+    completedAtMs: safeIntegerSchema,
+    item: completedItemSchema,
+  }),
+});
+const agentDeltaSchema = z.strictObject({
+  method: z.literal("item/agentMessage/delta"),
+  params: z.strictObject({
+    threadId: providerIdSchema,
+    turnId: providerIdSchema,
+    itemId: providerIdSchema,
+    delta: scalarStringSchema,
+  }),
+});
+
+type ThreadRecord = z.infer<typeof threadSchema>;
+type TurnRecord = z.infer<typeof turnSchema>;
+
+function parseSelected<T>(schema: z.ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value);
+  if (!result.success) throw new ProtocolFailure();
+  return result.data;
+}
+
+const nullableScalarStringSchema = z.union([scalarStringSchema, z.null()]);
+const networkApprovalContextSchema = z.strictObject({
+  host: scalarStringSchema,
+  protocol: z.enum(["http", "https", "socks5Tcp", "socks5Udp"]),
+});
+const commandActionSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("read"),
+    command: scalarStringSchema,
+    name: scalarStringSchema,
+    path: scalarStringSchema,
+  }),
+  z.strictObject({
+    type: z.literal("listFiles"),
+    command: scalarStringSchema,
+    path: nullableScalarStringSchema.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("search"),
+    command: scalarStringSchema,
+    path: nullableScalarStringSchema.optional(),
+    query: nullableScalarStringSchema.optional(),
+  }),
+  z.strictObject({ type: z.literal("unknown"), command: scalarStringSchema }),
+]);
+const networkPolicyAmendmentSchema = z.strictObject({
+  host: scalarStringSchema,
+  action: z.enum(["allow", "deny"]),
+});
+const approvalRequestIdSchema = z.union([safeIntegerSchema, scalarStringSchema]);
+const approvalCommonShape = {
+  threadId: providerIdSchema,
+  turnId: providerIdSchema,
+  itemId: providerIdSchema,
+  startedAtMs: safeIntegerSchema,
+};
+const commandApprovalSchema = z.strictObject({
+  id: approvalRequestIdSchema,
+  method: z.literal("item/commandExecution/requestApproval"),
+  params: z.strictObject({
+    ...approvalCommonShape,
+    environmentId: nullableScalarStringSchema,
+    approvalId: nullableScalarStringSchema.optional(),
+    reason: nullableScalarStringSchema.optional(),
+    networkApprovalContext: z.union([networkApprovalContextSchema, z.null()]).optional(),
+    command: nullableScalarStringSchema.optional(),
+    cwd: nullableScalarStringSchema.optional(),
+    commandActions: z.union([z.array(commandActionSchema), z.null()]).optional(),
+    proposedExecpolicyAmendment: z.union([z.array(scalarStringSchema), z.null()]).optional(),
+    proposedNetworkPolicyAmendments: z
+      .union([z.array(networkPolicyAmendmentSchema), z.null()])
+      .optional(),
+  }),
+});
+const fileApprovalSchema = z.strictObject({
+  id: approvalRequestIdSchema,
+  method: z.literal("item/fileChange/requestApproval"),
+  params: z.strictObject({
+    ...approvalCommonShape,
+    reason: nullableScalarStringSchema.optional(),
+    grantRoot: nullableScalarStringSchema.optional(),
+  }),
+});
+const permissionNetworkSchema = z.strictObject({ enabled: z.union([z.boolean(), z.null()]) });
+const permissionSpecialPathSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.enum(["root", "minimal", "tmpdir", "slash_tmp"]) }),
+  z.strictObject({
+    kind: z.literal("project_roots"),
+    subpath: nullableScalarStringSchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("unknown"),
+    path: scalarStringSchema,
+    subpath: nullableScalarStringSchema.optional(),
+  }),
+]);
+const permissionPathSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("path"), path: scalarStringSchema }),
+  z.strictObject({ type: z.literal("glob_pattern"), pattern: scalarStringSchema }),
+  z.strictObject({ type: z.literal("special"), value: permissionSpecialPathSchema }),
+]);
+const permissionEntrySchema = z.strictObject({
+  path: permissionPathSchema,
+  access: z.enum(["read", "write", "deny"]),
+});
+const permissionFileSystemSchema = z.strictObject({
+  read: z.union([z.array(scalarStringSchema), z.null()]),
+  write: z.union([z.array(scalarStringSchema), z.null()]),
+  globScanMaxDepth: safeIntegerSchema.optional(),
+  entries: z.array(permissionEntrySchema).optional(),
+});
+const permissionsApprovalSchema = z.strictObject({
+  id: approvalRequestIdSchema,
+  method: z.literal("item/permissions/requestApproval"),
+  params: z.strictObject({
+    ...approvalCommonShape,
+    environmentId: nullableScalarStringSchema,
+    cwd: scalarStringSchema,
+    reason: nullableScalarStringSchema,
+    permissions: z.strictObject({
+      network: z.union([permissionNetworkSchema, z.null()]),
+      fileSystem: z.union([permissionFileSystemSchema, z.null()]),
+    }),
+  }),
+});
 
 class StrictJsonScanner {
   #index = 0;
@@ -726,74 +973,18 @@ function validateId(value: unknown): value is string {
   return validBoundedString(value, CONNECTOR_LIMITS.providerIdBytes);
 }
 
-function validateTurn(value: unknown): Record<string, unknown> {
-  if (!isRecord(value) || !hasExactKeys(value, ["id", "items", "itemsView", "status"])) {
-    throw new ProtocolFailure();
-  }
-  if (!validateId(value.id) || !Array.isArray(value.items) || value.itemsView !== "full") {
-    throw new ProtocolFailure();
-  }
-  if (!["completed", "interrupted", "failed", "inProgress"].includes(String(value.status))) {
-    throw new ProtocolFailure();
-  }
-  return value;
-}
-
-function validateThread(value: unknown): Record<string, unknown> {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, [
-      "id",
-      "preview",
-      "modelProvider",
-      "createdAt",
-      "updatedAt",
-      "status",
-      "cwd",
-      "cliVersion",
-      "source",
-      "sessionId",
-      "turns",
-      "ephemeral",
-      "projectId",
-    ]) ||
-    !validateId(value.id) ||
-    !isUnicodeScalarString(value.cwd) ||
-    !Array.isArray(value.turns) ||
-    value.ephemeral !== false
-  ) {
-    throw new ProtocolFailure();
-  }
-  return value;
+function validateTurn(value: unknown): TurnRecord {
+  return parseSelected(turnSchema, value);
 }
 
 function validateThreadSettings(
   result: unknown,
   cwd: string,
   expectedThreadId?: string,
-): Record<string, unknown> {
-  if (
-    !isRecord(result) ||
-    !hasExactKeys(result, [
-      "thread",
-      "model",
-      "modelProvider",
-      "cwd",
-      "approvalPolicy",
-      "approvalsReviewer",
-      "sandbox",
-    ]) ||
-    result.cwd !== cwd ||
-    result.approvalPolicy !== "never" ||
-    result.approvalsReviewer !== "user" ||
-    !isRecord(result.sandbox) ||
-    !hasExactKeys(result.sandbox, ["type", "networkAccess"]) ||
-    result.sandbox.type !== "readOnly" ||
-    result.sandbox.networkAccess !== false
-  ) {
-    throw new ProtocolFailure();
-  }
-  const thread = validateThread(result.thread);
+): ThreadRecord {
+  const parsed = parseSelected(threadSettingsSchema, result);
+  const thread = parsed.thread;
+  if (parsed.cwd !== cwd) throw new ProtocolFailure();
   if (thread.cwd !== cwd || (expectedThreadId !== undefined && thread.id !== expectedThreadId)) {
     throw new ProtocolFailure();
   }
@@ -1150,16 +1341,11 @@ class CodexAppServerAdapter implements ProviderPort {
   }
 
   #handleThreadNotification(invocation: ActiveInvocation, record: Record<string, unknown>): void {
-    if (
-      eventMethod(record) !== "thread/started" ||
-      !hasExactKeys(record, ["method", "params"]) ||
-      !isRecord(record.params) ||
-      !hasExactKeys(record.params, ["thread"])
-    ) {
+    if (eventMethod(record) !== "thread/started") {
       if (this.#ignoredNotification(invocation, record)) return;
       throw new ProtocolFailure();
     }
-    const thread = validateThread(record.params.thread);
+    const thread = parseSelected(threadStartedSchema, record).params.thread;
     if (thread.cwd !== this.options.workingDirectory) throw new ProtocolFailure();
     this.#bindSession(invocation, thread.id);
   }
@@ -1217,13 +1403,14 @@ class CodexAppServerAdapter implements ProviderPort {
       } else {
         if (
           invocation.turnId === null &&
-          [
+          ([
             "item/agentMessage/delta",
             "item/completed",
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",
             "item/permissions/requestApproval",
-          ].includes(method ?? "")
+          ].includes(method ?? "") ||
+            IGNORED_NOTIFICATION_METHODS.has(method ?? ""))
         ) {
           pendingRecords.push(record);
         } else {
@@ -1281,15 +1468,9 @@ class CodexAppServerAdapter implements ProviderPort {
       return undefined;
     }
     if (method === "turn/started") {
-      if (
-        !hasExactKeys(record, ["method", "params"]) ||
-        !isRecord(record.params) ||
-        !hasExactKeys(record.params, ["threadId", "turn"]) ||
-        record.params.threadId !== invocation.sessionId
-      ) {
-        throw new ProtocolFailure();
-      }
-      const turn = validateTurn(record.params.turn);
+      const parsed = parseSelected(turnStartedSchema, record);
+      if (parsed.params.threadId !== invocation.sessionId) throw new ProtocolFailure();
+      const turn = parsed.params.turn;
       this.#bindTurn(invocation, turn.id);
       return undefined;
     }
@@ -1321,23 +1502,28 @@ class CodexAppServerAdapter implements ProviderPort {
   }
 
   #approvalRequest(invocation: ActiveInvocation, record: Record<string, unknown>): unknown {
+    if (invocation.approvalPending) throw new ProtocolFailure();
+    const method = eventMethod(record);
+    const parsed =
+      method === "item/commandExecution/requestApproval"
+        ? parseSelected(commandApprovalSchema, record)
+        : method === "item/fileChange/requestApproval"
+          ? parseSelected(fileApprovalSchema, record)
+          : method === "item/permissions/requestApproval"
+            ? parseSelected(permissionsApprovalSchema, record)
+            : undefined;
     if (
-      invocation.approvalPending ||
-      !hasExactKeys(record, ["id", "method", "params"]) ||
-      !isRecord(record.params) ||
-      record.params.threadId !== invocation.sessionId ||
-      record.params.turnId !== invocation.turnId ||
-      !validateId(record.params.itemId)
+      parsed === undefined ||
+      parsed.params.threadId !== invocation.sessionId ||
+      parsed.params.turnId !== invocation.turnId
     ) {
       throw new ProtocolFailure();
     }
     let approvalRequestId: string;
-    if (typeof record.id === "number" && Number.isSafeInteger(record.id)) {
-      approvalRequestId = `n:${record.id}`;
-    } else if (isUnicodeScalarString(record.id)) {
-      approvalRequestId = `s:${record.id}`;
+    if (typeof parsed.id === "number") {
+      approvalRequestId = `n:${parsed.id}`;
     } else {
-      throw new ProtocolFailure();
+      approvalRequestId = `s:${parsed.id}`;
     }
     if (!validBoundedString(approvalRequestId, CONNECTOR_LIMITS.providerIdBytes)) {
       throw new ProtocolFailure();
@@ -1351,51 +1537,45 @@ class CodexAppServerAdapter implements ProviderPort {
   }
 
   #agentDelta(invocation: ActiveInvocation, record: Record<string, unknown>): unknown {
+    const parsed = parseSelected(agentDeltaSchema, record);
     if (
-      !hasExactKeys(record, ["method", "params"]) ||
-      !isRecord(record.params) ||
-      !hasExactKeys(record.params, ["threadId", "turnId", "itemId", "delta"]) ||
-      record.params.threadId !== invocation.sessionId ||
-      record.params.turnId !== invocation.turnId ||
-      !validateId(record.params.itemId) ||
-      !validBoundedString(record.params.delta, CONNECTOR_LIMITS.finalReplyBytes)
+      parsed.params.threadId !== invocation.sessionId ||
+      parsed.params.turnId !== invocation.turnId ||
+      !validBoundedString(parsed.params.delta, CONNECTOR_LIMITS.finalReplyBytes)
     ) {
       throw new ProtocolFailure();
     }
-    const prior = invocation.deltas.get(record.params.itemId) ?? "";
-    const combined = prior + record.params.delta;
+    const prior = invocation.deltas.get(parsed.params.itemId) ?? "";
+    const combined = prior + parsed.params.delta;
     if (
       !isUnicodeScalarString(combined) ||
       Buffer.byteLength(combined) > CONNECTOR_LIMITS.finalReplyBytes
     ) {
       throw new ProtocolFailure();
     }
-    invocation.deltas.set(record.params.itemId, combined);
+    invocation.deltas.set(parsed.params.itemId, combined);
     return {
       event: "progress",
       execution_id: invocation.executionId,
-      text: record.params.delta,
+      text: parsed.params.delta,
     };
   }
 
   #completedItem(invocation: ActiveInvocation, record: Record<string, unknown>): void {
+    const parsed = parseSelected(itemCompletedSchema, record);
     if (
-      !hasExactKeys(record, ["method", "params"]) ||
-      !isRecord(record.params) ||
-      !hasExactKeys(record.params, ["threadId", "turnId", "completedAtMs", "item"]) ||
-      record.params.threadId !== invocation.sessionId ||
-      record.params.turnId !== invocation.turnId ||
-      !Number.isSafeInteger(record.params.completedAtMs) ||
-      !isRecord(record.params.item) ||
-      !validateId(record.params.item.id)
+      parsed.params.threadId !== invocation.sessionId ||
+      parsed.params.turnId !== invocation.turnId
     ) {
       throw new ProtocolFailure();
     }
-    const existing = invocation.completedItems.get(record.params.item.id);
-    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(record.params.item)) {
+    const item = parsed.params.item;
+    if (item.type !== "agentMessage") return;
+    const existing = invocation.completedItems.get(item.id);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(item)) {
       throw new ProtocolFailure();
     }
-    invocation.completedItems.set(record.params.item.id, record.params.item);
+    invocation.completedItems.set(item.id, item);
   }
 
   #bindTurn(invocation: ActiveInvocation, value: unknown): void {
@@ -1405,17 +1585,12 @@ class CodexAppServerAdapter implements ProviderPort {
   }
 
   #terminalFromTurn(invocation: ActiveInvocation, record: Record<string, unknown>): TerminalEvent {
-    if (
-      !hasExactKeys(record, ["method", "params"]) ||
-      !isRecord(record.params) ||
-      !hasExactKeys(record.params, ["threadId", "turn"]) ||
-      record.params.threadId !== invocation.sessionId
-    ) {
-      throw new ProtocolFailure();
-    }
-    const turn = validateTurn(record.params.turn);
+    const parsed = parseSelected(turnCompletedSchema, record);
+    if (parsed.params.threadId !== invocation.sessionId) throw new ProtocolFailure();
+    const turn = parsed.params.turn;
     this.#bindTurn(invocation, turn.id);
     if (turn.status === "failed") {
+      this.#validateTerminalItems(turn.items);
       return {
         event: "failed",
         execution_id: invocation.executionId,
@@ -1439,22 +1614,21 @@ class CodexAppServerAdapter implements ProviderPort {
     const final: SelectedReply[] = [];
     const compatibility: SelectedReply[] = [];
     for (const item of items) {
-      if (!isRecord(item) || item.type !== "agentMessage") continue;
-      if (!hasExactKeys(item, ["id", "type", "phase", "text"])) return null;
-      if (
-        !validateId(item.id) ||
-        !validBoundedString(item.text, CONNECTOR_LIMITS.finalReplyBytes)
-      ) {
-        return null;
-      }
-      const selected = { id: item.id, text: item.text, item };
-      if (item.phase === "final_answer") final.push(selected);
-      else if (item.phase === null) compatibility.push(selected);
-      else if (item.phase !== "commentary") return null;
+      const parsed = completedItemSchema.safeParse(item);
+      if (!parsed.success) return null;
+      if (parsed.data.type !== "agentMessage") continue;
+      if (!validBoundedString(parsed.data.text, CONNECTOR_LIMITS.finalReplyBytes)) return null;
+      const selected = { id: parsed.data.id, text: parsed.data.text, item: parsed.data };
+      if (parsed.data.phase === "final_answer") final.push(selected);
+      else if (parsed.data.phase === null) compatibility.push(selected);
     }
     if (final.length === 1) return final[0] as SelectedReply;
     if (final.length === 0 && compatibility.length === 1) return compatibility[0] as SelectedReply;
     return null;
+  }
+
+  #validateTerminalItems(items: readonly unknown[]): void {
+    for (const item of items) parseSelected(completedItemSchema, item);
   }
 
   #corroborates(invocation: ActiveInvocation, reply: SelectedReply): boolean {
@@ -1468,8 +1642,7 @@ class CodexAppServerAdapter implements ProviderPort {
 
   #ignoredNotification(invocation: ActiveInvocation, record: Record<string, unknown>): boolean {
     const method = eventMethod(record);
-    if (method === "configWarning") throw new ProtocolFailure();
-    if (!["warning", "turn/diff/updated"].includes(method ?? "")) return false;
+    if (!IGNORED_NOTIFICATION_METHODS.has(method ?? "")) return false;
     if (!hasExactKeys(record, ["method", "params"]) || !isRecord(record.params)) {
       throw new ProtocolFailure();
     }
@@ -1522,8 +1695,7 @@ class CodexAppServerAdapter implements ProviderPort {
     if (next.done) return uncertain(invocation.executionId);
     try {
       const result = responseResult(next.value, 2);
-      if (!isRecord(result) || !hasExactKeys(result, ["thread"])) throw new ProtocolFailure();
-      const thread = validateThread(result.thread);
+      const thread = parseSelected(threadReadResultSchema, result).thread;
       if (thread.id !== invocation.sessionId) throw new ProtocolFailure();
       const matches = (thread.turns as unknown[]).filter(
         (turn) => isRecord(turn) && turn.id === invocation.turnId,
@@ -1531,6 +1703,7 @@ class CodexAppServerAdapter implements ProviderPort {
       if (matches.length !== 1) return uncertain(invocation.executionId);
       const turn = validateTurn(matches[0]);
       if (turn.status === "failed") {
+        this.#validateTerminalItems(turn.items);
         return {
           event: "failed",
           execution_id: invocation.executionId,
