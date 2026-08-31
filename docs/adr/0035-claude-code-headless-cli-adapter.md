@@ -199,9 +199,11 @@ seals the already known group itself.
 The connector sends no start command until it receives the complete ready
 record. If the connector dies before readiness, descriptor 3 reaches EOF.
 Once the monitor arms the handler, including when EOF was already pending, it
-seals its known group without accepting a start command. CL04 must prove that
-the group disappears when the connector dies during native Node startup and
-before this first application action.
+seals its known group without accepting a start command. CL02 and CL03 must
+prove connector death during native Node startup and before this first
+application action. CL04 may kill the packed connector only at an externally
+observable startup point and must prove that every process group visible at
+that point disappears; it makes no claim about the private readiness barrier.
 
 Monitor readiness has a five-second monotonic subdeadline capped by the
 invocation's absolute deadline. After the start record, the matching
@@ -537,9 +539,10 @@ connector already knows the exact group and runs the fixed TERM-then-KILL
 sequence before it considers any result. If the connector dies, the monitor
 cannot be reaped by that connector. CL04 must externally prove that the group
 disappears and the OS reaps the orphaned process unit. CL02 must make the
-production monitor enter sealing for every injected internal fault, and CL04
-must prove the owner-pipe behavior at every real startup and execution
-barrier.
+production monitor enter sealing for every injected internal fault. CL02 and
+CL03 must prove owner-pipe behavior at every private startup and execution
+barrier. CL04 proves the same packed monitor contains real processes after
+connector death at externally observable startup and active-execution points.
 
 ### History, retention, and retirement
 
@@ -634,12 +637,33 @@ CL04 runs only when the user explicitly provides a suitable authenticated,
 disposable environment. CI never downloads Claude Code, signs in, reads real
 history, or uses provider credentials.
 
+CL02 and CL03 own every assertion that requires visibility into the private
+monitor protocol or injection at an internal protocol barrier. Their fake
+full-process suite must prove the byte-exact `ready`, `start`,
+`child_started`, `child_exited`, contain, TERM, KILL, monitor-reap, and
+connector group-proof ordering; every malformed or out-of-order control
+record; every injected monitor, spawn, and control-channel fault; and
+connector death at each internal barrier. Those assertions run against the
+same production adapter and packaged monitor used by CL04.
+
+The packed production artifact exposes no monitor observation, barrier, or
+fault-injection channel. CL04 must not add one, change the public CLI, or pass
+test controls through provider argv, environment, stdin, configuration, or
+files. CL04 therefore qualifies externally observable real-runtime behavior.
+It complements the internal fake proofs instead of duplicating private
+protocol instrumentation in a real provider account.
+
 Each claimed provider and platform pair must pass all of these gates through
 the packed connector and full local gateway chain:
 
 1. official executable identity and exact version stdout;
-2. init-before-input while stdin remains open and empty;
-3. byte-exact acceptance and replay of the selected `SDKUserMessage` record;
+2. complete real start and resume through the adapter's enforced
+   session-before-input state machine; CL02 and CL03 prove its internal
+   init-before-input ordering while stdin remains open and empty;
+3. send adversarial input only through the selected structured provider
+   interface and find no argv, environment, artifact, or diagnostic
+   reflection; CL02 and CL03 prove byte-exact `SDKUserMessage` acceptance and
+   replay;
 4. two turns in one caller-generated and exactly resumed session;
 5. safe and restricted startup with no user or project customizations and no
    administrator-managed executable hook or command;
@@ -647,19 +671,22 @@ the packed connector and full local gateway chain:
    write, denied out-of-root write, and no tool-mediated network access;
 7. denied permission and unsupported-control behavior without a connector
    grant;
-8. byte-exact monitor-PGID capture before ready, start, `child_started`,
-   `child_exited`, contain, TERM, KILL, monitor-reap, and connector group-proof
-   ordering for version and turn children, with no monitor emptiness claim;
+8. externally observe one monitor-led process group containing the expected
+   Claude root and descendants, retain its identity only in memory, and prove
+   the exact group and tracked processes gone before accepting a terminal;
 9. SIGINT cancellation with the monitor kept alive, provider timeout, normal
    exit, and mandatory held-group sealing;
-10. connector hard death before monitor readiness, before and after start,
-    before and after Claude spawn and `child_started`, during execution, after
-    prompt EOF, and after terminal output;
-11. the prompt-EOF then connector-kill case, externally proving the monitor,
-    Claude root, and descendants gone and the orphaned unit OS-reaped;
-12. monitor hard death, internal failure, and control-channel failure with the
-    known group contained and no orphan, content reflection, or accepted
-    terminal result;
+10. connector hard death during externally observable startup, proving every
+    observed process disappears; CL02 and CL03 prove the internal pre-ready,
+    start, spawn, and `child_started` barriers;
+11. connector hard death while a real Claude turn is externally observed as
+    active, proving the monitor, Claude root, and descendants gone and the
+    orphaned unit OS-reaped; CL02 and CL03 prove the exact prompt-EOF and
+    post-terminal barriers;
+12. externally induced monitor hard death with the known group contained and
+    no orphan, content reflection, or accepted terminal result; injected
+    internal and control-channel failures remain mandatory CL02 and CL03
+    proofs;
 13. restart after every durable barrier with no blind turn replay;
 14. provider-owned history usable for resume but never opened by the connector;
 15. complete artifact, state, process-argument, environment, output, temporary
@@ -667,9 +694,10 @@ the packed connector and full local gateway chain:
 
 Failure of either protocol timing gate, sandbox containment, or hard-crash
 containment leaves that provider and platform pair unsupported. Fake success
-does not substitute for this evidence. If no suitable authenticated
-environment is available, CL04 remains pending and the project makes no real
-Claude qualification claim.
+does not substitute for externally observable real-runtime evidence, and a
+real run does not substitute for the internal fake fault matrix. If no
+suitable authenticated environment is available, CL04 remains pending and
+the project makes no real Claude qualification claim.
 
 ## Alternatives
 

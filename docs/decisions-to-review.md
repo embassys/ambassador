@@ -638,6 +638,12 @@ central owner and returns a material contract difference for review.
   `0.57.0`; no compliant stable replacement was available on 2026-08-31.
   Claude implementation and real qualification remain pending, and Gemini
   implementation remains blocked on a new provider interface.
+- ADR 0035 assigns private monitor-protocol ordering, internal barrier, and
+  injected-fault evidence to the CL02 and CL03 fake full-process suite. CL04
+  uses the exact packed artifact and records only externally observable
+  real-runtime evidence. It does not add a production observation or
+  fault-injection seam, change the public CLI, or expose test controls to the
+  provider process.
 - The private package and installation model is accepted. Public-repository
   conversion, publish jobs, preview or stable publication, and support claims
   remain unapproved until their later gates. The gateway CLI stays unchanged.

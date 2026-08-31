@@ -314,7 +314,11 @@ hard-crash qualification externally proves that the orphaned group
 disappears. The monitor adds no new dependency or provider executable. CL02
 must review its complete red failure inventory before CL03 begins. Real
 provider support remains pending CL04's authenticated disposable-environment,
-sandbox, protocol-timing, and hard-crash containment evidence.
+sandbox, protocol-timing, and hard-crash containment evidence. The private
+monitor protocol remains unobservable in the packed artifact: CL02 and CL03
+own exact internal ordering, barrier, and fault-injection proofs, while CL04
+owns externally observable real-runtime process, policy, history, and
+containment evidence. No qualification-only production control is permitted.
 
 ### Gemini CLI track
 
