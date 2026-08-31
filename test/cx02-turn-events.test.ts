@@ -455,6 +455,12 @@ test("CX02-X11 treats deltas as progress and the corroborated full terminal snap
       text: "not authoritative",
       unknown: true,
     },
+    {
+      id: "over_limit_completed_agent",
+      type: "agentMessage",
+      phase: "final_answer",
+      text: "x".repeat(262_145),
+    },
     { id: "unsupported_dynamic", type: "dynamicToolCall", providerOwnedDetail: true },
   ]) {
     const malformed = await createCx02Adapter(t, "CX02-CX03:X11", {
@@ -828,6 +834,38 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
       },
     },
     {
+      name: "malformed command action element",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        commandActions: [{ type: "read", command: "cat", name: 7, path: cwd }],
+      },
+    },
+    {
+      name: "unknown network approval context field",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        networkApprovalContext: { host: "example.com", protocol: "https", unknown: true },
+      },
+    },
+    {
+      name: "malformed exec policy amendment",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        proposedExecpolicyAmendment: { command: "allow" },
+      },
+    },
+    {
+      name: "malformed network policy amendment",
+      method: "item/commandExecution/requestApproval",
+      params: {
+        ...approvalParams("item/commandExecution/requestApproval", cwd, "approval_item", "private"),
+        proposedNetworkPolicyAmendments: [{ host: "example.com", action: "future" }],
+      },
+    },
+    {
       name: "missing file timestamp",
       method: "item/fileChange/requestApproval",
       params: {
@@ -860,6 +898,26 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
       params: {
         ...approvalParams("item/permissions/requestApproval", cwd, "approval_item", "private"),
         permissions: { network: { enabled: null, unknown: true }, fileSystem: null },
+      },
+    },
+    {
+      name: "malformed permission entry",
+      method: "item/permissions/requestApproval",
+      params: {
+        ...approvalParams("item/permissions/requestApproval", cwd, "approval_item", "private"),
+        permissions: {
+          network: null,
+          fileSystem: {
+            read: [cwd],
+            write: null,
+            entries: [
+              {
+                path: { type: "special", value: { kind: "root", unknown: true } },
+                access: "read",
+              },
+            ],
+          },
+        },
       },
     },
   ];
