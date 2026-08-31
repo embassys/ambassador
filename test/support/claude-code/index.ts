@@ -1,0 +1,51 @@
+export {
+  type Cl03AdapterModule,
+  type Cl03MonitorModule,
+  type Cl03ProductionModule,
+  type ClaudeAdapterForTestOptions,
+  type ClaudeAdapterPort,
+  type ClaudeMonitorSpawnForTest,
+  isExactMissingCl03Entry,
+  loadCl03Production,
+  validateCl03AdapterModule,
+  validateCl03MonitorModule,
+} from "./cl03-production.js";
+export { type FakeClaudeCli, startFakeClaudeCli } from "./fake-cli.js";
+export {
+  type ClaudeMonitorSpawnOptionsForTest,
+  type FakeClaudeMonitor,
+  startFakeClaudeMonitor,
+} from "./fake-monitor.js";
+export {
+  CL02_DEADLINE_MS,
+  CL02_EXECUTION_ID,
+  CL02_INPUT_UUID,
+  CL02_SESSION_ID,
+  cancelRequest,
+  collectEvents,
+  createCl02Adapter,
+  createCl02Clock,
+  exactClaudeArguments,
+  initRecord,
+  inputRecord,
+  READ_ONLY_TOOLS,
+  recoverRequest,
+  replayRecord,
+  resultRecord,
+  resumeRequest,
+  startRequest,
+  syntheticCl02Environment,
+  validTurnPlan,
+  WORKSPACE_WRITE_TOOLS,
+} from "./scenarios.js";
+export {
+  CLAUDE_FIXTURE_VERSION,
+  type ClaudeAdapterProcessBarrier,
+  type ClaudeLifetimeMonitorBarrier,
+  type ClaudeProcessObservation,
+  type FakeClaudeLaunchRecord,
+  type FakeClaudeProcessPlan,
+  type FakeClaudeWireWrite,
+  type FakeMonitorLaunchRecord,
+  type FakeMonitorPlan,
+} from "./types.js";

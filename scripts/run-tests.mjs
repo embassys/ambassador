@@ -15,6 +15,7 @@ const files = compiledTests
       !basename(file).startsWith("t04-") &&
       !basename(file).startsWith("k02-") &&
       !basename(file).startsWith("cx02-") &&
+      !basename(file).startsWith("cl02-") &&
       !basename(file).startsWith("k04-"),
   )
   .sort();
