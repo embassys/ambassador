@@ -1,11 +1,22 @@
 # Central interface change requests
 
-Status: accepted target contract, not implemented or deployment-verified
+Status: accepted target contract; DPoP reported implemented, exact revision
+and deployment not verified
 
 The user accepted the client-visible contracts in ADRs 0023, 0025, 0026, and
 0027 on 2026-08-29. This document is the handoff to the central service owners.
 It does not claim that the production service, database, shared security state,
 proxy, or email system implements them.
+
+The central repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). On
+2026-08-31 its inspected default branch at `4690319` and the observed hosted
+routes still exposed the older bearer API. The project owner reports that DPoP
+has been implemented in a newer server version, but that version's exact
+commit and deployment have not been identified. I01 and I02 in the gateway
+[implementation plan](implementation-plan.md) track a complete current REST,
+MCP, template, and event re-baseline, all resulting flow changes, and the
+development E2E switch. This review is not limited to DPoP or authentication.
 
 Central implementers should use
 [`central-server-implementation-spec.md`](central-server-implementation-spec.md)
@@ -31,7 +42,16 @@ remains content-free on disk. ADR 0027 makes the future release a fresh-install
 cutover. These requests do not migrate a version 1 credential, mailbox, or
 identity, and they do not change the published v1 gateway regression contract.
 
-`Now` describes `agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`, checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and `expiry_sweep.py`. This repository's independent fixture reproduces the inspected contract for gateway tests. It does not prove the behavior of a deployed service. The supplied live tunnel returned `404`, so deployment of that revision was not checked.
+`Now` below is a historical comparison based on
+`agent2agent-creator/agent2agent@bcddcbb4df662e04b2f5f3199740b7b79eb46cd4`,
+checked directly in `database.py`, `main.py`, `agent2agent_mcp.py`, and
+`expiry_sweep.py`. The newer repository location, user-supplied API snapshot,
+and hosted service still show related bearer-era behavior, but they do not
+identify the reported DPoP implementation or the reported new user-email and
+user-phone request templates. I01 must replace this historical baseline with a
+pinned source revision, a complete client-visible API inventory, and generated
+schemas before client integration changes. This repository's independent
+fixture does not prove the behavior of a deployed service.
 
 ## 1. Redeliver full messages under a lease
 

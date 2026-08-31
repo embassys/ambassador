@@ -4,11 +4,12 @@
 
 Before starting any task, read these files in order:
 
-1. `docs/product-vision-and-architecture.md`
-2. `docs/protocol-v1.md`
-3. `docs/implementation-plan.md`
-4. `docs/decisions-to-review.md`
-5. Relevant accepted records under `docs/adr/`
+1. `docs/README.md`
+2. `docs/product-vision-and-architecture.md`
+3. `docs/protocol-v1.md`
+4. `docs/implementation-plan.md`
+5. `docs/decisions-to-review.md`
+6. Relevant accepted records under `docs/adr/`
 
 If your task conflicts with these documents, stop and ask. Do not expand the scope on your own.
 
@@ -29,3 +30,15 @@ If your task conflicts with these documents, stop and ask. Do not expand the sco
 - Record approved architecture and dependency choices under `docs/adr/`.
 - Respect task dependencies and file ownership in `docs/implementation-plan.md`.
 - Follow the task gates in `docs/implementation-plan.md`. `docs/v2-fixture-profile.md` supplies test-only stand-ins for unknown central facts. Do not treat it or a development override as a production URL or as evidence that central implements the accepted target. A production central MCP implementation, ACP, hosted-agent connectors, and GUI work stay out of scope.
+- For central integration work, pin the exact `embassys/agent2agent` source
+  revision and the deployment built from it. Treat the supplied API snapshot
+  and a health response as background evidence only. Inventory the complete
+  current REST, MCP, template, and event surface and trace every affected flow;
+  do not scope the recheck to DPoP or authentication. Confirm the reported
+  user-email and user-phone request templates from pinned schemas before using
+  one with synthetic data as the preferred low-impact E2E interaction. Follow
+  I01 and I02 in `docs/server-integration-status.md`; never weaken an accepted
+  contract or add runtime probing to match an unpinned server.
+- Keep `docs/README.md` navigational, `docs/architecture-overview.md` concise,
+  and `docs/human-work.md` current. Normative behavior belongs in the protocol
+  or an ADR, not in the wiki summaries.

@@ -2,7 +2,7 @@
 
 Status: active implementation backlog for the accepted version 2 architecture
 
-Date: 2026-08-30
+Date: 2026-08-31
 
 This document turns the accepted architecture in ADRs 0023, 0024, 0025, 0026,
 and 0027 into reviewable tasks and pull requests. It covers central REST
@@ -106,7 +106,10 @@ S04 -> S05 idempotent reply and terminal outcomes
 S03 -> S06 token lifecycle and recovery
 S02/S03/S04/S05/S06 -> S07 staging contract gate
 
-S07 + G04 -> E01/E02/E03 gateway qualification
+server revision + complete API/template inventory -> I01 flow, integration, and test refresh
+I01 + deployed DPoP contract -> I02 contact-template development E2E
+
+S07 + I02 + G04 -> E01/E02/E03 gateway qualification
 
 D05 + accepted G04 contract -> K01 -> K02 -> K03 -> K04 fake connector E2E
 K04 -> Codex, Claude, and Gemini adapter tracks in parallel
@@ -165,9 +168,14 @@ external gate closes.
 
 ### Central repository, external ownership
 
-The central production repository is not part of this workspace. Its owners
-must implement and review S01. The gateway's fixture suite cannot stand in for
-real database, proxy, email, shared-state, or deployment tests.
+The central production repository is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent), not this
+workspace. Its owners must implement and review S01. The gateway's fixture
+suite cannot stand in for real database, proxy, email, shared-state, or
+deployment tests. DPoP is reported implemented, but the inspected default
+branch and hosted routes still show the older bearer API. The exact DPoP
+revision and deployment must be pinned before S03 or a live client switch can
+be marked complete.
 
 | ID | Type | Proposed PR title | Depends on | Scope and completion evidence |
 | --- | --- | --- | --- | --- |
@@ -235,11 +243,22 @@ G02, G03, and G04 all touch application assembly and MCP projection. Serialize
 them in that order. Do not ask parallel agents to edit
 `src/gateway-application.ts` or `src/mcp-contract.ts` on separate branches.
 
+## Wave 3A: refresh the latest server integration
+
+| ID | Type | Proposed task or PR | Depends on | Completion evidence |
+| --- | --- | --- | --- | --- |
+| I01 | Red contract refresh, then implementation | `test: align gateway integrations with the pinned central revision` | Exact current server commit, deployed schemas and catalogs, and material-difference review | The complete REST, MCP, template, event, version, and deprecation inventory is classified; affected flows, both fixtures, gateway clients, failure inventories, and CI tests match one approved revision without runtime discovery or fallback |
+| I02 | Development E2E | `test: switch the development gateway to central DPoP` | I01, Gate A, deployed S02 through S06 behavior | Both reported user-contact templates have contract tests; a fresh version 2 identity uses an approved email- or phone-request template with synthetic data and passes issuance binding, bearer rejection, nonce and replay, protected REST and MCP, reissue, activation, leased delivery, terminal result, acknowledgement, restart, packed install, artifact scans, and content-boundary checks |
+
+The evidence baseline and safe hosted probes are recorded in
+[server integration status](server-integration-status.md). I02 is development
+evidence. It does not replace S07 staging or E01 through E03 release evidence.
+
 ## Wave 4: qualify the gateway end to end
 
 | ID | Type | Proposed task or PR | Depends on | Completion evidence |
 | --- | --- | --- | --- | --- |
-| E01 | Green E2E PR | `test: qualify REST enrollment and DPoP end to end` | G01, G02, G03, S07 | T03 is green against the Node fixture and Docker fixture; staging smoke covers HTTPS, real proxy URI handling, nonce, restart, reissue, and bearer rejection |
+| E01 | Green E2E PR | `test: qualify REST enrollment and DPoP end to end` | I02, S07 | T03 is green against the Node fixture and Docker fixture; staging smoke covers HTTPS, real proxy URI handling, nonce, restart, reissue, and bearer rejection |
 | E02 | Green E2E PR | `test: qualify recovery and reply crash windows end to end` | G04, S07 | T04 is green against both fixtures; deterministic process kills prove recovery after poll, one reply after lost acceptance, and one terminal acknowledgement |
 | E03 | Qualification task | `record gateway soak, outage, recovery, and artifact-scan evidence` | E01, E02 | A bounded soak covers poll outages, nonce rotation, central restart, gateway restart, rate limits, mailbox pressure, reply conflicts, cancellation, recovery, and clean shutdown without content or credential artifacts |
 | W01 | Deferred | `defer Windows support under ADR 0033` | User direction | Closed as deferred, not passed; no initial-release or CI evidence is claimed |
