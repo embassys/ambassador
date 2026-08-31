@@ -2,12 +2,24 @@ import { userInfo } from "node:os";
 import { startConnector } from "./connector.js";
 import {
   ConnectorError,
+  type ConnectorPolicy,
   connectorError,
   type ProviderKind,
   WEBHOOK_TOKEN_PATTERN,
 } from "./constants.js";
 import { parseConnectorArguments } from "./public-cli.js";
+import type { ProviderPort } from "./runtime-types.js";
 import { accountStateDirectory, reserveConnectorState, retireConnectorState } from "./state.js";
+
+interface ProviderFactoryOptions {
+  readonly workingDirectory: string;
+  readonly policy: ConnectorPolicy;
+  readonly inheritedEnvironment: Readonly<Record<string, string | undefined>>;
+  readonly webhookTokenEnvironmentName: string;
+}
+
+type ManagedProvider = ProviderPort & { close(): Promise<void> };
+type ProviderFactory = (options: ProviderFactoryOptions) => Promise<ManagedProvider>;
 
 const EXIT_CODES: Readonly<Record<string, number>> = {
   connector_internal_error: 1,
@@ -34,11 +46,15 @@ function publicError(error: unknown): never {
   process.exit(EXIT_CODES[code] as number);
 }
 
-export async function runConnectorCli(provider: ProviderKind): Promise<void> {
+export async function runConnectorCli(
+  provider: ProviderKind,
+  providerFactory?: ProviderFactory,
+): Promise<void> {
   try {
     const parsed = parseConnectorArguments(process.argv.slice(2));
     const stateDirectory = accountStateDirectory(userInfo().homedir, provider);
     const reservation = reserveConnectorState(stateDirectory, parsed.command === "retire-state");
+    let managedProvider: ManagedProvider | undefined;
     try {
       if (parsed.command === "retire-state") {
         const result = await retireConnectorState({
@@ -55,6 +71,12 @@ export async function runConnectorCli(provider: ProviderKind): Promise<void> {
       if (token === undefined || !WEBHOOK_TOKEN_PATTERN.test(token)) {
         connectorError("webhook_token_unavailable");
       }
+      managedProvider = await providerFactory?.({
+        workingDirectory: parsed.workingDirectory,
+        policy: parsed.policy,
+        inheritedEnvironment: process.env,
+        webhookTokenEnvironmentName: parsed.webhookTokenEnvironmentName,
+      });
       const connector = await startConnector({
         providerKind: provider,
         webhookPort: parsed.webhookPort,
@@ -62,6 +84,7 @@ export async function runConnectorCli(provider: ProviderKind): Promise<void> {
         workingDirectory: parsed.workingDirectory,
         policy: parsed.policy,
         stateReservation: reservation,
+        ...(managedProvider === undefined ? {} : { provider: managedProvider }),
       });
       const signal = new Promise<"SIGINT" | "SIGTERM">((resolve) => {
         process.once("SIGINT", () => resolve("SIGINT"));
@@ -71,7 +94,11 @@ export async function runConnectorCli(provider: ProviderKind): Promise<void> {
       const received = await Promise.race([signal, connector.waitForFatal()]);
       await connector.shutdown(received);
     } finally {
-      reservation.close();
+      try {
+        await managedProvider?.close();
+      } finally {
+        reservation.close();
+      }
     }
   } catch (error) {
     publicError(error);

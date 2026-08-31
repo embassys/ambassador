@@ -431,6 +431,13 @@ license, and platform ADRs.
   seams from the emitted App Server adapter with exact-count transforms. Any
   emitted-shape drift fails the build, while source-level CX02 tests retain the
   seams needed to exercise protocol and containment failures deterministically.
+- The Codex entrypoint injects one fixed async App Server factory after public
+  argument parsing, singleton reservation, retirement handling, and webhook
+  token validation. The fixed package version is compiled into that entrypoint;
+  no CLI, environment, or configuration selector was added. `retire-state`
+  returns before the factory can probe Codex, Claude and Gemini retain their
+  dormant providers, and the Codex adapter is closed before releasing the
+  singleton reservation on every foreground exit path.
 - On supported POSIX platforms, the pinned version probe and every App Server
   launch create a detached process group whose positive group ID is the exact
   root child PID returned by `spawn`. Terminal cleanup checks that recorded
