@@ -22,6 +22,7 @@ interface MutableLaunchRecord {
   requests: Readonly<Record<string, unknown>>[];
   stdinClosed: boolean;
   descendantPid: number | undefined;
+  barriers: string[];
   socket: Socket;
 }
 
@@ -41,6 +42,7 @@ type WorkerMessage =
   | { readonly channel: "request"; readonly raw: string; readonly value: unknown }
   | { readonly channel: "stdin_closed" }
   | { readonly channel: "descendant"; readonly pid?: number }
+  | { readonly channel: "barrier"; readonly name: string }
   | { readonly channel: "fixture_error"; readonly code: string };
 
 export interface FakeCodexAppServer {
@@ -55,6 +57,7 @@ export interface FakeCodexAppServer {
   waitForRequests(count: number): Promise<void>;
   waitForStdinClosed(count: number): Promise<void>;
   waitForDescendants(count: number): Promise<void>;
+  waitForBarrier(name: string): Promise<void>;
   containLatestUnit(): Promise<boolean>;
   isLatestUnitEmpty(): boolean;
   readConfigSentinel(): Promise<Buffer>;
@@ -87,6 +90,7 @@ function immutable(record: MutableLaunchRecord): FakeCodexLaunchRecord {
     requests: record.requests.map((request) => structuredClone(request)),
     stdinClosed: record.stdinClosed,
     descendantPid: record.descendantPid,
+    barriers: [...record.barriers],
   };
 }
 
@@ -231,6 +235,7 @@ export async function startFakeCodexAppServer(
           requests: [],
           stdinClosed: false,
           descendantPid: undefined,
+          barriers: [],
           socket,
         };
         records.push(record);
@@ -256,6 +261,8 @@ export async function startFakeCodexAppServer(
         record.stdinClosed = true;
       } else if (message.channel === "descendant") {
         record.descendantPid = message.pid;
+      } else if (message.channel === "barrier") {
+        record.barriers.push(message.name);
       } else if (message.channel === "fixture_error") {
         fixtureErrors.push(message.code);
       }
@@ -332,6 +339,12 @@ export async function startFakeCodexAppServer(
         () =>
           records.filter((record) => record.descendantPid !== undefined).length >= count ||
           fixtureErrors.length > 0,
+      );
+      assert.deepEqual(fixtureErrors, []);
+    },
+    async waitForBarrier(name) {
+      await waitFor(
+        () => records.some((record) => record.barriers.includes(name)) || fixtureErrors.length > 0,
       );
       assert.deepEqual(fixtureErrors, []);
     },

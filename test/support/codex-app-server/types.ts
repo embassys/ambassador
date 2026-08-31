@@ -52,4 +52,5 @@ export interface FakeCodexLaunchRecord {
   readonly requests: readonly Readonly<Record<string, unknown>>[];
   readonly stdinClosed: boolean;
   readonly descendantPid: number | undefined;
+  readonly barriers: readonly string[];
 }
