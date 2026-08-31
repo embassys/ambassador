@@ -178,6 +178,64 @@ its input and output protocols, recheck policy precedence and sandbox behavior,
 solve hard-death containment, write its red suite first, and complete real
 qualification in a suitable disposable authenticated environment.
 
+## Post-approval reevaluation
+
+After accepting this record, the user authorized a read-only search for another
+Gemini interface without weakening any security rule. The reevaluation found no
+compliant stable replacement. Repository findings below use the Gemini CLI
+[snapshot `0bd1d439751478771c45d3d0895a6a9760554bf4`](https://github.com/google-gemini/gemini-cli/commit/0bd1d439751478771c45d3d0895a6a9760554bf4),
+audited on 2026-08-31:
+
+- `0.57.0` remains the
+  [latest stable Gemini CLI release](https://github.com/google-gemini/gemini-cli/releases/tag/v0.57.0).
+  The current
+  [headless contract](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/docs/cli/headless.md)
+  still structures output only. Prompt input remains raw text, so the original
+  rejection stands.
+- The repository contains `@google/gemini-cli-sdk`, but the official
+  [release package list](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/docs/releases.md#package-scopes)
+  does not give it a stable production package contract. Its
+  [design record](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/packages/sdk/SDK_DESIGN.md#approvals--policies)
+  says approvals and policies are not implemented. The current
+  [session code](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/packages/sdk/src/session.ts)
+  disables MCP, extensions, and hooks but hardcodes an allow-by-default policy.
+  Its public options expose no policy or authentication control. Initialization
+  selects authentication from the environment or falls back to Compute ADC,
+  and
+  [resume](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/packages/sdk/src/agent.ts)
+  scans and loads complete provider history into the embedding process.
+- `@google/gemini-cli-core` is a published internal backend package. Google's
+  [package overview](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/docs/npm.md#googlegemini-cli-core)
+  describes it as the backend for API calls, authentication, and local cache,
+  not a supported provider-session facade. Building directly from its config,
+  storage, scheduler, policy, and tool internals would not supply the missing
+  stable contract.
+- The snapshot's A2A server
+  [manifest](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/packages/a2a-server/package.json)
+  identifies `@google/gemini-cli-a2a-server`, and its
+  [README](https://github.com/google-gemini/gemini-cli/blob/0bd1d439751478771c45d3d0895a6a9760554bf4/packages/a2a-server/README.md)
+  labels all code experimental and under active development. It is not a stable
+  server choice. ACP remains outside this project's scope.
+
+GM02 and GM03 remain blocked. Reopening interface selection requires all of
+these external facts:
+
+- A stable supported contract accepts structured in-memory prompt input and
+  reuses user-owned Gemini authentication without credential copying or API-key
+  environment injection.
+- Each turn is durably bound to its exact provider session before prompt input,
+  whether the session identity is caller-generated or provider-generated.
+  Resume does not expose or scan provider history in the connector.
+- Effective controls enforce the exact read-only and one-root workspace-write
+  maxima without silently granting an unapproved action, and user or
+  administrator settings cannot widen them. The controls may be fixed launch
+  and sandbox constraints or a policy API. MCP, extensions, hooks, skills,
+  subagents, and discovery remain disabled.
+- Output and terminal outcomes are structured and bounded. On Linux and macOS,
+  connector-owned lifetime monitoring, an operating-system mechanism, or exact
+  reconciliation proves that no provider or tool process remains after a
+  terminal result or connector owner death.
+
 ## Options left open
 
 A future GM01 replacement may evaluate a stable structured CLI input protocol
