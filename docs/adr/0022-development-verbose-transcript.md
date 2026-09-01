@@ -1,8 +1,11 @@
 # 0022 Development verbose transcript
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-27
+
+The current REST integration removes this option and its content-bearing
+diagnostic exception.
 
 ## Problem
 

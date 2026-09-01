@@ -1,8 +1,11 @@
 # 0021 Central result normalization
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-26
+
+The gateway no longer uses central MCP. Remove this compatibility parser with
+the old central client.
 
 ## Problem
 

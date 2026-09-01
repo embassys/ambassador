@@ -7,6 +7,10 @@ offline manual qualification runner, but no real authenticated Codex run has
 succeeded. The package has no provider or platform support claim and is not
 approved for publication.
 
+Its central-facing workflow assumes conversation and reply routes that ADR
+0037 removed. Do not run it against the live service until the connector is
+redesigned around current permission and action messages after I05.
+
 The foreground command is:
 
 ```text

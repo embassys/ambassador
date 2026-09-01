@@ -4,6 +4,10 @@ This private package contains the provider-neutral connector foundation and the
 Gemini command entrypoint. It has no selected or qualified Gemini provider
 interface, and it is not approved for publication.
 
+The shared connector workflow also assumes central routes superseded by ADR
+0037. It needs the same permission/action redesign after I05 before any live
+use, independently of the missing Gemini provider interface.
+
 GM01 evaluated Gemini CLI `0.57.0` and rejected it as a production interface.
 Its headless prompt input is not structured, its approval modes cannot enforce
 the connector's policy maximum, its sandbox copies stdin into a child process

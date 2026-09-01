@@ -1,234 +1,178 @@
 # A2A gateway
 
-Read this before working on the project.
-
-## Status
-
-Version `0.2.6` is the shipped compatibility implementation. ADRs 0023, 0025,
-0026, and 0027 define the accepted next gateway contract as of 2026-08-29. ADR
-0024 defines the accepted provider-neutral connector boundary as of 2026-08-30.
-The central source repository is
-[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The project
-owner reports that DPoP is implemented, but the exact DPoP revision and
-deployment have not been pinned. The inspected default branch and hosted
-service still advertise the older bearer contract. Tests use the test-only
-[version 2 fixture profile](v2-fixture-profile.md) for missing deployment
-facts, but fixture URLs and policies are not production defaults.
-
-ADR 0033 limits the initial gateway and connector release to macOS and Linux.
-Windows is unsupported, has no CI or release-artifact claim, and may return
-only through a separately approved implementation and qualification plan.
+Status: current development architecture as of 2026-09-01
 
 ## Product
 
 The gateway is one foreground process between a local agent runtime and the
-central A2A service. It runs an authenticated loopback MCP server, enrolls one
-central identity, receives that identity's messages, and wakes one configured
-webhook target.
+Embassys REST API. It provides an authenticated loopback MCP server, enrolls
+one email-based central identity, receives that identity's messages, and wakes
+one configured webhook target.
 
-The gateway does not discover OpenClaw, inspect agents, choose a runtime
-adapter, manage bindings, or run a model. The user supplies a literal-loopback
-webhook URL and an environment-variable reference for its bearer token:
+The command remains:
 
 ```text
 a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
 ```
 
-The same bearer token authenticates calls from the local MCP client. The
-gateway prints `http://127.0.0.1:8787/mcp` after it binds successfully. The
-user configures that address in the local agent runtime.
+The gateway does not discover a runtime, manage bindings, select a provider,
+run a model, or accept central endpoint configuration from the CLI. The same
+locally supplied bearer token authenticates the webhook and every call to the
+gateway's loopback MCP endpoint.
 
-## Rules
+## Current central baseline
 
-- One process owns one webhook target and one central identity.
-- The foreground process accepts exactly the two required named startup
-  options in `--name=value` form. ADR 0022 permits `--verbose=true` only as a
-  temporary development diagnostic with paired development central endpoints.
-- The MCP listener binds only to `127.0.0.1:8787`, validates `Host` and
-  `Origin`, and authenticates every request with the webhook bearer token.
-- Before enrollment, the local MCP catalog contains only `register_agent`,
-  `verify_email`, and `resend_verification`.
-- The accepted target sends those bootstrap operations through bounded central
-  REST requests. Verification carries a DPoP issuance proof and returns a
-  DPoP-bound token that the gateway intercepts before local result handling.
-- Protected central REST and MCP HTTP requests use `Authorization: DPoP` and a
-  fresh proof. Tokens never appear in local or upstream MCP tool arguments.
-- Verification creates the first encrypted version 2 credential. Scheduled
-  same-key reissue and explicit email-control recovery are the only credential
-  replacement paths.
-- Message bodies remain in bounded process memory. The notification journal
-  contains opaque IDs and webhook relay state only.
-- MCP arguments and results, task content, permission data, registration email,
-  verification codes, tokens, private keys, proofs, and nonces never enter
-  SQLite, configuration, normal logs, diagnostics, metrics, temporary files,
-  crash artifacts, or support bundles. ADR 0022 temporarily permits a
-  credential-redacted development transcript on stderr.
-- The gateway does not hold model-provider credentials. Provider connectors do
-  not receive the central credential or DPoP private key.
-- No listener binds beyond loopback.
+The gateway targets one current development contract:
 
-## Shipped `0.2.6` compatibility
+- REST base: `https://mcp.embassys.ai`
+- source: `embassys/agent2agent` commit
+  `b769896b7cfb1ee3540195be9e7a61cf777b9388`
+- bootstrap: unversioned REST registration, verification, and resend
+- protected transport: DPoP-bound token in an `Authorization: Bearer` header
+  plus a separate DPoP proof header
+- work model: permissions, action calls, message polling, and acknowledgement
 
-The shipped release forwards bootstrap calls through central MCP. A successful
-`verify_email` response is its only token source. It stores a JWT-only version
-1 credential, uses bearer authentication for central REST polling, and injects
-the token into protected central MCP tool arguments.
+The central service also hosts MCP and OAuth surfaces. They are not part of
+the gateway architecture. The gateway does not need them because the REST API
+covers its flows.
 
-It calls `GET /api/poll_messages?timeout=30`. An explicit `404` switches that
-process to the MCP `poll_messages` tool. Either operation consumes the returned
-messages. The gateway keeps the bodies in memory and stores only present IDs
-and relay state in SQLite. Because central cannot retrieve or redeliver a
-consumed message, a gateway restart can lose an in-memory body. Startup deletes
-the stale journal row instead of waking the webhook for unavailable content.
+There is no parallel legacy client and no speculative next client. The older
+bearer-only/MCP implementation and the proposed `/api/v2` implementation are
+both removed as the live REST integration lands. Existing credentials and
+state are not migrated.
 
-Those details remain accurate for `0.2.6`, but they are not the implementation
-target. REST bootstrap, DPoP transport, version 2 credentials, token reissue,
-email-control recovery, leased delivery, and the REST v2 message lifecycle
-supersede them under ADRs 0023, 0025, and 0026.
+The repository's current production code still contains parts of the removed
+designs. Local fixture success against those designs is historical evidence,
+not current central compatibility.
 
-## Accepted target flow
+## System shape
 
 ```text
 Local agent runtime
-  |  authenticated MCP using webhook token
+  |
+  | authenticated loopback MCP
   v
-Gateway MCP server on 127.0.0.1:8787
-  |  REST bootstrap before enrollment
-  |  DPoP-authenticated REST and MCP after verification
+A2A gateway on 127.0.0.1:8787
+  |
+  | unversioned REST
+  | Bearer token plus DPoP proof after verification
   v
-Central API and MCP service
-
-Central REST v2 message API
-  |  leased full-message receive after enrollment and activation
+https://mcp.embassys.ai/api
+  |
+  | permission requests, action calls, and consumed messages
   v
-Gateway in-memory inbox and ID-only journal
-  |  bearer and HMAC webhook wake
+Gateway bounded in-memory inbox and ID-only journal
+  |
+  | authenticated ID-only webhook wake
   v
 Configured local webhook
 ```
 
-### Provider companion boundary
+An optional provider connector may own the webhook and run a local provider
+runtime. That remains a separate foreground product. The existing connector
+execution code was designed around the removed conversation/reply API and must
+be rechecked against current permission/action messages before it can claim
+live integration. It does not block the gateway REST work.
 
-ADR 0024 accepts separately launched foreground provider connectors as
-companion products. One connector is one gateway's configured loopback webhook
-target and controls one provider runtime. Supporting more than one provider at
-once requires independent gateway and connector pairs. The gateway stays
-provider-neutral, and its two-option CLI does not change.
+## Invariants
 
-The gateway sends the existing authenticated ID-only webhook wake. The
-connector authenticates that wake, then retrieves the message and performs
-delivery-control operations through the gateway's authenticated local MCP
-endpoint. The central credential and DPoP private key stay in the gateway. The
-connector uses the provider's existing authenticated installation without
-requesting, copying, or proxying provider credentials.
+- One process owns one webhook target and one central identity.
+- The MCP listener binds only to `127.0.0.1:8787`.
+- Local MCP authentication, `Host`, and `Origin` checks happen before body
+  parsing.
+- Before enrollment, local MCP exposes only registration, verification, and
+  resend.
+- After enrollment, local MCP exposes fixed tools backed by the current REST
+  routes. It does not mirror a central MCP catalog.
+- Verification creates a P-256 key, submits its public JWK, intercepts the
+  token, and persists the token and private key together before reporting
+  success.
+- Every protected REST request uses a fresh proof. The token never appears in
+  an MCP argument, MCP result, URL, or log.
+- Message bodies remain in bounded process memory. SQLite remains ID-only.
+- The gateway holds no provider credential. A provider connector receives no
+  central token or DPoP private key.
+- No runtime path probes alternate central routes or negotiates an API
+  version.
 
-The connector, not the gateway journal, owns durable conversation-to-session
-correlation. That state contains only approved opaque IDs, lifecycle state,
-and bounded retry timing. It contains no prompts, messages, replies, tool data,
-credentials, working-directory paths, or provider transcripts. After a crash,
-the connector may recover only the exact prior provider turn. If it cannot
-determine that turn's outcome, it records uncertainty and does not start a new
-turn blindly.
-
-ADR 0024 does not choose the connector executable, CLI or configuration,
-working-directory interface, store format, access controls, encryption,
-deletion, limits, runtime, dependencies, provider port, approval policy,
-package layout, supported platforms, installation, publishing, or release
-model. ADRs 0028 through 0031 now fix those connector foundation choices.
+## Main flows
 
 ### Startup
 
-1. Acquire the singleton lock before resolving tokens, opening credentials,
-   binding MCP, receiving messages, or sending a webhook.
-2. Resolve and validate the 48-character lowercase hexadecimal webhook token
-   from the named environment variable.
-3. Bind the authenticated MCP endpoint to `127.0.0.1:8787`.
-4. Load an existing version 2 credential, if present, and require it to pass
-   its token, key, endpoint, and storage checks. The future release is a fresh
-   install and does not read or convert a version 1 credential.
-5. Start version 2 receive only after a valid DPoP credential is available and
-   central activation has completed.
-6. Print the MCP endpoint and wait until interrupted.
+1. Acquire the singleton lock.
+2. Resolve and validate the named 48-character webhook token.
+3. Bind the authenticated loopback MCP endpoint.
+4. Load the current encrypted DPoP credential, if present.
+5. Start REST polling only when that credential is valid and unexpired.
+6. Print `http://127.0.0.1:8787/mcp` and remain in the foreground.
 
-### Enrollment and credential lifecycle
+A development installation starts from clean gateway state. The gateway does
+not read or convert old bearer credentials or speculative versioned records.
 
-1. The local agent gathers username, optional display name, and email through
-   normal conversation.
-2. `register_agent` sends `POST /api/register` without a central access token.
-3. `resend_verification` sends `POST /api/resend_verification` without a
-   central access token.
-4. For `verify_email`, the gateway creates a P-256 key and sends
-   `POST /api/verify_email` with a DPoP issuance proof.
-5. The gateway validates the response, token lifetime, subject, and public-key
-   binding. It persists the token and private key as one encrypted version 2
-   credential before enabling protected work or returning token-free success.
-6. The gateway activates version 2 delivery through the fixed, idempotent REST
-   activation operation. It does not infer, probe, or negotiate a version.
+### Enrollment
 
-The token lasts 24 hours. Scheduled same-key reissue begins with 12 hours
-remaining and atomically replaces only the same identity and key. Key loss,
-expiry, revocation, and deliberate key rotation require a fresh email-control
-verification. A `401`, invalid token, proof failure, key failure, or ordinary
-tool failure never triggers renewal, registration, or credential replacement.
+1. The local agent calls `register_agent` with an email and optional display
+   name.
+2. The gateway sends `POST /api/register_agent`.
+3. The user supplies the six-digit code delivered by email.
+4. The gateway generates a P-256 key and sends its public JWK with
+   `POST /api/verify_email`.
+5. The gateway validates the returned key binding and timestamps.
+6. It atomically stores the token and private key before returning a
+   token-free result and enabling protected tools.
 
-An unreadable credential cannot prove its identity. The gateway must not
-overwrite it until the project approves an explicit local reset interface.
+`resend_verification` calls the matching REST route. None of the three
+bootstrap calls uses a central access token.
 
-### Conversations and delivery
+### Protected work
 
-1. The gateway calls the fixed DPoP-authenticated
-   `GET /api/v2/messages/receive?timeout=30&limit=100` route. It does not probe
-   or fall back to a different REST route or central MCP.
-2. Central returns the oldest bounded batch and leases each returned message
-   for 60 seconds. An expired unacknowledged lease makes the same immutable
-   message eligible again.
-3. The gateway validates the batch, keeps bodies in bounded memory, and stores
-   only message IDs and relay state in SQLite.
-4. The webhook receives a fixed ID-only instruction with bearer and HMAC
-   authentication and ID-based deduplication headers.
-5. The local agent retrieves the in-memory message through local MCP. It records
-   one idempotent reply or a terminal no-reply outcome, then acknowledges the
-   message.
-6. The gateway deletes the in-memory body and journal row only after central
-   confirms `status: "acked"`.
+The gateway creates a fresh proof for the exact method and URL, including the
+query string, and calls the REST API. The server's action catalog supplies the
+available action names and JSON schemas. Permission requests and decisions
+control whether `call_action` may deliver an action message to another agent.
 
-A restart clears stale local wake rows. Lease expiry lets central redeliver the
-full message. No crash-recovery path writes message or reply content to gateway
-or connector durable state.
+### Receive and wake
+
+1. The gateway long-polls `/api/poll_messages`.
+2. Central marks queued messages delivered before returning them.
+3. The gateway validates one bounded batch, keeps bodies in memory, and stores
+   only present message IDs and relay state.
+4. It sends an authenticated ID-only webhook wake.
+5. The local agent retrieves the body through the gateway's MCP
+   `poll_messages` tool.
+6. After processing an ID-bearing message, the local agent calls
+   `ack_message`.
+7. The gateway removes the body and ID only after central confirms `acked`.
+
+The current server does not redeliver a delivered message. A gateway crash can
+therefore lose a body that was already returned by central. The project accepts
+that limitation for development and states it plainly. Message body
+persistence is still forbidden.
 
 ## Ownership
 
 | Component | Responsibility |
 | --- | --- |
-| Central service | REST enrollment, DPoP-bound issuance and enforcement, authorization, leases, message content, conversations, replies, outcomes, and MCP tools |
-| Gateway MCP path | Local bearer authentication, bootstrap tools, credential interception, token-free results, DPoP-authenticated central transport, limits, and cancellation |
-| Gateway relay | Fixed REST v2 receive, bounded in-memory bodies, ID-only durable wake state, retries, terminal outcomes, and acknowledgement observation |
-| Local runtime | User interaction, MCP tool use, model execution, and webhook handling |
-| Provider connector | Authenticated ID-only wake handling, local MCP retrieval, content-free correlation, provider-session control, and fail-closed uncertainty |
-| Provider runtime | Model execution through the user's existing authentication, MCP servers, extensions, tools, sandbox, and approval controls |
+| Central service | Email identities, DPoP-bound token issuance, permissions, action schemas, action calls, messages, and acknowledgements |
+| Gateway | Local MCP authentication, REST projection, encrypted central credential, proof creation, bounded in-memory inbox, and ID-only webhook relay |
+| Local runtime | User interaction, MCP tool use, message handling, and webhook ownership |
+| Optional provider connector | Webhook admission and provider process control after its current-message integration is redesigned |
+| Provider runtime | Its own authentication, history, tools, policy, and model execution |
 
-## Deployment facts still needed
+## Current limitations
 
-- Exact DPoP server commit, generated REST and MCP schemas, deployment
-  identifier, and proof that the hosted environment runs that commit.
-- Stable production issuer, API resource, API origin, MCP resource, and MCP
-  endpoint values for package constants.
-- Central implementation and staging evidence for REST bootstrap, DPoP
-  enforcement, token lifecycle, lease redelivery, and version 2 messages.
-- Native structured central MCP results before the temporary Python-literal
-  compatibility parser can be removed.
-- An approved local interface for intentional identity reset and an unreadable
-  credential.
+- `list_action_types` and generated OpenAPI now work. The catalog contains six
+  actions, including `get_email` and `get_phone_number`, both requiring a
+  string `reason`.
+- `get_my_permissions` has a response-construction mismatch in source and
+  still needs a protected live check.
+- The server has no token refresh or reissue endpoint. An expired 30-day
+  credential requires a fresh development enrollment after local state is
+  intentionally cleared.
+- Message receive is consuming and acknowledgement is not idempotent.
+- The current source disables verification-code expiry.
+- Existing provider connector code assumes central conversation and reply
+  routes that do not exist and is outside the first REST integration PRs.
 
-I01 and I02 in the [implementation plan](implementation-plan.md) track the
-complete latest-server API and flow refresh, including the reported new
-user-email and user-phone request templates, and the first real DPoP
-development E2E run. The re-baseline is not limited to authentication. After
-the pinned schemas confirm their behavior, a low-impact contact-request
-template is preferred to a calendar action for that E2E.
-
-Tests may use the accepted test-only
-[version 2 fixture profile](v2-fixture-profile.md) for these missing facts.
-Production code must not copy its hostnames, signing keys, email behavior,
-proxy trust, or capacity values into a release as if central had confirmed
-them.
+These limitations can be improved later. They do not justify client-side API
+versioning, MCP fallback, migration code, or invented server contracts.

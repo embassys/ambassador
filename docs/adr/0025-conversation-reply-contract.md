@@ -1,10 +1,13 @@
 # 0025 Conversation and reply contract
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-29
 
 Approved: 2026-08-29
+
+The current server exposes permissions, action calls, consuming polling, and
+acknowledgement. It does not expose this proposed conversation lifecycle.
 
 Version 1 mailbox and delivery-mode migration requirements are superseded by
 accepted ADR 0027. Future activation is fresh-install-only.

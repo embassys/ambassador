@@ -1,8 +1,12 @@
 # 0029 Connector correlation state
 
-Status: accepted
+Status: accepted for storage security; central lifecycle requires ADR 0037 rework
 
 Date: 2026-08-30
+
+The encryption, filesystem, quota, and retirement rules remain useful. The
+conversation and paired-message state model assumes the superseded central
+conversation lifecycle and must be redesigned after I05 before live use.
 
 ## Problem
 
