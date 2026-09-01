@@ -2,138 +2,116 @@
 
 Status: evidence snapshot as of 2026-09-01
 
-This page tracks which central server source and deployment the gateway should
-integrate with. It is evidence and planning context, not a protocol
-specification. ADRs 0023, 0025, and 0026 remain authoritative until a material
-server difference is reviewed and accepted.
+This page records observed facts. ADR 0037 and the gateway protocol own the
+client decision.
 
-## Server sources
+## Pin
 
-The central server repository is
-[`embassys/agent2agent`](https://github.com/embassys/agent2agent). GitHub
-currently reports it as private. Authorized project collaborators can use it
-for cross-repository implementation and review.
+- Repository: [`embassys/agent2agent`](https://github.com/embassys/agent2agent)
+- Source revision:
+  `b769896b7cfb1ee3540195be9e7a61cf777b9388`
+- Live origin: `https://mcp.embassys.ai`
+- REST prefix: `https://mcp.embassys.ai/api`
 
-The hosted API base supplied for the existing service is
-`https://mcp.embassys.ai`. A user-supplied API document identifies itself as
-version `1.0.0`, dated 2026-08-30. That document describes bearer JWTs,
-`POST /api/register_agent`, consuming `GET /api/poll_messages`, and the older
-permission and action API. It may be behind the server's current work and must
-not be treated as a generated contract for the next gateway.
+The live service does not expose a build revision. Its observed registration,
+verification, and DPoP behavior matches the pinned source. The user reports
+that this source has been deployed. This is the accepted development pin.
 
-Do not copy the snapshot's infrastructure identifiers, account details,
-addresses, emails, or log locations into this repository. They are not needed
-to integrate the client and may already be stale.
+## Live observations
 
-## Evidence observed on 2026-08-31
+| Check | Result |
+| --- | --- |
+| `GET /health` | `200`, healthy service response |
+| `POST /api/register_agent` with email and display name | `200` |
+| Verification email through the real central mail path | Delivered to the disposable Mailosaur inbox |
+| `POST /api/verify_email` with email, code, and P-256 public JWK | `200` with token and matching `jkt` |
+| Response `jkt` and JWT `cnf.jkt` | Both matched the submitted public key |
+| Bound token without a `DPoP` header | `401` |
+| `Authorization: DPoP <token>` | `401` |
+| `Authorization: Bearer <token>` plus a valid proof | `200` on `GET /api/poll_messages?timeout=0` |
+| Valid token with a proof from another key | `401` |
+| Reuse of an accepted proof | `401` |
+| Initial valid proof without a nonce | Accepted; no nonce challenge required |
+| `GET /api/list_action_types` with valid DPoP | `200` with six action definitions |
+| `GET /openapi.json` | `200`; raw response SHA-256 `da0ddc402935c7112cebae1604a84f412c003c8d81493a566a901c199bba9544` |
 
-| Source | Observation | Meaning |
+No token, private key, proof, email address, or verification code was written
+to the repository or printed in captured output. The disposable Mailosaur
+message was deleted after use.
+
+## Source-derived REST inventory
+
+| Surface | Routes | Gateway use |
 | --- | --- | --- |
-| `embassys/agent2agent` default branch | `main` points to commit `4690319`, an initial FastAPI implementation using bearer JWTs, `/api/register_agent`, `/api/poll_messages`, and MCP token arguments. The tree has no DPoP or version 2 implementation and no server test directory. | This commit is an older source snapshot. It is not the DPoP integration target. |
-| Hosted health route | `GET https://mcp.embassys.ai/health` returned the healthy service response. | The hostname is live, but health does not identify its source revision or contract. |
-| Hosted bootstrap routes | An empty request reached `/api/register_agent`; `/api/register` returned `404`. | The accepted ADR 0023 bootstrap route was not advertised by the observed deployment. |
-| Hosted version 2 receive route | `/api/v2/messages/receive` returned `404`. | The accepted ADR 0025 delivery route was not advertised by the observed deployment. |
-| Hosted OpenAPI route | `/openapi.json` returned `500`. | A deployed schema could not be collected from that route. |
-| Project-owner report | The central server has a DPoP implementation. | The exact source commit, branch, deployment, issuer, resource values, and conformance evidence still need to be pinned. |
+| Health | `GET /health` | Operational check only |
+| Enrollment | `POST /api/register_agent`, `POST /api/verify_email`, `POST /api/resend_verification` | Required |
+| Action catalog | `GET /api/list_action_types` | Required and live-qualified |
+| Permissions | `POST /api/request_permission`, `POST /api/respond_to_permission`, `GET /api/get_my_permissions` | Required |
+| Actions | `POST /api/call_action` | Required |
+| Messages | `GET /api/poll_messages`, `POST /api/ack_message` | Required |
+| Duplicate permission helpers | `POST /api/grant_permission`, `POST /api/deny_permission` | Not used; `respond_to_permission` is canonical |
+| Invitations | `GET /accept-invitation`, `GET /api/check_invitation_approval` | Human/server surface; not a gateway tool |
+| MCP and OAuth | `/mcp` and discovery/registration routes | Not used by the gateway |
 
-The DPoP implementation may exist outside the inspected default branch or may
-await deployment. Until its revision and endpoint are identified, this
-repository must describe it as reported, not live-qualified.
+The source contains an invitation helper, but `request_permission` does not
+call it. The shared guide's claim that first contact automatically creates an
+invitation is not true for this revision.
 
-## I01: re-baseline the complete server API and client tests
+## DPoP profile
 
-- [ ] Obtain the exact current server commit and the exact development
-  deployment built from it, including the reported DPoP work and every API
-  added or changed since the inspected bearer-era snapshot.
-- [ ] Record the canonical issuer, API origin and resource, MCP endpoint and
-  resource, proxy path, deployment identifier, and rollout state without
-  recording credentials or verification data.
-- [ ] Export or inspect the exact REST OpenAPI, MCP schemas, template catalog,
-  and other client-visible registries from that revision and deployment.
-- [ ] Produce an exhaustive inventory of current REST routes, MCP tools,
-  templates, events or callbacks, authentication rules, versioning, and
-  deprecations. Classify each item as required by an accepted gateway flow,
-  flow-affecting, optional, or out of scope.
-- [ ] Diff methods, request and response shapes, sequencing, authentication,
-  permissions and consent, errors, retries, limits, idempotency, leases,
-  message lifecycle, and token lifecycle against ADRs 0023, 0025, and 0026.
-- [ ] Identify the two new templates for requesting a user's email address and
-  phone number. Confirm their exact identifiers, schemas, consent behavior,
-  availability rules, and result handling from the pinned contract rather
-  than guessing names from an older document.
-- [ ] Trace how every material addition or change affects enrollment,
-  verification, protected calls, message receipt, user interaction, replies,
-  completion, outcomes, acknowledgement, reissue, recovery, and failure
-  handling. The review is not limited to authentication.
-- [ ] Return any material client-visible difference for ADR review. Do not add
-  a route probe, compatibility fallback, or runtime contract selection.
-- [ ] Update the Node fixture, independent Python fixture, gateway integration
-  clients, and reviewed test inventories to the approved latest server
-  contract. Tests and CI change before production integration code.
+- Key and proof algorithm: ES256 on P-256
+- Verification binding: public JWK in the JSON body
+- Token: HS256, 30-day configured lifetime
+- Token claims: `sub`, `email`, `iat`, `exp`, `cnf.jkt`
+- Protected authorization: `Authorization: Bearer <token>`
+- Proof header: separate `DPoP` header
+- Proof claims: `jti`, `htm`, exact `htu`, `iat`, and `ath`
+- Maximum proof age: 60 seconds
+- Future clock allowance: 5 seconds
+- Replay key: agent plus `jti`
+- Nonce: enforced only when a server-side nonce already exists; none is needed
+  for the first valid request
 
-I01 is complete when one pinned server revision, its complete client-visible
-API inventory and generated schemas, the gateway clients, both fixtures, and
-the gateway tests agree. Every new API is classified and every flow impact is
-either implemented behind accepted tests, returned for ADR review, or recorded
-as intentionally out of scope. A hosted health response or an unpinned API
-document is not enough.
+## Message behavior
 
-## I02: switch to DPoP and complete development E2E
+`poll_messages` updates all selected queued messages to `delivered` and returns
+their full bodies. The response fields come from the database row:
+`id`, `sender_agent_id`, `action_type_id`, `payload`, and `created_at`.
 
-### Local email-capture preparation
+`ack_message` changes one delivered message to `acked`. It returns `404` when
+the message is absent, already acknowledged, or not in delivered state. There
+is no lease, redelivery, or delivered-message lookup.
 
-The development machine has Mailosaur API access and catch-all inbox details
-in the macOS login Keychain. The service name is
-`ai.embassys.ambassador.development.mailosaur`; the three accounts are
-`api-key`, `server-id`, and `inbox-domain`. The values do not belong in this
-repository, shell startup files, `.env` files, command arguments, logs, or test
-output.
+## Source issues relevant to the client
 
-On 2026-09-01, a read-only server lookup authenticated successfully. One
-uniquely addressed synthetic message then passed API creation, address search,
-full retrieval, content matching, and deletion. The check consumed one message
-from the 500-email daily allowance and left no message behind. It proves that
-the machine-local API credential and unique-address lookup work. It does not
-prove that the central deployment sends its verification email correctly;
-I01 must first pin that deployment and its email format, and I02 must exercise
-the real outbound path.
+| Issue | Effect | Plan |
+| --- | --- | --- |
+| `get_my_permissions` constructs username fields while its response model declares email fields | Route may return `500` | Confirm live; keep it covered but nonessential to the first action E2E |
+| Verification-code expiry is set to `NULL` | Codes do not expire | Accept for current development; track as server hardening |
+| Duplicate grant/deny endpoints write a different message shape | Their behavior may diverge from the canonical response route | Do not use them |
+| Invitation sending helper is disconnected from permission requests | Automatic first-contact invitation is not active | Do not rely on it |
+| Expiry comparison in `call_action` mixes a database timestamp with event-loop time | Expiring permissions may fail incorrectly | Use non-expiring test grants and report the server defect |
 
-Conserve the daily allowance by completing every compatible I02 check with one
-authenticated identity. Create another identity only for a case whose contract
-requires fresh issuance or email-control recovery.
+## Mailosaur handling
 
-- [ ] After I01 confirms the current template contract, qualify both
-  user-contact templates at the contract boundary and select a low-impact
-  email- or phone-request flow for live E2E instead of a calendar action. Use
-  only synthetic or disposable contact data and preserve the repository's
-  content-free persistence and logging boundary.
-- [ ] Enroll a fresh version 2 identity against the pinned development
-  deployment through the fixed REST bootstrap routes.
-- [ ] Prove issuance binds the token to the gateway P-256 key and that the
-  server rejects the same token through bearer authentication.
-- [ ] Prove nonce handling, wrong-key rejection, proof replay rejection, proxy
-  URI reconstruction, and fresh proofs for protected REST and MCP requests.
-- [ ] Prove the central MCP catalog and tool calls carry no token argument.
-- [ ] Prove same-key reissue, activation, leased receive, reply or terminal
-  completion, outcome lookup, acknowledgement, and restart recovery.
-- [ ] Run the packed gateway, artifact scans, and content-boundary checks
-  against that deployment without recording tokens, keys, proofs, nonces,
-  email addresses, verification codes, messages, or replies.
+The development machine stores Mailosaur access in the macOS login Keychain
+under service `ai.embassys.ambassador.development.mailosaur` and accounts
+`api-key`, `server-id`, and `inbox-domain`. Values never belong in repository
+files, `.env`, shell arguments, logs, or test output.
 
-I02 is complete when the full development flow, including the selected
-contact-request template, passes against the pinned DPoP deployment with
-bearer rejection and no persisted or logged contact value. S07 and E01 through
-E03 still provide the later staging, soak, and release evidence.
+The live run uses unique catch-all addresses, searches only the current time
+window, extracts the six-digit code in memory, and deletes the captured
+message. Keep the qualification loop within the 500-message daily allowance.
 
-## Evidence rules
+## Remaining live work
 
-- Pin a source commit and a deployment identifier together. Neither one proves
-  the other.
-- Treat the attached API document as historical input until generated schemas
-  and black-box behavior confirm it.
-- Use a fresh version 2 identity. Do not convert or silently reuse a version 1
-  bearer identity.
-- Never weaken an accepted test to match a server implementation. Return a
-  material contract difference for review.
-- Never put a DPoP-bound token in an MCP argument or accept it through a bearer
-  path.
+- [x] Observe the fixed `list_action_types` response and pin `get_email` and
+  `get_phone_number`. Both require a string `reason`.
+- [ ] Confirm `get_my_permissions` after the same deployment.
+- [ ] Run two disposable identities through permission request, permission
+  decision, action call, poll, and acknowledgement.
+- [ ] Run the packed gateway after I02 through I04 replace the old client.
+- [ ] Scan all run artifacts without storing content or credentials.
+
+Server build metadata remains desirable for a release. Generated OpenAPI and
+the dynamic catalog now corroborate the pinned source.

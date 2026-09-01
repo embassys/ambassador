@@ -1,10 +1,13 @@
 # 0023 REST enrollment API
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-29
 
 Approved: 2026-08-29
+
+ADR 0037 replaces the proposed `/api/register` and issuance-proof contract
+with the deployed `/api/register_agent` and verification-body JWK contract.
 
 Migration and in-place-upgrade requirements are superseded by accepted ADR
 0027. The future gateway is fresh-install-only.
