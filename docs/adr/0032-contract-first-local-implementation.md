@@ -1,8 +1,12 @@
 # 0032 Contract-first local implementation before central deployment
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-30
+
+The project now has a pinned public central source and live behavior. Tests
+must follow that source-derived contract rather than the former speculative
+fixture contract.
 
 ## Problem
 

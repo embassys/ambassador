@@ -1,8 +1,12 @@
 # 0024 Provider session connectors
 
-Status: accepted
+Status: accepted for provider separation; central lifecycle amended by ADR 0037
 
 Date: 2026-08-29
+
+The provider-neutral process boundary remains. Assumptions about central
+conversations, replies, completion, outcomes, and leased messages are
+superseded. The connector's central-facing workflow needs redesign after I05.
 
 ## Problem
 

@@ -1,13 +1,16 @@
 # Connector setup and retention
 
-Status: prepared for Q02; real-provider qualification pending
+Status: local provider reference; current central integration redesign pending
 
-This guide describes the accepted local connector design. It is not a support
-or release claim. No Codex, Claude, or Gemini connector has completed a real
-authenticated qualification run. The production central version 2 service is
-also not deployed or advertised, and connector publishing is not approved.
-The shipped gateway `0.2.6` does not implement this accepted version 2
-connector lifecycle and is not compatible with the setup below.
+This guide describes the useful local connector boundaries that remain after
+ADR 0037. It is not a support or release claim. No Codex, Claude, or Gemini
+connector has completed a real authenticated qualification run.
+
+The implemented connector execution flow assumes central conversation and
+reply routes that the current server does not provide. Do not use the setup
+below against the live service until the connector is redesigned around
+permission and action messages after I05. The published gateway `0.2.6` is
+also unsupported against the current DPoP REST contract.
 
 ## Provider status
 
@@ -90,9 +93,9 @@ a2a-gateway start \
   --webhook-token-env=A2A_CONNECTOR_WEBHOOK_TOKEN
 ```
 
-Do not substitute fixture URLs for production central endpoints. The external
-central team owns the deployment contract in the
-[central implementation specification](central-server-implementation-spec.md).
+The gateway owns the fixed live REST origin. The connector never receives a
+central URL, token, or DPoP key. See the
+[central REST contract inventory](central-server-implementation-spec.md).
 
 ## Working directory and policy
 
@@ -204,15 +207,17 @@ after its fake protocol, packed artifact, policy, cancellation, hard-crash
 containment, recovery, history, and real authenticated qualification gates all
 pass.
 
-As of 2026-08-31:
+As of 2026-09-01:
 
 - the provider-neutral fake connector chain is implemented;
 - the Codex fake App Server adapter is implemented;
 - the Claude fake and production adapters are implemented, and the CL04 manual runner is available;
 - Gemini has no selected interface;
 - no real provider qualification has succeeded;
-- production central compatibility remains blocked on external deployment;
+- the gateway central client is being replaced with the live REST contract;
+- the connector's central-facing flow needs redesign after that work;
 - connector publishing and stable release remain unapproved.
 
-Q02 therefore remains prepared but incomplete. Fake tests, an offline manual
-runner, or accepted architecture do not replace real-provider evidence.
+The guide therefore remains a local reference, not an operable live setup.
+Fake tests, an offline manual runner, or accepted process boundaries do not
+replace current central and real-provider evidence.

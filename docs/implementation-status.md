@@ -1,82 +1,55 @@
 # Implementation status
 
-Status: historical `0.2.6` compatibility snapshot from August 27, 2026.
+Status: current development snapshot as of 2026-09-01
 
-This page predates the local version 2 gateway and connector implementation.
-Use the [project wiki](README.md) for navigation and the
-[human work queue](human-work.md) for current status. The shipped `0.2.6`
-details below remain useful as a compatibility record.
+## Decision
 
-## Approved target
+ADR 0037 replaced both earlier central clients with one current target:
 
-- One foreground process starts with `--webhook-url=<url>` and `--webhook-token-env=<name>`. ADR 0022 temporarily permits `--verbose=true` for live development diagnostics.
-- The CLI accepts only named `--name=value` options and has no setup, binding, runtime-discovery, configuration, or service-management flow.
-- The process binds an authenticated Streamable HTTP MCP endpoint at `http://127.0.0.1:8787/mcp` and prints that address after successful startup.
-- The webhook token authenticates both the outbound webhook and every local MCP request.
-- Before enrollment, the MCP server exposes only registration, verification, and resend tools.
-- A successful verification response supplies the central JWT. The gateway persists it, strips it from the local result, starts polling, and adds it only to future transient upstream MCP arguments and central poll authorization.
-- One process owns one webhook and one central identity. There are no bindings or configured local-runtime agent IDs.
-- Full messages consumed from the live REST API remain only in a bounded in-memory inbox. SQLite remains ID-only, and message content and plaintext credentials never enter durable relay state or observability outputs.
+- `https://mcp.embassys.ai/api`
+- unversioned REST routes
+- email-only registration
+- P-256 JWK in the verification body
+- `Authorization: Bearer` plus a separate DPoP proof
+- permissions, action calls, consuming message polling, and acknowledgement
+- no central MCP, `/api/v2`, reissue, activation, lease, conversation, reply,
+  outcome, legacy support, or migration
 
-ADR `0017-single-webhook-gateway.md` records this design. Obsolete ADRs were deleted at the user's direction.
+## Evidence complete
 
-## Replacement source
+- central source commit `b769896b7cfb1ee3540195be9e7a61cf777b9388`
+  inspected;
+- complete route surface classified;
+- live registration and Mailosaur email delivery passed;
+- live DPoP verification passed;
+- token/key binding matched;
+- valid protected polling passed;
+- missing proof, wrong key, replay, and wrong authorization scheme were
+  rejected; and
+- current message consumption and acknowledgement semantics traced in source.
 
-PR `#5` implements the approved replacement on the reviewed test branch:
+## Work remaining
 
-- strict two-option foreground `start` and lock-first startup;
-- authenticated, bounded Streamable HTTP MCP on `127.0.0.1:8787`;
-- bootstrap enrollment, encrypted JWT persistence, token-free verification, and authenticated tool proxying;
-- ID-only SQLite notification state and webhook work;
-- accepted-wake redrive until confirmed MCP `ack_message`;
-- restart recovery and fixed safe errors; and
-- deletion of setup, bindings, runtime adapters, JSON configuration, and native service management.
+The repository code does not yet implement ADR 0037 end to end. Existing
+central fixtures and modules still contain bearer-era and speculative
+versioned behavior. The implementation order is:
 
-The local replacement suite covers the complete loopback flow and one container-gated FastMCP flow. Linux and macOS run the local suite in CI. The Linux Docker job tests the independent fixture, then runs the Node gateway through enrollment, notification delivery, content retrieval, and acknowledgement against the pinned FastMCP server. A separate Linux and macOS job packs the npm-registry artifact with pnpm, installs it into an empty prefix with pnpm, and repeats that flow through the installed binary. Its Linux run also verifies pre- and post-enrollment tool discovery through OpenClaw `2026.7.1-2` and confirms that OpenClaw accepts the gateway's bearer request with the additional runtime-agnostic HMAC headers. Both package jobs verify direct delivery to an independent Hermes-compatible HMAC V2 endpoint. ADR 0033 makes Windows unsupported for the initial release, removes its CI lane, and closes W01 as deferred rather than passed.
+1. I02 replace tests and fixtures.
+2. I03 replace enrollment, credential validation, and DPoP transport.
+3. I04 replace protected tools and message handling.
+4. I05 run the live two-identity E2E.
 
-Version `0.2.0` introduced the paired `A2A_DEV_CENTRAL_API_URL` and `A2A_DEV_CENTRAL_MCP_URL` development overrides and beginner setup guides. Its Hermes setup used a packaged loopback bridge to translate bearer authentication into Hermes' generic HMAC V2 format.
+`list_action_types` and generated OpenAPI now work live. The catalog returned
+six actions; `get_email` and `get_phone_number` each require a string `reason`.
+The full permission/action E2E waits only for the gateway reimplementation.
 
-Version `0.2.1` adds a generic timestamped HMAC V2 signature and `X-Request-ID` to every bearer-authenticated wake, so Hermes can verify the gateway directly without a runtime option or bridge. The old bridge remains packaged only for existing `0.2.0` configurations.
+The provider-neutral connector, Codex adapter, and Claude adapter have local
+fixture implementations, but their central-facing flow assumed removed
+conversation/reply routes. They require a later redesign and have no current
+live support claim.
 
-Version `0.2.2` projects the live central bootstrap schemas, accepts the central server's bounded Python-literal result wrapper and harmless verification extensions, preserves top-level arrays under `result`, and rejects credential-bearing metadata or unsupported literal syntax. Live OpenClaw acceptance covers natural registration, code-only verification, restart recovery, authenticated tools, permission and action delivery, and a synthetic calendar response through `poll_messages` and `ack_message`.
+## Published package
 
-Version `0.2.3` matches the live consuming REST interface. It buffers one validated full-message response in memory, serves that inbox through local `poll_messages`, forwards the live `{message_id,status:"acked"}` acknowledgement contract, removes `ack_notification`, and handles ID-less messages as unique one-shot deliveries without durable deduplication or acknowledgement.
-
-Version `0.2.4` caps normalized tool results at 512 KiB, rejects JSON-RPC batches before dispatch, limits notification polls to 256 messages and 16,384 JSON structural tokens, and checks 100 nesting levels before parsing. Local `poll_messages` no longer needs a central MCP catalog request. ID-less wake retries survive an early local poll, failed, uncertain, or mismatched acknowledgements retain the buffered body, and confirmed IDs are deleted from the journal.
-
-Version `0.2.5` switches notification polling to the central MCP `poll_messages` tool only after the public REST route returns an explicit `404`. It keeps REST for every other failed or uncertain outcome, injects the central JWT only into the transient MCP call, and applies the existing message and result limits to both paths.
-
-Version `0.2.6` adds the temporary development-only `--verbose=true` transcript for the paired development endpoints. It records local MCP, central MCP, central REST, and webhook request and response details on stderr while redacting credentials, cookies, webhook signatures, and six-digit verification codes. The normal logging boundary and every durable artifact remain content-blind.
-
-## Production decisions
-
-- ADR `0018-mcp-sdk.md` approves the official split MCP TypeScript SDK version 2 packages.
-- ADR `0019-central-credential-storage.md` approves an AES-256-GCM credential file keyed from the shared 192-bit webhook token.
-
-The user approved the red failures and authorized production implementation on 2026-08-25. OS credential-vault storage and DPoP remain stronger future improvements; DPoP also requires central support.
-
-## External central changes
-
-- Add redelivery or retrieval of delivered but unacknowledged messages so gateway restarts cannot lose consumed in-memory content.
-- Make `ack_message` idempotent so an uncertain acknowledgement can be safely repeated.
-- Return native structured MCP results so the temporary Python-literal compatibility parser can be removed.
-- Define JWT expiry, revocation, reissue, and deliberate local identity reset.
-
-Token reissue is required for recovery if remote verification succeeds but the gateway cannot persist the one-time JWT before crashing.
-
-The inspected central implementation returns message content and marks it delivered during REST or MCP polling. Versions `0.2.3` through `0.2.6` match that behavior with an in-memory inbox. Its MCP wrapper also returns Python string representations; ADR 0021 permits a bounded, non-executing compatibility parser for those MCP results.
-
-## Test work
-
-PR `#4` recorded the reviewed red suite and failure inventory before production implementation. PR `#5` turns all eight expected failures green without changing their assertions. The Docker fixture independently implements the central contract with in-memory state; it copies no source from the unlicensed private central repository.
-
-Docker runs in GitHub's Ubuntu runners and on the local acceptance-test host.
-
-## Production release blockers
-
-- Obtain stable production central API and MCP URLs.
-- Obtain central redelivery or delivered-message retrieval for restart recovery.
-- Make content acknowledgement idempotent.
-- Obtain central JWT reissue and revocation behavior.
-- If Windows support is reconsidered, approve a new plan and complete ADR
-  0033's native qualification before restoring CI or making a support claim.
+`0.2.6` is historical development software and is not supported against the
+current DPoP REST contract. New documentation must not direct users to it.
+The next package requires explicit publication approval after I05.

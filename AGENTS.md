@@ -9,36 +9,61 @@ Before starting any task, read these files in order:
 3. `docs/protocol-v1.md`
 4. `docs/implementation-plan.md`
 5. `docs/decisions-to-review.md`
-6. Relevant accepted records under `docs/adr/`
+6. Relevant accepted records under `docs/adr/`, especially ADR 0037 for
+   central integration work
 
-If your task conflicts with these documents, stop and ask. Do not expand the scope on your own.
+If a task conflicts with these documents, stop and ask. Do not expand the
+scope on your own.
 
 ## Project rules
 
-- One foreground gateway process owns one webhook target and one enrolled central identity. Do not add bindings, runtime discovery, configured local-runtime agent IDs, general configuration, or native service management.
-- `start` accepts only `--webhook-url=<url>` and `--webhook-token-env=<name>`. The webhook token also authenticates every request to the loopback MCP endpoint.
-- Keep shipped `0.2.6` compatibility behavior distinct from the accepted next contract. ADRs 0023, 0025, and 0026 define the next contract, but the production central service does not yet implement or advertise it.
-- Keep the notification journal ID-only. Never write task text, responses, permission details, grants, tool arguments, email addresses, verification codes, or MCP bodies to SQLite, configuration, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
-- The accepted target sends registration, verification, and resend through the fixed REST bootstrap routes in ADR 0023. Verification creates the first version 2 credential. Scheduled same-key reissue and explicit email-control recovery are the only credential-replacement paths. A `401`, invalid token, proof failure, key failure, or ordinary tool failure never triggers refresh or replacement.
-- Intercept every verification, reissue, and recovery token before generic result handling. Persist the token and P-256 private key only as the atomic encrypted version 2 credential in ADRs 0019 and 0026. A DPoP-bound token may appear transiently only in a gateway-to-central `Authorization: DPoP` header or while calculating `ath`. Never put it in MCP arguments or results, URLs, the journal, diagnostics, metrics, logs, temporary files, crash artifacts, or support bundles.
-- Registration, verification, and resend do not use a central access token, but they are not unauthenticated locally. Verification carries the issuance proof required by ADR 0026. The MCP listener always binds to `127.0.0.1`, validates `Host` and `Origin`, and checks the webhook bearer token.
-- The accepted message target uses the fixed REST v2 lifecycle and central lease redelivery in ADR 0025. Do not persist message bodies, add a capability probe or fallback, or treat the `0.2.6` consuming-poll crash loss as the target behavior.
-- Write tests and configure CI before production implementation.
-- Do not select or install any framework, library, runtime, package manager, database driver, or build tool without explicit user approval.
-- Get user approval for the CLI interface before writing CLI tests or code.
-- Get user approval for publishing and installation plans before adding distribution tooling.
-- Record approved architecture and dependency choices under `docs/adr/`.
-- Respect task dependencies and file ownership in `docs/implementation-plan.md`.
-- Follow the task gates in `docs/implementation-plan.md`. `docs/v2-fixture-profile.md` supplies test-only stand-ins for unknown central facts. Do not treat it or a development override as a production URL or as evidence that central implements the accepted target. A production central MCP implementation, ACP, hosted-agent connectors, and GUI work stay out of scope.
-- For central integration work, pin the exact `embassys/agent2agent` source
-  revision and the deployment built from it. Treat the supplied API snapshot
-  and a health response as background evidence only. Inventory the complete
-  current REST, MCP, template, and event surface and trace every affected flow;
-  do not scope the recheck to DPoP or authentication. Confirm the reported
-  user-email and user-phone request templates from pinned schemas before using
-  one with synthetic data as the preferred low-impact E2E interaction. Follow
-  I01 and I02 in `docs/server-integration-status.md`; never weaken an accepted
-  contract or add runtime probing to match an unpinned server.
-- Keep `docs/README.md` navigational, `docs/architecture-overview.md` concise,
-  and `docs/human-work.md` current. Normative behavior belongs in the protocol
-  or an ADR, not in the wiki summaries.
+- One foreground gateway process owns one webhook target and one enrolled
+  central identity. Do not add bindings, runtime discovery, configured local
+  runtime IDs, general configuration, or native service management.
+- `start` accepts only `--webhook-url=<url>` and
+  `--webhook-token-env=<name>`. The webhook token also authenticates every
+  request to the loopback MCP endpoint.
+- The current central contract is ADR 0037. Pin gateway integration work to
+  `embassys/agent2agent` commit
+  `b769896b7cfb1ee3540195be9e7a61cf777b9388` until a deliberate contract
+  refresh changes that pin.
+- The gateway uses the central REST API at `https://mcp.embassys.ai`. It does
+  not connect to the central MCP endpoint, discover central MCP tools, put a
+  token in MCP arguments, probe alternate routes, or select an API version at
+  runtime.
+- Registration, verification, and resend use `/api/register_agent`,
+  `/api/verify_email`, and `/api/resend_verification`. Registration is
+  email-based. Verification sends the generated P-256 public JWK in the JSON
+  body and intercepts the returned token before generic result handling.
+- Protected central requests send `Authorization: Bearer <token>` and a
+  separate `DPoP: <proof>` header. Follow the deployed proof shape in ADR
+  0037. A nonce is optional and is used only after the server supplies one.
+- Persist the DPoP-bound token and P-256 private key only as one atomic
+  encrypted credential. Never put either value in MCP arguments or results,
+  URLs, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts,
+  or support bundles.
+- This is a development cutover. Do not keep bearer-only central support,
+  central MCP fallbacks, speculative `/api/v2` routes, old credential readers,
+  migration code, activation, token reissue, lease, conversation, reply, or
+  outcome compatibility paths.
+- The current server consumes messages when `/api/poll_messages` returns them.
+  Keep message bodies in bounded memory and the notification journal ID-only.
+  Document the resulting restart-loss limitation; do not invent local body
+  persistence or a server lease contract.
+- The local MCP listener always binds to `127.0.0.1`, validates `Host` and
+  `Origin`, and checks the webhook bearer token before parsing a request.
+- Write or update tests and CI expectations before production implementation.
+- Do not select or install a framework, library, runtime, package manager,
+  database driver, or build tool without explicit user approval.
+- Get user approval for any CLI interface change before writing CLI tests or
+  code. Get user approval for publishing and installation plans before adding
+  distribution tooling.
+- Record approved architecture and dependency changes in `docs/adr/` and keep
+  `docs/human-work.md` current.
+- Use the deployed `get_email` and `get_phone_number` action schemas recorded
+  in the source inventory. Refresh them deliberately if the central catalog
+  changes.
+- A health response and fixture success are supporting evidence only. For live
+  central claims, record the source revision and the observed REST behavior.
+- A production central MCP implementation, ACP, hosted-agent connectors, and
+  GUI work remain out of scope.
