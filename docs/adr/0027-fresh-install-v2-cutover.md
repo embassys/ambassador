@@ -1,10 +1,13 @@
 # 0027 Fresh-install version 2 cutover
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-29
 
 Approved: 2026-08-29
+
+The no-migration conclusion remains, but there is no versioned target. ADR
+0037 defines one clean current development client.
 
 ## Problem
 

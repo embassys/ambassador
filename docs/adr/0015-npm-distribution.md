@@ -1,6 +1,6 @@
 # 0015 npm distribution
 
-Status: accepted
+Status: accepted for packaging; compatibility language superseded by ADR 0037
 
 Date: 2026-08-24
 
@@ -24,13 +24,21 @@ User-facing guides pin the qualified gateway version. They do not require a glob
 
 Publish initial production releases from the `main` branch only after Linux and macOS checks pass. ADR 0033 makes Windows unsupported and excludes Windows qualification from initial-release artifact evidence. The platform-neutral npm package is not a Windows-qualified artifact or support claim. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
 
-The user approved `0.2.0` through `0.2.6` as development-only exceptions on npm's `latest` tag after Linux and macOS qualification. ADR 0033 later made Windows unsupported for the initial release. Documentation makes no Windows-qualified artifact or support claim.
+Versions `0.2.0` through `0.2.6` are historical development publications.
+ADR 0037 removes their central compatibility paths from the current target.
+They are not a supported fallback and the next publication needs explicit
+approval after current live qualification.
 
 Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
 
 ## Security
 
-Publish a minimal tarball containing built runtime files and package documentation. Releases after `0.2.0` keep the packaged Hermes bridge only so existing development installations can upgrade without breaking their configured loopback target; new setup does not use it. Test and audit a pnpm installation of the tarball with strict release-age, exotic-subdependency, and build-script policies before publishing. pnpm 11 applies the age and exotic-source checks to user installs by default, with non-strict age handling so an explicitly selected new gateway release can install. Keep exact dependency versions and publish from a GitHub-hosted runner with npm provenance when the source repository is public.
+Publish a minimal tarball containing built runtime files and package
+documentation. Do not retain an old central client, old credential reader, or
+legacy bridge solely for upgrade compatibility. Test and audit a pnpm
+installation of the tarball with strict release-age, exotic-subdependency,
+and build-script policies before publishing. Keep exact dependency versions
+and publish from a GitHub-hosted runner with npm provenance.
 
 After trusted publishing works, configure npm to require two-factor authentication and disallow traditional tokens for package publishing.
 

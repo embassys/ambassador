@@ -1,76 +1,46 @@
 # Architecture decisions
 
-Put each architecture or dependency choice in its own file.
+## Current central authority
 
-Do not mark a decision accepted or install the corresponding software until the user approves it.
+- [0037 Live central REST contract](0037-live-central-rest-contract.md) is the
+  current central integration decision.
+- [0017 Single-webhook gateway](0017-single-webhook-gateway.md) defines the
+  product and local boundary.
+- [0019 Central credential storage](0019-central-credential-storage.md)
+  defines encrypted token/key custody.
+- [0020 In-memory central test service](0020-in-memory-central-test-service.md)
+  defines the replacement fixture strategy.
 
-Use a name such as `0001-typescript-runtime.md`. Include:
+## Other active decisions
 
-- A status of proposed, accepted, rejected, or superseded.
-- The problem to solve.
-- Options considered.
-- A recommendation with reasons.
-- Tradeoffs and operating costs.
-- Maintenance status and license.
-- Effects on packaging and supported platforms.
-- User approval and date.
+- 0006 toolchain
+- 0007 SQLite
+- 0012 HTTP deadlines
+- 0014 lock handoff timeout
+- 0015 npm distribution, subject to a new publication approval
+- 0018 MCP SDK for the local MCP boundary
+- 0024 provider process separation, amended for current central semantics
+- 0028 connector startup interface
+- 0029 connector correlation state, pending current-message recheck
+- 0030 provider execution safety, with central lifecycle sections superseded
+- 0031 connector runtime and distribution
+- 0033 Windows deferral
+- 0034 Codex App Server adapter
+- 0035 Claude Code headless CLI adapter
+- 0036 Gemini CLI interface rejection
 
-Read the accepted decisions that affect your task before writing code. If a choice changes later, normally add a record that supersedes the old one. Obsolete records may be deleted only when the user explicitly asks to remove them; Git history remains the archive.
+## Superseded central decisions
 
-ADRs 0023, 0025, 0026, and 0027 were accepted on 2026-08-29. They define the
-target REST enrollment, version 2 conversation and recovery, DPoP contracts,
-and fresh-install-only cutover.
+ADRs 0021, 0022, 0023, 0025, 0026, 0027, and 0032 are superseded by ADR
+0037. They remain in the repository as history and do not define current work.
 
-ADR 0024's provider-neutral connector boundary was accepted on 2026-08-30. It
-keeps provider control in separate foreground companions, leaves the gateway
-and its CLI provider-neutral, assigns one connector to one gateway and provider
-pair, uses the ID-only webhook wake plus authenticated local MCP retrieval, and
-keeps content-free correlation in connector-owned state. Central and provider
-credentials do not cross that boundary, and an uncertain provider turn is not
-replayed blindly.
+The earlier central portions of ADRs 0017, 0019, 0020, 0024, and 0030 are
+amended by ADR 0037. Read the current record first.
 
-ADRs 0028 through 0031 were accepted on 2026-08-30 and complete D05. They fix
-the startup and retirement interface, encrypted content-free state, execution
-and recovery contract, fixed limits, runtime, dependency scope, private
-package layout, platform qualification, installation model, and later
-publishing gates. ADR 0032 permits K01 against the accepted G04 fixture
-contract. Provider interfaces and public distribution remain behind their
-separate ADR and release gates.
+## Decision rule
 
-ADR 0032 was accepted on 2026-08-30. It permits contract-first local gateway,
-connector, and provider implementation against the accepted independent
-fixtures before the external central service is ready. Gate A, S07, combined
-qualification, production activation, support claims, and publishing remain
-blocked on their real evidence and approvals.
-
-ADR 0033 was accepted on 2026-08-30. The initial gateway and connector release
-supports macOS and Linux only. Windows is unsupported, implementation-plan task
-W01 is closed as deferred rather than passed, and Windows CI may return only
-under a new approved implementation and qualification plan.
-
-ADR 0034 is accepted for the Codex-first preview implementation path. It pins
-one Codex App Server release and generated schema and defines the Codex-specific
-stdio, policy, recovery, history, authentication, containment, license, update,
-and CX02 red-test contracts. It authorizes CX02 and, after the red failure
-review, CX03. Later user review remains available but is not a blocker. The
-record does not authorize publication, stable support, real-central
-compatibility claims, or Windows support.
-
-ADR 0035 was accepted on 2026-08-31. It selects the separately installed
-Claude Code headless CLI at exactly `2.1.251`, with structured JSONL input,
-exact session resume, fixed restricted policy, no exact-turn recovery, and a
-packaged Node lifetime monitor. The monitor leads a connector-known process
-group and keeps a separate owner pipe open after prompt EOF. CL02 and CL03 may
-proceed in order, but provider and platform support remain pending CL04.
-
-ADR 0036 was accepted on 2026-08-31 as a rejection. Gemini CLI `0.57.0` does
-not meet the structured-input, policy, sandbox, or hard-death containment
-requirements. A wider review found no compliant stable Gemini CLI SDK, core,
-or server interface. GM02 and GM03 remain blocked until a new stable interface
-meets the existing requirements and receives approval.
-
-Accepted target architecture is not evidence that the central service has
-implemented or deployed it. Until central owners provide production URLs and
-deployment facts, tests use only the stand-ins in
-`docs/v2-fixture-profile.md`. Never copy those test values into production
-constants or cite a fixture result as proof of a real central transaction.
+Add a new ADR when changing a public CLI, dependency, trust boundary,
+credential location, content-persistence rule, central source pin, or
+provider-execution safety property. Do not turn a temporary server limitation
+or fixture behavior into a permanent architecture requirement without user
+review.

@@ -1,10 +1,14 @@
 # 0026 DPoP-bound central tokens
 
-Status: accepted
+Status: superseded by ADR 0037
 
 Date: 2026-08-29
 
 Approved: 2026-08-29
+
+ADR 0037 keeps DPoP key binding while replacing this proposed issuance,
+authorization, token-claim, MCP, reissue, and recovery profile with the
+deployed server behavior.
 
 Version 1 credential migration and in-place-upgrade requirements are
 superseded by accepted ADR 0027. The future gateway is fresh-install-only.

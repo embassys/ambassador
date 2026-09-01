@@ -1,10 +1,15 @@
 # 0030 Connector execution contract
 
-Status: accepted
+Status: accepted for provider execution safety; central lifecycle amended by ADR 0037
 
 Date: 2026-08-30
 
 Approval: approved by the user on 2026-08-30
+
+The work scheduling, policy, containment, and uncertain-provider-outcome
+rules remain useful. Central conversation, reply, completion, outcome, and
+acknowledgement operations in this record are superseded and require a new
+permission/action mapping after I05.
 
 This accepted record completes its part of D05. ADR 0032 permits K01 against
 the accepted G04 fixture contract. Provider interfaces, installation, and
