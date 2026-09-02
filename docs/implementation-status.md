@@ -46,10 +46,10 @@ ADR 0037 replaced both earlier central clients with one current target:
 `get_phone_number` schemas each require a string `reason` and include the
 deployed property description recorded in the fixtures.
 
-The protected `get_my_permissions` call still returns a server error. This
-matches the pinned source, which constructs username fields while its response
-model declares email fields. The gateway validates the declared email-field
-model if the route succeeds and otherwise returns a safe local error.
+The final protected `get_my_permissions` call returned the declared email-field
+model and passed the gateway's strict validator. This differs from the pinned
+source's username-field construction and from the earlier live server error;
+the live service exposes no build revision with which to identify that fix.
 
 Central consumes a message when it returns the poll response. If the gateway
 stops before acknowledgement, the in-memory body can be lost and cannot be
@@ -68,4 +68,5 @@ live support claim.
 `0.2.6` is historical development software and is not supported against the
 current DPoP REST contract. New documentation must not direct users to it.
 Phase 3A does not publish a package; any replacement publication requires
-explicit approval.
+explicit approval. The final live-qualified tarball SHA-256 is
+`97307e385441ccbbac01cf19dc863528b65670d575d2c97872b23deeb1d110fb`.

@@ -35,8 +35,8 @@ published.
 
 The packed gateway passed the full two-identity live registration,
 verification, restart, DPoP, permission, action, consuming-poll,
-acknowledgement, and artifact flow. The deployed `get_my_permissions` route
-still returns a server error matching the pinned response-field mismatch.
+acknowledgement, and artifact flow. The final protected `get_my_permissions`
+call returned the declared email-field model and passed gateway validation.
 
 ## Documentation map
 

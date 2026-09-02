@@ -142,9 +142,10 @@ The packed live run completed every step above with two disposable identities.
 It observed all nine REST routes used by the flow, no central MCP request, no
 initial nonce challenge, and no forbidden marker in the package, temporary
 state, or captured process output. Captured Mailosaur messages and temporary
-state were deleted. The live `get_my_permissions` call returned a server error,
-matching the pinned source's response-construction mismatch; the gateway keeps
-the declared response validator and fails closed.
+state were deleted. The final live `get_my_permissions` call returned the
+declared email-field model and passed the strict gateway validator. This is a
+recorded live deployment difference from the pinned source's username-field
+construction and the earlier server error.
 
 ## Follow-on provider work
 
@@ -176,5 +177,6 @@ No old package or old fixture result can substitute for these gates.
 ## Current blockers
 
 Phase 3A has no gateway implementation blocker. Publishing remains unapproved,
-and the deployed `get_my_permissions` server error remains a central follow-up.
-Provider connector redesign is separate follow-on work.
+and provider connector redesign is separate follow-on work. Central build
+metadata remains unavailable, so the corrected live `get_my_permissions`
+behavior is recorded as a deployment difference from the source pin.

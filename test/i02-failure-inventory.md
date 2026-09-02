@@ -55,7 +55,7 @@ defines the missing behavior before production central clients change.
 | I02-R03 | `request_permission` sends `target_email`, `action_type`, and optional `scope`. |
 | I02-R04 | `respond_to_permission` accepts only permission ID plus `granted` or `denied`. |
 | I02-R05 | `call_action` sends target email, action type, and payload without adding identity or credential selectors. |
-| I02-R06 | `get_my_permissions` calls the current REST route, validates the declared email-field response model, and fails closed on the deployed server error confirmed by the protected check. |
+| I02-R06 | `get_my_permissions` calls the current REST route, validates the declared email-field response model observed in the final protected check, and fails closed on any incompatible response. |
 | I02-R07 | No local tool calls duplicate grant/deny, invitation, OAuth, health, or central MCP surfaces. |
 | I02-R08 | FastAPI `detail` errors map to bounded safe local errors without reflecting the remote body. |
 | I02-R09 | Side-effecting transport uncertainty causes no automatic retry. |

@@ -6,13 +6,17 @@ These items are useful changes to the current REST service. They are not a
 second API contract and the gateway must not emulate them with compatibility
 branches.
 
-## Needed for complete route coverage
+## Resolved live, pending source identification
 
-### Fix permission listing
+### Permission listing
 
 `GET /api/get_my_permissions` declares `grantor_email` and `grantee_email` but
-constructs username-named fields. The protected I05 call confirmed a deployed
-server error. Make the implementation and model agree and add a route test.
+the pinned source constructs username-named fields. An earlier protected I05
+call confirmed a server error; the final call returned the declared email-field
+model and passed gateway validation. No gateway compatibility path is needed.
+Because the service exposes no build revision, central should identify the
+deployed fix and add its route test during the next deliberate source-pin
+refresh.
 
 ## Useful development hardening
 

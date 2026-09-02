@@ -7,9 +7,8 @@ Status: current action view as of 2026-09-02
 - [x] Central owner: deploy the JSON codec and `list_action_types` fix.
 - [x] Gateway owner: record the live `get_email` and `get_phone_number`
   schemas. Both accept an object with required string `reason`.
-- [ ] Central owner: fix `get_my_permissions`. The protected I05 call confirmed
-  that the deployed route returns a server error consistent with the pinned
-  response-field mismatch.
+- [x] Central owner: fix `get_my_permissions`. The final protected I05 call
+  returned the declared email-field model and passed gateway validation.
 - [ ] Central owner: optionally expose build metadata before a release claim.
   Generated OpenAPI now works.
 
