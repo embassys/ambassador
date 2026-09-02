@@ -32,8 +32,8 @@ install or pnpm. The repository, CI, packing, and release qualification use
 pnpm under ADR 0006.
 
 Publish from `main` only after Linux and macOS checks, packed installation,
-the OpenClaw/Hermes local qualification matrix, live central qualification,
-and artifact audits pass. ADR 0033 keeps Windows unsupported.
+the five-profile local qualification matrix, live central qualification, and
+artifact audits pass. ADR 0033 keeps Windows unsupported.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips

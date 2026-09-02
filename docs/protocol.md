@@ -118,10 +118,9 @@ containing those credential fields or stored token bytes.
 ```
 
 Before writing state or contacting central, Ambassador resolves the current MCP
-session to exactly one enabled capability profile. The first version enables
-OpenClaw and Hermes; both support direct and webhook delivery. Codex and Claude
-remain disabled until an exact ACP adapter contract is separately approved,
-implemented, and qualified.
+session to exactly one enabled capability profile. OpenClaw, Hermes, Codex,
+Claude Code, and Gemini CLI support direct and webhook delivery through their
+exact compiled-in contracts.
 
 Profile behavior is capability-driven:
 
@@ -382,12 +381,24 @@ directory is the canonical process directory captured during registration. A
 later start from a different directory fails closed instead of silently moving
 the agent's scope.
 
-The initial enabled profiles are OpenClaw and Hermes. A profile is enabled only
-after its exact `clientInfo` aliases, invocation, supported version policy, MCP
-configuration behavior, and qualification cases are committed. Adapter
-downloads at runtime are forbidden. Codex and Claude require separately
-approved ACP adapter contracts and remain unsupported until those contracts
-meet the same gate.
+The enabled profiles and exact contracts are:
+
+| Profile | MCP `clientInfo` aliases | Direct invocation | ACP `agentInfo` | MCP setup |
+| --- | --- | --- | --- | --- |
+| OpenClaw | `openclaw-bundle-mcp` / `0.0.0` | `openclaw acp` | `openclaw-acp` / `2026.8.1` | provider configuration |
+| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.21.0` | session injection |
+| Codex | `codex-mcp-client` / `0.149.0` or `0.152.1` | `codex-acp` | `@agentclientprotocol/codex-acp` / `1.8.0` | session injection |
+| Claude Code | `claude-code` / `2.1.257` or `2.1.258` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` / `0.73.0` | session injection |
+| Gemini CLI | `gemini-cli-mcp-client` / `0.58.0` | `gemini --acp` | `gemini-cli` / `0.58.0` | session injection |
+
+A profile is enabled only after its exact aliases, invocation, supported
+version policy, MCP configuration behavior, and qualification cases are
+committed. Adapter downloads at runtime are forbidden. Codex requires the
+separately installed `@agentclientprotocol/codex-acp` 1.8.0 adapter, which
+translates ACP to Codex App Server. Claude Code requires the separately
+installed `@agentclientprotocol/claude-agent-acp` 0.73.0 adapter and its exact
+Claude Agent SDK 0.3.257 dependency. Gemini CLI provides native ACP. Versions
+outside the table remain unsupported.
 
 Ambassador initializes the agent and opens a gateway-managed session. It
 provides its authenticated MCP endpoint in ACP session configuration where the
@@ -482,7 +493,8 @@ The cutover must prove at least:
 - ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
   cancellation, crash, and uncertainty handling;
 - deterministic CI coverage with a mock webhook receiver and mock ACP agent;
-- opt-in local OpenClaw and Hermes coverage in both modes;
+- opt-in local coverage for OpenClaw, Hermes, Codex, Claude Code, and Gemini
+  CLI in both modes;
 - unchanged central REST and DPoP behavior from ADR 0037;
 - bounded in-memory body custody and ID-only durable state;
 - no local delivery-control or nonexistent central reply tools;

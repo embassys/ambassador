@@ -39,8 +39,8 @@ client baseline.
 12. Stop all processes, delete mail and temporary state, and scan artifacts.
 
 Use the mock webhook receiver and mock ACP agent for this live REST test.
-Real-agent OpenClaw and Hermes qualification remains a separate local matrix in
-[Delivery qualification](qualification.md).
+Real-agent qualification for all five enabled profiles remains a separate
+local matrix in [Delivery qualification](qualification.md).
 
 The controlled runner must require an explicit confirmation phrase before any
 live request. It must record the reviewed central source revision or note that

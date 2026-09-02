@@ -7,11 +7,18 @@ import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const CONFIRMATION = "run-installed-openclaw-and-hermes";
+const CONFIRMATION = "run-installed-supported-agents";
 const FIXTURE_ORIGIN = process.env.AMBASSADOR_QUALIFICATION_CENTRAL ?? "http://127.0.0.1:8000";
 const TARBALL = process.env.AMBASSADOR_CANDIDATE_TARBALL;
 const LOCAL_TOKEN = process.env.AMBASSADOR_QUALIFICATION_LOCAL_TOKEN;
 const VERSION = /(?:^|\D)(\d+\.\d+\.\d+)(?:$|\D)/u;
+const VERSION_PROBES = new Map([
+  ["openclaw", { command: "openclaw", args: ["--version"] }],
+  ["hermes", { command: "hermes", args: ["--version"] }],
+  ["codex", { command: "codex-acp", args: ["--version"] }],
+  ["claude", { command: "claude-agent-acp", args: ["--version"] }],
+  ["gemini", { command: "gemini", args: ["--version"] }],
+]);
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -141,7 +148,7 @@ async function fixtureReady() {
 
 async function fixtureRevision() {
   const digest = createHash("sha256");
-  for (const name of ["Dockerfile", "app.py", "requirements.txt"]) {
+  for (const name of ["Dockerfile", "app.py", "requirements.lock"]) {
     digest.update(name, "utf8");
     digest.update("\u0000", "utf8");
     digest.update(await readFile(join(process.cwd(), "test", "fixtures", "central", name)));
@@ -224,10 +231,9 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           await mkdir(workingDirectory, { mode: 0o700 });
           let installedVersion;
           try {
-            installedVersion = await commandVersion(
-              profile.kind === "openclaw" ? "openclaw" : "hermes",
-              ["--version"],
-            );
+            const probe = VERSION_PROBES.get(profile.kind);
+            if (probe === undefined) throw new Error("version probe unavailable");
+            installedVersion = await commandVersion(probe.command, probe.args);
           } catch {
             installedVersion = "unavailable";
           }

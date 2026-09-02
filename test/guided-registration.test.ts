@@ -31,19 +31,26 @@ async function fixture(t: TestContext, registry = PRODUCTION_AGENT_CAPABILITIES)
   return { root, calls, registration };
 }
 
-test("OpenClaw and Hermes ask for delivery with direct as the default", async (t) => {
-  for (const clientInfo of [
-    { name: "openclaw-bundle-mcp", version: "0.0.0" },
-    { name: "mcp", version: "0.1.0" },
+test("all supported agents ask for delivery with direct as the default", async (t) => {
+  for (const { clientInfo, label } of [
+    { clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" }, label: "OpenClaw" },
+    { clientInfo: { name: "mcp", version: "0.1.0" }, label: "Hermes" },
+    { clientInfo: { name: "codex-mcp-client", version: "0.149.0" }, label: "Codex" },
+    { clientInfo: { name: "codex-mcp-client", version: "0.152.1" }, label: "Codex" },
+    { clientInfo: { name: "claude-code", version: "2.1.257" }, label: "Claude Code" },
+    { clientInfo: { name: "claude-code", version: "2.1.258" }, label: "Claude Code" },
+    {
+      clientInfo: { name: "gemini-cli-mcp-client", version: "0.58.0" },
+      label: "Gemini CLI",
+    },
   ]) {
-    await t.test(clientInfo.name, async (t) => {
+    await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
       const result = await registration.register(
         { email: "agent@example.test" },
         clientInfo,
         new AbortController().signal,
       );
-      const label = clientInfo.name === "mcp" ? "Hermes" : "OpenClaw";
       assert.deepEqual(result, {
         status: "input_required",
         prompt: "How should incoming requests reach this agent?",
@@ -87,6 +94,23 @@ test("persists the derived direct or webhook profile before central registration
   assert.deepEqual(webhook.calls, [
     { email: "webhook@example.test", display_name: "Webhook agent" },
   ]);
+
+  for (const clientInfo of [
+    { name: "codex-mcp-client", version: "0.152.1" },
+    { name: "claude-code", version: "2.1.258" },
+    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+  ]) {
+    await t.test(clientInfo.name, async (t) => {
+      const selected = await fixture(t);
+      const result = await selected.registration.register(
+        { email: `${clientInfo.name}@example.test`, delivery: { mode: "direct" } },
+        clientInfo,
+        new AbortController().signal,
+      );
+      assert.equal(result.agent_id, "agent-1");
+      assert.equal(selected.calls.length, 1);
+    });
+  }
 });
 
 test("a direct-only profile registers without asking a delivery question", async (t) => {

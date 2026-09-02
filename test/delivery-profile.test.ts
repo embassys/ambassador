@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -56,6 +56,26 @@ test("stores the canonical direct directory and rejects a conflicting restart", 
     (error: unknown) =>
       error instanceof DeliveryProfileError && error.code === "incompatible_profile",
   );
+});
+
+test("loads every enabled registry-derived direct profile", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-all-direct-profiles-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const capability of PRODUCTION_AGENT_CAPABILITIES) {
+    const workingDirectory = join(root, capability.kind);
+    await mkdir(workingDirectory, { recursive: true });
+    const profile = await createDeliveryProfile(
+      capability,
+      { mode: "direct" },
+      workingDirectory,
+      {},
+    );
+    assert.equal(profile.agent_kind, capability.kind);
+    assert.deepEqual(await validateStoredDeliveryProfile(profile, workingDirectory), {
+      profile,
+      capability,
+    });
+  }
 });
 
 test("fails closed on missing secrets, conflicting state, and obsolete records", async (t) => {
