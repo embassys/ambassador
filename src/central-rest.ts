@@ -120,21 +120,9 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     ),
   },
   {
-    name: "poll_messages",
-    description: "Read messages currently held in gateway memory.",
-    inputSchema: objectSchema({ timeout: { type: "integer", minimum: 0, maximum: 60 } }),
-  },
-  {
     name: "get_my_permissions",
     description: "List permissions involving the enrolled identity.",
     inputSchema: objectSchema({}),
-  },
-  {
-    name: "ack_message",
-    description: "Acknowledge one delivered message after processing it.",
-    inputSchema: objectSchema({ message_id: { type: "string", minLength: 1, maxLength: 128 } }, [
-      "message_id",
-    ]),
   },
 ] as const;
 

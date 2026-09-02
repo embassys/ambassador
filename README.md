@@ -27,11 +27,11 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 
 ## Implementation status
 
-The REST and DPoP integration is implemented and live-qualified. The source
-still contains the earlier webhook-only runtime and connector packages. The
-approved delivery cutover, package rename, and CLI change are open work in the
-[implementation plan](docs/implementation-plan.md). Do not publish a package
-until that cutover and its qualification gates are complete.
+The REST and DPoP integration and deterministic Ambassador delivery cutover
+are implemented. Real-agent OpenClaw/Hermes qualification, refreshed live
+central qualification, cross-platform CI, and explicit publication approval
+remain in the [implementation plan](docs/implementation-plan.md). Do not
+publish a package until those gates are complete.
 
 ## Development
 
@@ -42,7 +42,7 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-CI will use a mock webhook receiver and mock ACP v1 agent for deterministic
+CI uses a mock webhook receiver and mock ACP v1 agent for deterministic
 delivery tests. Opt-in local qualification will cover real OpenClaw and Hermes
 agents in both delivery modes.
 

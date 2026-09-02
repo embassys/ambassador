@@ -35,7 +35,7 @@ function rest(central: FakeCentral, credential: LoadedCentralCredential): Centra
   });
 }
 
-test("I02-R01 post-enrollment catalog is the seven fixed REST tools", () => {
+test("post-enrollment catalog exposes exactly five agent-facing tools", () => {
   assert.deepEqual(
     REST_AUTHENTICATED_TOOLS.map((tool) => tool.name),
     [
@@ -43,13 +43,20 @@ test("I02-R01 post-enrollment catalog is the seven fixed REST tools", () => {
       "request_permission",
       "respond_to_permission",
       "call_action",
-      "poll_messages",
       "get_my_permissions",
-      "ack_message",
     ],
   );
   const serialized = JSON.stringify(REST_AUTHENTICATED_TOOLS);
-  for (const removed of ["start_", "reply_", "complete_", "outcome", "reissue", "activation"]) {
+  for (const removed of [
+    "poll_messages",
+    "ack_message",
+    "start_",
+    "reply_",
+    "complete_",
+    "outcome",
+    "reissue",
+    "activation",
+  ]) {
     assert.equal(serialized.includes(removed), false);
   }
 });

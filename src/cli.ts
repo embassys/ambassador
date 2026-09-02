@@ -4,16 +4,21 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  AmbassadorOptionsError,
+  type AmbassadorStartOptions,
+  parseAmbassadorStartOptions,
+  resolveLocalToken,
+} from "./ambassador-options.js";
 import type { CredentialStore } from "./credential-store.js";
 import { GatewayError } from "./errors.js";
-import { openGatewayApplication, type RunningGatewayApplication } from "./gateway-application.js";
 import {
-  GatewayOptionsError,
-  type GatewayStartOptions,
-  parseGatewayStartOptions,
-  resolveWebhookToken,
-} from "./gateway-options.js";
+  type DeliveryTargetContext,
+  openGatewayApplication,
+  type RunningGatewayApplication,
+} from "./gateway-application.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
+import type { DeliveryTarget } from "./notification-relay.js";
 import { ProcessLock } from "./process-lock.js";
 
 export interface CliIo {
@@ -27,6 +32,7 @@ export interface CliTestOverrides {
   readonly credentialStore?: CredentialStore;
   readonly centralFetch?: typeof fetch;
   readonly webhookFetch?: typeof fetch;
+  readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
   readonly localMcpPort?: number;
   readonly nowSeconds?: () => number;
 }
@@ -70,14 +76,14 @@ function homeDirectory(environment: NodeJS.ProcessEnv): string {
 }
 
 export async function runCli(args: string[], context: CliContext): Promise<number> {
-  let parsed: GatewayStartOptions;
+  let parsed: AmbassadorStartOptions;
   try {
-    parsed = parseGatewayStartOptions(args);
+    parsed = parseAmbassadorStartOptions(args);
   } catch (error) {
     context.io.stderr.write(
-      `${error instanceof GatewayOptionsError ? error.message : "Invalid command or arguments"}\n`,
+      `${error instanceof AmbassadorOptionsError ? error.message : "Invalid command or arguments"}\n`,
     );
-    return error instanceof GatewayOptionsError ? error.exitCode : 2;
+    return error instanceof AmbassadorOptionsError ? error.exitCode : 2;
   }
 
   const paths =
@@ -88,16 +94,18 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
   let application: RunningGatewayApplication | undefined;
   const ownedSignal = context.signal === undefined ? processSignal() : undefined;
   const signal = context.signal ?? ownedSignal?.signal;
-  if (signal === undefined) throw new Error("Gateway signal is unavailable");
+  if (signal === undefined) throw new Error("Ambassador signal is unavailable");
 
   try {
     lock = await ProcessLock.acquire(paths.lockPath);
-    const webhookToken = resolveWebhookToken(context.env, parsed.webhookTokenEnv);
+    const localToken = resolveLocalToken(context.env, parsed.localTokenEnv);
     application = await openGatewayApplication({
-      webhookUrl: parsed.webhookUrl,
-      webhookToken,
+      localToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
+      profilePath: paths.profilePath,
+      workingDirectory: context.cwd,
+      environment: context.env,
       signal,
       ...(context.testOverrides === undefined
         ? {}
@@ -112,6 +120,9 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
             ...(context.testOverrides.webhookFetch === undefined
               ? {}
               : { webhookFetch: context.testOverrides.webhookFetch }),
+            ...(context.testOverrides.deliveryTargetFactory === undefined
+              ? {}
+              : { deliveryTargetFactory: context.testOverrides.deliveryTargetFactory }),
             ...(context.testOverrides.localMcpPort === undefined
               ? {}
               : { localMcpPort: context.testOverrides.localMcpPort }),
@@ -129,7 +140,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     return 0;
   } catch (error) {
     if (signal.aborted) return 0;
-    if (error instanceof GatewayOptionsError) {
+    if (error instanceof AmbassadorOptionsError) {
       context.io.stderr.write(`${error.message}\n`);
       return error.exitCode;
     }
@@ -137,7 +148,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       context.io.stderr.write(`${error.message}\n`);
       return error.exitCode;
     }
-    context.io.stderr.write("Gateway local state failed\n");
+    context.io.stderr.write("Ambassador local state failed\n");
     return 7;
   } finally {
     await application?.close().catch(() => undefined);

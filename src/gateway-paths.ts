@@ -5,6 +5,7 @@ export interface GatewayPaths {
   journalPath: string;
   lockPath: string;
   credentialPath: string;
+  profilePath: string;
 }
 
 export function pathsForStateDirectory(
@@ -14,8 +15,9 @@ export function pathsForStateDirectory(
   return {
     stateDirectory,
     journalPath: join(stateDirectory, "notifications.sqlite"),
-    lockPath: join(stateDirectory, "gateway.lock"),
+    lockPath: join(stateDirectory, "ambassador.lock"),
     credentialPath: join(stateDirectory, "central-credential.json"),
+    profilePath: join(stateDirectory, "delivery-profile.json"),
   };
 }
 
@@ -30,18 +32,18 @@ export function defaultGatewayPaths(
 
   if (platform === "darwin") {
     return pathsForStateDirectory(
-      posix.join(homeDirectory, "Library", "Application Support", "a2a-gateway"),
+      posix.join(homeDirectory, "Library", "Application Support", "ambassador"),
     );
   }
 
   if (platform === "linux") {
     const stateRoot = environment.XDG_STATE_HOME || posix.join(homeDirectory, ".local", "state");
-    return pathsForStateDirectory(posix.join(stateRoot, "a2a-gateway"));
+    return pathsForStateDirectory(posix.join(stateRoot, "ambassador"));
   }
 
   if (platform === "win32") {
     const stateRoot = environment.LOCALAPPDATA || win32.join(homeDirectory, "AppData", "Local");
-    return pathsForStateDirectory(win32.join(stateRoot, "a2a-gateway"), win32.join);
+    return pathsForStateDirectory(win32.join(stateRoot, "ambassador"), win32.join);
   }
 
   throw new Error("Unsupported platform");

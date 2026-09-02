@@ -9,9 +9,7 @@
 5. [Qualification strategy](qualification.md)
 
 The architecture and protocol define the accepted target. The implementation
-plan contains only work that is not complete. Until the delivery cutover lands,
-the source still contains the earlier webhook-only runtime and separate
-connector packages.
+plan contains only work that is not complete.
 
 ## Other records
 
@@ -26,9 +24,9 @@ The complete central service belongs in
 repository documents only Ambassador behavior that depends on it. Test fixture
 details live beside the fixture code under `test/fixtures/`.
 
-Old connector setup guides and provider-specific qualification notes describe
-the implementation being removed. They are historical references, not current
-instructions, and are intentionally absent from this index.
+Old connector setup guides and provider-specific qualification notes were
+removed with the superseded implementation. Their useful decisions remain in
+the ADR ledger.
 
 ## Target repository map
 
@@ -38,6 +36,3 @@ instructions, and are intentionally absent from this index.
 | `test/` | Unit, integration, security, artifact, and qualification tests |
 | `test/fixtures/` | Independent central fixture, mock webhook receiver, and mock ACP agent |
 | `docs/adr/` | Accepted decisions and the historical ledger |
-
-The current `packages/*-connector` directories remain only until the delivery
-cutover removes them.

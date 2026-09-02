@@ -38,10 +38,6 @@ jobs:
           test "$(pnpm --version)" = 11.22.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
-      - name: Validate classified CX02 Codex App Server adapter inventory
-        run: node scripts/run-red-inventory.mjs --suite=cx02
-      - name: Validate classified CL02 Claude Code adapter inventory
-        run: node scripts/run-red-inventory.mjs --suite=cl02
       - if: always()
         run: pnpm audit --prod --audit-level=high
       - if: always()
@@ -79,11 +75,11 @@ jobs:
           test "$(pnpm --version)" = 11.22.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:build
-      - name: Pack and install gateway for Docker E2E
+      - name: Pack and install Ambassador for Docker E2E
         shell: bash
         run: |
           set -euo pipefail
-          tarball="$RUNNER_TEMP/a2adev-gateway-docker-$(node -p "require('./package.json').version").tgz"
+          tarball="$RUNNER_TEMP/ambassador-docker-$(node -p "require('./package.json').version").tgz"
           pnpm pack --out "$tarball"
           install_root="$RUNNER_TEMP/a2a-docker-install"
           mkdir -p "$install_root"
@@ -91,8 +87,8 @@ jobs:
             --dir "$install_root" \
             --allow-build=better-sqlite3 \
             add "$tarball"
-          test -x "$install_root/node_modules/.bin/a2a-gateway"
-      - name: Run packaged gateway against current REST fixture
+          test -x "$install_root/node_modules/.bin/ambassador"
+      - name: Run packaged Ambassador against current REST fixture
         shell: bash
         run: |
           set -euo pipefail
@@ -112,8 +108,8 @@ jobs:
           done
 
           curl --fail --silent http://127.0.0.1:8000/readyz >/dev/null
-          A2A_PACKED_GATEWAY_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/@a2adev/gateway/dist/cli.js" \
-            A2A_CENTRAL_REST_FIXTURE_URL=http://127.0.0.1:8000 \
+          AMBASSADOR_PACKED_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/@embassys/ambassador/dist/cli.js" \
+            AMBASSADOR_CENTRAL_REST_FIXTURE_URL=http://127.0.0.1:8000 \
             node --test .test-dist/test/current-rest-docker-e2e.test.js
       - name: Verify hardened runtime fixture
         shell: bash
@@ -170,7 +166,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tarball="$RUNNER_TEMP/a2adev-gateway-$(node -p "require('./package.json').version").tgz"
+          tarball="$RUNNER_TEMP/ambassador-$(node -p "require('./package.json').version").tgz"
           pnpm pack --out "$tarball"
           install_root="$RUNNER_TEMP/a2a-install"
           mkdir -p "$install_root"
@@ -199,15 +195,13 @@ jobs:
               const localOnly = status === 1 && clean && report.invalid?.length === 1 && report.audited === report.verified + 1 && report.invalid[0]?.name === name && report.invalid[0]?.version === version && report.invalid[0]?.registry === "https://registry.npmjs.org/" && report.invalid[0]?.reason === `Missing registry metadata for ${name}@${version}`;
               if (!allVerified && !localOnly) process.exit(1);
             '
-          test -x "$install_root/node_modules/.bin/a2a-gateway"
-          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+          test -x "$install_root/node_modules/.bin/ambassador"
+          AMBASSADOR_PACKED_CLI="$install_root/node_modules/@embassys/ambassador/dist/cli.js" \
             node --test .test-dist/test/current-packed-e2e.test.js
-          A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
-            node --test .test-dist/test/hermes-webhook-bridge.test.js
 
   publish:
     name: Publish npm package
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false # Publication requires a separate explicit approval after qualification.
     needs: [check, central-fixture, package]
     runs-on: ubuntu-latest
     permissions:
@@ -246,7 +240,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm run test:build
-          tarball="$RUNNER_TEMP/a2adev-gateway-$(node -p "require('./package.json').version").tgz"
+          tarball="$RUNNER_TEMP/ambassador-$(node -p "require('./package.json').version").tgz"
           pnpm pack --out "$tarball"
           install_root="$RUNNER_TEMP/a2a-publish-install"
           mkdir -p "$install_root"
@@ -275,11 +269,9 @@ jobs:
               const localOnly = status === 1 && clean && report.invalid?.length === 1 && report.audited === report.verified + 1 && report.invalid[0]?.name === name && report.invalid[0]?.version === version && report.invalid[0]?.registry === "https://registry.npmjs.org/" && report.invalid[0]?.reason === `Missing registry metadata for ${name}@${version}`;
               if (!allVerified && !localOnly) process.exit(1);
             '
-          test -x "$install_root/node_modules/.bin/a2a-gateway"
-          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
+          test -x "$install_root/node_modules/.bin/ambassador"
+          AMBASSADOR_PACKED_CLI="$install_root/node_modules/@embassys/ambassador/dist/cli.js" \
             node --test .test-dist/test/current-packed-e2e.test.js
-          A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
-            node --test .test-dist/test/hermes-webhook-bridge.test.js
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Use OIDC-capable npm publisher
         if: steps.version.outputs.publish == 'true'
