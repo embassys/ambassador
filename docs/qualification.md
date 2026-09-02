@@ -48,6 +48,17 @@ Both modes run the same queue, body-size, batch, deadline, concurrency,
 singleton, graceful-shutdown, restart-loss, and forbidden-marker scans. SQLite
 and the delivery profile must remain free of message content and secret values.
 
+Registration cases also prove:
+
+- exact allowlisted `clientInfo` aliases select only their fixed profile;
+- unknown, ambiguous, disabled, and incomplete profiles return
+  `unsupported_agent` before state or a central call;
+- supplying a delivery object cannot bypass profile resolution;
+- a complete direct-only test profile proceeds without a question;
+- OpenClaw and Hermes ask direct versus webhook with direct as the default;
+- agent kind and process configuration are rejected as tool input; and
+- a failed direct launch never falls back to webhook.
+
 These tests are mandatory on Linux and macOS for every pull request that
 changes delivery.
 
@@ -70,8 +81,9 @@ For each row:
 1. Create an isolated provider profile and bounded working directory.
 2. Start the packed Ambassador candidate with a fresh local token.
 3. Configure Ambassador MCP through the provider's supported mechanism.
-4. Register a synthetic fixture identity and choose the requested delivery
-   mode through MCP.
+4. Register a synthetic fixture identity and prove the real MCP client's exact
+   alias selects the expected fixed profile. Choose the requested mode when the
+   dual-mode result asks, and prove direct is its advertised default.
 5. Inject one permission message and one action message through the fixture.
 6. Prove the real agent receives the complete message.
 7. Prove the agent can call an allowed Ambassador MCP tool.
@@ -103,8 +115,9 @@ It does not record prompts, replies, message bodies, payloads, identities,
 tokens, secrets, provider credentials, paths containing user data, or raw
 provider output.
 
-Codex and Claude can join this matrix later. Recognizing their profile names is
-not a support claim.
+Codex and Claude can join this matrix after their exact ACP adapter contracts
+are approved, implemented, and qualified. Until then, their `clientInfo`
+values are unsupported rather than partially recognized.
 
 ## Live central suite
 

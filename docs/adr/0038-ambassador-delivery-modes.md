@@ -4,6 +4,8 @@ Status: accepted
 
 Date: 2026-09-02
 
+Updated: 2026-09-02
+
 ## Problem
 
 The implemented gateway wakes one loopback webhook with only a message ID. A
@@ -57,19 +59,35 @@ webhook secret, central URL, or configuration-path option.
 
 ### Delivery selection during registration
 
-Collect delivery information through "register_agent" before contacting
-central. An initial call without delivery returns structured "input_required"
-content asking the user whether incoming work should be sent directly to the
-current agent or to a webhook.
+Resolve delivery through `register_agent` before contacting central. Match the
+MCP session's bounded `clientInfo` exactly against a compiled-in capability
+registry. An enabled entry contains its exact aliases, supported delivery
+modes, fixed direct executable and arguments, MCP setup behavior, version
+policy, and qualification contract.
 
-MCP "clientInfo" can make the question friendlier and suggest a recognized
-agent profile. It is not authenticated identity and cannot silently select a
-profile. The follow-up tool call records the user's explicit choice.
+`clientInfo` is not authenticated identity. It is nevertheless sufficient to
+select among fixed local profiles because it cannot add a profile, alter
+process details, authorize central work, or widen capabilities. User and model
+input never supplies an agent kind, executable, arguments, adapter, shell
+command, transport, or working directory.
 
-Direct mode uses a fixed agent kind: "codex", "claude", "openclaw", or
-"hermes". If "clientInfo" does not provide a recognized hint, Ambassador asks
-the user to choose from that fixed list. The tool never accepts an executable,
-arguments, shell command, transport, or working directory.
+Direct is the default:
+
+- A complete direct-only profile selects direct and continues without asking
+  the user a delivery question.
+- A complete dual-mode profile returns structured `input_required` content
+  asking the user to choose direct or webhook, with direct identified as the
+  default. The follow-up contains the mode and any mode-specific fields, not an
+  agent kind.
+- An unknown, ambiguous, disabled, or incomplete profile returns
+  `unsupported_agent`. Ambassador writes no registration state and makes no
+  central request.
+
+The first version enables OpenClaw and Hermes as dual-mode profiles. Codex and
+Claude remain unsupported until exact ACP adapter contracts are separately
+approved, implemented, and qualified. Do not offer an arbitrary command or a
+generic webhook fallback for an unsupported client. Do not fall back from a
+failed direct launch to webhook.
 
 The direct working directory is Ambassador's canonical process directory at
 registration time. It persists in the profile. A later start from a different
@@ -79,7 +97,8 @@ Webhook mode accepts a validated URL and the name of an environment variable
 containing the receiver secret. The raw secret is configured outside the model.
 It never appears in MCP arguments or results.
 
-Persist only the nonsecret delivery profile. One profile belongs to one
+Persist only the nonsecret delivery profile derived from the matched registry
+entry and, for a dual-mode entry, the user's choice. One profile belongs to one
 central identity. There is no development-state migration or runtime profile
 switching in this cutover.
 
@@ -111,6 +130,11 @@ For a selected profile, Ambassador launches one fixed executable and argument
 set without a shell. Agent input and remote messages cannot select process
 details. The child receives a minimal, reviewed environment and bounded
 working directory.
+
+An agent profile is enabled only after its exact aliases, invocation, version
+policy, MCP behavior, and tests are committed. Ambassador never downloads an
+adapter at runtime. A recognizable product name without that complete contract
+is unsupported.
 
 Ambassador initializes ACP, creates or safely resumes a gateway-owned session,
 and submits one prompt containing fixed untrusted-input instructions plus the
@@ -183,7 +207,12 @@ DPoP, REST schemas, permissions, consuming polls, and acknowledgement.
 
 ## Consequences
 
-- Users choose delivery in the same agent conversation used for enrollment.
+- OpenClaw and Hermes users choose delivery in the same agent conversation used
+  for enrollment, with direct as the default.
+- Complete direct-only profiles can enroll without an unnecessary delivery
+  question.
+- Unknown and incomplete clients fail before local or central registration
+  state exists.
 - The command line no longer contains delivery configuration.
 - Raw webhook secrets stay outside model context.
 - Webhook receivers get enough data to act without calling delivery-control
@@ -192,7 +221,7 @@ DPoP, REST schemas, permissions, consuming polls, and acknowledgement.
   provider transports.
 - Ambassador now owns local agent process safety and ACP lifecycle.
 - Real provider compatibility is a qualification claim, not an inference from
-  a recognized profile name.
+  a product name or model-supplied field.
 - The package gains one exact ACP SDK dependency after red tests approve its
   use.
 - The implementation can delete substantial connector code, state, tests, and
@@ -222,8 +251,14 @@ contract.
 - **Use the existing MCP session as the callback channel.** Rejected because
   MCP does not provide a durable reverse invocation path to the registration
   chat.
-- **Put agent selection on "start".** Rejected because the user chooses delivery
-  during registration and the chosen profile persists.
+- **Put agent selection on `start`.** Rejected because Ambassador resolves a
+  fixed profile from MCP `clientInfo` during registration and persists it.
+- **Ask every client to choose an agent.** Rejected because the MCP session
+  already provides bounded `clientInfo`, while an agent-kind argument would
+  let model input influence process selection.
+- **Accept webhook details from unknown clients.** Rejected for the first
+  version because it weakens the fixed support boundary and makes unsupported
+  callers appear qualified.
 - **Pass the webhook secret through MCP.** Rejected because the model should
   handle only the environment-variable name.
 - **Send provider-specific webhook bodies.** Rejected because provider mapping
@@ -236,4 +271,7 @@ contract.
 The user approved the two delivery modes, guided MCP registration, full-message
 webhooks, gateway-owned ACP v1 direct mode, no agent startup flag, package
 rename, deterministic mock CI coverage, and local OpenClaw/Hermes qualification
-on 2026-09-02.
+on 2026-09-02. The same day, the user clarified that direct is the default,
+only supported dual-mode profiles ask the delivery question, agent selection
+comes from the fixed `clientInfo` registry rather than tool input, and unknown
+agents are rejected in this version.

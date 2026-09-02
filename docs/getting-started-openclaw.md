@@ -22,7 +22,8 @@ For either mode:
 4. Configure OpenClaw to call `http://127.0.0.1:8787/mcp` with the local
    bearer token.
 5. Ask OpenClaw to register through MCP.
-6. Choose direct or webhook when the registration result asks.
+6. Choose direct or webhook when the registration result asks. Direct is the
+   default.
 7. For webhook mode, provide only the hook URL and webhook secret
    environment-variable name. Never paste the secret into chat.
 8. Complete email verification through the MCP tools.

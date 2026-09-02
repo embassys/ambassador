@@ -25,8 +25,9 @@ delivery cutover before using it as release evidence.
 
 1. Pack and scan the exact candidate package.
 2. Create two disposable identities through authenticated local MCP.
-3. Choose one webhook profile and one direct profile through guided
-   registration.
+3. Use the exact enabled `clientInfo` aliases for one webhook profile and one
+   direct profile. Prove the dual-mode registration result advertises direct
+   as its default before choosing the required mode.
 4. Receive and use both verification emails without persisting their codes.
 5. Restart and prove encrypted credential and nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
