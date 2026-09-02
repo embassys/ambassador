@@ -1,6 +1,6 @@
 # 0017 Single-webhook gateway
 
-Status: accepted; central integration amended by ADR 0037
+Status: superseded by ADR 0038
 
 Date: 2026-08-25
 

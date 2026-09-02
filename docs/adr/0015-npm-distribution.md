@@ -1,56 +1,71 @@
 # 0015 npm distribution
 
-Status: accepted for packaging; compatibility language superseded by ADR 0037
+Status: accepted for packaging; package and CLI amended by ADR 0038
 
 Date: 2026-08-24
 
-Updated: 2026-08-27 for `npx` end-user execution
+Updated: 2026-09-02
 
 ## Problem
 
-The initial distribution plan required standalone files before public beta. Current users already have Node.js, so that work would delay a usable release without removing a real installation barrier.
+Users already have Node.js, so standalone installers would delay a usable
+release without removing a current installation barrier. The public package
+also needs the Embassys product name rather than the development namespace.
 
 ## Decision
 
-Publish the public package as `@a2adev/gateway` with the `a2a-gateway` binary. Version 1 requires Node.js 24.
+Publish one public package as `@embassys/ambassador` with the `ambassador`
+binary. The package requires Node.js 24.
 
-Users run the foreground gateway directly from the npm registry with `npx`:
+Users run the foreground process directly from a qualified npm release:
 
 ```text
-npx --yes @a2adev/gateway@<qualified-version> start --webhook-url=<url> --webhook-token-env=<environment-variable>
+npx --yes @embassys/ambassador@<qualified-version> start --local-token-env=<environment-variable>
 ```
 
-User-facing guides pin the qualified gateway version. They do not require a global gateway or pnpm installation. The repository, CI, packing, and release qualification continue to use pnpm under ADR 0006.
+Do not publish separate connector packages. Direct ACP support and its fixed
+agent profiles belong in the Ambassador package. Do not retain
+`@a2adev/gateway`, `a2a-gateway`, or provider connector binaries as aliases.
 
-Publish initial production releases from the `main` branch only after Linux and macOS checks pass. ADR 0033 makes Windows unsupported and excludes Windows qualification from initial-release artifact evidence. The platform-neutral npm package is not a Windows-qualified artifact or support claim. Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish token. A main push publishes only a new version from `package.json`; it skips a version that already exists.
+User-facing guides pin a qualified version. They do not require a global
+install or pnpm. The repository, CI, packing, and release qualification use
+pnpm under ADR 0006.
 
-Versions `0.2.0` through `0.2.6` are historical development publications.
-ADR 0037 removes their central compatibility paths from the current target.
-They are not a supported fallback and the next publication needs explicit
-approval after current live qualification.
+Publish from `main` only after Linux and macOS checks, packed installation,
+the OpenClaw/Hermes local qualification matrix, live central qualification,
+and artifact audits pass. ADR 0033 keeps Windows unsupported.
 
-Keep containers for acceptance tests. Defer standalone files, native installers, package-manager manifests, signing, notarization, and a self-updater until users need a Node-free installation.
+Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
+token. A main push publishes only a new version from `package.json` and skips
+an existing version.
+
+Versions 0.2.0 through 0.2.6 under the old package name are historical
+development publications. They are not a fallback or migration source. A new
+publication requires separate user approval.
+
+Keep containers for acceptance tests. Defer standalone files, native
+installers, package-manager manifests, signing, notarization, and a self-updater
+until users need a Node-free installation.
 
 ## Security
 
 Publish a minimal tarball containing built runtime files and package
-documentation. Do not retain an old central client, old credential reader, or
-legacy bridge solely for upgrade compatibility. Test and audit a pnpm
-installation of the tarball with strict release-age, exotic-subdependency,
-and build-script policies before publishing. Keep exact dependency versions
-and publish from a GitHub-hosted runner with npm provenance.
+documentation. Do not retain an old central client, connector, credential
+reader, package alias, or bridge for compatibility.
 
-After trusted publishing works, configure npm to require two-factor authentication and disallow traditional tokens for package publishing.
+Test and audit a pnpm installation of the tarball with strict release-age,
+subdependency, and build-script policies. Keep exact dependency versions and
+publish with npm provenance. Configure npm to require two-factor authentication
+and disallow traditional publish tokens after trusted publishing works.
 
 ## Costs
 
-Users need Node.js 24 with npm and `npx`. Native `better-sqlite3` binaries remain part of the temporary package installation and need qualification on every supported operating system.
-
-The current private GitHub repository can use trusted publishing, but npm cannot generate public provenance attestations until the repository is public.
+Users need Node.js 24 with npm and `npx`. Native `better-sqlite3` binaries
+need qualification on every supported operating system. Direct mode also adds
+the exact ACP SDK approved in ADR 0038.
 
 ## Approval
 
-The user approved npm distribution, the public package name, MIT licensing,
-Node-based end-user installation through `npx`, and trusted publishing. pnpm
-remains repository tooling. Each new publication still requires explicit
-approval after qualification.
+The user approved npm distribution, MIT licensing, Node-based execution,
+trusted publishing, and the new package name on 2026-09-02. Each publication
+still requires explicit approval after qualification.

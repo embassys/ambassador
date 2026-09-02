@@ -8,29 +8,55 @@ Before starting any task, read these files in order:
 2. `docs/product-vision-and-architecture.md`
 3. `docs/protocol.md`
 4. `docs/implementation-plan.md`
-5. Relevant accepted records under `docs/adr/`, especially ADR 0037 for
-   central integration work
+5. Relevant accepted records under `docs/adr/`, especially ADR 0037 for the
+   central REST contract and ADR 0038 for local delivery
 
-If a task conflicts with these documents, stop and ask. Do not expand the
+The architecture and protocol describe the accepted target. The implementation
+plan says which parts are not built yet. During the delivery cutover, replace
+superseded behavior rather than preserving it for compatibility.
+
+If a task conflicts with the accepted target, stop and ask. Do not expand the
 scope on your own.
 
 ## Project rules
 
-- One foreground gateway process owns one webhook target and one enrolled
-  central identity. Do not add bindings, runtime discovery, configured local
-  runtime IDs, general configuration, or native service management.
-- `start` accepts only `--webhook-url=<url>` and
-  `--webhook-token-env=<name>`. The webhook token also authenticates every
-  request to the loopback MCP endpoint.
+- The product and public npm package are `@embassys/ambassador`. The public
+  binary is `ambassador`. Do not keep the old package or binary as aliases.
+- One foreground Ambassador process owns one enrolled central identity and one
+  local delivery profile.
+- `start` accepts only `--local-token-env=<name>`. Do not add delivery-mode,
+  agent, webhook URL, central URL, configuration path, or secret-value flags.
+- Delivery is selected during the MCP registration flow. The two modes are
+  `webhook` and `direct`. Do not add a third connector or polling mode.
+- An MCP client's `clientInfo` may improve the registration prompt, but it is
+  not authenticated identity. A user-confirmed, persisted delivery profile is
+  authoritative.
+- Webhook registration accepts a URL and a webhook secret environment-variable
+  name, never the secret value. The gateway sends the complete validated
+  central message with bearer and HMAC authentication. A `2xx` transfers
+  responsibility to the webhook receiver, after which the gateway acknowledges
+  central.
+- Direct mode makes Ambassador an ACP v1 client. It launches and controls the
+  selected local agent and submits the complete message as an ACP prompt. It
+  does not attempt to call back through the MCP connection that registered the
+  identity.
+- MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
+  control through local `poll_messages` or `ack_message` tools after the
+  cutover. Do not invent a reply tool while central has no reply endpoint.
+- Direct-agent work is a gateway-managed ACP session. It is not the exact chat
+  in which registration happened. Configure Ambassador MCP in that session
+  when the agent supports session MCP injection; otherwise require normal
+  provider configuration.
+- Keep central message bodies in bounded memory and the notification journal
+  ID-only. Do not invent local body persistence or server redelivery.
 - The gateway follows the current
-  [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST
-  service at `https://mcp.embassys.ai`. Review current server code and live
-  behavior before changing the integration. Update gateway code, fixtures,
-  protocol, and qualification evidence together when the server contract
-  changes.
-- The gateway does not connect to the central MCP endpoint, discover central
-  MCP tools, put a token in MCP arguments, probe alternate routes, or select
-  an API version at runtime.
+  [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST service
+  at `https://mcp.embassys.ai`. Review current server code and live behavior
+  before changing the integration. Update gateway code, fixtures, protocol,
+  and qualification evidence together when the server contract changes.
+- The gateway does not connect to central MCP, discover central MCP tools, put
+  a token in MCP arguments, probe alternate routes, or select an API version at
+  runtime.
 - Registration, verification, and resend use `/api/register_agent`,
   `/api/verify_email`, and `/api/resend_verification`. Registration is
   email-based. Verification sends the generated P-256 public JWK in the JSON
@@ -46,20 +72,20 @@ scope on your own.
   routes, credential migration, activation, token reissue, leases,
   conversations, replies, or outcomes unless the current server adds the
   behavior and the user accepts the client change.
-- The server currently consumes messages when `/api/poll_messages` returns
-  them. Keep message bodies in bounded memory and the notification journal
-  ID-only. Do not invent local body persistence or server redelivery.
 - The local MCP listener always binds to `127.0.0.1`, validates `Host` and
-  `Origin`, and checks the webhook bearer token before parsing a request.
+  `Origin`, and authenticates before parsing a request.
 - Write or update tests and CI expectations before production implementation.
+  CI delivery tests use a mock webhook receiver and a mock ACP v1 agent. Real
+  OpenClaw and Hermes tests are explicit local qualification, not CI.
 - Do not select or install a framework, library, runtime, package manager,
-  database driver, or build tool without explicit user approval.
-- Get user approval for any CLI change before writing CLI tests or code. Get
-  user approval before adding publication or installation tooling.
+  database driver, or build tool without explicit user approval. ACP v1 and
+  exact `@agentclientprotocol/sdk` 1.4.0 are approved by ADR 0038.
+- Get user approval for any further CLI change before writing CLI tests or
+  code. Get user approval before adding publication or installation tooling.
 - Record approved architecture and dependency changes under `docs/adr/`.
-- Keep open gateway work in `docs/implementation-plan.md` and optional server
-  work in `docs/central-follow-ups.md`. Do not leave completed work as a TODO.
+- Keep open Ambassador work in `docs/implementation-plan.md` and optional
+  server work in `docs/central-follow-ups.md`. Do not leave completed work as a
+  TODO.
 - A health response and fixture success do not prove live compatibility. Run
   the controlled live qualification for client-visible server changes.
-- A production central MCP implementation, ACP, hosted-agent connectors, and
-  GUI work remain out of scope.
+- GUI work and a production central MCP client remain out of scope.

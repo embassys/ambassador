@@ -1,6 +1,6 @@
 # 0035 Claude Code headless CLI adapter
 
-Status: accepted
+Status: superseded by ADR 0038; historical reference only
 
 Date: 2026-08-31
 

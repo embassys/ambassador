@@ -1,26 +1,32 @@
 # Get started with OpenClaw
 
-Status: paused pending approval and publication of a qualified package
+Status: target setup; wait for the Ambassador delivery cutover and a qualified
+package
 
-Do not use the published `0.2.6` gateway for a new OpenClaw setup. It uses a
-superseded central contract.
+OpenClaw will support two Ambassador delivery choices:
 
-The current source has passed live qualification. If a new development package
-is approved, the setup will remain small:
+- **Webhook:** Configure an authenticated OpenClaw hook and a receiver-side
+  mapping from Ambassador's canonical message JSON to OpenClaw's native agent
+  hook input.
+- **Direct:** Run OpenClaw's ACP interface under Ambassador. Configure the
+  authenticated Ambassador MCP endpoint in OpenClaw before registration when
+  the tested ACP interface does not accept session MCP configuration.
 
-1. Install the qualified Node.js 24 gateway package.
-2. Generate one 48-character lowercase hexadecimal local secret.
-3. Put that secret in an environment variable available to both the gateway
-   and OpenClaw's MCP configuration.
-4. Start the gateway with a literal-loopback OpenClaw webhook URL and the name
-   of that environment variable.
-5. Configure OpenClaw to use `http://127.0.0.1:8787/mcp` with
-   `Authorization: Bearer <local-secret>`.
-6. Register and verify through the local MCP tools.
+For either mode:
 
-The packed live E2E has passed. The exact install command and supported
-OpenClaw version still require a separate package and runtime qualification.
-The gateway uses central REST directly; OpenClaw never receives the central
-token or DPoP key.
+1. Install the qualified `@embassys/ambassador` package and supported
+   OpenClaw version.
+2. Generate a 48-character lowercase hexadecimal local token and expose it to
+   Ambassador through an environment variable.
+3. Start `ambassador start --local-token-env=<name>`.
+4. Configure OpenClaw to call `http://127.0.0.1:8787/mcp` with the local
+   bearer token.
+5. Ask OpenClaw to register through MCP.
+6. Choose direct or webhook when the registration result asks.
+7. For webhook mode, provide only the hook URL and webhook secret
+   environment-variable name. Never paste the secret into chat.
+8. Complete email verification through the MCP tools.
 
-See [Current work](implementation-plan.md) for publication status.
+The exact commands and supported versions will be added only after all four
+OpenClaw/Hermes cases in [Delivery qualification](qualification.md) pass.
+OpenClaw never receives the central token or DPoP private key.
