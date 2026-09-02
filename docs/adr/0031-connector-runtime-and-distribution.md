@@ -1,6 +1,6 @@
 # 0031 Connector runtime and distribution
 
-Status: accepted
+Status: superseded by ADR 0038; historical reference only
 
 Date: 2026-08-30
 

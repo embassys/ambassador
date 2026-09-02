@@ -1,102 +1,80 @@
-# Live gateway qualification
+# Live central qualification
 
 ## Purpose
 
-Qualify a packed gateway against the current Embassys REST service and an
-authenticated local qualification webhook. This runbook does not test central
-MCP, `/api/v2`, migration, reissue, lease recovery, the removed
-conversation/reply design, or a provider connector. Provider requalification
-follows the separate connector redesign.
+This runbook records the controlled test of Ambassador's REST and DPoP client
+against `https://mcp.embassys.ai`. It does not test central MCP, API-version
+fallbacks, migration, token reissue, leases, conversations, or invented reply
+operations.
+
+The existing runner and completed observation predate ADR 0038. They prove the
+central client baseline, not the new package name, guided registration,
+full-message webhook, or direct ACP delivery. Update the runner during the
+delivery cutover before using it as release evidence.
 
 ## Safety
 
 - Use disposable Mailosaur addresses and synthetic action data.
-- Read Mailosaur credentials from the approved macOS Keychain entries.
+- Read Mailosaur credentials from approved local secret storage.
 - Keep addresses, codes, tokens, keys, proofs, messages, and payloads out of
   commands, files, logs, screenshots, and reports.
-- Capture only status, timing, route name, and safe pass/fail evidence.
+- Capture only route names, status, timing, digests, and safe pass/fail evidence.
 - Delete captured mail and all temporary state in cleanup.
-- Do not use a real personal email or phone value in an action payload.
 
-## Preconditions
+## Required live checks after the cutover
 
-- Current fixtures and gateway tests are green.
-- The candidate implements the current gateway protocol.
-- `GET /api/list_action_types` returns the recorded `get_email` and
-  `get_phone_number` schemas.
-- Review the current `embassys/agent2agent` source and confirm the live origin
-  before running.
-- A packed gateway has passed local artifact scans.
-- The bounded local qualification webhook is available on an isolated
-  loopback port.
+1. Pack and scan the exact candidate package.
+2. Create two disposable identities through authenticated local MCP.
+3. Choose one webhook profile and one direct profile through guided
+   registration.
+4. Receive and use both verification emails without persisting their codes.
+5. Restart and prove encrypted credential and nonsecret profile loading.
+6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
+7. Validate the live action catalog against the recorded fixture schemas.
+8. Request and decide one synthetic permission.
+9. Deliver one synthetic action message through each delivery mode.
+10. Prove local acceptance or completion precedes central acknowledgement.
+11. Record the consuming-poll restart-loss limitation.
+12. Stop all processes, delete mail and temporary state, and scan artifacts.
 
-## Run
+Use the mock webhook receiver and mock ACP agent for this live REST test.
+Real-agent OpenClaw and Hermes qualification remains a separate local matrix in
+[Delivery qualification](qualification.md).
 
-The controlled runner is `scripts/live-qualification.mjs`. It requires
-`A2A_CONFIRM_LIVE_QUALIFICATION` to equal
-`run-live-qualification-with-two-disposable-mailosaur-identities` before it
-contacts the live service.
-
-1. Create two unique Mailosaur addresses for this run.
-2. Start one clean gateway instance for the first identity and one for the
-   second identity in isolated local state and on isolated loopback ports as
-   supported by the test harness.
-3. Register each identity through its authenticated local MCP endpoint.
-4. Retrieve each verification email, extract the code in memory, verify with a
-   gateway-generated P-256 key, and delete the mail.
-5. Restart both gateways and prove they load their encrypted credentials.
-6. Run protected negative checks with an isolated test client: missing proof,
-   wrong key, replay, stale and future proof, wrong method, wrong URL, and wrong
-   token hash.
-7. Confirm a valid poll uses `Authorization: Bearer` plus `DPoP` and succeeds
-   without a proactive nonce.
-8. List action types and validate the returned schemas used by the test.
-9. Request one low-impact synthetic permission from identity A to identity B.
-10. Poll B, retrieve the permission message through local MCP, decide it with
-    `respond_to_permission`, and acknowledge it.
-11. Poll A and acknowledge the permission response.
-12. Call the approved action from A to B using only synthetic data.
-13. Poll B, retrieve the action message, and acknowledge it.
-14. Confirm the qualification webhook receives only ID-based wakes and that
-    bodies are retrieved through local MCP.
-15. Stop both gateways and run the complete artifact scan.
-
-Do not claim restart recovery for a message already consumed from central.
-Record that the current server cannot redeliver that body.
+The controlled runner must require an explicit confirmation phrase before any
+live request. It must record the reviewed central source revision or note that
+the deployment does not expose one.
 
 ## Required report
 
 Record only:
 
-- date and server revision, when the deployment identifies it;
+- date and reviewed server revision;
 - live origin;
-- gateway package digest;
-- qualification harness revision;
-- status for each step;
+- packed Ambassador digest;
+- qualification runner revision;
+- status for each safe case;
 - returned action names and schema digests;
 - whether a DPoP nonce was observed;
+- delivery mode used for each synthetic message;
 - artifact-scan result; and
 - the known consuming-poll limitation.
 
-Do not include addresses, IDs, codes, tokens, JWK coordinates, proof claims,
-messages, action payloads, permission scopes, or remote error bodies.
+Do not include identities, IDs, codes, tokens, JWK coordinates, proof claims,
+messages, action payloads, permission scopes, webhook details, prompts,
+provider output, or remote error bodies.
 
-## Cleanup
+## Baseline observation
 
-- Stop gateway and runtime processes.
-- Delete temporary gateway and connector state created for the run.
-- Delete all captured Mailosaur messages.
-- Confirm no temporary report contains a forbidden marker.
-- Leave no central credential in a shared development profile.
+On 2026-09-02, the packed pre-ADR-0038 gateway passed registration, Mailosaur
+email receipt, verification, encrypted restart, the DPoP positive and negative
+matrix, six-action catalog validation, permission request and decision,
+permission-response delivery, one `get_email` delivery, consuming polls,
+acknowledgements, and forbidden-marker scans.
 
-## Completed observation
+It used no central MCP request and observed no initial nonce challenge. The
+final `get_my_permissions` check matched the deployed email-field model.
+Captured mail and temporary gateway state were deleted.
 
-The 2026-09-02 packed run passed registration, email receipt, verification,
-encrypted restart, the DPoP positive and negative matrix, six-action catalog
-validation, permission request and decision, permission-response delivery,
-`get_email` delivery, consuming polls, acknowledgements, and forbidden-marker
-scans. It made no central MCP request and observed no initial nonce challenge.
-
-The final protected `get_my_permissions` check returned the declared
-email-field model and passed the strict gateway validator. Captured Mailosaur
-messages and all temporary gateway state were deleted.
+This observation remains useful evidence for ADR 0037 only. It is not release
+evidence for the Ambassador delivery cutover.

@@ -1,30 +1,32 @@
 # Product and architecture
 
+Status: accepted target; implementation progress is tracked separately
+
 ## Product boundary
 
-The gateway is one foreground process between a local agent runtime and the
-Embassys REST service. It exposes an authenticated loopback MCP server,
-enrolls one email-based central identity, receives messages for that identity,
-and wakes one configured webhook.
+Embassys Ambassador is one foreground process between a local agent and the
+Embassys REST service. It exposes an authenticated loopback MCP server, enrolls
+one email-based central identity, and owns one local delivery profile.
 
-The command is:
+The public package and command are:
 
 ```text
-a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
+@embassys/ambassador
+ambassador start --local-token-env=<environment-variable>
 ```
 
-The gateway does not discover runtimes, manage bindings, select providers, run
-a model, or accept central endpoint configuration. The same local token
-authenticates the webhook and every request to the loopback MCP endpoint.
+The local token authenticates MCP and encrypts the central credential. The
+command does not select an agent or delivery mode. Those choices are collected
+during registration and stored as nonsecret local profile data.
 
 ## System
 
 ```text
-Local agent runtime
+Local agent during setup and normal tool use
   |
   | authenticated loopback MCP
   v
-A2A gateway on 127.0.0.1:8787
+Embassys Ambassador on 127.0.0.1:8787
   |
   | Embassys REST API
   | Bearer token plus DPoP proof after verification
@@ -33,109 +35,163 @@ Central permissions, actions, and messages
   |
   | consumed message batch
   v
-Gateway bounded memory and ID-only journal
+Bounded in-memory delivery queue and ID-only journal
   |
-  | authenticated ID-only webhook wake
-  v
-Configured local webhook
+  +--> webhook mode: complete message to an authenticated endpoint
+  |
+  `--> direct mode: complete message to a gateway-managed ACP v1 agent
 ```
 
-An optional provider connector may own the webhook and run a provider. It is a
-separate foreground process and never receives the central credential.
+MCP and ACP have different directions. MCP lets an agent call Ambassador's
+business tools. In direct mode, ACP lets Ambassador start and prompt an agent.
+An MCP connection cannot be used later as a reverse invocation channel.
+
+## One process, two delivery modes
+
+One Ambassador process owns one central identity and one persisted delivery
+profile.
+
+### Webhook
+
+Ambassador sends the complete validated central message to the configured
+webhook. The receiver authenticates the request, accepts custody with a `2xx`,
+and handles any provider-specific mapping. Ambassador then acknowledges the
+message to central.
+
+The webhook contract is provider-neutral. OpenClaw or another receiver may need
+a local mapping from the canonical Embassys JSON body to its native hook input.
+That mapping is receiver setup, not gateway branching.
+
+### Direct
+
+Ambassador acts as an ACP v1 client. It launches the selected local agent,
+creates or resumes a gateway-managed session as supported, and submits the
+complete central message as the prompt. The direct session is not the original
+chat in which the user registered.
+
+Ambassador makes its MCP endpoint available through ACP session configuration
+where the selected agent supports it. A provider that does not accept
+session-level MCP configuration must have Ambassador MCP configured through
+its normal setup mechanism.
+
+Codex, Claude, OpenClaw, and Hermes are recognized agent profiles. A profile is
+not supported merely because its name is recognized. Support requires its
+adapter and qualification gates. The first real-agent qualification target is
+OpenClaw and Hermes in both modes.
+
+## Guided registration
+
+The agent first calls `register_agent` with email and optional display name.
+If delivery is missing, Ambassador returns a structured `input_required`
+result asking the agent to obtain the user's choice:
+
+- Send directly to this agent.
+- Send to a webhook.
+
+The result can use MCP `clientInfo` to name a recognized agent in the prompt.
+`clientInfo` is a convenience hint, not authenticated identity. The follow-up
+tool call contains the user's explicit choice. If direct mode cannot infer a
+supported profile, the user also selects one from the fixed profile list.
+
+Webhook setup collects the URL and the name of an environment variable that
+contains the webhook secret. The raw secret never enters a prompt, tool
+argument, tool result, or profile file. Ambassador does not call central
+registration until the complete local delivery input validates.
 
 ## Central service relationship
 
 The central service source is
 [`embassys/agent2agent`](https://github.com/embassys/agent2agent), and the live
-service is `https://mcp.embassys.ai`. The gateway uses its unversioned REST
-API. It does not use central MCP or OAuth.
+service is `https://mcp.embassys.ai`. Ambassador uses its unversioned REST API.
+It does not use central MCP or OAuth.
 
-The gateway follows current server code rather than freezing the architecture
-to one server commit. A client-visible server change requires a deliberate
-gateway update. Change the protocol, fixtures, tests, implementation, and live
-qualification together. Do not probe for alternate contracts or keep the old
-client as a fallback.
+Ambassador follows current server code rather than pinning the architecture to
+one commit. A client-visible server change requires a deliberate update to the
+protocol, fixtures, tests, implementation, and live qualification. Ambassador
+does not probe alternate contracts or keep an old client as fallback.
 
 ## Trust and custody
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, messages, and acknowledgements | Local webhook or provider credentials |
-| Gateway | Local MCP authentication, encrypted central credential, DPoP proofs, bounded message memory, and ID-only wake state | Provider credentials, durable message bodies, or runtime selection |
-| Local runtime | User interaction, MCP tool use, and message handling | Direct central token handling |
-| Optional connector | Webhook admission and provider process control | Central credential or message-body persistence |
-| Provider runtime | Its own authentication, history, tools, policy, and model execution | Gateway state |
+| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, messages, acknowledgements | Local delivery or provider credentials |
+| Ambassador | Local MCP authentication, encrypted central credential, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
+| Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
+| Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
-The token and P-256 private key persist only inside one encrypted credential
-file. SQLite contains opaque message IDs and relay state. Action payloads,
-messages, permissions, emails, verification codes, proofs, and MCP bodies stay
-out of durable gateway state and observability output.
+The central token and P-256 private key persist only inside one encrypted
+credential file. The delivery profile may persist the mode, recognized agent
+kind, webhook URL, webhook secret environment-variable name, canonical direct
+working directory, and minimum ACP session metadata. It never contains a secret
+or message body. SQLite remains ID-only.
 
 ## Main flows
 
 ### Startup
 
 1. Acquire the singleton lock.
-2. Resolve and validate the named webhook token.
+2. Resolve and validate the local token from `--local-token-env`.
 3. Bind authenticated MCP on `127.0.0.1:8787`.
-4. Load the encrypted central credential if one exists.
-5. Start REST polling only when the credential is valid and unexpired.
-6. Print the MCP endpoint and remain in the foreground.
+4. Load the delivery profile and encrypted central credential if present.
+5. Prepare the configured delivery target.
+6. Start REST polling only when both stored records are valid.
+7. Print the MCP endpoint and remain in the foreground.
 
 ### Enrollment
 
-1. The local agent calls `register_agent` with an email and optional display
-   name.
-2. The gateway registers through the REST API.
-3. The user supplies the code delivered by email.
-4. The gateway generates a P-256 key and sends its public JWK during
-   verification.
-5. The gateway validates the returned key binding and timestamps.
-6. It stores the token and private key before returning token-free success and
+1. The local agent calls `register_agent`.
+2. Ambassador collects a user-confirmed delivery profile through structured
+   follow-up results.
+3. Ambassador registers the email through central REST.
+4. The user supplies the code delivered by email.
+5. Ambassador generates a P-256 key and verifies with its public JWK.
+6. Ambassador validates the returned key binding and timestamps.
+7. It stores the token and private key before returning token-free success and
    enabling protected tools.
 
 ### Protected work
 
-Each protected REST request carries Bearer authorization and a fresh DPoP
-proof for the exact method and URL. The server's action catalog supplies action
-names and payload schemas. Permission requests and decisions control whether
-an action call may deliver a message to another identity.
+Each protected REST request carries Bearer authorization and a fresh DPoP proof
+for the exact method and URL. The central action catalog supplies action names
+and payload schemas. Permission requests and decisions control whether an
+action call may deliver a message to another identity.
 
-### Receive and wake
+### Incoming message
 
-1. The gateway long-polls central.
-2. Central marks queued messages delivered before returning them.
-3. The gateway validates a bounded batch, keeps bodies in memory, and journals
-   only message IDs and relay state.
-4. It sends an authenticated ID-only webhook wake.
-5. The local agent retrieves the body through MCP.
-6. The local agent acknowledges an ID-bearing message after processing it.
-7. The gateway removes the body and ID only after central confirms the
-   acknowledgement.
+1. Ambassador long-polls central.
+2. Central marks selected messages delivered before returning them.
+3. Ambassador validates a bounded batch, keeps bodies in memory, and journals
+   only message IDs and delivery state.
+4. The selected delivery target receives the complete message.
+5. A webhook `2xx` or successful direct ACP completion transfers or completes
+   local responsibility.
+6. Ambassador acknowledges the message to central and removes its local state.
 
-The server cannot currently redeliver a delivered message. A gateway crash
-can lose a body that central already returned. Message-body persistence is
-still forbidden, so server-side retrieval or redelivery is the proper future
-fix.
+After a direct prompt may have started, an uncertain failure is not replayed
+automatically. The server cannot currently redeliver a message consumed by
+polling. A process crash can therefore lose an in-memory body. Server-side
+retrieval or redelivery is the proper future fix.
 
-## Provider connectors
+## Non-goals
 
-The connector foundation, Codex adapter, and Claude adapter have local fixture
-coverage. Their central-facing workflow was designed for conversation and
-reply operations that the current server does not have.
-
-Provider process isolation, local policy, credential separation, and
-content-free state remain valid. The workflow must be redesigned around
-permission and action messages before any connector claims live integration.
+- Calling the central MCP endpoint.
+- API-version probing or compatibility branches.
+- A separate connector process or provider-specific gateway transport.
+- Recovering the exact MCP chat used during registration.
+- Passing raw secrets through the model.
+- Inventing reply, conversation, lease, outcome, activation, or token-reissue
+  APIs that central does not expose.
+- Persisting message bodies locally.
+- Native service management or a GUI.
 
 ## Current limitations
 
 - Central has no message retrieval or redelivery after a consuming poll.
-- Central has no token refresh or reissue route. An expired credential requires
-  intentional local cleanup and fresh development enrollment.
+- Central has no general reply or action-result endpoint.
+- Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
-- No provider connector has qualified its current central-facing workflow.
-- The published `0.2.6` package predates this implementation.
+- The delivery cutover and renamed package are not implemented yet.
+- No direct agent profile has passed the new real-agent qualification matrix.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).

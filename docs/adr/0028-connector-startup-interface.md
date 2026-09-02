@@ -1,6 +1,6 @@
 # 0028 Connector startup interface
 
-Status: accepted
+Status: superseded by ADR 0038; historical reference only
 
 Date: 2026-08-30
 

@@ -1,14 +1,14 @@
 # 0019 Central credential storage
 
-Status: accepted; credential profile amended by ADR 0037
+Status: accepted; terminology amended by ADR 0038
 
 Date: 2026-08-25
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 ## Problem
 
-The gateway must survive restart without returning the central token or DPoP
+Ambassador must survive restart without returning the central token or DPoP
 private key to the local agent and without writing either value in plaintext
 to configuration or SQLite.
 
@@ -17,7 +17,7 @@ to configuration or SQLite.
 Store the current central token and P-256 private key together as one atomic
 encrypted credential file.
 
-Derive a 256-bit encryption key from the supplied 192-bit webhook token and a
+Derive a 256-bit encryption key from the supplied 192-bit local token and a
 fresh random salt with Node's approved scrypt parameters. Encrypt with
 AES-256-GCM and a fresh IV. Persist only the format metadata, salt, IV,
 authentication tag, and ciphertext. Use Node core cryptography and add no
@@ -46,7 +46,7 @@ refresh a token, reissue against the same key, or run email-control recovery.
 
 An unreadable or expired credential fails closed. A developer may intentionally
 remove the complete local development state before fresh enrollment. The
-gateway does not make that decision automatically after a `401` or parse
+Ambassador does not make that decision automatically after a `401` or parse
 failure.
 
 ## Data boundary
@@ -62,5 +62,6 @@ bundles.
 
 ## Approval
 
-The user approved the Node-core encrypted-file design on 2026-08-25 and the
-current-only DPoP amendment through ADR 0037 on 2026-09-01.
+The user approved the Node-core encrypted-file design on 2026-08-25, the
+current-only DPoP amendment through ADR 0037 on 2026-09-01, and the local-token
+terminology through ADR 0038 on 2026-09-02.
