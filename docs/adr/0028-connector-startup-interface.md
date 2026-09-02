@@ -16,7 +16,7 @@ loopback port, token source, working directory, and bounded policy. It must not
 let a remote A2A message choose a provider, model, session, tool, MCP server,
 sandbox, endpoint, directory, or credential.
 
-## Proposed decision
+## Decision
 
 Build one shared provider-neutral connector foundation with three thin,
 provider-specific foreground entrypoints. The entrypoint fixes the provider
@@ -40,8 +40,7 @@ secret, opening connector state, binding a listener, contacting the gateway,
 or starting a provider process. There is no optional verbose or configuration
 flag.
 
-This record proposes the entrypoint pattern. ADR 0031 separately proposes the
-final package and binary names. Neither record is approved yet.
+ADR 0031 defines the package and binary names.
 
 ## Option contract
 
@@ -431,10 +430,6 @@ showing the command.
 
 ## Approval
 
-Approved by the user on 2026-08-30. This fixes the N3-D1 startup interface,
-local authority inputs, and whole-provider retirement command described above.
-ADRs 0029 through 0031 were accepted with this record and complete D05.
-
-This approval does not select a provider executable or SDK version, authorize
-public package publication, or make a provider/platform support claim. ADR
-0032 permits K01 against the accepted G04 fixture contract.
+Approved by the user on 2026-08-30. This approval does not select a provider
+executable or SDK version, authorize public package publication, or make a
+provider and platform support claim.

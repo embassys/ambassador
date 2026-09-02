@@ -22,7 +22,7 @@ test("package metadata exposes the approved public gateway", async () => {
     "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
-    "docs/live-e2e-openclaw-hermes.md",
+    "docs/live-qualification.md",
   ]);
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
   assert.deepEqual(packageJson.repository, {

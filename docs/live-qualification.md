@@ -1,10 +1,8 @@
-# I05 packed gateway live E2E
-
-Status: completed on 2026-09-02; retained as the controlled rerun procedure
+# Live gateway qualification
 
 ## Purpose
 
-Qualify the packed gateway against the current Embassys REST service and an
+Qualify a packed gateway against the current Embassys REST service and an
 authenticated local qualification webhook. This runbook does not test central
 MCP, `/api/v2`, migration, reissue, lease recovery, the removed
 conversation/reply design, or a provider connector. Provider requalification
@@ -22,16 +20,22 @@ follows the separate connector redesign.
 
 ## Preconditions
 
-- I02 replacement fixtures and tests are green.
-- I03 and I04 are complete in the candidate being qualified.
+- Current fixtures and gateway tests are green.
+- The candidate implements the current gateway protocol.
 - `GET /api/list_action_types` returns the recorded `get_email` and
   `get_phone_number` schemas.
-- The source pin and live origin in `server-integration-status.md` are current.
+- Review the current `embassys/agent2agent` source and confirm the live origin
+  before running.
 - A packed gateway has passed local artifact scans.
 - The bounded local qualification webhook is available on an isolated
   loopback port.
 
 ## Run
+
+The controlled runner is `scripts/live-qualification.mjs`. It requires
+`A2A_CONFIRM_LIVE_QUALIFICATION` to equal
+`run-live-qualification-with-two-disposable-mailosaur-identities` before it
+contacts the live service.
 
 1. Create two unique Mailosaur addresses for this run.
 2. Start one clean gateway instance for the first identity and one for the
@@ -46,7 +50,7 @@ follows the separate connector redesign.
    token hash.
 7. Confirm a valid poll uses `Authorization: Bearer` plus `DPoP` and succeeds
    without a proactive nonce.
-8. List action types and compare the response with the pinned schemas.
+8. List action types and validate the returned schemas used by the test.
 9. Request one low-impact synthetic permission from identity A to identity B.
 10. Poll B, retrieve the permission message through local MCP, decide it with
     `respond_to_permission`, and acknowledge it.
@@ -64,7 +68,7 @@ Record that the current server cannot redeliver that body.
 
 Record only:
 
-- date and source commit;
+- date and server revision, when the deployment identifies it;
 - live origin;
 - gateway package digest;
 - qualification harness revision;
@@ -94,6 +98,5 @@ validation, permission request and decision, permission-response delivery,
 scans. It made no central MCP request and observed no initial nonce challenge.
 
 The final protected `get_my_permissions` check returned the declared
-email-field model and passed the strict gateway validator. This differs from
-the pinned source construction and the earlier live server error. Captured
-Mailosaur messages and all temporary gateway state were deleted.
+email-field model and passed the strict gateway validator. Captured Mailosaur
+messages and all temporary gateway state were deleted.
