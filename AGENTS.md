@@ -26,11 +26,24 @@ scope on your own.
   local delivery profile.
 - `start` accepts only `--local-token-env=<name>`. Do not add delivery-mode,
   agent, webhook URL, central URL, configuration path, or secret-value flags.
-- Delivery is selected during the MCP registration flow. The two modes are
-  `webhook` and `direct`. Do not add a third connector or polling mode.
-- An MCP client's `clientInfo` may improve the registration prompt, but it is
-  not authenticated identity. A user-confirmed, persisted delivery profile is
-  authoritative.
+- Resolve delivery during MCP registration through a fixed capability
+  registry. The two modes are `webhook` and `direct`. Do not add a third
+  connector or polling mode.
+- Match bounded MCP `clientInfo` metadata exactly against reviewed aliases.
+  It is not authenticated identity, but it may select only a compiled-in
+  profile whose command, arguments, capabilities, and qualification are
+  fixed. Never accept an agent kind, executable, arguments, adapter, or
+  working directory from MCP input.
+- Direct is the default. A complete direct-only profile proceeds without a
+  delivery question. Ask direct versus webhook only for a complete dual-mode
+  profile, and present direct as the default. The initial dual-mode profiles
+  are OpenClaw and Hermes.
+- Reject an unknown, ambiguous, or incomplete profile before creating local or
+  central registration state. Do not offer a generic webhook fallback. Codex
+  and Claude remain unsupported until exact ACP adapter contracts are approved,
+  implemented, and qualified.
+- A persisted profile derived from the matched capability entry and any
+  required user choice is authoritative.
 - Webhook registration accepts a URL and a webhook secret environment-variable
   name, never the secret value. The gateway sends the complete validated
   central message with bearer and HMAC authentication. A `2xx` transfers

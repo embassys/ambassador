@@ -63,10 +63,16 @@ The boundary keeps these limits:
 JSON-RPC batches and redirects are rejected. Errors do not reflect request
 bodies, remote bodies, URLs, headers, or credentials.
 
-MCP initialization `clientInfo` is retained as bounded session metadata. A
-recognized name may suggest `codex`, `claude`, `openclaw`, or `hermes`
-during registration. It is not authenticated identity and never silently
-selects a delivery profile.
+MCP initialization `clientInfo` is retained as bounded session metadata and
+matched exactly against a compiled-in capability registry. It is not
+authenticated identity, so it cannot authorize central work or supply process
+configuration. It may only select a complete fixed local profile whose aliases,
+delivery modes, command, arguments, MCP behavior, and version policy have been
+reviewed and tested.
+
+An unknown, ambiguous, disabled, or incomplete match is unsupported. The model
+cannot supply an agent kind, executable, arguments, adapter, or fallback
+profile.
 
 ## Tool catalog
 
@@ -100,7 +106,7 @@ containing those credential fields or stored token bytes.
 
 ## Guided registration
 
-### Initial call
+### Profile resolution and initial call
 
 `register_agent` accepts:
 
@@ -111,14 +117,29 @@ containing those credential fields or stored token bytes.
 }
 ```
 
-If no delivery profile exists and `delivery` is absent, Ambassador makes no
-central request. It returns structured content equivalent to:
+Before writing state or contacting central, Ambassador resolves the current MCP
+session to exactly one enabled capability profile. The first version enables
+OpenClaw and Hermes; both support direct and webhook delivery. Codex and Claude
+remain disabled until an exact ACP adapter contract is separately approved,
+implemented, and qualified.
+
+Profile behavior is capability-driven:
+
+| Matched profile | Registration behavior |
+| --- | --- |
+| Complete direct-only | Select direct and continue without a delivery question |
+| Complete direct and webhook | Return `input_required`; direct is the default |
+| Unknown, ambiguous, disabled, or incomplete | Return `unsupported_agent`; write no state and make no central request |
+
+For a dual-mode profile, an initial call without `delivery` returns structured
+content equivalent to:
 
 ```json
 {
   "status": "input_required",
   "prompt": "How should incoming requests reach this agent?",
   "required": ["delivery"],
+  "default": "direct",
   "choices": [
     {"value": "direct", "label": "Send directly to this agent"},
     {"value": "webhook", "label": "Send to a webhook"}
@@ -126,10 +147,23 @@ central request. It returns structured content equivalent to:
 }
 ```
 
-When `clientInfo` identifies a recognized profile, the direct label may name
-it, such as "Send directly to this OpenClaw agent". The agent presents the
-question to the user and makes a follow-up call. MCP elicitation may improve the
-experience where available, but correctness cannot depend on it.
+The labels should name the matched agent, such as "Send directly to this
+OpenClaw agent". The agent presents the question to the user and makes a
+follow-up call. MCP elicitation may improve the experience where available, but
+correctness cannot depend on it.
+
+An unsupported result is structured content equivalent to:
+
+```json
+{
+  "status": "unsupported_agent",
+  "message": "This MCP client is not supported by this Ambassador version."
+}
+```
+
+The result may list enabled profile names but must not echo raw `clientInfo`.
+Supplying `delivery` cannot bypass profile resolution or make an unsupported
+client valid.
 
 ### Direct follow-up
 
@@ -138,17 +172,16 @@ experience where available, but correctness cannot depend on it.
   "email": "agent@example.test",
   "display_name": "Optional display name",
   "delivery": {
-    "mode": "direct",
-    "agent": "openclaw"
+    "mode": "direct"
   }
 }
 ```
 
-`agent` is one of `codex`, `claude`, `openclaw`, or `hermes`. It may be
-omitted only when the current MCP session has one recognized `clientInfo`
-profile. If neither source provides one, Ambassador returns another
-`input_required` result with the fixed agent choices. User input never
-supplies an executable, argument list, shell fragment, transport, or path.
+The agent kind always comes from the matched capability entry. `register_agent`
+has no `agent` field. Direct-only profiles do not need this follow-up; if a
+caller sends it anyway, it may be accepted only when it agrees with the
+resolved profile. User input never supplies an executable, argument list,
+shell fragment, adapter, transport, or path.
 
 ### Webhook follow-up
 
@@ -172,6 +205,10 @@ is recommended.
 Webhook URLs may use HTTPS. Plain HTTP is accepted only for a literal loopback
 host. Credentials, fragments, control characters, unsupported schemes, and
 redirect-based target changes are rejected.
+
+Webhook input is accepted only for a matched profile whose registry entry
+enables webhook delivery. There is no generic webhook path for an unknown
+client and no automatic webhook fallback after direct failure.
 
 Ambassador validates and atomically stores the nonsecret delivery profile
 before it sends `POST /api/register_agent`. A conflicting stored profile or
@@ -233,15 +270,16 @@ The profile contains only the minimum nonsecret fields:
 | Mode | Fields |
 | --- | --- |
 | `webhook` | mode, canonical URL, secret environment-variable name |
-| `direct` | mode, fixed agent kind, canonical startup working directory, minimum opaque ACP session metadata when safe and supported |
+| `direct` | mode, registry-derived fixed agent kind, canonical startup working directory, minimum opaque ACP session metadata when safe and supported |
 
 The profile uses the same protected application-state directory as the central
 credential and journal. It is written atomically with restrictive ownership and
 permissions. It never contains secret values, message bodies, prompts, provider
 output, provider credentials, or executable input.
 
-One profile belongs to one central identity. Runtime mode switching is not part
-of this development cutover.
+One profile belongs to one central identity. The stored agent kind and mode
+must still correspond to a complete enabled registry entry at startup. Runtime
+mode switching is not part of this development cutover.
 
 ## Central REST and DPoP
 
@@ -344,6 +382,13 @@ directory is the canonical process directory captured during registration. A
 later start from a different directory fails closed instead of silently moving
 the agent's scope.
 
+The initial enabled profiles are OpenClaw and Hermes. A profile is enabled only
+after its exact `clientInfo` aliases, invocation, supported version policy, MCP
+configuration behavior, and qualification cases are committed. Adapter
+downloads at runtime are forbidden. Codex and Claude require separately
+approved ACP adapter contracts and remain unsupported until those contracts
+meet the same gate.
+
 Ambassador initializes the agent and opens a gateway-managed session. It
 provides its authenticated MCP endpoint in ACP session configuration where the
 agent supports that field. Agents that reject session MCP configuration, such
@@ -427,8 +472,10 @@ The journal remains ID-only.
 The cutover must prove at least:
 
 - the new package, binary, startup contract, and rejection of old interfaces;
-- guided MCP registration for direct and webhook choices;
-- safe `clientInfo` handling and explicit user confirmation;
+- exact capability-registry matching, direct-only automatic selection, and
+  dual-mode registration with direct as the default;
+- safe `clientInfo` handling, rejection of unknown or incomplete profiles, and
+  no model-supplied agent or process configuration;
 - no raw secret in MCP, profile data, output, or process arguments;
 - complete-message webhook delivery, authentication, deduplication, retry, and
   acknowledgement ordering;

@@ -14,15 +14,36 @@ state, the old package name, the old CLI, ID-only wakes, or connector packages.
 - Specify atomic delivery-profile storage with no secret or message content.
 - Specify canonical startup-directory capture and rejection of a conflicting
   direct-mode restart directory.
+- Specify a fixed capability registry with exact bounded `clientInfo` aliases,
+  enabled modes, direct invocation, MCP behavior, version policy, and a
+  completeness gate for every profile.
+- Specify that direct-only profiles continue automatically, dual-mode profiles
+  ask direct versus webhook with direct as the default, and unknown,
+  ambiguous, disabled, or incomplete profiles fail before any state or central
+  request.
 - Add a delivery-target interface that has webhook and direct fakes.
 - Keep all existing central REST and DPoP contract tests green.
 
 ## 2. Guided MCP registration
 
-- Retain MCP initialization `clientInfo` as a bounded per-session hint.
-- Extend `register_agent` with the optional delivery union in the protocol.
-- Return structured `input_required` results until the user supplies all local
-  delivery choices.
+- Retain bounded MCP initialization `clientInfo` and match it exactly against
+  the capability registry. Do not use substring or fuzzy matching.
+- Enable initial OpenClaw and Hermes entries only after their exact aliases,
+  fixed ACP commands and arguments, supported versions, and MCP setup behavior
+  are recorded and tested. Both entries support direct and webhook.
+- Keep Codex and Claude disabled until separate ACP adapter contracts are
+  approved, implemented, and qualified. A recognizable name is not a partial
+  support state.
+- Extend `register_agent` with the optional mode-specific delivery union in the
+  protocol. Do not add an agent-kind, executable, argument, adapter, transport,
+  or working-directory field.
+- For a complete direct-only entry, derive and store direct mode without a
+  follow-up. For a complete dual-mode entry, return structured
+  `input_required` content with direct as the default until the user supplies
+  direct or webhook details.
+- Return `unsupported_agent` for unknown, ambiguous, disabled, or incomplete
+  clients. Supplying webhook or direct input must not bypass this check. Make no
+  central request and create no profile or partial registration state.
 - Validate and persist the delivery profile before contacting central.
 - Reject raw secret values and credential-shaped fields before dispatch.
 - Remove local `poll_messages` and `ack_message` from the post-enrollment MCP
@@ -47,6 +68,9 @@ state, the old package name, the old CLI, ID-only wakes, or connector packages.
   existing dependency audit.
 - Implement a gateway-owned ACP client, child lifecycle, fixed supported-agent
   profiles, and safe environment handling.
+- Launch only the exact invocation from the matched capability entry, without a
+  shell or runtime adapter download. Never fall back to webhook after a direct
+  failure.
 - Supply Ambassador MCP to ACP sessions that accept session MCP configuration.
   Require provider-side MCP setup where they do not.
 - Submit a fixed instruction plus the complete validated message as one ACP
@@ -73,6 +97,10 @@ state, the old package name, the old CLI, ID-only wakes, or connector packages.
 ### Required in CI
 
 - Run the full central fixture matrix.
+- Prove exact `clientInfo` alias matching, rejection of unknown and ambiguous
+  values, rejection of model-supplied agent/process fields, automatic
+  direct-only selection with a test-only profile, and direct-default follow-up
+  behavior for both initial dual-mode profiles.
 - Run webhook delivery against a mock receiver that validates the complete
   body, bearer, HMAC, timestamp, idempotency, retry, and acknowledgement order.
 - Run direct delivery against a mock ACP v1 agent that validates initialize,

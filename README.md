@@ -11,9 +11,14 @@ The accepted package and command are:
 ambassador start --local-token-env=<environment-variable>
 ```
 
-Delivery is chosen through the MCP registration flow. Webhook mode sends the
-complete message to a user-approved URL. Direct mode starts a gateway-managed
-ACP agent session. There is no agent selector or webhook URL on `start`.
+Delivery is resolved through the MCP registration flow and a fixed capability
+registry. OpenClaw and Hermes support both modes, so Ambassador asks their
+users to choose direct or webhook and presents direct as the default. A known
+direct-only profile would proceed without a delivery question. Unknown or
+incomplete profiles are rejected; the model cannot select an agent, command,
+or adapter. Webhook mode sends the complete message to a user-approved URL.
+Direct mode starts a gateway-managed ACP agent session. There is no agent
+selector or webhook URL on `start`.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an

@@ -16,8 +16,10 @@ ambassador start --local-token-env=<environment-variable>
 ```
 
 The local token authenticates MCP and encrypts the central credential. The
-command does not select an agent or delivery mode. Those choices are collected
-during registration and stored as nonsecret local profile data.
+command does not select an agent or delivery mode. Ambassador resolves a fixed
+agent profile from MCP `clientInfo` during registration. It asks for a delivery
+choice only when that profile supports both modes, then stores the result as
+nonsecret local profile data.
 
 ## System
 
@@ -74,24 +76,37 @@ where the selected agent supports it. A provider that does not accept
 session-level MCP configuration must have Ambassador MCP configured through
 its normal setup mechanism.
 
-Codex, Claude, OpenClaw, and Hermes are recognized agent profiles. A profile is
-not supported merely because its name is recognized. Support requires its
-adapter and qualification gates. The first real-agent qualification target is
-OpenClaw and Hermes in both modes.
+Agent support is a fixed capability registry, not a name supplied by the model.
+Each enabled entry has exact bounded `clientInfo` aliases, allowed modes, a
+fixed executable and argument list for direct delivery, MCP setup behavior, and
+qualification evidence. User input and remote content cannot add or modify an
+entry.
+
+The first version enables OpenClaw and Hermes with direct and webhook modes.
+Direct is the default. Codex and Claude are not enabled merely because their
+names can be recognized; each needs a separately approved, implemented, and
+qualified ACP adapter contract. Unknown, ambiguous, disabled, and incomplete
+profiles are unsupported.
 
 ## Guided registration
 
 The agent first calls `register_agent` with email and optional display name.
-If delivery is missing, Ambassador returns a structured `input_required`
-result asking the agent to obtain the user's choice:
+Ambassador matches the MCP session's `clientInfo` against the capability
+registry before creating any state or calling central:
 
-- Send directly to this agent.
-- Send to a webhook.
+- A complete direct-only profile selects direct automatically and continues.
+- A complete dual-mode profile returns structured `input_required` content
+  asking the user to choose direct or webhook, with direct marked as the
+  default. The follow-up supplies only the mode and, for webhook, its setup
+  fields.
+- An unknown, ambiguous, disabled, or incomplete profile returns
+  `unsupported_agent` and stops.
 
-The result can use MCP `clientInfo` to name a recognized agent in the prompt.
-`clientInfo` is a convenience hint, not authenticated identity. The follow-up
-tool call contains the user's explicit choice. If direct mode cannot infer a
-supported profile, the user also selects one from the fixed profile list.
+The model never supplies an agent kind or chooses from a profile list.
+`clientInfo` is not authenticated identity, but exact matching is safe for this
+purpose because it can select only a compiled-in local profile and cannot
+change process details or widen capabilities. A failed direct launch does not
+fall back to webhook.
 
 Webhook setup collects the URL and the name of an environment variable that
 contains the webhook secret. The raw secret never enters a prompt, tool
@@ -140,8 +155,8 @@ or message body. SQLite remains ID-only.
 ### Enrollment
 
 1. The local agent calls `register_agent`.
-2. Ambassador collects a user-confirmed delivery profile through structured
-   follow-up results.
+2. Ambassador resolves a complete capability profile and, only for a dual-mode
+   profile, collects the user's direct-or-webhook choice.
 3. Ambassador registers the email through central REST.
 4. The user supplies the code delivered by email.
 5. Ambassador generates a P-256 key and verifies with its public JWK.
