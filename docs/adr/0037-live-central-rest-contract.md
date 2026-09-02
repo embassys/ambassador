@@ -4,6 +4,8 @@ Status: accepted; local delivery amended by ADR 0038
 
 Date: 2026-09-01
 
+Updated: 2026-09-03
+
 ## Problem
 
 Ambassador needs to work with the Embassys service that is being developed
@@ -24,9 +26,9 @@ uses the live service at `https://mcp.embassys.ai`.
 
 This decision does not freeze the integration to one server commit. When the
 server changes a client-visible contract, update the Ambassador protocol,
-fixtures, tests, implementation, and live qualification deliberately. The
-Ambassador does not probe for versions, negotiate between contracts, or retain an
-old client as a fallback.
+fixtures, tests, implementation, and live qualification deliberately.
+Ambassador does not probe for versions, negotiate between contracts, or retain
+an old client as a fallback.
 
 ### REST only
 
@@ -46,6 +48,7 @@ Protected work uses these REST routes:
 | Request permission | `POST /api/request_permission` |
 | Grant or deny | `POST /api/respond_to_permission` |
 | Deliver an action call | `POST /api/call_action` |
+| Submit an action result | `POST /api/submit_action_result` |
 | Poll messages | `GET /api/poll_messages?timeout=<seconds>` |
 | List permissions | `GET /api/get_my_permissions` |
 | Acknowledge a message | `POST /api/ack_message` |
@@ -77,10 +80,20 @@ replacement, or a weaker authorization path.
 
 ### Permissions, actions, and messages
 
-The server models agent interaction as permission requests and action calls.
-The action catalog is dynamic data returned by `list_action_types`. Ambassador
-owns a fixed local tool catalog but does not copy central action types into new
-MCP tools.
+The server models agent interaction as permission requests, action calls, and
+correlated action results. The action catalog is dynamic data returned by
+`list_action_types`. Ambassador owns a fixed local tool catalog but does not
+copy central action types into new MCP tools.
+
+`call_action` queues an `action_call` with a new `call_id`. Only its target may
+call `submit_action_result`. The target supplies that `call_id`, a structured
+result, and `success` or `error`. Central updates the action call to `completed`
+or `failed` and queues one `action_response` for the original caller. A later
+submission after completion returns `409`.
+
+The result endpoint is not a general reply channel. It has no per-action output
+schema, idempotency key, or outcome lookup. Ambassador therefore never retries
+an uncertain result submission.
 
 Central marks queued messages delivered before returning them from a poll.
 Ambassador keeps returned bodies in bounded memory and stores only message
@@ -110,8 +123,8 @@ approved durable location for the central token and private key.
 
 The repository contains one current central client. It has no bearer-only
 client, central MCP fallback, speculative versioned routes, credential
-migration, token reissue, activation, lease, conversation, reply, completion,
-or outcome path.
+migration, token reissue, activation, lease, general conversation or reply, or
+outcome-lookup path.
 
 The protocol contains the exact Ambassador behavior. The server repository
 contains the complete central API. Optional improvements to the server are

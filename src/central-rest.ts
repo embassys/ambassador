@@ -15,6 +15,7 @@ const MAX_NORMALIZED_RESULT_BYTES = 512 * 1024;
 const MAX_MESSAGES = 256;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const FORBIDDEN_ARGUMENT_NAMES = new Set([
   "access_token",
   "authorization",
@@ -120,21 +121,21 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     ),
   },
   {
-    name: "poll_messages",
-    description: "Read messages currently held in gateway memory.",
-    inputSchema: objectSchema({ timeout: { type: "integer", minimum: 0, maximum: 60 } }),
+    name: "submit_action_result",
+    description: "Return one success or error result for an action call received by this identity.",
+    inputSchema: objectSchema(
+      {
+        call_id: { type: "string", format: "uuid" },
+        result: { type: "object" },
+        status: { type: "string", enum: ["success", "error"] },
+      },
+      ["call_id", "result", "status"],
+    ),
   },
   {
     name: "get_my_permissions",
     description: "List permissions involving the enrolled identity.",
     inputSchema: objectSchema({}),
-  },
-  {
-    name: "ack_message",
-    description: "Acknowledge one delivered message after processing it.",
-    inputSchema: objectSchema({ message_id: { type: "string", minLength: 1, maxLength: 128 } }, [
-      "message_id",
-    ]),
   },
 ] as const;
 
@@ -197,6 +198,11 @@ function requestEmail(value: unknown): string {
 
 function requestName(value: unknown): string {
   if (typeof value !== "string" || !NAME.test(value)) throw failure("invalid_arguments");
+  return value;
+}
+
+function requestUuid(value: unknown): string {
+  if (typeof value !== "string" || !UUID.test(value)) throw failure("invalid_arguments");
   return value;
 }
 
@@ -390,10 +396,45 @@ export class CentralRestClient {
     if (
       !exactKeys(result, ["call_id", "message_id", "status"]) ||
       typeof result.call_id !== "string" ||
-      !NAME.test(result.call_id) ||
+      !UUID.test(result.call_id) ||
       typeof result.message_id !== "string" ||
       !NAME.test(result.message_id) ||
       result.status !== "delivered"
+    ) {
+      throw failure("central_response_invalid");
+    }
+    return result;
+  }
+
+  async submitActionResult(
+    arguments_: unknown,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (
+      !exactKeys(arguments_, ["call_id", "result", "status"]) ||
+      (arguments_.status !== "success" && arguments_.status !== "error")
+    ) {
+      throw failure("invalid_arguments");
+    }
+    const callId = requestUuid(arguments_.call_id);
+    const requestedStatus = arguments_.status;
+    const result = await this.#request(
+      "POST",
+      "/api/submit_action_result",
+      {
+        call_id: callId,
+        result: requestObject(arguments_.result),
+        status: requestedStatus,
+      },
+      signal,
+    );
+    const expectedStatus = requestedStatus === "success" ? "completed" : "failed";
+    if (
+      !exactKeys(result, ["call_id", "status", "message_id"]) ||
+      result.call_id !== callId ||
+      result.status !== expectedStatus ||
+      typeof result.message_id !== "string" ||
+      !NAME.test(result.message_id)
     ) {
       throw failure("central_response_invalid");
     }

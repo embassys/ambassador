@@ -35,7 +35,7 @@ function rest(central: FakeCentral, credential: LoadedCentralCredential): Centra
   });
 }
 
-test("I02-R01 post-enrollment catalog is the seven fixed REST tools", () => {
+test("post-enrollment catalog exposes exactly six agent-facing tools", () => {
   assert.deepEqual(
     REST_AUTHENTICATED_TOOLS.map((tool) => tool.name),
     [
@@ -43,13 +43,21 @@ test("I02-R01 post-enrollment catalog is the seven fixed REST tools", () => {
       "request_permission",
       "respond_to_permission",
       "call_action",
-      "poll_messages",
+      "submit_action_result",
       "get_my_permissions",
-      "ack_message",
     ],
   );
   const serialized = JSON.stringify(REST_AUTHENTICATED_TOOLS);
-  for (const removed of ["start_", "reply_", "complete_", "outcome", "reissue", "activation"]) {
+  for (const removed of [
+    "poll_messages",
+    "ack_message",
+    "start_",
+    "reply_",
+    "complete_",
+    "outcome",
+    "reissue",
+    "activation",
+  ]) {
     assert.equal(serialized.includes(removed), false);
   }
 });
@@ -99,6 +107,11 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
   });
   assert.equal(decided.status, "granted");
   await target.ackMessage({ message_id: permissionMessageId as string });
+  const permissionResponse = await requester.pollRemoteMessages(0);
+  const permissionResponseId = permissionResponse.messages[0]?.id;
+  assert.equal(permissionResponse.messages[0]?.payload.type, "permission_response");
+  assert.equal(typeof permissionResponseId, "string");
+  await requester.ackMessage({ message_id: permissionResponseId as string });
 
   const called = await requester.callAction({
     target_email: "rest-target@fixture.test",
@@ -110,6 +123,26 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
   assert.equal(actionPoll.messages[0]?.id, called.message_id);
   assert.equal(actionPoll.messages[0]?.payload.type, "action_call");
   await target.ackMessage({ message_id: called.message_id });
+
+  const submitted = await target.submitActionResult({
+    call_id: called.call_id,
+    result: { email: "rest-target@fixture.test" },
+    status: "success",
+  });
+  assert.equal(submitted.call_id, called.call_id);
+  assert.equal(submitted.status, "completed");
+  assert.equal(typeof submitted.message_id, "string");
+
+  const responsePoll = await requester.pollRemoteMessages(0);
+  assert.equal(responsePoll.messages[0]?.id, submitted.message_id);
+  assert.deepEqual(responsePoll.messages[0]?.payload, {
+    type: "action_response",
+    call_id: called.call_id,
+    action_type: "get_email",
+    status: "success",
+    result: { email: "rest-target@fixture.test" },
+  });
+  await requester.ackMessage({ message_id: submitted.message_id });
 
   const permissions = await requester.getMyPermissions();
   assert.equal(permissions.length, 1);
@@ -149,7 +182,27 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
         dpopCount: 1,
       },
       { method: "POST", path: "/api/ack_message", authorizationScheme: "Bearer", dpopCount: 1 },
+      {
+        method: "GET",
+        path: "/api/poll_messages?timeout=0",
+        authorizationScheme: "Bearer",
+        dpopCount: 1,
+      },
+      { method: "POST", path: "/api/ack_message", authorizationScheme: "Bearer", dpopCount: 1 },
       { method: "POST", path: "/api/call_action", authorizationScheme: "Bearer", dpopCount: 1 },
+      {
+        method: "GET",
+        path: "/api/poll_messages?timeout=0",
+        authorizationScheme: "Bearer",
+        dpopCount: 1,
+      },
+      { method: "POST", path: "/api/ack_message", authorizationScheme: "Bearer", dpopCount: 1 },
+      {
+        method: "POST",
+        path: "/api/submit_action_result",
+        authorizationScheme: "Bearer",
+        dpopCount: 1,
+      },
       {
         method: "GET",
         path: "/api/poll_messages?timeout=0",

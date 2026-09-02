@@ -1,3 +1,4 @@
+import type { AgentCapability } from "./agent-capabilities.js";
 import {
   CentralEnrollmentClient,
   CentralEnrollmentError,
@@ -6,7 +7,16 @@ import {
 import { CentralProtectedTransport } from "./central-protected-transport.js";
 import { CentralRestClient, CentralRestError, REST_AUTHENTICATED_TOOLS } from "./central-rest.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
+import {
+  type DeliveryProfile,
+  DeliveryProfileError,
+  DeliveryProfileStore,
+  resolveWebhookSecret,
+  validateStoredDeliveryProfile,
+} from "./delivery-profile.js";
+import { DirectDeliveryTarget } from "./direct-delivery.js";
 import { DpopNonceCache } from "./dpop.js";
+import { GuidedRegistration, GuidedRegistrationError } from "./guided-registration.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
 import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "./local-mcp.js";
 import {
@@ -14,25 +24,36 @@ import {
   McpContractError,
   safeLocalToolArguments,
 } from "./mcp-contract.js";
-import { NotificationJournal, validateNotificationId } from "./notification-journal.js";
+import { NotificationJournal } from "./notification-journal.js";
 import {
+  type DeliveryTarget,
   NotificationRelay,
   NotificationRelayError,
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
+import { WebhookDeliveryTarget } from "./webhook-delivery.js";
 
 export const CENTRAL_ORIGIN = "https://mcp.embassys.ai";
 const CENTRAL_POLL_SECONDS = 30;
 
+export interface DeliveryTargetContext {
+  readonly profile: DeliveryProfile;
+  readonly capability: AgentCapability;
+  readonly endpoint: string;
+}
+
 export interface GatewayApplicationOptions {
-  readonly webhookUrl: string;
-  readonly webhookToken: string;
+  readonly localToken: string;
   readonly journalPath: string;
   readonly credentialPath: string;
+  readonly profilePath: string;
+  readonly workingDirectory: string;
+  readonly environment: NodeJS.ProcessEnv;
   readonly centralOrigin?: string;
   readonly centralFetch?: typeof fetch;
   readonly webhookFetch?: typeof fetch;
   readonly credentialStore?: CredentialStore;
+  readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
   readonly localMcpPort?: number;
   readonly nowSeconds?: () => number;
   readonly signal?: AbortSignal;
@@ -45,7 +66,7 @@ export interface RunningGatewayApplication {
 }
 
 function safeFailure(): Error {
-  return new Error("Gateway operation failed");
+  return new Error("Ambassador operation failed");
 }
 
 function localError(error: unknown): LocalMcpToolError {
@@ -53,18 +74,11 @@ function localError(error: unknown): LocalMcpToolError {
   if (error instanceof IdentityError) return new LocalMcpToolError(error.code);
   if (error instanceof CentralEnrollmentError) return new LocalMcpToolError(error.code);
   if (error instanceof CentralRestError) return new LocalMcpToolError(error.code);
+  if (error instanceof GuidedRegistrationError) return new LocalMcpToolError(error.code);
+  if (error instanceof DeliveryProfileError) return new LocalMcpToolError(error.code);
   if (error instanceof McpContractError) return new LocalMcpToolError("invalid_arguments");
   if (error instanceof NotificationRelayError) return new LocalMcpToolError(error.code);
-  return new LocalMcpToolError("gateway_operation_failed");
-}
-
-function timeout(arguments_: Record<string, unknown>): number {
-  if (Object.keys(arguments_).some((key) => key !== "timeout")) throw new McpContractError();
-  const value = arguments_.timeout ?? 30;
-  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 60) {
-    throw new McpContractError();
-  }
-  return value as number;
+  return new LocalMcpToolError("ambassador_operation_failed");
 }
 
 export async function openGatewayApplication(
@@ -73,11 +87,12 @@ export async function openGatewayApplication(
   const centralOrigin = options.centralOrigin ?? CENTRAL_ORIGIN;
   const nowSeconds = options.nowSeconds ?? (() => Date.now() / 1_000);
   const journal = new NotificationJournal(options.journalPath);
+  const profileStore = new DeliveryProfileStore(options.profilePath);
   const store =
     options.credentialStore ??
     new EncryptedFileCredentialStore(
       options.credentialPath,
-      options.webhookToken,
+      options.localToken,
       JSON.stringify({ centralOrigin: new URL(centralOrigin).origin }),
     );
   const controller = new AbortController();
@@ -92,7 +107,6 @@ export async function openGatewayApplication(
   let relayRun: Promise<void> | undefined;
   let closed = false;
   let activation: Promise<void> | undefined;
-  const acknowledgements = new Set<string>();
   let reportFailure: ((error: Error) => void) | undefined;
   const failure = new Promise<Error>((resolve) => {
     reportFailure = resolve;
@@ -103,20 +117,55 @@ export async function openGatewayApplication(
     ...(options.centralFetch === undefined ? {} : { fetch: options.centralFetch }),
     nowSeconds,
   });
+  const guidedRegistration = new GuidedRegistration({
+    profileStore,
+    workingDirectory: options.workingDirectory,
+    environment: options.environment,
+    registerCentral: (arguments_, signal) => enrollment.register(arguments_, signal),
+  });
 
-  const requireRest = (): CentralRestClient => {
-    if (rest === undefined) throw safeFailure();
-    return rest;
+  const loadProfile = async (): Promise<{
+    readonly profile: DeliveryProfile;
+    readonly capability: AgentCapability;
+  }> => {
+    const profile = await profileStore.load();
+    if (profile === undefined) throw new DeliveryProfileError("invalid_profile");
+    const validated = await validateStoredDeliveryProfile(profile, options.workingDirectory);
+    if (validated.profile.mode === "webhook") {
+      resolveWebhookSecret(options.environment, validated.profile.secret_env);
+    }
+    return validated;
   };
-  const requireRelay = (): NotificationRelay => {
-    if (relay === undefined) throw safeFailure();
-    return relay;
+
+  const createDeliveryTarget = (context: DeliveryTargetContext): DeliveryTarget => {
+    if (options.deliveryTargetFactory !== undefined) {
+      return options.deliveryTargetFactory(context);
+    }
+    if (context.profile.mode === "webhook") {
+      return new WebhookDeliveryTarget({
+        url: context.profile.url,
+        secret: resolveWebhookSecret(options.environment, context.profile.secret_env),
+        now: () => nowSeconds() * 1_000,
+        ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
+      });
+    }
+    if (context.capability.direct === undefined) {
+      throw new DeliveryProfileError("incompatible_profile");
+    }
+    return new DirectDeliveryTarget({
+      capability: context.capability.direct,
+      workingDirectory: context.profile.working_directory,
+      environment: options.environment,
+      mcpEndpoint: context.endpoint,
+      localToken: options.localToken,
+    });
   };
 
   const enableEnrolledIdentity = async (): Promise<void> => {
     if (rest !== undefined && relay !== undefined) return;
     if (activation !== undefined) return activation;
     activation = (async () => {
+      const profile = await loadProfile();
       const transport = new CentralProtectedTransport({
         credential: () => identity.credential(),
         nonceCache: new DpopNonceCache(),
@@ -124,11 +173,10 @@ export async function openGatewayApplication(
         now: nowSeconds,
       });
       const nextRest = new CentralRestClient({ centralOrigin, transport });
+      const target = createDeliveryTarget({ ...profile, endpoint: local.endpoint });
       const nextRelay = new NotificationRelay({
         journal,
-        webhookUrl: options.webhookUrl,
-        webhookToken: options.webhookToken,
-        ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
+        deliveryTarget: target,
         receiveMessages: async (signal) => {
           try {
             return (await nextRest.pollRemoteMessages(CENTRAL_POLL_SECONDS, signal)).messages;
@@ -142,11 +190,11 @@ export async function openGatewayApplication(
             if (error instanceof CentralRestError && error.code === "central_response_invalid") {
               throw new NotificationRelayError("invalid_notification_response");
             }
-            if (error instanceof CentralRestError) {
-              throw new NotificationRelayError("relay_failed");
-            }
             throw error;
           }
+        },
+        acknowledgeMessage: async (messageId, signal) => {
+          await nextRest.ackMessage({ message_id: messageId }, signal);
         },
       });
       rest = nextRest;
@@ -165,23 +213,29 @@ export async function openGatewayApplication(
     }
   };
 
+  const requireRest = (): CentralRestClient => {
+    if (rest === undefined) throw safeFailure();
+    return rest;
+  };
+
   const router: LocalMcpRouter = {
     async listTools() {
       return [...(identity.enrolled ? REST_AUTHENTICATED_TOOLS : REST_BOOTSTRAP_TOOLS)];
     },
-    async callTool(name, untrustedArguments, signal) {
+    async callTool(name, untrustedArguments, signal, clientInfo) {
       try {
         const arguments_ = safeLocalToolArguments(untrustedArguments);
         let result: Record<string, unknown>;
         if (!identity.enrolled) {
           switch (name) {
             case "register_agent":
-              result = await enrollment.register(arguments_, signal);
+              result = await guidedRegistration.register(arguments_, clientInfo, signal);
               break;
             case "resend_verification":
               result = await enrollment.resend(arguments_, signal);
               break;
             case "verify_email":
+              await loadProfile();
               result = await identity.enroll(() => enrollment.verify(arguments_, signal));
               await enableEnrolledIdentity();
               await local.sendToolListChanged();
@@ -206,30 +260,13 @@ export async function openGatewayApplication(
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;
-          case "poll_messages":
-            result = await requireRelay().pollMessages(timeout(arguments_), signal);
+          case "submit_action_result":
+            result = await requireRest().submitActionResult(arguments_, signal);
             break;
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
             result = { permissions: await requireRest().getMyPermissions(signal) };
             break;
-          case "ack_message": {
-            if (Object.keys(arguments_).length !== 1) throw new McpContractError();
-            const messageId = validateNotificationId(arguments_.message_id);
-            if (!requireRelay().hasCurrentMessage(messageId) || acknowledgements.has(messageId)) {
-              throw new LocalMcpToolError("message_not_available");
-            }
-            acknowledgements.add(messageId);
-            try {
-              result = await requireRest().ackMessage({ message_id: messageId }, signal);
-              if (!requireRelay().confirmAcknowledgement(messageId)) {
-                throw new LocalMcpToolError("message_not_available");
-              }
-            } finally {
-              acknowledgements.delete(messageId);
-            }
-            break;
-          }
           default:
             throw new LocalMcpToolError("tool_not_found");
         }
@@ -243,7 +280,8 @@ export async function openGatewayApplication(
 
   try {
     identity = await GatewayIdentity.open(store, nowSeconds);
-    local = new LocalMcpServer(options.webhookToken, router, {
+    if (identity.enrolled) await loadProfile();
+    local = new LocalMcpServer(options.localToken, router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
     });
     await local.listen();

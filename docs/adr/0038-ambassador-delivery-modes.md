@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-09-02
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Problem
 
@@ -17,8 +17,9 @@ through a provider-specific interface. That design no longer fits the product:
 - MCP is a request channel from an agent to the gateway, not a reverse channel
   that can wake the original chat later;
 - ACP v1 provides a common client-to-agent invocation protocol;
-- the current central REST service has permission and action messages but no
-  conversation, reply, completion, or outcome routes; and
+- the central REST service has permission messages, action calls, and
+  correlated action results but no general conversation, reply, or
+  outcome-lookup routes; and
 - maintaining separate connector products adds process, state, CLI, packaging,
   and documentation cost without adding a necessary trust boundary.
 
@@ -83,11 +84,10 @@ Direct is the default:
   `unsupported_agent`. Ambassador writes no registration state and makes no
   central request.
 
-The first version enables OpenClaw and Hermes as dual-mode profiles. Codex and
-Claude remain unsupported until exact ACP adapter contracts are separately
-approved, implemented, and qualified. Do not offer an arbitrary command or a
-generic webhook fallback for an unsupported client. Do not fall back from a
-failed direct launch to webhook.
+The enabled dual-mode profiles are OpenClaw, Hermes, Codex, Claude Code, and
+Gemini CLI. Their exact contracts appear below. Do not offer an arbitrary
+command or a generic webhook fallback for an unsupported client. Do not fall
+back from a failed direct launch to webhook.
 
 The direct working directory is Ambassador's canonical process directory at
 registration time. It persists in the profile. A later start from a different
@@ -136,6 +136,36 @@ policy, MCP behavior, and tests are committed. Ambassador never downloads an
 adapter at runtime. A recognizable product name without that complete contract
 is unsupported.
 
+The enabled direct profiles are:
+
+| Profile | Exact MCP `clientInfo` aliases | Fixed direct invocation | Required ACP `agentInfo` | Ambassador MCP setup |
+| --- | --- | --- | --- | --- |
+| OpenClaw | `openclaw-bundle-mcp` / `0.0.0` | `openclaw acp` | `openclaw-acp` / `2026.8.1` | provider configuration |
+| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.21.0` | ACP session injection |
+| Codex | `codex-mcp-client` / `0.149.0` or `0.152.1` | `codex-acp` from `@agentclientprotocol/codex-acp` 1.8.0 | `@agentclientprotocol/codex-acp` / `1.8.0` | ACP session injection |
+| Claude Code | `claude-code` / `2.1.257` or `2.1.258` | `claude-agent-acp` from `@agentclientprotocol/claude-agent-acp` 0.73.0 | `@agentclientprotocol/claude-agent-acp` / `0.73.0` | ACP session injection |
+| Gemini CLI | `gemini-cli-mcp-client` / `0.58.0` | `gemini --acp` | `gemini-cli` / `0.58.0` | ACP session injection |
+
+Codex CLI does not expose native ACP in the reviewed versions. The selected
+Apache-2.0 adapter starts Codex App Server, translates ACP v1, and accepts HTTP
+MCP session configuration. The adapter includes a compatible `@openai/codex`
+dependency. Ambassador does not pass `CODEX_PATH`, `CODEX_CONFIG`, or another
+process or session override from its environment. It may pass the reviewed
+Codex and OpenAI API-key variables, along with the common provider environment,
+so the agent can use its own authentication.
+
+Claude Code uses the selected Apache-2.0 ACP adapter and its exact
+`@anthropic-ai/claude-agent-sdk` 0.3.257 dependency. That SDK contains Claude
+Code 2.1.257, while the separately reviewed current Claude Code client is
+2.1.258. Both exact MCP identities are aliases for the same fixed profile.
+Ambassador passes only the reviewed Anthropic authentication variables and the
+common provider environment. It does not pass a Claude executable override.
+
+Gemini CLI 0.58.0 supplies native ACP v1 through `gemini --acp`; Ambassador
+does not add an adapter. Its reviewed session implementation accepts the HTTP
+MCP configuration. The profile permits Gemini API-key authentication and the
+reviewed Google Vertex selection variables. Other Gemini versions fail closed.
+
 Ambassador initializes ACP, creates or safely resumes a gateway-owned session,
 and submits one prompt containing fixed untrusted-input instructions plus the
 complete canonical central message.
@@ -157,19 +187,24 @@ before prompt dispatch, a bounded retry is allowed. If prompt dispatch may have
 happened and the terminal result is lost, the outcome is uncertain and the
 message is not automatically submitted again.
 
-Provider output is not sent to central because the server has no general reply
-or action-result endpoint. An agent may use the existing Ambassador MCP tools
-for supported permission and action operations.
+For an `action_call`, the agent uses the Ambassador `submit_action_result` MCP
+tool before finishing. It supplies the received `call_id`, one structured
+result, and `success` or `error`. Central authorizes the original target,
+updates the call, and sends an `action_response` to the original caller.
+
+Ambassador does not turn free-form provider output into the result. It discards
+that output after bounded processing. The result operation is not a general
+chat reply and cannot be used without an action call.
 
 ### MCP catalog
 
 MCP remains the agent-to-Ambassador business tool channel. After enrollment,
 the target catalog keeps action listing, permission request and decision,
-action call, and permission listing.
+action call, action-result submission, and permission listing.
 
 Remove local "poll_messages" and "ack_message" after automatic delivery owns
-those operations. Do not add a reply or completion tool until central exposes a
-real contract for it.
+those operations. Do not present `submit_action_result` as a general reply or
+completion tool.
 
 ### Custody and restart behavior
 
@@ -190,25 +225,29 @@ agent. The mocks cover the full delivery contract, failure boundaries,
 acknowledgement order, crash uncertainty, and content-free durability without
 network or paid agent accounts.
 
-An opt-in local suite runs real OpenClaw and Hermes in this four-case matrix:
+An opt-in local suite runs every enabled agent in this ten-case matrix:
 
 | Agent | Webhook | Direct |
 | --- | --- | --- |
 | OpenClaw | required | required |
 | Hermes | required | required |
+| Codex | required | required |
+| Claude Code | required | required |
+| Gemini CLI | required | required |
 
 The local suite uses the central fixture by default. It records versions and
 safe pass/fail evidence, never prompts, messages, credentials, or provider
-output. Codex and Claude can be added after their ACP profiles are implemented
-and separately qualified.
+output. A source or container contract probe does not replace a real
+authenticated prompt and MCP call.
 
 Live central qualification remains a separate controlled test for email,
-DPoP, REST schemas, permissions, consuming polls, and acknowledgement.
+DPoP, REST schemas, permissions, action results, consuming polls, and
+acknowledgement.
 
 ## Consequences
 
-- OpenClaw and Hermes users choose delivery in the same agent conversation used
-  for enrollment, with direct as the default.
+- OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI users choose delivery in
+  the same agent conversation used for enrollment, with direct as the default.
 - Complete direct-only profiles can enroll without an unnecessary delivery
   question.
 - Unknown and incomplete clients fail before local or central registration
@@ -235,7 +274,7 @@ This record supersedes:
 - ADRs 0024 and 0028 through 0031's separate connector architecture, CLI,
   correlation database, execution contract, and package layout;
 - ADRs 0034 and 0035's provider-specific Codex and Claude transports; and
-- ADR 0036's relevance to the initial delivery cutover.
+- ADR 0036's rejected Gemini headless interface. Gemini now uses native ACP.
 
 ADR 0015 is amended for the new package and binary names. ADRs 0019 and 0037
 remain authoritative for central credential custody and the central REST
@@ -271,7 +310,18 @@ contract.
 The user approved the two delivery modes, guided MCP registration, full-message
 webhooks, gateway-owned ACP v1 direct mode, no agent startup flag, package
 rename, deterministic mock CI coverage, and local OpenClaw/Hermes qualification
-on 2026-09-02. The same day, the user clarified that direct is the default,
-only supported dual-mode profiles ask the delivery question, agent selection
-comes from the fixed `clientInfo` registry rather than tool input, and unknown
-agents are rejected in this version.
+as the initial qualification scope on 2026-09-02. The same day, the user
+clarified that direct is the default, only supported dual-mode profiles ask the
+delivery question, agent selection comes from the fixed `clientInfo` registry
+rather than tool input, and unknown agents are rejected in this version.
+
+On 2026-09-02, the user approved the exact Codex, Claude Code, and Gemini CLI
+ACP profiles above, including the two external Apache-2.0 adapters. The user
+also approved isolated copies of existing provider configuration or disposable
+provider credentials for local qualification. This approval does not permit
+Ambassador to install adapters at runtime, copy credentials into its state, or
+relax exact version matching.
+
+On 2026-09-03, the user approved adopting central's deployed
+`submit_action_result` route and requested a live result round trip between a
+controlled requester and real Codex.

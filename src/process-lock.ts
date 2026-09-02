@@ -19,11 +19,11 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function invalidLockArtifact(): GatewayError {
-  return new GatewayError("lock_invalid", "The gateway lock artifact is invalid", 7);
+  return new GatewayError("lock_invalid", "The Ambassador lock artifact is invalid", 7);
 }
 
 function daemonRunning(): GatewayError {
-  return new GatewayError("daemon_running", "The gateway is already running", 7);
+  return new GatewayError("daemon_running", "Ambassador is already running", 7);
 }
 
 function pathKey(path: string): string {

@@ -67,6 +67,29 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
         display_name: { type: "string", minLength: 1, maxLength: 128 },
+        delivery: {
+          oneOf: [
+            {
+              type: "object",
+              properties: { mode: { const: "direct" } },
+              required: ["mode"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                mode: { const: "webhook" },
+                url: { type: "string", minLength: 1, maxLength: 2_048 },
+                secret_env: {
+                  type: "string",
+                  pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
+                },
+              },
+              required: ["mode", "url", "secret_env"],
+              additionalProperties: false,
+            },
+          ],
+        },
       },
       ["email"],
     ),

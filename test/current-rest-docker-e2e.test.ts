@@ -7,7 +7,8 @@ import { pathToFileURL } from "node:url";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
-const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const FIXTURE_NOW_SECONDS = 1_788_220_800;
 
 interface PackedCli {
@@ -38,58 +39,69 @@ async function waitForEndpoint(read: () => string): Promise<string> {
     if (match?.[1] !== undefined) return match[1];
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  throw new Error("packed gateway did not publish its local endpoint");
+  throw new Error("packed Ambassador did not publish its local endpoint");
 }
 
-test("I02-X05 packed gateway completes current REST enrollment through the Docker fixture", async (t) => {
-  const cliPath = process.env.A2A_PACKED_GATEWAY_CLI;
-  const centralOrigin = process.env.A2A_CENTRAL_REST_FIXTURE_URL;
+test("packed Ambassador completes REST enrollment through the Docker fixture", async (t) => {
+  const cliPath = process.env.AMBASSADOR_PACKED_CLI;
+  const centralOrigin = process.env.AMBASSADOR_CENTRAL_REST_FIXTURE_URL;
   if (cliPath === undefined || centralOrigin === undefined) {
     t.skip("requires the packed Docker fixture lane");
     return;
   }
   const packed = (await import(pathToFileURL(cliPath).href)) as PackedCli;
-  const root = await mkdtemp(join(tmpdir(), "a2a-packed-current-rest-"));
+  const root = await mkdtemp(join(tmpdir(), "ambassador-packed-current-rest-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const webhook = await startFakeWebhook(t);
+  const webhook = await startFakeWebhook(t, {
+    secret: WEBHOOK_SECRET,
+    nowSeconds: FIXTURE_NOW_SECONDS,
+  });
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(
-    ["start", `--webhook-url=${webhook.url}`, "--webhook-token-env=PACKED_WEBHOOK_TOKEN"],
-    {
-      io: {
-        stdout: {
-          write(chunk: string | Uint8Array) {
-            stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            return true;
-          },
-        },
-        stderr: {
-          write(chunk: string | Uint8Array) {
-            stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            return true;
-          },
+  const running = packed.runCli(["start", "--local-token-env=AMBASSADOR_LOCAL_TOKEN"], {
+    io: {
+      stdout: {
+        write(chunk: string | Uint8Array) {
+          stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
         },
       },
-      env: { PACKED_WEBHOOK_TOKEN: WEBHOOK_TOKEN },
-      cwd: root,
-      signal: controller.signal,
-      testOverrides: {
-        centralOrigin,
-        stateRoot: root,
-        localMcpPort: 0,
-        nowSeconds: () => FIXTURE_NOW_SECONDS,
+      stderr: {
+        write(chunk: string | Uint8Array) {
+          stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
+        },
       },
     },
-  );
+    env: {
+      AMBASSADOR_LOCAL_TOKEN: LOCAL_TOKEN,
+      EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
+    },
+    cwd: root,
+    signal: controller.signal,
+    testOverrides: {
+      centralOrigin,
+      stateRoot: root,
+      localMcpPort: 0,
+      nowSeconds: () => FIXTURE_NOW_SECONDS,
+    },
+  });
   t.after(() => controller.abort());
 
   const endpoint = await waitForEndpoint(() => stdout);
-  const client = new TestMcpClient(endpoint, WEBHOOK_TOKEN);
-  await client.initialize();
+  const client = new TestMcpClient(endpoint, LOCAL_TOKEN);
+  await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   const email = "packed-current@fixture.test";
-  await client.callTool("register_agent", { email });
+  assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
+  await client.callTool("register_agent", {
+    email,
+    delivery: {
+      mode: "webhook",
+      url: webhook.url,
+      secret_env: "EMBASSYS_WEBHOOK_SECRET",
+    },
+  });
   const codeResponse = await fetch(
     `${centralOrigin}/__test__/verification-code/${encodeURIComponent(email)}`,
     { headers: { "x-a2a-test-control": "central-fixture-control" } },
@@ -106,9 +118,8 @@ test("I02-X05 packed gateway completes current REST enrollment through the Docke
       "request_permission",
       "respond_to_permission",
       "call_action",
-      "poll_messages",
+      "submit_action_result",
       "get_my_permissions",
-      "ack_message",
     ],
   );
   assert.equal(Array.isArray((await client.callTool("list_action_types", {})).action_types), true);

@@ -145,7 +145,7 @@ test("I02-F03 fixture challenges once with a server-provided nonce", async (t) =
   assert.equal(accepted.status, 200);
 });
 
-test("I02-F04 fixture models permission, action, consuming poll, and non-idempotent ack", async (t) => {
+test("I02-F04 fixture models permission, action, result, consuming poll, and ack", async (t) => {
   const central = await startFakeCentral(t);
   const requester = central.seedClient("requester@fixture.test");
   const target = central.seedClient("target@fixture.test");
@@ -206,6 +206,23 @@ test("I02-F04 fixture models permission, action, consuming poll, and non-idempot
     body: JSON.stringify({ message_id: permissionMessageId }),
   });
   assert.equal(acknowledged.status, 200);
+  const permissionResponse = await requester.protectedFetch("/api/poll_messages?timeout=0");
+  const permissionResponseMessages = (
+    (await permissionResponse.json()) as { messages: Array<Record<string, unknown>> }
+  ).messages;
+  assert.equal(permissionResponseMessages.length, 1);
+  const permissionResponsePayload = permissionResponseMessages[0]?.payload as
+    | Record<string, unknown>
+    | undefined;
+  assert.equal(permissionResponsePayload?.type, "permission_response");
+  const permissionResponseId = permissionResponseMessages[0]?.id;
+  assert.equal(typeof permissionResponseId, "string");
+  const acknowledgedResponse = await requester.protectedFetch("/api/ack_message", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ message_id: permissionResponseId }),
+  });
+  assert.equal(acknowledgedResponse.status, 200);
   const repeatedAck = await target.protectedFetch("/api/ack_message", {
     method: "POST",
     headers: jsonHeaders,
@@ -223,13 +240,70 @@ test("I02-F04 fixture models permission, action, consuming poll, and non-idempot
     }),
   });
   assert.equal(action.status, 200);
-  const actionMessageId = ((await action.json()) as Record<string, unknown>).message_id;
+  const actionResult = (await action.json()) as Record<string, unknown>;
+  const callId = actionResult.call_id;
+  const actionMessageId = actionResult.message_id;
+  assert.equal(typeof callId, "string");
   assert.equal(typeof actionMessageId, "string");
   assert.equal(central.messageState(actionMessageId as string), "queued");
 
   const actionPoll = await target.protectedFetch("/api/poll_messages?timeout=0");
-  assert.equal(((await actionPoll.json()) as { messages: unknown[] }).messages.length, 1);
+  const actionMessages = ((await actionPoll.json()) as { messages: Array<Record<string, unknown>> })
+    .messages;
+  assert.equal(actionMessages.length, 1);
+  const actionPayload = actionMessages[0]?.payload as Record<string, unknown> | undefined;
+  assert.equal(actionPayload?.call_id, callId);
   assert.equal(central.messageState(actionMessageId as string), "delivered");
+
+  const unauthorized = await requester.protectedFetch("/api/submit_action_result", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      call_id: callId,
+      result: { phone_number: "+447700900001" },
+      status: "success",
+    }),
+  });
+  assert.equal(unauthorized.status, 404);
+
+  const submitted = await target.protectedFetch("/api/submit_action_result", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      call_id: callId,
+      result: { phone_number: "+447700900001" },
+      status: "success",
+    }),
+  });
+  assert.equal(submitted.status, 200);
+  const submittedResult = (await submitted.json()) as Record<string, unknown>;
+  assert.equal(submittedResult.call_id, callId);
+  assert.equal(submittedResult.status, "completed");
+  assert.equal(typeof submittedResult.message_id, "string");
+
+  const repeatedResult = await target.protectedFetch("/api/submit_action_result", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      call_id: callId,
+      result: { phone_number: "+447700900001" },
+      status: "success",
+    }),
+  });
+  assert.equal(repeatedResult.status, 409);
+
+  const requesterPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
+  const requesterMessages = (
+    (await requesterPoll.json()) as { messages: Array<Record<string, unknown>> }
+  ).messages;
+  assert.equal(requesterMessages.length, 1);
+  assert.deepEqual(requesterMessages[0]?.payload, {
+    type: "action_response",
+    call_id: callId,
+    action_type: "get_email",
+    status: "success",
+    result: { phone_number: "+447700900001" },
+  });
 });
 
 test("I02-F05 fixture rejects routes outside the fixed REST catalog", async (t) => {
