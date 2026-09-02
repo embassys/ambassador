@@ -8,11 +8,17 @@ interfaces have been removed.
 
 ## Required before publication
 
-- Run the ten opt-in real-agent cases with exact authenticated profiles:
+- Complete the remaining nine opt-in real-agent cases with exact authenticated
+  profiles:
   OpenClaw 2026.8.1, Hermes Agent 0.21.0,
   `@agentclientprotocol/codex-acp` 1.8.0, backed by Codex 0.152.1,
   `@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0.
-  Each profile must pass webhook and direct delivery.
+  Every profile must pass webhook and direct delivery. Codex direct passed on
+  2026-09-02 against packed candidate
+  `48cda0f9efa86030f2ddca90b992cda89ad3cef85cb368d1ed934e4927e827d4`:
+  the authenticated prompt completed and the exact allowlisted Codex MCP
+  client called `get_my_permissions`. Its isolated credential copy was removed
+  immediately after the run.
 - The isolated ACP initialization probes already pass for Codex ACP 1.8.0,
   Claude Agent ACP 0.73.0, and native Gemini CLI ACP 0.58.0. The pinned
   OpenClaw and Hermes images also pass their version and ACP startup probes.
@@ -30,8 +36,9 @@ interfaces have been removed.
   response before the qualification deadline. Live compatibility therefore
   remains unqualified; do not treat the successful writes or partial route
   coverage as a pass.
-- Replace the source-reviewed candidate version labels in the getting-started
-  guides with real-agent qualification evidence after all ten cases pass.
+- Replace the remaining source-reviewed candidate version labels in the
+  getting-started guides with real-agent qualification evidence after all ten
+  cases pass.
 - Obtain explicit publication approval. The CI publication job remains
   disabled until then.
 
