@@ -3,7 +3,9 @@
 Status: implementation candidate; source-reviewed against Codex 0.149.0 and
 0.152.1 plus `@agentclientprotocol/codex-acp` 1.8.0, with the exact ACP
 initialization contract probed and the direct real-agent case passed. Webhook
-qualification is still required before publication
+qualification is still required before publication. The direct pass included
+the live central REST service, a controlled peer, polling, ACP delivery, an
+Ambassador MCP call, and central acknowledgement.
 
 Ambassador enables Codex only for this exact contract:
 

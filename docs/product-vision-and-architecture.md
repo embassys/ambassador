@@ -208,6 +208,7 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
-- No direct agent profile has passed the new real-agent qualification matrix.
+- Codex direct delivery has passed with the live central service. The other
+  nine cases in the five-profile real-agent matrix remain open.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).
