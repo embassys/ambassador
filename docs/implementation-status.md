@@ -69,4 +69,4 @@ live support claim.
 current DPoP REST contract. New documentation must not direct users to it.
 Phase 3A does not publish a package; any replacement publication requires
 explicit approval. The final live-qualified tarball SHA-256 is
-`97307e385441ccbbac01cf19dc863528b65670d575d2c97872b23deeb1d110fb`.
+`a46beb66c2bdcd9c724f638cfdb39c22694097a56bc27990b1286aa0ea086612`.

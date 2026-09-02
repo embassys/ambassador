@@ -46,7 +46,7 @@ below.
 | `GET /openapi.json` | `200`; raw response SHA-256 `da0ddc402935c7112cebae1604a84f412c003c8d81493a566a901c199bba9544` |
 
 The final packed qualification used artifact SHA-256
-`97307e385441ccbbac01cf19dc863528b65670d575d2c97872b23deeb1d110fb`.
+`a46beb66c2bdcd9c724f638cfdb39c22694097a56bc27990b1286aa0ea086612`.
 No token, private key, proof, email address, or verification code was written
 to the repository or printed in captured output. The disposable Mailosaur
 messages were deleted after use.
