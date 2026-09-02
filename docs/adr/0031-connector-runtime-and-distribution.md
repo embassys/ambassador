@@ -19,7 +19,7 @@ unbounded framework stack. It must also keep real provider credentials out of
 CI and avoid claiming support on a platform that either the gateway or the
 selected provider has not passed.
 
-## Proposed decision
+## Decision
 
 ### Runtime and repository toolchain
 
@@ -44,9 +44,7 @@ cryptography package, provider SDK, or provider executable as part of the
 foundation. A provider-specific ADR may propose an SDK or executable only with
 its exact version, license, protocol, release policy, and platform impact.
 
-This accepted amendment does not itself install or update a dependency. ADR
-0032 permits the exact workspace entries and lockfile changes in the K01
-through K03 implementation sequence.
+This decision does not authorize future dependency additions or updates.
 
 The connector is an MCP client, not an MCP server, and uses the client
 package's approved HTTP transport. No MCP server or Node transport package is
@@ -412,11 +410,9 @@ reviewable.
 
 ## Approval
 
-Approved by the user on 2026-08-30. This accepts the D05 runtime, private
-package layout, installation model, dependency scope, and platform
-qualification rules. With ADRs 0028 through 0030, it completes D05. K01
-through K03 were originally gated on G04. ADR 0032 now permits that local work
-against the accepted fixture contract.
+Approved by the user on 2026-08-30. This accepts the runtime, private package
+layout, installation model, dependency scope, and platform qualification
+rules.
 
 The user separately approved making the source public at
 `https://github.com/embassys/ambassador` on 2026-08-31. That approval changes

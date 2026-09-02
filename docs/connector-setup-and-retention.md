@@ -1,17 +1,16 @@
 # Connector setup and retention
 
-Status: local provider reference; provider flow redesign pending after Phase 3A
+Status: local provider reference; central workflow redesign pending
 
-This guide describes the useful local connector boundaries that remain after
-ADR 0037. It is not a support or release claim. No Codex, Claude, or Gemini
-connector has completed a real authenticated qualification run.
+This guide describes the local connector boundaries that remain valid. It is
+not a support or release claim. No Codex, Claude, or Gemini connector has
+completed a real authenticated qualification run.
 
 The implemented connector execution flow assumes central conversation and
 reply routes that the current server does not provide. Do not use the setup
 below against the live service until the connector is redesigned around
-permission and action messages. I05 is complete, so that redesign can now be
-planned separately. The published gateway `0.2.6` is
-also unsupported against the current DPoP REST contract.
+permission and action messages. The published gateway `0.2.6` also predates
+the current DPoP REST contract.
 
 ## Provider status
 
@@ -95,8 +94,7 @@ a2a-gateway start \
 ```
 
 The gateway owns the fixed live REST origin. The connector never receives a
-central URL, token, or DPoP key. See the
-[central REST contract inventory](central-server-implementation-spec.md).
+central URL, token, or DPoP key. See the [gateway protocol](protocol.md).
 
 ## Working directory and policy
 
@@ -215,7 +213,7 @@ As of 2026-09-02:
 - the Claude fake and production adapters are implemented, and the CL04 manual runner is available;
 - Gemini has no selected interface;
 - no real provider qualification has succeeded;
-- the gateway central client and live Phase 3A qualification are complete;
+- the gateway REST client has passed live qualification;
 - the connector's central-facing flow still needs a separate redesign;
 - connector publishing and stable release remain unapproved.
 

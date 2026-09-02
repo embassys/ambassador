@@ -1,4 +1,4 @@
-# 0037 Live central REST contract
+# 0037 Central REST integration
 
 Status: accepted
 
@@ -6,76 +6,36 @@ Date: 2026-09-01
 
 ## Problem
 
-The gateway documentation treated a proposed versioned API as a fixed future
-contract. It required `/api/v2` routes, central MCP transport, token reissue,
-delivery activation, leases, conversations, replies, outcomes, and migration
-behavior that the central service does not implement.
+The gateway needs to work with the Embassys service that is being developed
+and deployed. Earlier plans invented a second versioned API, central MCP
+transport, token reissue, message leases, conversations, replies, and
+migration behavior that the service did not implement.
 
-The product is still in development. Maintaining two client generations or
-forcing the server to implement a speculative design would delay a working
-integration without serving an installed compatibility requirement.
-
-## Evidence
-
-The current source baseline is
-[`embassys/agent2agent@b769896`](https://github.com/embassys/agent2agent/tree/b769896b7cfb1ee3540195be9e7a61cf777b9388).
-The hosted service is `https://mcp.embassys.ai`.
-
-On 2026-09-01, live checks established that:
-
-- email-only registration and verification work through the REST API;
-- verification accepts a P-256 public JWK in its JSON body and returns a
-  DPoP-bound token;
-- the response JWK thumbprint and the token's `cnf.jkt` match the submitted
-  key;
-- a protected request succeeds with `Authorization: Bearer <token>` and a
-  separate `DPoP` proof header;
-- the same bound token without a proof is rejected;
-- a proof signed by a different key is rejected;
-- reusing a proof is rejected; and
-- `Authorization: DPoP <token>` is rejected.
-
-The deployment does not expose a build identifier. Its observed DPoP behavior
-matches the pinned source. That is sufficient for the current development
-cutover. A release claim should still record a deploy revision when the server
-provides one.
-
-The first hosted `/openapi.json` and `/api/list_action_types` checks returned
-server errors. Commit `b769896` added database JSON codecs and repaired the
-catalog. After deployment, generated OpenAPI returned `200` and an
-authenticated catalog returned six actions, including `get_email` and
-`get_phone_number` with required string `reason`.
+Maintaining those speculative contracts made the gateway larger without
+helping a supported user.
 
 ## Decision
 
-### One current client
+### Follow the current server
 
-The gateway implements one central client for the current server. It does not
-retain or migrate the published bearer-only behavior and does not retain the
-speculative versioned client.
+The complete central implementation belongs in
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The gateway
+uses the live service at `https://mcp.embassys.ai`.
 
-Delete these paths when the current integration is implemented:
+This decision does not freeze the integration to one server commit. When the
+server changes a client-visible contract, update the gateway protocol,
+fixtures, tests, implementation, and live qualification deliberately. The
+gateway does not probe for versions, negotiate between contracts, or retain an
+old client as a fallback.
 
-- central MCP discovery and tool calls;
-- token arguments in upstream MCP calls;
-- the REST-to-MCP polling fallback;
-- `/api/v2` activation, conversation, receive, reply, completion, outcome,
-  reissue, and revocation clients;
-- bearer-only credential support;
-- old credential readers and migration branches; and
-- the development verbose transcript added for the old MCP integration.
+### REST only
 
-Internal storage may use a format marker. That marker is not an API version
-and does not create a migration requirement.
-
-### Central REST surface used by the gateway
-
-Bootstrap calls use no central access token:
+Bootstrap uses these public REST routes without central authorization:
 
 | Operation | Request |
 | --- | --- |
 | Register | `POST /api/register_agent` with `email` and optional `display_name` |
-| Verify | `POST /api/verify_email` with `email`, six-character `code`, and the gateway's public `jwk` |
+| Verify | `POST /api/verify_email` with `email`, verification `code`, and the gateway's public `jwk` |
 | Resend | `POST /api/resend_verification` with `email` |
 
 Protected work uses these REST routes:
@@ -90,82 +50,53 @@ Protected work uses these REST routes:
 | List permissions | `GET /api/get_my_permissions` |
 | Acknowledge a message | `POST /api/ack_message` |
 
-The gateway does not use central MCP or OAuth. It also does not expose the
-duplicate `/api/grant_permission` and `/api/deny_permission` routes. Public
-invitation and health routes are server or human surfaces, not gateway MCP
-tools.
+The gateway does not use central MCP or OAuth. It does not expose duplicate
+grant and deny routes, invitation routes, or health checks as local MCP tools.
 
-The API stays unversioned while the product is in development. A future
-breaking change updates the source pin, fixtures, tests, client, and docs in
-one reviewed change. The gateway does not probe, negotiate, or fall back at
-runtime.
+### DPoP
 
-### DPoP issuance and requests
+Verification creates an ES256 P-256 key pair and sends its public JWK in the
+JSON body. It does not send a proof for verification itself.
 
-The gateway creates one ES256 P-256 key pair immediately before verification.
-It sends only the public `kty`, `crv`, `x`, and `y` members in the verification
-body. Verification does not carry a DPoP proof.
+The gateway checks that the returned token is bound to its public key. It
+stores the token and private key together in the encrypted credential before
+reporting token-free success.
 
-The successful response contains `agent_id`, `email`, `token`, optional `jkt`,
-and `message`. The gateway intercepts the token, confirms the returned and JWT
-thumbprints match its public key, and atomically persists the token and private
-key in the encrypted credential store before it reports token-free success.
-
-The current access token is an HS256 JWT with `sub`, `email`, `iat`, `exp`, and
-`cnf.jkt`. The configured lifetime is 30 days. The client cannot verify the
-server's symmetric signature. It validates the compact shape, timestamps,
-identity fields, and key binding, then treats the serialized token as opaque.
-
-Each protected REST request sends:
+Every protected request sends:
 
 ```http
 Authorization: Bearer <DPoP-bound-token>
 DPoP: <ES256-proof-JWT>
 ```
 
-The proof header contains `typ: dpop+jwt`, `alg: ES256`, and the public JWK.
-The payload contains a unique `jti`, exact uppercase `htm`, exact full request
-URL in `htu`, current Unix `iat`, and base64url SHA-256 token hash in `ath`.
-The full URL includes the query string. The server accepts proofs no more than
-60 seconds old and allows five seconds of future clock skew.
-
-A nonce is not required on the first request. If a `401` response supplies a
-`DPoP-Nonce` header, the client may repeat that request once with the nonce and
-a new proof. It does not retry other authentication failures or replace the
-credential after a `401`.
+The proof binds a fresh identifier, the HTTP method, the exact URL, the issue
+time, and the access-token hash. A nonce is absent on the first request. If the
+server supplies one in a valid challenge, the gateway retries once with a new
+proof. Other authentication failures do not trigger enrollment, credential
+replacement, or a weaker authorization path.
 
 ### Permissions, actions, and messages
 
-The server models agent interaction as permissions and action calls. It does
-not provide the proposed free-text conversation, reply, completion, outcome,
-activation, or lease routes.
+The server models agent interaction as permission requests and action calls.
+The action catalog is dynamic data returned by `list_action_types`. The gateway
+owns a fixed local tool catalog but does not copy central action types into new
+MCP tools.
 
-`list_action_types` is the authority for deployed action names and input
-schemas. The pinned live catalog includes `get_email` and `get_phone_number`;
-both accept an object with required string `reason`.
+Central marks queued messages delivered before returning them from a poll.
+The gateway keeps returned bodies in bounded memory and stores only message
+IDs and relay state in SQLite. Acknowledgement removes local state only after
+central confirms it.
 
-`poll_messages` atomically changes queued rows to `delivered` before returning
-their bodies. `ack_message` changes one delivered row to `acked`; a repeat
-returns `404`. There is no lease or delivered-message retrieval. A crash after
-receive and before acknowledgement can lose the in-memory body. That is an
-accepted development limitation and must remain visible in status and release
-documentation.
-
-The gateway keeps returned bodies in bounded memory. SQLite contains message
-IDs and webhook relay state only. It clears stale wake rows after a restart
-because their bodies cannot be recovered.
+Central has no delivered-message retrieval or redelivery. A crash after a
+successful poll can lose the body. This remains visible as a development
+limitation. The gateway does not persist message content to compensate.
 
 ### Errors and retries
 
-The server returns FastAPI-style JSON errors with a `detail` member. The
-gateway maps them to bounded safe local errors and does not require a proposed
-error-code envelope.
-
-The client rejects redirects. It may retry a poll after a transport failure
-because a lost poll response can already have consumed messages; that risk is
-part of the current development limitation. It does not automatically retry a
-side-effecting registration, verification, permission, action, response, or
-acknowledgement request after an uncertain outcome.
+The gateway maps bounded central errors to stable local failures and never
+returns the remote body verbatim. It rejects redirects. It does not retry a
+side-effecting call after an uncertain result. The one allowed authentication
+retry is the DPoP nonce challenge described above.
 
 ### Data boundary
 
@@ -173,31 +104,16 @@ Tokens, private keys, proofs, verification codes, email addresses, action
 payloads, permission details, messages, MCP bodies, and remote response bodies
 must not enter SQLite, normal logs, diagnostics, metrics, temporary files,
 crash artifacts, or support bundles. The encrypted credential is the only
-approved durable location for the token and private key.
-
-## Supersession
-
-This record:
-
-- amends ADR 0017's central transport and message sections;
-- amends ADR 0019 to one current encrypted DPoP credential with no replacement
-  or migration path;
-- amends ADR 0020's fixture target;
-- supersedes ADRs 0021, 0022, 0023, 0025, 0026, 0027, and 0032; and
-- supersedes the central conversation, reply, completion, and acknowledgement
-  assumptions in ADRs 0024 and 0030.
-
-Provider process isolation, local authentication, content-free persistence,
-and provider-specific safety decisions remain in force where they do not
-depend on the removed central lifecycle.
+approved durable location for the central token and private key.
 
 ## Consequences
 
-The gateway can be made useful against the deployed server without waiting
-for a second API generation. The implementation becomes smaller and removes
-multiple unshipped compatibility branches.
+The repository contains one current central client. It has no bearer-only
+client, central MCP fallback, speculative versioned routes, credential
+migration, token reissue, activation, lease, conversation, reply, completion,
+or outcome path.
 
-The current server has weaker crash recovery and token lifecycle behavior than
-the proposed design. Those are follow-up improvements, not hidden client
-requirements. If the server later adds them, source, live behavior, tests, and
-the client move together under a new decision.
+The protocol contains the exact gateway behavior. The server repository
+contains the complete central API. Optional improvements to the server are
+tracked separately and do not become client requirements until both projects
+adopt them.

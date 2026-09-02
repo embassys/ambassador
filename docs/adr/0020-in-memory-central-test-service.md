@@ -20,11 +20,11 @@ Maintain two independently implemented test services:
 - a Python container fixture using the already approved test-only
   `cryptography==50.0.0` wheel.
 
-Both implement the current unversioned REST contract in
-`docs/central-fixture-profile.md`. They hold all identities, codes, keys,
-tokens, permissions, action schemas, and messages in memory. Restarting a
-fixture clears state unless the test harness explicitly preserves its backing
-process for a crash barrier.
+Both implement the current unversioned REST contract. Their exact behavior is
+documented beside the fixture code in `test/fixtures/central/`. They hold all
+identities, codes, keys, tokens, permissions, action schemas, and messages in
+memory. Restarting a fixture clears state unless the test harness explicitly
+preserves its backing process for a crash barrier.
 
 The Python fixture computes JWK thumbprints and verifies ES256 proofs
 independently. It does not copy the gateway implementation or central server

@@ -1,6 +1,6 @@
 # 0030 Connector execution contract
 
-Status: accepted for provider execution safety; central lifecycle amended by ADR 0037
+Status: provider-safety reference; central workflow pending redesign
 
 Date: 2026-08-30
 
@@ -9,11 +9,10 @@ Approval: approved by the user on 2026-08-30
 The work scheduling, policy, containment, and uncertain-provider-outcome
 rules remain useful. Central conversation, reply, completion, outcome, and
 acknowledgement operations in this record are superseded and require a new
-permission/action mapping after I05.
+permission and action mapping before live use.
 
-This accepted record completes its part of D05. ADR 0032 permits K01 against
-the accepted G04 fixture contract. Provider interfaces, installation, and
-publication retain their later gates.
+Provider interfaces, installation, and publication retain separate approval
+and qualification gates.
 
 ## Problem
 
@@ -30,7 +29,7 @@ exhaust local memory. A connector that acknowledges before central accepts a
 reply can lose the response. The common contract must close those gaps before
 provider-specific tests or code begin.
 
-## Proposed decision
+## Decision
 
 Adopt one language-neutral internal provider port with four operations:
 `start`, `resume`, `recover`, and `cancel`. The first three produce a bounded,
@@ -272,7 +271,7 @@ wake can enter the queue:
    it.
 8. Parse one strict JSON object. Reject duplicate or unknown keys, invalid
    Unicode scalar values, and any body that is not the exact ID-bearing wake
-   contract in `docs/protocol-v1.md`. Require `Idempotency-Key`,
+   contract in `docs/protocol.md`. Require `Idempotency-Key`,
    `X-Request-ID`, and the body message ID to carry the same opaque ID.
 9. Coalesce a valid repeated message ID. Otherwise admit it only when the queue
    has capacity. After content retrieval, conversation scheduling enforces the
@@ -1044,11 +1043,9 @@ The connector runtime, process library, JSON parser, HMAC implementation,
 state store, packaging, and supported platforms remain separate decisions.
 No package may be installed and no platform may be claimed from this proposal.
 
-## Approval gate
+## Approval
 
-Approved by the user on 2026-08-30. This freezes the provider-neutral port,
-all fixed limits, webhook admission order, local maximum policy, failure
-mapping, crash behavior, and fake-provider cases. ADRs 0028, 0029, and 0031
-were accepted with this record and complete D05. ADR 0032 permits K01 against
-the accepted G04 fixture contract. Each real provider interface remains behind
-its provider-specific ADR.
+Approved by the user on 2026-08-30. The provider-neutral port, fixed limits,
+webhook admission order, local maximum policy, failure mapping, and crash
+behavior remain accepted. Current permission and action messages require a new
+central workflow before live use. Each provider retains its own ADR.

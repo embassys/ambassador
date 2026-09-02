@@ -50,4 +50,7 @@ The current private GitHub repository can use trusted publishing, but npm cannot
 
 ## Approval
 
-The user reviewed and approved npm-registry distribution, package scope, initial version `0.1.0`, MIT licensing, and trusted publishing on 2026-08-24. On 2026-08-25, the user selected stable `0.2.0` on the `latest` tag for the explicitly development-only Linux/macOS flow while Windows was unqualified. On 2026-08-26, the user approved the `0.2.1` dual-authentication patch, pnpm for repository tooling, and the `0.2.2` central compatibility release under the same qualification boundary. On 2026-08-27, the user requested the live central compatibility releases through `0.2.5`, including a temporary MCP polling fallback while the public REST route is unavailable, then approved `0.2.6` with the temporary development transcript under the same qualification boundary. The same day, the user clarified that end-user usage stays on `npx`; pnpm is only for repository development and release work. ADR 0033 later made Windows unsupported for the initial release.
+The user approved npm distribution, the public package name, MIT licensing,
+Node-based end-user installation through `npx`, and trusted publishing. pnpm
+remains repository tooling. Each new publication still requires explicit
+approval after qualification.

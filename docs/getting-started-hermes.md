@@ -5,8 +5,8 @@ Status: paused pending approval and publication of a qualified package
 Do not use the published `0.2.6` gateway for a new Hermes setup. It uses a
 superseded central contract.
 
-I02 through I05 are complete. If a new development package is approved, the
-setup will remain small:
+The current source has passed live qualification. If a new development package
+is approved, the setup will remain small:
 
 1. Install the qualified Node.js 24 gateway package.
 2. Generate one 48-character lowercase hexadecimal local secret.
@@ -22,4 +22,4 @@ The packed live E2E has passed. The exact install command and supported Hermes
 version still require a separate package and runtime qualification. Hermes
 never receives the central token or DPoP key.
 
-See the [implementation status](implementation-status.md) for current work.
+See [Current work](implementation-plan.md) for publication status.
