@@ -1,8 +1,7 @@
 FROM python:3.13.15-slim-trixie@sha256:7e3a6aca9d74f93cca21a91d86a8dad8c34749afd5b4a98ee481c9c47b9f5ed4 AS dependencies
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    A2A_TEST_CONTROL_TOKEN=central-fixture-control
+    PYTHONUNBUFFERED=1
 
 RUN groupadd --gid 10001 fixture \
     && useradd --uid 10001 --gid fixture --no-create-home --shell /usr/sbin/nologin fixture

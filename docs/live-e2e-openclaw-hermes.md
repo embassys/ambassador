@@ -1,12 +1,14 @@
-# Live E2E with OpenClaw or Hermes
+# I05 packed gateway live E2E
 
-Status: I05 runbook; do not run until I02 through I04 pass
+Status: completed on 2026-09-02; retained as the controlled rerun procedure
 
 ## Purpose
 
-Qualify the packed gateway against the current Embassys REST service and one
-local runtime. This runbook does not test central MCP, `/api/v2`, migration,
-reissue, lease recovery, or the removed conversation/reply design.
+Qualify the packed gateway against the current Embassys REST service and an
+authenticated local qualification webhook. This runbook does not test central
+MCP, `/api/v2`, migration, reissue, lease recovery, the removed
+conversation/reply design, or a provider connector. Provider requalification
+follows the separate connector redesign.
 
 ## Safety
 
@@ -21,13 +23,13 @@ reissue, lease recovery, or the removed conversation/reply design.
 ## Preconditions
 
 - I02 replacement fixtures and tests are green.
-- I03 and I04 are merged.
+- I03 and I04 are complete in the candidate being qualified.
 - `GET /api/list_action_types` returns the recorded `get_email` and
   `get_phone_number` schemas.
 - The source pin and live origin in `server-integration-status.md` are current.
 - A packed gateway has passed local artifact scans.
-- A supported OpenClaw or Hermes version is installed and configured with no
-  production credential in the repository.
+- The bounded local qualification webhook is available on an isolated
+  loopback port.
 
 ## Run
 
@@ -51,8 +53,8 @@ reissue, lease recovery, or the removed conversation/reply design.
 11. Poll A and acknowledge the permission response.
 12. Call the approved action from A to B using only synthetic data.
 13. Poll B, retrieve the action message, and acknowledge it.
-14. Confirm the configured OpenClaw or Hermes webhook receives only ID-based
-    wakes and retrieves bodies through local MCP.
+14. Confirm the qualification webhook receives only ID-based wakes and that
+    bodies are retrieved through local MCP.
 15. Stop both gateways and run the complete artifact scan.
 
 Do not claim restart recovery for a message already consumed from central.
@@ -65,7 +67,7 @@ Record only:
 - date and source commit;
 - live origin;
 - gateway package digest;
-- local runtime name and version;
+- qualification harness revision;
 - status for each step;
 - returned action names and schema digests;
 - whether a DPoP nonce was observed;
@@ -82,3 +84,16 @@ messages, action payloads, permission scopes, or remote error bodies.
 - Delete all captured Mailosaur messages.
 - Confirm no temporary report contains a forbidden marker.
 - Leave no central credential in a shared development profile.
+
+## Completed observation
+
+The 2026-09-02 packed run passed registration, email receipt, verification,
+encrypted restart, the DPoP positive and negative matrix, six-action catalog
+validation, permission request and decision, permission-response delivery,
+`get_email` delivery, consuming polls, acknowledgements, and forbidden-marker
+scans. It made no central MCP request and observed no initial nonce challenge.
+
+The final protected `get_my_permissions` check returned the declared
+email-field model and passed the strict gateway validator. This differs from
+the pinned source construction and the earlier live server error. Captured
+Mailosaur messages and all temporary gateway state were deleted.

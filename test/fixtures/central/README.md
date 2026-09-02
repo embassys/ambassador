@@ -1,25 +1,15 @@
-# Central fixture
+# Central REST fixture
 
-Status: current implementation is obsolete; I02 replacement pending
+This independent Python service models the unversioned REST contract in ADR
+0037. It implements email enrollment, P-256 key binding, 30-day HS256 test
+tokens, Bearer authorization with a separate ES256 DPoP proof, permissions,
+action calls, consuming message polling, permission listing, and
+acknowledgement.
 
-The files in this directory still implement the superseded versioned fixture.
-They must not be used as current central compatibility evidence.
+The service has no gateway central-MCP implementation, version negotiation,
+activation, reissue, lease, conversation, reply, completion, outcome, or
+migration behavior.
 
-I02 replaces them with the contract in
-[`docs/central-fixture-profile.md`](../../../docs/central-fixture-profile.md):
-
-- email-only unversioned REST enrollment;
-- P-256 public JWK in the verification body;
-- 30-day test tokens with `cnf.jkt`;
-- `Authorization: Bearer` plus a separate DPoP proof;
-- current action, permission, poll, permission-list, and acknowledgement
-  routes; and
-- consuming message state with no lease or redelivery.
-
-The replacement removes central MCP, bearer-only client behavior, `/api/v2`,
-activation, reissue, revocation, conversations, replies, outcomes, and
-migration controls.
-
-The Python fixture continues to verify proofs independently with the approved
-test-only cryptography dependency. Test controls remain isolated and absent
-from packed artifacts.
+`cryptography==50.0.0` verifies proof signatures independently from the
+gateway. Test controls require the isolated `A2A_TEST_CONTROL_TOKEN` value and
+are not part of packed gateway artifacts.

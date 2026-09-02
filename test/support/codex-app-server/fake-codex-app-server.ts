@@ -72,6 +72,20 @@ async function writeWire(write: FakeCodexWireWrite): Promise<void> {
   process.stdout.write(Buffer.from(write.value, "base64"));
 }
 
+async function terminateDescendant(descendant: ReturnType<typeof spawn>): Promise<void> {
+  if (descendant.exitCode !== null || descendant.signalCode !== null) return;
+  await new Promise<void>((resolve) => {
+    const finished = () => {
+      descendant.off("error", finished);
+      descendant.off("close", finished);
+      resolve();
+    };
+    descendant.once("error", finished);
+    descendant.once("close", finished);
+    if (!descendant.kill("SIGTERM")) finished();
+  });
+}
+
 function failFixture(code: string): never {
   send({ channel: "fixture_error", code });
   process.exit(91);
@@ -138,8 +152,8 @@ async function runAppServer(
   input.on("close", () => {
     void (async () => {
       send({ channel: "stdin_closed" });
-      if (plan.killDescendantOnStdinEnd === true && descendant?.pid !== undefined) {
-        descendant.kill("SIGTERM");
+      if (plan.killDescendantOnStdinEnd === true && descendant !== undefined) {
+        await terminateDescendant(descendant);
       }
       for (const write of plan.writesAfterStdinEnd ?? []) await writeWire(write);
       await waitForGate(plan.stdinEndGate);

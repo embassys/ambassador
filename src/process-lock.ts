@@ -97,6 +97,9 @@ export class ProcessLock {
     } catch (error) {
       pendingLockPaths.delete(pendingPath);
       for (const key of keys) activeLockKeys.delete(key);
+      if (errorCode(error) === "ENOENT" && keys.some((key) => key.startsWith("artifact:"))) {
+        throw daemonRunning();
+      }
       throw error;
     }
   }

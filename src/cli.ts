@@ -4,45 +4,43 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CentralTokenProfile } from "./central-enrollment.js";
 import type { CredentialStore } from "./credential-store.js";
-import { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { GatewayError } from "./errors.js";
 import { openGatewayApplication, type RunningGatewayApplication } from "./gateway-application.js";
 import {
   GatewayOptionsError,
   type GatewayStartOptions,
   parseGatewayStartOptions,
-  resolveDevelopmentCentralUrls,
   resolveWebhookToken,
 } from "./gateway-options.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
 import { ProcessLock } from "./process-lock.js";
 
 export interface CliIo {
-  stdout: Pick<NodeJS.WriteStream, "write">;
-  stderr: Pick<NodeJS.WriteStream, "write">;
+  readonly stdout: Pick<NodeJS.WriteStream, "write">;
+  readonly stderr: Pick<NodeJS.WriteStream, "write">;
 }
 
 export interface CliTestOverrides {
-  centralApiUrl: string;
-  centralMcpUrl: string;
-  stateRoot: string;
-  credentialStore?: CredentialStore;
-  centralEnrollmentProfile?: CentralTokenProfile;
-  centralEnrollmentFetch?: typeof fetch;
+  readonly centralOrigin: string;
+  readonly stateRoot: string;
+  readonly credentialStore?: CredentialStore;
+  readonly centralFetch?: typeof fetch;
+  readonly webhookFetch?: typeof fetch;
+  readonly localMcpPort?: number;
+  readonly nowSeconds?: () => number;
 }
 
 export interface CliContext {
-  io: CliIo;
-  env: NodeJS.ProcessEnv;
-  cwd: string;
-  signal?: AbortSignal;
-  testOverrides?: CliTestOverrides;
+  readonly io: CliIo;
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd: string;
+  readonly signal?: AbortSignal;
+  readonly testOverrides?: CliTestOverrides;
 }
 
 interface ProcessSignal {
-  signal: AbortSignal;
+  readonly signal: AbortSignal;
   close(): void;
 }
 
@@ -76,12 +74,10 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
   try {
     parsed = parseGatewayStartOptions(args);
   } catch (error) {
-    if (error instanceof GatewayOptionsError) {
-      context.io.stderr.write(`${error.message}\n`);
-      return error.exitCode;
-    }
-    context.io.stderr.write("Invalid command or arguments\n");
-    return 2;
+    context.io.stderr.write(
+      `${error instanceof GatewayOptionsError ? error.message : "Invalid command or arguments"}\n`,
+    );
+    return error instanceof GatewayOptionsError ? error.exitCode : 2;
   }
 
   const paths =
@@ -97,39 +93,31 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
   try {
     lock = await ProcessLock.acquire(paths.lockPath);
     const webhookToken = resolveWebhookToken(context.env, parsed.webhookTokenEnv);
-    const developmentCentralUrls =
-      context.testOverrides === undefined ? resolveDevelopmentCentralUrls(context.env) : undefined;
-    if (
-      parsed.verbose &&
-      context.testOverrides === undefined &&
-      developmentCentralUrls === undefined
-    ) {
-      throw new GatewayOptionsError(2);
-    }
-    const verboseTranscript = parsed.verbose
-      ? new DevelopmentVerboseTranscript(context.io.stderr, [webhookToken])
-      : undefined;
     application = await openGatewayApplication({
       webhookUrl: parsed.webhookUrl,
       webhookToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
       signal,
-      ...(verboseTranscript === undefined ? {} : { verboseTranscript }),
       ...(context.testOverrides === undefined
-        ? developmentCentralUrls
+        ? {}
         : {
-            centralApiUrl: context.testOverrides.centralApiUrl,
-            centralMcpUrl: context.testOverrides.centralMcpUrl,
-            ...(context.testOverrides.centralEnrollmentProfile === undefined
-              ? {}
-              : { centralEnrollmentProfile: context.testOverrides.centralEnrollmentProfile }),
-            ...(context.testOverrides.centralEnrollmentFetch === undefined
-              ? {}
-              : { centralEnrollmentFetch: context.testOverrides.centralEnrollmentFetch }),
+            centralOrigin: context.testOverrides.centralOrigin,
             ...(context.testOverrides.credentialStore === undefined
               ? {}
               : { credentialStore: context.testOverrides.credentialStore }),
+            ...(context.testOverrides.centralFetch === undefined
+              ? {}
+              : { centralFetch: context.testOverrides.centralFetch }),
+            ...(context.testOverrides.webhookFetch === undefined
+              ? {}
+              : { webhookFetch: context.testOverrides.webhookFetch }),
+            ...(context.testOverrides.localMcpPort === undefined
+              ? {}
+              : { localMcpPort: context.testOverrides.localMcpPort }),
+            ...(context.testOverrides.nowSeconds === undefined
+              ? {}
+              : { nowSeconds: context.testOverrides.nowSeconds }),
           }),
     });
     context.io.stdout.write(`MCP endpoint: ${application.endpoint}\n`);

@@ -5,7 +5,7 @@ Embassys REST messages to one configured webhook.
 
 ## Current status
 
-The project is being switched to the live unversioned REST API at
+The gateway implements the live unversioned REST API at
 `https://mcp.embassys.ai`. The current contract uses email-only registration,
 a P-256 JWK in the verification request, and protected requests with:
 
@@ -19,13 +19,13 @@ bearer-only/MCP client, the repository's proposed `/api/v2` client, or state
 migration.
 
 The published `0.2.6` package predates this decision and is not supported
-against the current DPoP REST contract. Do not use it for a new setup. A new
-package will be considered after the replacement tests, implementation, and
-live two-identity E2E pass.
+against the current DPoP REST contract. Do not use it for a new setup. The
+replacement implementation and two-identity live qualification are complete
+in source; publishing a replacement package remains a separate approval.
 
 ## Product boundary
 
-The eventual command remains:
+The command remains:
 
 ```text
 a2a-gateway start --webhook-url=<loopback-url> --webhook-token-env=<name>
@@ -52,9 +52,10 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-The existing suite still contains tests for superseded central contracts. See
-the [implementation plan](docs/implementation-plan.md) before treating a green
-run as current live compatibility.
+The test suite and independent Docker fixture implement the current contract.
+See the [implementation plan](docs/implementation-plan.md) and
+[server integration status](docs/server-integration-status.md) for the exact
+fixture and live evidence.
 
 ## Documentation
 

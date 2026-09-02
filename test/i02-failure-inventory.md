@@ -1,6 +1,6 @@
 # I02 current central contract inventory
 
-Status: planned red specification for ADR 0037
+Status: implemented and green on 2026-09-02
 
 This inventory replaces T03, T04, and the future-version portion of C01. It
 defines the missing behavior before production central clients change.
@@ -55,7 +55,7 @@ defines the missing behavior before production central clients change.
 | I02-R03 | `request_permission` sends `target_email`, `action_type`, and optional `scope`. |
 | I02-R04 | `respond_to_permission` accepts only permission ID plus `granted` or `denied`. |
 | I02-R05 | `call_action` sends target email, action type, and payload without adding identity or credential selectors. |
-| I02-R06 | `get_my_permissions` calls the current REST route and validates the live field names after a protected check. |
+| I02-R06 | `get_my_permissions` calls the current REST route, validates the declared email-field response model observed in the final protected check, and fails closed on any incompatible response. |
 | I02-R07 | No local tool calls duplicate grant/deny, invitation, OAuth, health, or central MCP surfaces. |
 | I02-R08 | FastAPI `detail` errors map to bounded safe local errors without reflecting the remote body. |
 | I02-R09 | Side-effecting transport uncertainty causes no automatic retry. |
@@ -84,10 +84,10 @@ defines the missing behavior before production central clients change.
 | I02-X03 | Runtime source and built files contain no reissue, activation, lease, conversation, reply, completion, or outcome implementation. |
 | I02-X04 | Runtime source and built files contain no development verbose transcript. |
 | I02-X05 | Packaged smoke uses the independent current REST fixture and the same DPoP request shape as live. |
+| I02-X06 | A clean-installed package runs the current Node REST fixture on each package-job platform. |
 
 ## Review gate
 
-I02 is ready for production implementation when every new failure maps to one
-missing ADR 0037 behavior, fixture self-tests are green, old central tests are
-deleted or rewritten, and CI checks the new classification on Linux and
-macOS.
+The red boundary was reviewed before production replacement. All current
+gateway checks now pass, the independent fixture passes its five self-tests,
+the packed Docker E2E passes, and old central tests were deleted or rewritten.
