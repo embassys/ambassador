@@ -1,6 +1,6 @@
 # Central fixture profile
 
-Status: target for I02 replacement tests
+Status: implemented by the I02 Node and independent Python fixtures
 
 The replacement central fixtures model the pinned REST contract in ADR 0037.
 They do not model the removed bearer-only or speculative versioned clients.
@@ -52,9 +52,10 @@ The fixture implements:
 - `GET /api/get_my_permissions`
 - `POST /api/ack_message`
 
-Seed `get_email` and `get_phone_number` exactly as observed live. Each schema
-is an object with required string property `reason`. Other catalog entries may
-be fixture data only when a test needs them.
+`get_email` and `get_phone_number` are seeded exactly as observed live. Each
+schema is an object with required string property `reason` and the deployed
+human-readable property description. The fixtures contain all six observed
+catalog entries.
 
 ## Message state
 

@@ -1,6 +1,6 @@
 # Gateway protocol
 
-Status: accepted current development contract as of 2026-09-01
+Status: accepted current development contract as of 2026-09-02
 
 ADR 0037 replaces the earlier bearer-only and proposed versioned central
 contracts. This document defines one gateway behavior for the current REST
@@ -276,7 +276,8 @@ tool because the server has no such REST route.
 
 The deployed action catalog defines the exact action names and their payload
 schemas. The pinned catalog includes `get_email` and `get_phone_number`; each
-accepts an object with required string `reason`.
+accepts an object with required string `reason`. Their `reason` properties
+also carry the deployed descriptions recorded in the fixture inventory.
 
 ## Message polling and local retrieval
 

@@ -1,6 +1,6 @@
 # Central server integration status
 
-Status: evidence snapshot as of 2026-09-01
+Status: evidence snapshot as of 2026-09-02
 
 This page records observed facts. ADR 0037 and the gateway protocol own the
 client decision.
@@ -33,6 +33,13 @@ that this source has been deployed. This is the accepted development pin.
 | Reuse of an accepted proof | `401` |
 | Initial valid proof without a nonce | Accepted; no nonce challenge required |
 | `GET /api/list_action_types` with valid DPoP | `200` with six action definitions |
+| Packed two-identity registration, verification, and restart | Passed with two disposable Mailosaur identities |
+| Missing, wrong-key, stale, future, wrong-method, wrong-URL, wrong-hash, and replayed DPoP proofs | Rejected |
+| Permission request, target decision, response delivery, and acknowledgement | Passed through the packed gateway |
+| `GET /api/get_my_permissions` with valid DPoP | Server error; no permission data returned |
+| Granted `get_email` action, consuming poll, and acknowledgement | Passed with a synthetic in-memory payload |
+| Central MCP traffic during the packed run | Zero requests |
+| Package, state, and captured-output forbidden-marker scan | Passed |
 | `GET /openapi.json` | `200`; raw response SHA-256 `da0ddc402935c7112cebae1604a84f412c003c8d81493a566a901c199bba9544` |
 
 No token, private key, proof, email address, or verification code was written
@@ -101,17 +108,21 @@ files, `.env`, shell arguments, logs, or test output.
 
 The live run uses unique catch-all addresses, searches only the current time
 window, extracts the six-digit code in memory, and deletes the captured
-message. Keep the qualification loop within the 500-message daily allowance.
+messages. The completed I05 run stayed within the 500-message daily allowance.
 
-## Remaining live work
+## Completed Phase 3A live work
 
 - [x] Observe the fixed `list_action_types` response and pin `get_email` and
-  `get_phone_number`. Both require a string `reason`.
-- [ ] Confirm `get_my_permissions` after the same deployment.
-- [ ] Run two disposable identities through permission request, permission
+  `get_phone_number`. Both require a string `reason`; the schemas also include
+  their deployed property descriptions.
+- [x] Check `get_my_permissions` after the same deployment. The route returned
+  a server error, confirming that the gateway must keep failing closed until
+  the central response mismatch is fixed.
+- [x] Run two disposable identities through permission request, permission
   decision, action call, poll, and acknowledgement.
-- [ ] Run the packed gateway after I02 through I04 replace the old client.
-- [ ] Scan all run artifacts without storing content or credentials.
+- [x] Run the packed gateway after I02 through I04 replaced the old client.
+- [x] Scan all run artifacts without storing content or credentials.
 
-Server build metadata remains desirable for a release. Generated OpenAPI and
-the dynamic catalog now corroborate the pinned source.
+Server build metadata and a corrected permission-list response remain central
+follow-ups. Generated OpenAPI and the dynamic catalog corroborate the pinned
+source for the rest of the implemented surface.

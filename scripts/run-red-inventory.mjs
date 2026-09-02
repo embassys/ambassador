@@ -8,43 +8,6 @@ const MAX_CAPTURE_BYTES = 4 * 1024 * 1024;
 const STOP_TIMEOUT_MS = 2_000;
 
 const definitions = {
-  t03: {
-    key: "t03",
-    label: "T03 REST enrollment and DPoP",
-    filePrefix: "t03-",
-    files: [
-      "t03-artifact-lifecycle.test.js",
-      "t03-dpop-transport-negatives.test.js",
-      "t03-issuance-negatives.test.js",
-      "t03-publication-crash.test.js",
-      "t03-reissue-lifecycle.test.js",
-      "t03-rest-boundaries.test.js",
-      "t03-rest-dpop-gateway.test.js",
-      "t03-security-lifecycle.test.js",
-      "t03-size-boundaries.test.js",
-    ],
-    expected: { tests: 146, pass: 146, fail: 0, skipped: 0, todo: 0 },
-    timeoutMs: 90_000,
-    vectorNote:
-      "136 behavior vectors: all 136 green after G01 credential, G02 enrollment, and G03 protected-transport work",
-  },
-  t04: {
-    key: "t04",
-    label: "T04 conversation recovery",
-    filePrefix: "t04-",
-    files: [
-      "t04-commit-recovery.test.js",
-      "t04-conversation-recovery.test.js",
-      "t04-crash-barriers.test.js",
-      "t04-inbound-boundaries.test.js",
-      "t04-lifecycle-contract.test.js",
-      "t04-outbound-boundaries.test.js",
-      "t04-response-observer.test.js",
-    ],
-    expected: { tests: 41, pass: 41, fail: 0, skipped: 0, todo: 0 },
-    timeoutMs: 120_000,
-    vectorNote: "41 behavior checks: all 41 green after G04 conversation recovery work",
-  },
   k02: {
     key: "k02",
     label: "K02 provider-neutral connector",
@@ -102,41 +65,21 @@ const definitions = {
     boundaryKind: "marker",
     vectorNote: "30 checks: the complete CL03 Claude Code boundary is green",
   },
-  "packaged-docker": {
-    key: "packaged-docker",
-    label: "Packaged gateway and independent Docker v2 fixture",
-    exactFile: "c01-packaged-docker-v2.test.js",
-    files: ["c01-packaged-docker-v2.test.js"],
-    expected: { tests: 1, pass: 0, fail: 1, skipped: 0, todo: 0 },
-    timeoutMs: 60_000,
-    boundaryKind: "marker",
-    vectorNote: "1 future-v2 packaged smoke check: 1 expected red",
-  },
 };
 
 const requested = process.argv.slice(2);
 let selected;
 if (requested.length === 0) {
-  selected = [
-    definitions.t03,
-    definitions.t04,
-    definitions.k02,
-    definitions.cx02,
-    definitions.cl02,
-  ];
+  selected = [definitions.k02, definitions.cx02, definitions.cl02];
 } else if (requested.length === 1 && requested[0]?.startsWith("--suite=")) {
   const key = requested[0].slice("--suite=".length);
   const definition = definitions[key];
   if (definition === undefined) {
-    throw new Error(
-      "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|cl02|packaged-docker]",
-    );
+    throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|cx02|cl02]");
   }
   selected = [definition];
 } else {
-  throw new Error(
-    "Usage: node scripts/run-red-inventory.mjs [--suite=t03|t04|k02|cx02|cl02|packaged-docker]",
-  );
+  throw new Error("Usage: node scripts/run-red-inventory.mjs [--suite=k02|cx02|cl02]");
 }
 
 const root = join(process.cwd(), ".test-dist", "test");

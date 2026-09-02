@@ -22,14 +22,14 @@ import {
   type EncryptedFileCredentialStoreOptions,
   type WindowsCredentialAccessControl,
 } from "../src/credential-store.js";
+import { currentCredential } from "./support/current-credential.js";
 
 const HOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_HOOK_TOKEN = "abcdef0123456789abcdef0123456789abcdef0123456789";
-const CENTRAL_JWT = "header.payload.central-signature-value";
-const OTHER_CENTRAL_JWT = "other-header.other-payload.other-signature";
-const CREDENTIAL_SCOPE = "central:https://api.example.test|https://mcp.example.test/mcp";
-const OTHER_CREDENTIAL_SCOPE =
-  "central:https://other-api.example.test|https://other-mcp.example.test/mcp";
+const CENTRAL_JWT = currentCredential("first@fixture.test", "agent.first");
+const OTHER_CENTRAL_JWT = currentCredential("second@fixture.test", "agent.second");
+const CREDENTIAL_SCOPE = '{"centralOrigin":"https://mcp.embassys.ai"}';
+const OTHER_CREDENTIAL_SCOPE = '{"centralOrigin":"https://other.example.test"}';
 const SUCCESSFUL_WINDOWS_ACCESS_CONTROL: WindowsCredentialAccessControl = {
   async secure() {},
 };

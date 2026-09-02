@@ -1,6 +1,6 @@
 # Central follow-ups
 
-Status: nonblocking server improvements as of 2026-09-01
+Status: nonblocking server improvements as of 2026-09-02
 
 These items are useful changes to the current REST service. They are not a
 second API contract and the gateway must not emulate them with compatibility
@@ -8,11 +8,11 @@ branches.
 
 ## Needed for complete route coverage
 
-### Fix or confirm permission listing
+### Fix permission listing
 
 `GET /api/get_my_permissions` declares `grantor_email` and `grantee_email` but
-constructs username-named fields. Make the implementation and model agree and
-add a route test.
+constructs username-named fields. The protected I05 call confirmed a deployed
+server error. Make the implementation and model agree and add a route test.
 
 ## Useful development hardening
 

@@ -1,12 +1,12 @@
 # Get started with Hermes Agent
 
-Status: paused until the current REST integration completes
+Status: paused pending approval and publication of a qualified package
 
 Do not use the published `0.2.6` gateway for a new Hermes setup. It uses a
 superseded central contract.
 
-After I02 through I05 are complete and a new development package is approved,
-the setup will remain small:
+I02 through I05 are complete. If a new development package is approved, the
+setup will remain small:
 
 1. Install the qualified Node.js 24 gateway package.
 2. Generate one 48-character lowercase hexadecimal local secret.
@@ -18,8 +18,8 @@ the setup will remain small:
 6. Register and verify through the local MCP tools.
 
 The gateway's webhook continues to send bearer and HMAC V2 authentication.
-The exact install command and supported Hermes version will be added only
-after the packed live E2E passes. Hermes never receives the central token or
-DPoP key.
+The packed live E2E has passed. The exact install command and supported Hermes
+version still require a separate package and runtime qualification. Hermes
+never receives the central token or DPoP key.
 
 See the [implementation status](implementation-status.md) for current work.
