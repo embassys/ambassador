@@ -33,7 +33,9 @@ Tests inject clocks, random values, HTTP transports, and writers. They do not re
 
 The HTTP wrapper owns deadlines, response-size limits, status mapping, and schema validation. It never logs a response body.
 
-The normal logger accepts named events with typed safe fields. It does not accept arbitrary objects, raw errors, headers, URLs, or protocol bodies. ADR 0022 defines a separate temporary development transcript on stderr; it is not part of the normal logger.
+The normal logger accepts named events with typed safe fields. It does not
+accept arbitrary objects, raw errors, headers, URLs, protocol bodies, or a
+verbose protocol transcript.
 
 The final npm-registry upload continues to use the exact npm CLI qualified for trusted OIDC publishing. pnpm 11's native publisher does not yet support npm trusted publishing; using it would require a long-lived token and weaken the release boundary. Repository dependency resolution, scripts, tests, audits, packing, and packed-artifact installation use pnpm. End users run the published package with `npx` as defined by ADR 0015.
 

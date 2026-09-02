@@ -1,31 +1,19 @@
 # A2A Gateway
 
 A local gateway that exposes an authenticated loopback MCP endpoint and relays
-Embassys REST messages to one configured webhook.
+Embassys messages to one configured webhook.
 
-## Current status
+## What it does
 
-The gateway implements the live unversioned REST API at
-`https://mcp.embassys.ai`. The current contract uses email-only registration,
-a P-256 JWK in the verification request, and protected requests with:
+The gateway integrates with the current Embassys REST service at
+`https://mcp.embassys.ai`. Registration is email-based. Verification binds the
+central token to a gateway-owned P-256 key. Protected requests send the token
+as Bearer authorization and carry a separate DPoP proof.
 
-```http
-Authorization: Bearer <DPoP-bound-token>
-DPoP: <proof-jwt>
-```
+The gateway does not use the central MCP endpoint. It has no API-version
+selector, legacy central client, or state migration path.
 
-The gateway does not use the central MCP endpoint. It does not support the old
-bearer-only/MCP client, the repository's proposed `/api/v2` client, or state
-migration.
-
-The published `0.2.6` package predates this decision and is not supported
-against the current DPoP REST contract. Do not use it for a new setup. The
-replacement implementation and two-identity live qualification are complete
-in source; publishing a replacement package remains a separate approval.
-
-## Product boundary
-
-The command remains:
+The public command is:
 
 ```text
 a2a-gateway start --webhook-url=<loopback-url> --webhook-token-env=<name>
@@ -35,37 +23,45 @@ One foreground process owns one webhook target and one central identity. The
 same local secret authenticates the webhook and the loopback MCP endpoint at
 `http://127.0.0.1:8787/mcp`.
 
-The gateway keeps the central token and DPoP private key in one encrypted
-credential file. Message bodies remain in bounded memory. SQLite stores only
-opaque message IDs and relay state.
+The central token and DPoP private key live in one encrypted credential file.
+Message bodies stay in bounded memory. SQLite stores only opaque message IDs
+and relay state.
 
-The current central server consumes messages when polling returns them and
-does not redeliver delivered messages. A gateway crash can lose an in-memory
-message. This is an explicit development limitation.
+The current server consumes messages when polling returns them and cannot
+redeliver them. A gateway crash can therefore lose an in-memory message. This
+is a known development limitation.
+
+The central service source is
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The gateway
+tracks that service as it changes. Client, fixture, protocol, and live
+qualification updates should land together when its contract changes.
 
 ## Development
 
-Use Node.js 24 and the exact pnpm version recorded in `package.json`.
+Use Node.js 24 and the pnpm version recorded in `package.json`.
 
 ```text
 pnpm install --frozen-lockfile
 pnpm check
 ```
 
-The test suite and independent Docker fixture implement the current contract.
-See the [implementation plan](docs/implementation-plan.md) and
-[server integration status](docs/server-integration-status.md) for the exact
-fixture and live evidence.
+The test suite includes a fast Node fixture and an independent Python fixture.
+The live qualification procedure covers registration, DPoP, permissions,
+action delivery, polling, acknowledgement, restart behavior, and artifact
+scans.
+
+The published `0.2.6` package predates the current REST integration. A new
+publication requires separate approval.
 
 ## Documentation
 
-- [Project wiki](docs/README.md)
-- [Architecture overview](docs/architecture-overview.md)
-- [Gateway protocol](docs/protocol-v1.md)
-- [Current central contract inventory](docs/central-server-implementation-spec.md)
-- [Server integration status](docs/server-integration-status.md)
-- [Implementation plan](docs/implementation-plan.md)
-- [ADR 0037](docs/adr/0037-live-central-rest-contract.md)
+- [Documentation map](docs/README.md)
+- [Product and architecture](docs/product-vision-and-architecture.md)
+- [Gateway protocol](docs/protocol.md)
+- [Current work](docs/implementation-plan.md)
+- [Architecture decisions](docs/adr/README.md)
+- [Live qualification](docs/live-qualification.md)
+- [Central service follow-ups](docs/central-follow-ups.md)
 
 ## License
 
