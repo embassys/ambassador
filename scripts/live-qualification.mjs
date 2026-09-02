@@ -241,7 +241,7 @@ class QualificationMcpClient {
     await this.#request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "gateway-live-qualification", version: "1" },
+      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
     });
     await this.#post({ jsonrpc: "2.0", method: "notifications/initialized" }, false);
   }
@@ -305,7 +305,7 @@ class QualificationMcpClient {
   }
 }
 
-async function startWebhook(token, forbiddenValues) {
+async function startWebhook(token) {
   const wakes = [];
   const waiters = [];
   const server = createServer((request, response) => {
@@ -336,16 +336,17 @@ async function startWebhook(token, forbiddenValues) {
         request.headers.authorization === `Bearer ${token}` &&
         request.headers["x-webhook-signature-v2"] === expected &&
         isRecord(parsed) &&
-        typeof parsed.message === "string" &&
-        forbiddenValues.every((value) => !body.includes(value));
+        typeof parsed.sender_agent_id === "string" &&
+        isRecord(parsed.payload) &&
+        typeof parsed.created_at === "string";
       response.writeHead(valid ? 200 : 400, { "content-type": "application/json" });
       response.end(valid ? '{"ok":true}' : '{"ok":false}');
       if (!valid) return;
       const waiter = waiters.shift();
-      if (waiter === undefined) wakes.push(true);
+      if (waiter === undefined) wakes.push(parsed);
       else {
         clearTimeout(waiter.timer);
-        waiter.resolve();
+        waiter.resolve(parsed);
       }
     });
   });
@@ -361,8 +362,9 @@ async function startWebhook(token, forbiddenValues) {
   return {
     url: `http://127.0.0.1:${address.port}/hooks/agent`,
     async wait(timeoutPhase = "webhook_timeout") {
-      if (wakes.shift() !== undefined) return;
-      await new Promise((resolve, reject) => {
+      const available = wakes.shift();
+      if (available !== undefined) return available;
+      return await new Promise((resolve, reject) => {
         const waiter = {
           resolve,
           timer: setTimeout(() => {
@@ -394,44 +396,51 @@ async function waitForEndpoint(read) {
   throw safeFailure("gateway_start");
 }
 
-async function startGateway(packed, stateRoot, webhook, centralFetch, token) {
+async function waitForDelivered(messages, predicate, phase) {
+  const deadline = Date.now() + WEBHOOK_WAIT_MS;
+  while (Date.now() < deadline) {
+    const index = messages.findIndex(predicate);
+    if (index >= 0) return messages.splice(index, 1)[0];
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw safeFailure(phase);
+}
+
+async function startGateway(packed, stateRoot, centralFetch, token, deliveryTargetFactory) {
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(
-    [
-      "start",
-      `--webhook-url=${webhook.url}`,
-      "--webhook-token-env=LIVE_QUALIFICATION_WEBHOOK_TOKEN",
-    ],
-    {
-      io: {
-        stdout: {
-          write(chunk) {
-            stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            if (Buffer.byteLength(stdout, "utf8") > MAX_CAPTURE_BYTES) controller.abort();
-            return true;
-          },
-        },
-        stderr: {
-          write(chunk) {
-            stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-            if (Buffer.byteLength(stderr, "utf8") > MAX_CAPTURE_BYTES) controller.abort();
-            return true;
-          },
+  const running = packed.runCli(["start", "--local-token-env=LIVE_QUALIFICATION_LOCAL_TOKEN"], {
+    io: {
+      stdout: {
+        write(chunk) {
+          stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          if (Buffer.byteLength(stdout, "utf8") > MAX_CAPTURE_BYTES) controller.abort();
+          return true;
         },
       },
-      env: { LIVE_QUALIFICATION_WEBHOOK_TOKEN: token },
-      cwd: repositoryRoot,
-      signal: controller.signal,
-      testOverrides: {
-        centralOrigin: LIVE_ORIGIN,
-        stateRoot,
-        localMcpPort: 0,
-        centralFetch,
+      stderr: {
+        write(chunk) {
+          stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          if (Buffer.byteLength(stderr, "utf8") > MAX_CAPTURE_BYTES) controller.abort();
+          return true;
+        },
       },
     },
-  );
+    env: {
+      LIVE_QUALIFICATION_LOCAL_TOKEN: token,
+      LIVE_QUALIFICATION_WEBHOOK_SECRET: token,
+    },
+    cwd: repositoryRoot,
+    signal: controller.signal,
+    testOverrides: {
+      centralOrigin: LIVE_ORIGIN,
+      stateRoot,
+      localMcpPort: 0,
+      centralFetch,
+      ...(deliveryTargetFactory === undefined ? {} : { deliveryTargetFactory }),
+    },
+  });
   const endpoint = await waitForEndpoint(() => stdout);
   const client = new QualificationMcpClient(endpoint, token);
   await client.initialize();
@@ -630,12 +639,12 @@ function schemaDigest(value) {
 }
 
 async function main() {
-  if (process.env.A2A_CONFIRM_LIVE_QUALIFICATION !== CONFIRMATION) {
+  if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== CONFIRMATION) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
   }
-  const cliPath = process.env.A2A_PACKED_GATEWAY_CLI;
-  const tarballPath = process.env.A2A_PACKED_GATEWAY_TARBALL;
+  const cliPath = process.env.AMBASSADOR_PACKED_CLI;
+  const tarballPath = process.env.AMBASSADOR_PACKED_TARBALL;
   assert(cliPath !== undefined && tarballPath !== undefined, "package_input");
 
   const credentials = {
@@ -655,9 +664,10 @@ async function main() {
   const roots = [];
   const gateways = [];
   const webhooks = [];
-  const webhookTokens = [];
+  const localTokens = [];
   const centralRoutes = new Set();
   const centralObservations = [];
+  const directMessages = [];
   let catalogObservation;
   const centralFetch = async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input);
@@ -698,24 +708,59 @@ async function main() {
       pathToFileURL(join(dirname(cliPath), "credential-store.js")).href
     );
     const dpopModule = await import(pathToFileURL(join(dirname(cliPath), "dpop.js")).href);
+    const directDeliveryModule = await import(
+      pathToFileURL(join(dirname(cliPath), "direct-delivery.js")).href
+    );
     assert(typeof packed.runCli === "function", "package_input");
     phase = "package_scan";
     await assertPackedRuntime(cliPath);
 
     phase = "state_setup";
-    const qualificationRoot = await mkdtemp(join(tmpdir(), "a2a-live-qualification-"));
+    const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
     roots.push(join(qualificationRoot, "identity-a"), join(qualificationRoot, "identity-b"));
     await Promise.all(roots.map((root) => mkdir(root, { recursive: true })));
 
-    const forbiddenWebhook = [addresses[0], addresses[1], actionReason];
     for (let index = 0; index < 2; index += 1) {
       phase = `webhook_setup_${index + 1}`;
       const token = randomBytes(24).toString("hex");
-      webhookTokens.push(token);
-      const webhook = await startWebhook(token, forbiddenWebhook);
+      localTokens.push(token);
+      const webhook = await startWebhook(token);
       webhooks.push(webhook);
       phase = `gateway_setup_${index + 1}`;
-      gateways.push(await startGateway(packed, roots[index], webhook, centralFetch, token));
+      const deliveryTargetFactory =
+        index === 0
+          ? undefined
+          : ({ endpoint }) => {
+              const target = new directDeliveryModule.DirectDeliveryTarget({
+                capability: {
+                  command: process.execPath,
+                  args: [
+                    join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
+                    "success-provider-mcp",
+                  ],
+                  agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+                  mcp: "provider_config",
+                  environment: ["HOME", "PATH", "TMPDIR"],
+                },
+                workingDirectory: repositoryRoot,
+                environment: process.env,
+                mcpEndpoint: endpoint,
+                localToken: token,
+              });
+              return {
+                async deliver(message, signal) {
+                  const result = await target.deliver(message, signal);
+                  directMessages.push(message);
+                  return result;
+                },
+                async close() {
+                  await target.close();
+                },
+              };
+            };
+      gateways.push(
+        await startGateway(packed, roots[index], centralFetch, token, deliveryTargetFactory),
+      );
     }
 
     phase = "registration";
@@ -727,7 +772,19 @@ async function main() {
           JSON.stringify(["register_agent", "verify_email", "resend_verification"]),
         "bootstrap_catalog",
       );
-      await client.call("register_agent", { email: addresses[index] });
+      const initial = await client.call("register_agent", { email: addresses[index] });
+      assert(initial.status === "input_required" && initial.default === "direct", "registration");
+      await client.call("register_agent", {
+        email: addresses[index],
+        delivery:
+          index === 0
+            ? {
+                mode: "webhook",
+                url: webhooks[index].url,
+                secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
+              }
+            : { mode: "direct" },
+      });
       const mail = await findVerification(credentials, addresses[index], receivedAfter);
       capturedMail.push(mail.messageId);
       codes.push(mail.code);
@@ -752,9 +809,38 @@ async function main() {
         await startGateway(
           packed,
           roots[index],
-          webhooks[index],
           centralFetch,
-          webhookTokens[index],
+          localTokens[index],
+          index === 0
+            ? undefined
+            : ({ endpoint }) => {
+                const target = new directDeliveryModule.DirectDeliveryTarget({
+                  capability: {
+                    command: process.execPath,
+                    args: [
+                      join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
+                      "success-provider-mcp",
+                    ],
+                    agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+                    mcp: "provider_config",
+                    environment: ["HOME", "PATH", "TMPDIR"],
+                  },
+                  workingDirectory: repositoryRoot,
+                  environment: process.env,
+                  mcpEndpoint: endpoint,
+                  localToken: localTokens[index],
+                });
+                return {
+                  async deliver(message, signal) {
+                    const result = await target.deliver(message, signal);
+                    directMessages.push(message);
+                    return result;
+                  },
+                  async close() {
+                    await target.close();
+                  },
+                };
+              },
         ),
       );
       const names = (await gateways[index].client.listTools()).map((tool) => tool.name);
@@ -765,9 +851,7 @@ async function main() {
             "request_permission",
             "respond_to_permission",
             "call_action",
-            "poll_messages",
             "get_my_permissions",
-            "ack_message",
           ]),
         "restart_catalog",
       );
@@ -831,17 +915,15 @@ async function main() {
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
-    phase = "permission_request_webhook";
-    await webhooks[1].wait("permission_request_webhook_timeout");
-    phase = "permission_request_poll";
-    const targetMessages = await gateways[1].client.call("poll_messages", { timeout: 0 });
-    assert(Array.isArray(targetMessages.messages), "permission_poll");
-    const permissionMessage = targetMessages.messages.find(
+    phase = "permission_request_direct";
+    const permissionMessage = await waitForDelivered(
+      directMessages,
       (message) =>
         isRecord(message) &&
         isRecord(message.payload) &&
         message.payload.type === "permission_request" &&
         message.payload.permission_id === requested.permission_id,
+      "permission_request_direct_timeout",
     );
     assert(
       isRecord(permissionMessage) && typeof permissionMessage.id === "string",
@@ -866,24 +948,16 @@ async function main() {
       permission_id: requested.permission_id,
       decision: "granted",
     });
-    await gateways[1].client.call("ack_message", { message_id: permissionMessage.id });
     phase = "permission_response_webhook";
-    await webhooks[0].wait("permission_response_webhook_timeout");
-    phase = "permission_response_poll";
-    const requesterMessages = await gateways[0].client.call("poll_messages", { timeout: 0 });
-    assert(Array.isArray(requesterMessages.messages), "permission_response_poll");
-    const responseMessage = requesterMessages.messages.find(
-      (message) =>
-        isRecord(message) &&
-        isRecord(message.payload) &&
-        message.payload.type === "permission_response" &&
-        message.payload.permission_id === requested.permission_id,
-    );
+    const responseMessage = await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
-      isRecord(responseMessage) && typeof responseMessage.id === "string",
+      isRecord(responseMessage) &&
+        typeof responseMessage.id === "string" &&
+        isRecord(responseMessage.payload) &&
+        responseMessage.payload.type === "permission_response" &&
+        responseMessage.payload.permission_id === requested.permission_id,
       "permission_response",
     );
-    await gateways[0].client.call("ack_message", { message_id: responseMessage.id });
 
     phase = "action";
     const called = await gateways[0].client.call("call_action", {
@@ -892,20 +966,17 @@ async function main() {
       payload: { reason: actionReason },
     });
     assert(typeof called.message_id === "string" && called.status === "delivered", "action");
-    phase = "action_webhook";
-    await webhooks[1].wait("action_webhook_timeout");
-    phase = "action_poll";
-    const actionMessages = await gateways[1].client.call("poll_messages", { timeout: 0 });
-    assert(Array.isArray(actionMessages.messages), "action_poll");
-    const actionMessage = actionMessages.messages.find(
+    phase = "action_direct";
+    const actionMessage = await waitForDelivered(
+      directMessages,
       (message) =>
         isRecord(message) &&
         message.id === called.message_id &&
         isRecord(message.payload) &&
         message.payload.type === "action_call",
+      "action_direct_timeout",
     );
     assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
-    await gateways[1].client.call("ack_message", { message_id: actionMessage.id });
 
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
@@ -931,15 +1002,15 @@ async function main() {
       { name: "identity-a-jwk-x", value: loadedCredential.publicJwk.x },
       { name: "identity-a-jwk-y", value: loadedCredential.publicJwk.y },
       { name: "action-payload", value: actionReason },
-      { name: "webhook-token-a", value: gateways[0].token },
-      { name: "webhook-token-b", value: gateways[1].token },
+      { name: "local-token-a", value: gateways[0].token },
+      { name: "local-token-b", value: gateways[1].token },
       ...dpop.proofMarkers.map((value, index) => ({ name: `dpop-proof-${index + 1}`, value })),
     ];
     await artifactScan(
       roots,
       gateways.flatMap((gateway, index) => [
-        { name: `gateway-${index + 1}-stdout`, value: gateway.stdout(), truncated: false },
-        { name: `gateway-${index + 1}-stderr`, value: gateway.stderr(), truncated: false },
+        { name: `ambassador-${index + 1}-stdout`, value: gateway.stdout(), truncated: false },
+        { name: `ambassador-${index + 1}-stderr`, value: gateway.stderr(), truncated: false },
       ]),
       markers,
     );
@@ -954,7 +1025,7 @@ async function main() {
       catalog.map((action) => [action.name, schemaDigest(action.input_schema)]),
     );
     const report = {
-      qualification: "gateway-live",
+      qualification: "ambassador-live",
       date: new Date().toISOString().slice(0, 10),
       source_repository: SOURCE_REPOSITORY,
       live_origin: LIVE_ORIGIN,
@@ -968,7 +1039,8 @@ async function main() {
         dpop_negative_matrix: "passed",
         permission_request_decision: "passed",
         permission_listing: permissionListing,
-        action_delivery_poll_ack: "passed",
+        webhook_delivery_ack: "passed",
+        direct_delivery_ack: "passed",
         central_mcp_requests: 0,
         artifact_scan: "passed",
         mail_cleanup: "passed",
@@ -978,7 +1050,7 @@ async function main() {
       dpop_nonce_observed: dpop.nonceObserved,
       observed_rest_routes: [...centralRoutes].sort(),
       restart_limitation:
-        "A message consumed by central polling is lost if the gateway exits before acknowledgement; no lease or redelivery exists.",
+        "A message consumed by central polling is lost if Ambassador exits before acknowledgement; no lease or redelivery exists.",
     };
     process.stdout.write(`${JSON.stringify(report)}\n`);
     return 0;
@@ -986,7 +1058,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, gateway_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {

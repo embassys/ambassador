@@ -7,10 +7,10 @@ against `https://mcp.embassys.ai`. It does not test central MCP, API-version
 fallbacks, migration, token reissue, leases, conversations, or invented reply
 operations.
 
-The existing runner and completed observation predate ADR 0038. They prove the
-central client baseline, not the new package name, guided registration,
-full-message webhook, or direct ACP delivery. Update the runner during the
-delivery cutover before using it as release evidence.
+The runner covers the current package name, guided registration, one
+full-message webhook target, and one deterministic mock-ACP direct target. The
+completed observation below predates ADR 0038 and proves only the central
+client baseline.
 
 ## Safety
 
@@ -46,6 +46,13 @@ The controlled runner must require an explicit confirmation phrase before any
 live request. It must record the reviewed central source revision or note that
 the deployment does not expose one.
 
+After packing and clean-installing the candidate, set
+`AMBASSADOR_PACKED_CLI`, `AMBASSADOR_PACKED_TARBALL`, and
+`AMBASSADOR_CONFIRM_LIVE_QUALIFICATION` to the confirmation phrase embedded in
+`scripts/live-qualification.mjs`, then run `pnpm run qualify:live`. The runner
+uses the mock ACP fixture compiled by `pnpm run test:build`; it does not run a
+paid provider.
+
 ## Required report
 
 Record only:
@@ -67,7 +74,7 @@ provider output, or remote error bodies.
 
 ## Baseline observation
 
-On 2026-09-02, the packed pre-ADR-0038 gateway passed registration, Mailosaur
+On 2026-09-02, the packed pre-ADR-0038 implementation passed registration, Mailosaur
 email receipt, verification, encrypted restart, the DPoP positive and negative
 matrix, six-action catalog validation, permission request and decision,
 permission-response delivery, one `get_email` delivery, consuming polls,
@@ -75,7 +82,7 @@ acknowledgements, and forbidden-marker scans.
 
 It used no central MCP request and observed no initial nonce challenge. The
 final `get_my_permissions` check matched the deployed email-field model.
-Captured mail and temporary gateway state were deleted.
+Captured mail and temporary process state were deleted.
 
 This observation remains useful evidence for ADR 0037 only. It is not release
 evidence for the Ambassador delivery cutover.

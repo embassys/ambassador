@@ -66,11 +66,11 @@ export class TestMcpClient {
     this.#forbiddenResponseValues = options.forbiddenResponseValues ?? [];
   }
 
-  async initialize(): Promise<void> {
+  async initialize(clientInfo = { name: "ambassador-test", version: "1" }): Promise<void> {
     const response = await this.#request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "a2a-gateway-test", version: "1" },
+      clientInfo,
     });
     assert.ok(response.result !== undefined, "initialize did not return a result");
     const result = response.result as { capabilities?: unknown };

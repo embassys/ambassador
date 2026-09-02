@@ -24,8 +24,8 @@ import {
 } from "../src/credential-store.js";
 import { currentCredential } from "./support/current-credential.js";
 
-const HOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
-const OTHER_HOOK_TOKEN = "abcdef0123456789abcdef0123456789abcdef0123456789";
+const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
+const OTHER_LOCAL_TOKEN = "abcdef0123456789abcdef0123456789abcdef0123456789";
 const CENTRAL_JWT = currentCredential("first@fixture.test", "agent.first");
 const OTHER_CENTRAL_JWT = currentCredential("second@fixture.test", "agent.second");
 const CREDENTIAL_SCOPE = '{"centralOrigin":"https://mcp.embassys.ai"}';
@@ -34,8 +34,8 @@ const SUCCESSFUL_WINDOWS_ACCESS_CONTROL: WindowsCredentialAccessControl = {
   async secure() {},
 };
 const SECRET_MARKERS = [
-  HOOK_TOKEN,
-  OTHER_HOOK_TOKEN,
+  LOCAL_TOKEN,
+  OTHER_LOCAL_TOKEN,
   CENTRAL_JWT,
   OTHER_CENTRAL_JWT,
   CREDENTIAL_SCOPE,
@@ -78,7 +78,7 @@ async function assertNoSecretFiles(root: string): Promise<void> {
 
 function credentialStore(
   path: string,
-  token = HOOK_TOKEN,
+  token = LOCAL_TOKEN,
   scope = CREDENTIAL_SCOPE,
   options: EncryptedFileCredentialStoreOptions = process.platform === "win32"
     ? { windowsAccessControl: SUCCESSFUL_WINDOWS_ACCESS_CONTROL }
@@ -126,11 +126,11 @@ test("writes only the strict cryptographic envelope and no plaintext", async (t)
   assert.deepEqual(await readdir(item.directory), ["central-credential.json"]);
 });
 
-test("a different valid webhook token cannot decrypt the credential", async (t) => {
+test("a different valid local token cannot decrypt the credential", async (t) => {
   const item = await fixture(t);
   await credentialStore(item.path).save(CENTRAL_JWT);
 
-  const wrongStore = credentialStore(item.path, OTHER_HOOK_TOKEN);
+  const wrongStore = credentialStore(item.path, OTHER_LOCAL_TOKEN);
   await expectSafeRejection(() => wrongStore.load());
   assert.ok((await credentialStore(item.path).load()) === CENTRAL_JWT);
 });
@@ -140,7 +140,7 @@ test("a different central endpoint scope cannot decrypt the credential", async (
   await credentialStore(item.path).save(CENTRAL_JWT);
 
   await expectSafeRejection(() =>
-    credentialStore(item.path, HOOK_TOKEN, OTHER_CREDENTIAL_SCOPE).load(),
+    credentialStore(item.path, LOCAL_TOKEN, OTHER_CREDENTIAL_SCOPE).load(),
   );
   assert.equal(await credentialStore(item.path).load(), CENTRAL_JWT);
 });
@@ -294,7 +294,7 @@ test("fails closed when injected Windows DACL enforcement fails", async (t) => {
       throw new Error("injected access-control failure");
     },
   };
-  const store = credentialStore(item.path, HOOK_TOKEN, CREDENTIAL_SCOPE, {
+  const store = credentialStore(item.path, LOCAL_TOKEN, CREDENTIAL_SCOPE, {
     platform: "win32",
     windowsAccessControl: accessControl,
   });
@@ -305,7 +305,7 @@ test("fails closed when injected Windows DACL enforcement fails", async (t) => {
   await assertNoSecretFiles(item.root);
 });
 
-test("rejects invalid webhook-token formats before touching state", async (t) => {
+test("rejects invalid local-token formats before touching state", async (t) => {
   const item = await fixture(t, "a2a-credential-token-format-test-");
   const invalidTokens = [
     "",

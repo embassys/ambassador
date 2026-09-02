@@ -27,8 +27,8 @@ function router(): LocalMcpRouter & { calls: Array<Record<string, unknown>> } {
         },
       ];
     },
-    async callTool(name, arguments_) {
-      calls.push({ name, arguments: arguments_ });
+    async callTool(name, arguments_, _signal, clientInfo) {
+      calls.push({ name, arguments: arguments_, clientInfo });
       return { echoed: arguments_.value };
     },
   };
@@ -41,7 +41,7 @@ test("serves an authenticated stateful MCP tool through the official transport",
   t.after(() => server.close());
 
   const client = new TestMcpClient(server.endpoint, TOKEN);
-  await client.initialize();
+  await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   assert.deepEqual(client.serverCapabilities.tools, { listChanged: true });
   assert.deepEqual(
     (await client.listTools()).map((tool) => tool.name),
@@ -50,7 +50,13 @@ test("serves an authenticated stateful MCP tool through the official transport",
   assert.deepEqual(await client.callTool("echo", { value: "safe value" }), {
     echoed: "safe value",
   });
-  assert.deepEqual(backend.calls, [{ name: "echo", arguments: { value: "safe value" } }]);
+  assert.deepEqual(backend.calls, [
+    {
+      name: "echo",
+      arguments: { value: "safe value" },
+      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
+    },
+  ]);
 
   const secondClient = new TestMcpClient(server.endpoint, TOKEN);
   await secondClient.initialize();

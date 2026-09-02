@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { TestContext } from "node:test";
@@ -18,7 +19,7 @@ interface WakeWaiter {
 
 export async function startFakeWebhook(
   t: TestContext,
-  options: { statuses?: number[] } = {},
+  options: { statuses?: number[]; secret?: string; nowSeconds?: number } = {},
 ): Promise<{ url: string; waitForWake: () => Promise<WebhookWake> }> {
   const wakes: WebhookWake[] = [];
   const waiters: WakeWaiter[] = [];
@@ -56,6 +57,40 @@ export async function startFakeWebhook(
         response.writeHead(400, { "content-type": "application/json" });
         response.end('{"ok":false}');
         return;
+      }
+
+      if (options.secret !== undefined) {
+        const body = parsed as Record<string, unknown>;
+        const timestamp = request.headers["x-webhook-timestamp"];
+        const signature = request.headers["x-webhook-signature-v2"];
+        const messageId = body.id;
+        const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
+        const expectedSignature =
+          typeof timestamp === "string"
+            ? createHmac("sha256", options.secret)
+                .update(timestamp, "ascii")
+                .update(".", "ascii")
+                .update(rawBody)
+                .digest("hex")
+            : "";
+        const signatureValid =
+          typeof signature === "string" &&
+          signature.length === expectedSignature.length &&
+          timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+        if (
+          request.headers.authorization !== `Bearer ${options.secret}` ||
+          typeof timestamp !== "string" ||
+          !/^\d{1,12}$/u.test(timestamp) ||
+          Math.abs(Number(timestamp) - nowSeconds) > 300 ||
+          !signatureValid ||
+          typeof messageId !== "string" ||
+          request.headers["idempotency-key"] !== messageId ||
+          request.headers["x-request-id"] !== messageId
+        ) {
+          response.writeHead(401, { "content-type": "application/json" });
+          response.end('{"ok":false}');
+          return;
+        }
       }
 
       const wake = {

@@ -206,7 +206,6 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
-- The delivery cutover and renamed package are not implemented yet.
 - No direct agent profile has passed the new real-agent qualification matrix.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).
