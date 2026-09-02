@@ -1,12 +1,13 @@
 # 0024 Provider session connectors
 
-Status: accepted for provider separation; central lifecycle amended by ADR 0037
+Status: provider-separation reference; central workflow pending redesign
 
 Date: 2026-08-29
 
 The provider-neutral process boundary remains. Assumptions about central
 conversations, replies, completion, outcomes, and leased messages are
-superseded. The connector's central-facing workflow needs redesign after I05.
+superseded. The connector's central-facing workflow needs redesign before live
+use.
 
 ## Problem
 
@@ -296,9 +297,9 @@ production code.
 - Start a fresh provider session for every message. This loses the multi-turn
   context required by the shared design.
 
-## D05 completion and remaining gates
+## Related decisions
 
-ADRs 0028 through 0031 complete D05 by approving:
+ADRs 0028 through 0031 define:
 
 1. the connector executable, CLI or configuration interface, working-directory
    input, and local security-policy input;
@@ -310,10 +311,8 @@ ADRs 0028 through 0031 complete D05 by approving:
    or uncertain outcomes; and
 6. packaging, installation, supported platforms, and publishing gates.
 
-ADR 0032 permits K01 against the accepted G04 fixture contract. Each provider
-interface, executable or SDK version, and protocol schema stays behind its
-later provider-specific ADR and blocks only that adapter's tests and
-production work.
+Each provider interface, executable or SDK version, and protocol schema stays
+behind its provider-specific ADR and qualification.
 
 ## Approval
 
@@ -326,7 +325,6 @@ central credential leaves the gateway, no provider credential leaves the
 provider runtime, and a provider turn with an uncertain outcome is never
 replayed blindly.
 
-This boundary approval did not itself complete D05. The user subsequently
-accepted ADRs 0028 through 0031 on 2026-08-30, completing the connector-wide
-foundation decisions. Provider-specific interfaces, support claims, and
-public publishing remain outside this record.
+Provider-specific interfaces, support claims, and public publishing remain
+outside this record. The central-facing conversation model is historical and
+must be replaced before live connector use.

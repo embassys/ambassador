@@ -12,7 +12,7 @@
     "docs/hermes-webhook-bridge.mjs",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
-    "docs/live-e2e-openclaw-hermes.md"
+    "docs/live-qualification.md"
   ],
   "publishConfig": {
     "access": "public"

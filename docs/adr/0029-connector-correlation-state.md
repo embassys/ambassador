@@ -1,12 +1,12 @@
 # 0029 Connector correlation state
 
-Status: accepted for storage security; central lifecycle requires ADR 0037 rework
+Status: storage-safety reference; central workflow pending redesign
 
 Date: 2026-08-30
 
 The encryption, filesystem, quota, and retirement rules remain useful. The
 conversation and paired-message state model assumes the superseded central
-conversation lifecycle and must be redesigned after I05 before live use.
+conversation lifecycle and must be redesigned before live use.
 
 ## Problem
 
@@ -22,12 +22,11 @@ provider sessions. Plaintext provider session and turn IDs would also expose
 sensitive local metadata to backups, support collection, or a copied state
 file.
 
-D05 therefore needs an exact technology, location, schema, cryptographic
-envelope, file-protection, quota, locking, crash, corruption, retention, and
-deletion proposal. This record addresses only that connector-state decision.
-It does not select a provider interface or authorize implementation.
+This record defines the connector's storage technology, location, schema,
+cryptographic envelope, file protection, quota, locking, crash, corruption,
+retention, and deletion behavior. It does not select a provider interface.
 
-## Proposed decision
+## Decision
 
 ### Store boundary and dependency
 
@@ -1042,6 +1041,6 @@ retirement, indefinite tombstone retention, dependency, license, packaging,
 and platform impact.
 
 The accepted design is fresh-install-only and adds no migration. Public
-publication and provider/platform support claims remain behind ADR 0031's
-later gates. ADRs 0028, 0030, and 0031 were accepted with this record and
-complete D05. ADR 0032 permits K01 against the accepted G04 fixture contract.
+publication and provider or platform support claims remain behind ADR 0031's
+qualification gates. The conversation-oriented schema must be replaced or
+amended as part of the pending permission and action workflow redesign.

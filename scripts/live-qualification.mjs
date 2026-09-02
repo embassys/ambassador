@@ -9,17 +9,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
-const SOURCE_REVISION = "b769896b7cfb1ee3540195be9e7a61cf777b9388";
+const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
-const CONFIRMATION = "run-live-phase-3a-with-two-disposable-mailosaur-identities";
+const CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
 const execFileAsync = promisify(execFile);
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function safeFailure(phase) {
-  return Object.assign(new Error("I05 qualification failed"), { phase });
+  return Object.assign(new Error("live qualification failed"), { phase });
 }
 
 function assert(condition, phase) {
@@ -185,7 +185,7 @@ async function deleteMessage(credentials, messageId) {
   }
 }
 
-async function deleteRecentI05Messages(credentials, receivedAfter) {
+async function deleteRecentQualificationMessages(credentials, receivedAfter) {
   try {
     const query = new URLSearchParams({
       server: credentials.serverId,
@@ -197,14 +197,14 @@ async function deleteRecentI05Messages(credentials, receivedAfter) {
     if (!isRecord(result) || !Array.isArray(result.items)) return;
     for (const item of result.items) {
       if (!isRecord(item) || typeof item.id !== "string" || !Array.isArray(item.to)) continue;
-      const belongsToI05 = item.to.some(
+      const belongsToQualification = item.to.some(
         (recipient) =>
           isRecord(recipient) &&
           typeof recipient.email === "string" &&
-          recipient.email.startsWith("i05-") &&
+          recipient.email.startsWith("live-qualification-") &&
           recipient.email.endsWith(`@${credentials.domain}`),
       );
-      if (belongsToI05) await deleteMessage(credentials, item.id);
+      if (belongsToQualification) await deleteMessage(credentials, item.id);
     }
   } catch {
     throw safeFailure("mail_cleanup");
@@ -241,7 +241,7 @@ class QualificationMcpClient {
     await this.#request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "i05-qualification", version: "1" },
+      clientInfo: { name: "gateway-live-qualification", version: "1" },
     });
     await this.#post({ jsonrpc: "2.0", method: "notifications/initialized" }, false);
   }
@@ -399,7 +399,11 @@ async function startGateway(packed, stateRoot, webhook, centralFetch, token) {
   let stdout = "";
   let stderr = "";
   const running = packed.runCli(
-    ["start", `--webhook-url=${webhook.url}`, "--webhook-token-env=I05_WEBHOOK_TOKEN"],
+    [
+      "start",
+      `--webhook-url=${webhook.url}`,
+      "--webhook-token-env=LIVE_QUALIFICATION_WEBHOOK_TOKEN",
+    ],
     {
       io: {
         stdout: {
@@ -417,7 +421,7 @@ async function startGateway(packed, stateRoot, webhook, centralFetch, token) {
           },
         },
       },
-      env: { I05_WEBHOOK_TOKEN: token },
+      env: { LIVE_QUALIFICATION_WEBHOOK_TOKEN: token },
       cwd: repositoryRoot,
       signal: controller.signal,
       testOverrides: {
@@ -626,8 +630,8 @@ function schemaDigest(value) {
 }
 
 async function main() {
-  if (process.env.A2A_I05_CONFIRM_LIVE !== CONFIRMATION) {
-    process.stderr.write("i05 qualification: explicit_confirmation_required\n");
+  if (process.env.A2A_CONFIRM_LIVE_QUALIFICATION !== CONFIRMATION) {
+    process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
   }
   const cliPath = process.env.A2A_PACKED_GATEWAY_CLI;
@@ -643,10 +647,10 @@ async function main() {
   const receivedAfter = new Date(Date.now() - 5_000);
   const cleanupWindow = new Date(Date.now() - 2 * 60 * 60 * 1_000);
   const addresses = [
-    `i05-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
-    `i05-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
+    `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
+    `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
   ];
-  const actionReason = `synthetic-i05-${randomUUID()}`;
+  const actionReason = `synthetic-live-qualification-${randomUUID()}`;
   const capturedMail = [];
   const roots = [];
   const gateways = [];
@@ -699,7 +703,7 @@ async function main() {
     await assertPackedRuntime(cliPath);
 
     phase = "state_setup";
-    const qualificationRoot = await mkdtemp(join(tmpdir(), "a2a-i05-live-"));
+    const qualificationRoot = await mkdtemp(join(tmpdir(), "a2a-live-qualification-"));
     roots.push(join(qualificationRoot, "identity-a"), join(qualificationRoot, "identity-b"));
     await Promise.all(roots.map((root) => mkdir(root, { recursive: true })));
 
@@ -950,9 +954,9 @@ async function main() {
       catalog.map((action) => [action.name, schemaDigest(action.input_schema)]),
     );
     const report = {
-      qualification: "i05",
+      qualification: "gateway-live",
       date: new Date().toISOString().slice(0, 10),
-      source_revision: SOURCE_REVISION,
+      source_repository: SOURCE_REPOSITORY,
       live_origin: LIVE_ORIGIN,
       package_sha256: createHash("sha256").update(tarball).digest("hex"),
       results: {
@@ -982,7 +986,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `i05 qualification: ${JSON.stringify({ phase: failurePhase, central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, gateway_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, gateway_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {
@@ -991,7 +995,7 @@ async function main() {
     for (const messageId of capturedMail.splice(0)) {
       await deleteMessage(credentials, messageId).catch(() => undefined);
     }
-    await deleteRecentI05Messages(credentials, cleanupWindow).catch(() => undefined);
+    await deleteRecentQualificationMessages(credentials, cleanupWindow).catch(() => undefined);
     for (const root of roots) {
       await rm(dirname(root), { recursive: true, force: true }).catch(() => undefined);
     }
