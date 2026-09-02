@@ -15,8 +15,6 @@ interfaces have been removed.
   `scripts/qualify-agents.mjs`. Do not record prompts, messages, credentials,
   secrets, paths containing user data, or provider output.
 - Rerun the controlled live-central qualification with the packed candidate.
-- Pass Linux and macOS CI, including clean packed-package installation,
-  dependency audit, signature audit, and forbidden-content scans.
 - Replace the source-reviewed candidate version labels in the getting-started
   guides with real-agent qualification evidence after all four cases pass.
 - Obtain explicit publication approval. The CI publication job remains

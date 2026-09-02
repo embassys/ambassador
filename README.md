@@ -29,9 +29,9 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 
 The REST and DPoP integration and deterministic Ambassador delivery cutover
 are implemented. Real-agent OpenClaw/Hermes qualification, refreshed live
-central qualification, cross-platform CI, and explicit publication approval
-remain in the [implementation plan](docs/implementation-plan.md). Do not
-publish a package until those gates are complete.
+central qualification, and explicit publication approval remain in the
+[implementation plan](docs/implementation-plan.md). Do not publish a package
+until those gates are complete.
 
 ## Development
 
