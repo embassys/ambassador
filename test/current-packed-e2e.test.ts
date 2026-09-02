@@ -44,6 +44,10 @@ async function waitForEndpoint(read: () => string): Promise<string> {
 }
 
 test("I02-X06 clean-installed package runs the current Node REST fixture", async (t) => {
+  const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+    scripts?: { prepack?: unknown };
+  };
+  assert.equal(manifest.scripts?.prepack, "node scripts/clean.mjs dist && pnpm run build");
   const cliPath = process.env.A2A_PACKED_GATEWAY_CLI;
   if (cliPath === undefined) {
     t.skip("requires the clean-installed package lane");

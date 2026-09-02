@@ -1,5 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, readdirSync, readFileSync } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import { z } from "zod";
@@ -778,9 +778,26 @@ function processGroupExists(groupId: number | null): boolean {
   if (groupId === null) return false;
   try {
     process.kill(-groupId, 0);
-    return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    return true;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    for (const entry of readdirSync("/proc", { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[0-9]+$/u.test(entry.name)) continue;
+      let stat: string;
+      try {
+        stat = readFileSync(`/proc/${entry.name}/stat`, "utf8");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        return true;
+      }
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      if (Number(fields[2]) === groupId && fields[0] !== "Z" && fields[0] !== "X") return true;
+    }
+    return false;
+  } catch {
     return true;
   }
 }
