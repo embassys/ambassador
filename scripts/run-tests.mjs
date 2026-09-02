@@ -8,16 +8,7 @@ const compiledTests = entries
   .filter((entry) => entry.isFile() && entry.name.endsWith(".test.js"))
   .map((entry) => join(entry.parentPath, entry.name))
   .sort();
-const files = compiledTests
-  .filter(
-    (file) =>
-      !basename(file).startsWith("t03-") &&
-      !basename(file).startsWith("t04-") &&
-      !basename(file).startsWith("k02-") &&
-      !basename(file).startsWith("cx02-") &&
-      !basename(file).startsWith("cl02-"),
-  )
-  .sort();
+const files = compiledTests.filter((file) => !basename(file).startsWith("t03-")).sort();
 
 if (files.length === 0) {
   throw new Error(`No compiled tests found under ${root}`);

@@ -28,19 +28,31 @@ The consuming poll can lose a delivered message when the gateway crashes
 before acknowledgement. Server-side retrieval or redelivery would solve the
 problem without storing message bodies in the gateway.
 
+Investigate live delivery liveness after accepted permission writes. In two
+controlled runs on 2026-09-02, central accepted the permission operation but
+the corresponding recipient did not observe the queued message before the
+qualification deadline: once for the initial request and once for the
+response. The second run successfully delivered and acknowledged the initial
+request before exhibiting the response failure. Keep this as a central
+investigation; Ambassador must not infer success or add a speculative polling
+or route fallback.
+
 Any change should define duplicate handling and idempotent acknowledgement.
 Update server tests, the gateway protocol, fixtures, client, and live
 qualification together.
 
-## Action results
+## Action-result hardening
 
-Central can deliver permission and action messages but has no general reply or
-action-result endpoint. A future result contract should define correlation,
-authorization, payload schema, terminal state, idempotency, expiry, and what
-the requester receives.
+Central now correlates `submit_action_result` by `call_id`, authorizes the
+original target, records `completed` or `failed`, and queues an
+`action_response` for the caller. The current operation has no per-action
+output schema, idempotency key, or outcome lookup. A client that loses the
+successful response cannot recover its message ID by repeating the request,
+because a later submission returns `409`.
 
-Until that route exists, Ambassador discards bounded direct-agent output and
-does not present webhook or ACP completion as a response to the sender.
+Define result size and nesting limits. Serialize competing submissions so two
+requests cannot both observe `pending`, and add an idempotent recovery contract
+before Ambassador retries an uncertain result submission.
 
 ## Credential lifecycle
 

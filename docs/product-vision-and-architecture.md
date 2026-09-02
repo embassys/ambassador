@@ -82,11 +82,13 @@ fixed executable and argument list for direct delivery, MCP setup behavior, and
 qualification evidence. User input and remote content cannot add or modify an
 entry.
 
-The first version enables OpenClaw and Hermes with direct and webhook modes.
-Direct is the default. Codex and Claude are not enabled merely because their
-names can be recognized; each needs a separately approved, implemented, and
-qualified ACP adapter contract. Unknown, ambiguous, disabled, and incomplete
-profiles are unsupported.
+The enabled profiles are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+All five support direct and webhook modes, with direct as the default. Codex
+uses `@agentclientprotocol/codex-acp` 1.8.0, Claude Code uses
+`@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0 uses its
+native `--acp` mode. Exact aliases, agent identities, environment allowlists,
+and version policies remain compiled in. Unknown, ambiguous, disabled, and
+incomplete profiles are unsupported.
 
 ## Guided registration
 
@@ -129,7 +131,7 @@ does not probe alternate contracts or keep an old client as fallback.
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, messages, acknowledgements | Local delivery or provider credentials |
+| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
 | Ambassador | Local MCP authentication, encrypted central credential, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
@@ -169,7 +171,9 @@ or message body. SQLite remains ID-only.
 Each protected REST request carries Bearer authorization and a fresh DPoP proof
 for the exact method and URL. The central action catalog supplies action names
 and payload schemas. Permission requests and decisions control whether an
-action call may deliver a message to another identity.
+action call may deliver a message to another identity. The target submits one
+structured success or error result for the call. Central correlates it by
+`call_id` and queues an `action_response` for the original caller.
 
 ### Incoming message
 
@@ -194,19 +198,20 @@ retrieval or redelivery is the proper future fix.
 - A separate connector process or provider-specific gateway transport.
 - Recovering the exact MCP chat used during registration.
 - Passing raw secrets through the model.
-- Inventing reply, conversation, lease, outcome, activation, or token-reissue
-  APIs that central does not expose.
+- Inventing general reply, conversation, lease, outcome-lookup, activation, or
+  token-reissue APIs that central does not expose.
 - Persisting message bodies locally.
 - Native service management or a GUI.
 
 ## Current limitations
 
 - Central has no message retrieval or redelivery after a consuming poll.
-- Central has no general reply or action-result endpoint.
+- Action results have no per-action output schema or outcome lookup. A
+  completed submission cannot be repeated to recover its response.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
-- The delivery cutover and renamed package are not implemented yet.
-- No direct agent profile has passed the new real-agent qualification matrix.
+- Codex direct delivery has passed with the live central service. The other
+  nine cases in the five-profile real-agent matrix remain open.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).

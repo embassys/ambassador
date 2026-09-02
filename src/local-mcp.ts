@@ -32,7 +32,13 @@ export interface LocalMcpRouter {
     name: string,
     arguments_: Record<string, unknown>,
     signal: AbortSignal,
+    clientInfo: LocalMcpClientInfo | undefined,
   ): Promise<Record<string, unknown>>;
+}
+
+export interface LocalMcpClientInfo {
+  readonly name: string;
+  readonly version: string;
 }
 
 export class LocalMcpToolError extends Error {
@@ -230,7 +236,7 @@ export class LocalMcpServer {
   #endpoint: string | undefined;
 
   constructor(
-    webhookToken: string,
+    localToken: string,
     private readonly router: LocalMcpRouter,
     options: LocalMcpServerOptions = {},
   ) {
@@ -244,7 +250,7 @@ export class LocalMcpServer {
     }
 
     this.#expectedAuthorizationDigest = createHash("sha256")
-      .update(`Bearer ${webhookToken}`, "utf8")
+      .update(`Bearer ${localToken}`, "utf8")
       .digest();
     this.#http = createHttpServer(
       { maxHeaderSize: MAX_HEADERS_BYTES, requestTimeout: this.#requestTimeoutMs },
@@ -296,7 +302,7 @@ export class LocalMcpServer {
 
   #createSdk(): Server {
     const sdk = new Server(
-      { name: "a2a-gateway", version: "1" },
+      { name: "ambassador", version: "1" },
       {
         capabilities: { tools: { listChanged: true } },
         supportedProtocolVersions: [PROTOCOL_VERSION],
@@ -323,7 +329,19 @@ export class LocalMcpServer {
           context.mcpReq.signal,
           AbortSignal.timeout(this.#requestTimeoutMs),
         ]);
-        const result = await this.router.callTool(request.params.name, arguments_ ?? {}, signal);
+        const version = sdk.getClientVersion();
+        const clientInfo =
+          version !== undefined &&
+          typeof version.name === "string" &&
+          typeof version.version === "string"
+            ? { name: version.name, version: version.version }
+            : undefined;
+        const result = await this.router.callTool(
+          request.params.name,
+          arguments_ ?? {},
+          signal,
+          clientInfo,
+        );
         const serialized = serializeLocalToolResult(result);
         return sdk.projectCallToolResult(
           {

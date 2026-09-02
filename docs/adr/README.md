@@ -41,7 +41,7 @@ history retains older records that have already been deleted.
 | 0032 | Fixture-first work before server deployment | Completed live REST integration |
 | 0034 | Codex App Server connector | ACP profile under ADR 0038 |
 | 0035 | Claude Code headless connector | ACP profile under ADR 0038 |
-| 0036 | Gemini connector evaluation | Outside the first ACP qualification scope |
+| 0036 | Gemini connector evaluation | Native Gemini ACP profile under ADR 0038 |
 
 Add an ADR when changing a public CLI, dependency, trust boundary, credential
 location, content-persistence rule, central transport, or agent-execution

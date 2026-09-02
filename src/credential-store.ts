@@ -19,7 +19,7 @@ const TAG_BYTES = 16;
 const MAX_PLAINTEXT_BYTES = 8_192;
 const MAX_FILE_BYTES = 16_384;
 const SYSTEM_SID = "S-1-5-18";
-const HOOK_TOKEN = /^[0-9a-f]{48}$/u;
+const LOCAL_TOKEN = /^[0-9a-f]{48}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ENVELOPE_KEYS = [
   "cipher",
@@ -144,10 +144,10 @@ function parseEnvelope(bytes: Buffer): {
   };
 }
 
-function deriveKey(hookToken: Buffer, salt: Buffer): Promise<Buffer> {
+function deriveKey(localToken: Buffer, salt: Buffer): Promise<Buffer> {
   return new Promise((resolveKey, reject) => {
     scrypt(
-      hookToken,
+      localToken,
       salt,
       KEY_BYTES,
       { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM },
@@ -266,24 +266,24 @@ class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessCo
 export class EncryptedFileCredentialStore implements CredentialStore {
   readonly #path: string;
   readonly #directoryPath: string;
-  readonly #hookToken: Buffer;
+  readonly #localToken: Buffer;
   readonly #credentialScope: string;
   readonly #platform: NodeJS.Platform;
   readonly #windowsAccessControl?: WindowsCredentialAccessControl;
 
   constructor(
     path: string,
-    hookToken: string,
+    localToken: string,
     credentialScope: string,
     options: EncryptedFileCredentialStoreOptions = {},
   ) {
-    if (!HOOK_TOKEN.test(hookToken)) throw new Error("The webhook token format is invalid");
+    if (!LOCAL_TOKEN.test(localToken)) throw new Error("The local token format is invalid");
     if (typeof credentialScope !== "string" || credentialScope.length < 1) {
       throw new Error("The credential scope is invalid");
     }
     this.#path = resolve(path);
     this.#directoryPath = dirname(this.#path);
-    this.#hookToken = Buffer.from(hookToken, "hex");
+    this.#localToken = Buffer.from(localToken, "hex");
     this.#credentialScope = credentialScope;
     this.#platform = options.platform ?? process.platform;
     if (this.#platform === "win32") {
@@ -339,7 +339,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       let ciphertext: Buffer;
       let tag: Buffer;
       try {
-        key = await deriveKey(this.#hookToken, salt);
+        key = await deriveKey(this.#localToken, salt);
         const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
         cipher.setAAD(this.#additionalData());
         ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -439,7 +439,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       let key: Buffer | undefined;
       let decoded: Buffer | undefined;
       try {
-        key = await deriveKey(this.#hookToken, envelope.salt);
+        key = await deriveKey(this.#localToken, envelope.salt);
         const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
           authTagLength: TAG_BYTES,
         });

@@ -19,6 +19,28 @@ test("I02-E01 bootstrap catalog contains only current enrollment tools", () => {
     assert.equal(JSON.stringify(tool).includes("username"), false);
     assert.equal(JSON.stringify(tool).includes("token"), false);
   }
+  const registration = REST_BOOTSTRAP_TOOLS[0];
+  assert.ok(registration);
+  assert.deepEqual((registration.inputSchema.properties as Record<string, unknown>).delivery, {
+    oneOf: [
+      {
+        type: "object",
+        properties: { mode: { const: "direct" } },
+        required: ["mode"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          mode: { const: "webhook" },
+          url: { type: "string", minLength: 1, maxLength: 2_048 },
+          secret_env: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" },
+        },
+        required: ["mode", "url", "secret_env"],
+        additionalProperties: false,
+      },
+    ],
+  });
 });
 
 test("I02-E02 enrollment sends exact REST bodies and returns token-free results", async (t) => {
@@ -34,7 +56,7 @@ test("I02-E02 enrollment sends exact REST bodies and returns token-free results"
   });
   const email = "gateway-enrollment@fixture.test";
 
-  const registered = await client.register({ email, display_name: "Gateway fixture" });
+  const registered = await client.register({ email, display_name: "Ambassador fixture" });
   assert.equal(registered.email, email);
   assert.deepEqual(Object.keys(registered).sort(), ["agent_id", "email", "message"]);
   const resent = await client.resend({ email });

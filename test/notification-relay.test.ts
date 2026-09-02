@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
@@ -8,14 +7,12 @@ import { type TestContext, test } from "node:test";
 import type { CentralMessage } from "../src/central-rest.js";
 import { NotificationJournal } from "../src/notification-journal.js";
 import {
+  type DeliveryTarget,
   NotificationRelay,
   NotificationRelayError,
   RetryableNotificationReceiveError,
 } from "../src/notification-relay.js";
 
-const NOW = Date.parse("2026-08-27T12:00:00Z");
-const WEBHOOK_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
-const WEBHOOK_URL = "http://127.0.0.1:18789/hooks/agent";
 const MESSAGE: CentralMessage = {
   id: "message-1",
   sender_agent_id: "agent.sender",
@@ -24,23 +21,22 @@ const MESSAGE: CentralMessage = {
   created_at: "2026-08-27T12:00:00Z",
 };
 
-function journal(t: TestContext): NotificationJournal {
-  const directory = mkdtempSync(join(tmpdir(), "a2a-relay-current-"));
-  const value = new NotificationJournal(join(directory, "notifications.sqlite3"));
+function journal(t: TestContext): { journal: NotificationJournal; path: string } {
+  const directory = mkdtempSync(join(tmpdir(), "ambassador-relay-"));
+  const path = join(directory, "notifications.sqlite3");
+  const value = new NotificationJournal(path);
   t.after(() => {
     value.close();
     rmSync(directory, { recursive: true, force: true });
   });
-  return value;
+  return { journal: value, path };
 }
 
 function pending(signal: AbortSignal): Promise<readonly CentralMessage[]> {
   return new Promise((_, reject) => {
-    if (signal.aborted) {
-      reject(new Error("cancelled"));
-      return;
-    }
-    signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+    const cancelled = () => reject(new Error("cancelled"));
+    if (signal.aborted) cancelled();
+    else signal.addEventListener("abort", cancelled, { once: true });
   });
 }
 
@@ -52,161 +48,182 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   }
 }
 
-function options(
-  value: NotificationJournal,
-  receiveMessages: (signal: AbortSignal) => Promise<readonly CentralMessage[]>,
-  webhookFetch: typeof fetch,
-) {
-  return {
-    journal: value,
-    webhookUrl: WEBHOOK_URL,
-    webhookToken: WEBHOOK_TOKEN,
-    receiveMessages,
-    fetch: webhookFetch,
-    now: () => NOW,
-    random: () => 0,
-    idleIntervalMs: 5,
-    emptyPollRetryMs: 5,
-    retryBaseMs: 5,
-    retryCapMs: 10,
-  };
-}
-
-test("holds a consumed body in memory, journals only its ID, wakes, and removes it after ack", async (t) => {
-  const value = journal(t);
-  const controller = new AbortController();
+test("delivers the complete message, records custody, then acknowledges", async (t) => {
+  const item = journal(t);
+  const events: string[] = [];
   let polls = 0;
-  let wakes = 0;
-  let webhookBody = "";
-  const receive = async (signal: AbortSignal): Promise<readonly CentralMessage[]> => {
-    polls += 1;
-    if (polls === 1) return [MESSAGE];
-    return pending(signal);
+  const target: DeliveryTarget = {
+    async deliver(message) {
+      events.push(`deliver:${message.payload.reason as string}`);
+      assert.equal(item.journal.get("message-1")?.deliveryState, "delivering");
+      return { status: "accepted" };
+    },
+    async close() {},
   };
-  const webhookFetch: typeof fetch = async (_input, init) => {
-    wakes += 1;
-    webhookBody = String(init?.body);
-    const headers = new Headers(init?.headers);
-    const timestamp = String(Math.floor(NOW / 1_000));
-    assert.equal(headers.get("authorization"), `Bearer ${WEBHOOK_TOKEN}`);
-    assert.equal(headers.get("idempotency-key"), MESSAGE.id);
-    assert.equal(
-      headers.get("x-webhook-signature-v2"),
-      createHmac("sha256", WEBHOOK_TOKEN)
-        .update(timestamp)
-        .update(".")
-        .update(webhookBody)
-        .digest("hex"),
-    );
-    return new Response(null, { status: 202 });
-  };
-  const relay = new NotificationRelay(options(value, receive, webhookFetch));
-  const running = relay.run(controller.signal);
-  await waitFor(() => wakes === 1);
-  assert.equal(webhookBody.includes("private message body"), false);
-  assert.equal(value.get("message-1")?.messageId, "message-1");
-  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
-    messages: [MESSAGE],
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: target,
+    receiveMessages: async (signal) => (++polls === 1 ? [MESSAGE, MESSAGE] : pending(signal)),
+    acknowledgeMessage: async (id) => {
+      events.push(`ack:${id}`);
+      assert.equal(item.journal.get(id)?.deliveryState, "acknowledging");
+    },
+    retryDelayMs: 1,
   });
-  assert.equal(relay.confirmAcknowledgement("message-1"), true);
-  assert.equal(value.get("message-1"), undefined);
-  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), { messages: [] });
+  const controller = new AbortController();
+  const running = relay.run(controller.signal);
+  await waitFor(() => events.length === 2);
+  assert.deepEqual(events, ["deliver:private message body", "ack:message-1"]);
+  assert.equal(item.journal.count(), 0);
+  assert.equal(readFileSync(item.path).includes(Buffer.from("private message body")), false);
   controller.abort();
   await running;
 });
 
-test("does not poll central again until every consumed body leaves memory", async (t) => {
-  const value = journal(t);
-  const controller = new AbortController();
+test("delivers ID-less messages once without acknowledgement", async (t) => {
+  const item = journal(t);
+  const { id: _id, ...message } = MESSAGE;
+  let delivered = 0;
+  let acknowledgements = 0;
   let polls = 0;
-  const receive = async (signal: AbortSignal): Promise<readonly CentralMessage[]> => {
-    polls += 1;
-    if (polls === 1) return [MESSAGE];
-    return pending(signal);
-  };
-  const relay = new NotificationRelay(
-    options(value, receive, async () => new Response(null, { status: 202 })),
-  );
-  const running = relay.run(controller.signal);
-  await waitFor(() => value.count() === 1);
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(polls, 1);
-  relay.confirmAcknowledgement("message-1");
-  await waitFor(() => polls === 2);
-  controller.abort();
-  await running;
-});
-
-test("ID-less messages are distinct volatile deliveries and are returned once", async (t) => {
-  const value = journal(t);
-  const controller = new AbortController();
-  let polls = 0;
-  const { id: _discardedId, ...message } = MESSAGE;
-  const receive = async (signal: AbortSignal): Promise<readonly CentralMessage[]> => {
-    polls += 1;
-    if (polls === 1) return [message, message];
-    return pending(signal);
-  };
-  const wakeKeys = new Set<string>();
-  const relay = new NotificationRelay(
-    options(value, receive, async (_input, init) => {
-      wakeKeys.add(new Headers(init?.headers).get("idempotency-key") ?? "");
-      return new Response(null, { status: 202 });
-    }),
-  );
-  const running = relay.run(controller.signal);
-  await waitFor(() => wakeKeys.size === 2);
-  assert.equal(value.count(), 0);
-  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), {
-    messages: [message, message],
-  });
-  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), { messages: [] });
-  controller.abort();
-  await running;
-});
-
-test("discards unrecoverable journal IDs on restart and never invents body recovery", async (t) => {
-  const value = journal(t);
-  value.ingest(["consumed-before-crash"], NOW);
-  const controller = new AbortController();
-  const relay = new NotificationRelay(
-    options(value, pending, async () => new Response(null, { status: 202 })),
-  );
-  const running = relay.run(controller.signal);
-  await waitFor(() => value.count() === 0);
-  assert.deepEqual(await relay.pollMessages(0, new AbortController().signal), { messages: [] });
-  controller.abort();
-  await running;
-});
-
-test("retries transient receive failures and fails closed on oversized batches", async (t) => {
-  const value = journal(t);
-  const controller = new AbortController();
-  let attempts = 0;
-  const relay = new NotificationRelay(
-    options(
-      value,
-      async (signal) => {
-        attempts += 1;
-        if (attempts === 1) throw new RetryableNotificationReceiveError(1);
-        if (attempts === 2) return [];
-        return pending(signal);
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: {
+      async deliver() {
+        delivered += 1;
+        return { status: "completed" };
       },
-      async () => new Response(null, { status: 202 }),
-    ),
-  );
+      async close() {},
+    },
+    receiveMessages: async (signal) => (++polls === 1 ? [message, message] : pending(signal)),
+    acknowledgeMessage: async () => {
+      acknowledgements += 1;
+    },
+    retryDelayMs: 1,
+  });
+  const controller = new AbortController();
   const running = relay.run(controller.signal);
-  await waitFor(() => attempts >= 3);
+  await waitFor(() => delivered === 2);
+  assert.equal(acknowledgements, 0);
+  assert.equal(item.journal.count(), 0);
+  controller.abort();
+  await running;
+});
+
+test("does not redeliver completed custody while recovering a safe acknowledgement", async (t) => {
+  const item = journal(t);
+  item.journal.ingest(["message-1"]);
+  item.journal.beginDelivery("message-1");
+  item.journal.recordDelivered("message-1", "completed");
+  let delivered = 0;
+  let acknowledged = 0;
+  const controller = new AbortController();
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: {
+      async deliver() {
+        delivered += 1;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+    receiveMessages: pending,
+    acknowledgeMessage: async () => {
+      acknowledged += 1;
+    },
+    retryDelayMs: 1,
+  });
+  const running = relay.run(controller.signal);
+  await waitFor(() => acknowledged === 1);
+  assert.equal(delivered, 0);
+  assert.equal(item.journal.count(), 0);
+  controller.abort();
+  await running;
+});
+
+test("discards consumed pre-delivery IDs after restart and shuts down target", async (t) => {
+  const item = journal(t);
+  item.journal.ingest(["consumed-before-crash"]);
+  let closed = 0;
+  const controller = new AbortController();
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: {
+      async deliver() {
+        return { status: "accepted" };
+      },
+      async close() {
+        closed += 1;
+      },
+    },
+    receiveMessages: pending,
+    acknowledgeMessage: async () => undefined,
+    retryDelayMs: 1,
+  });
+  const running = relay.run(controller.signal);
+  await waitFor(() => item.journal.count() === 0);
+  controller.abort();
+  await running;
+  assert.equal(closed, 1);
+});
+
+test("explicit shutdown aborts the receive and closes the target once", async (t) => {
+  const item = journal(t);
+  let closed = 0;
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: {
+      async deliver() {
+        return { status: "accepted" };
+      },
+      async close() {
+        closed += 1;
+      },
+    },
+    receiveMessages: pending,
+    acknowledgeMessage: async () => undefined,
+    retryDelayMs: 1,
+  });
+  relay.run(new AbortController().signal);
+  await relay.shutdown();
+  assert.equal(closed, 1);
+});
+
+test("retries receive failures but fails closed on an oversized batch", async (t) => {
+  const first = journal(t);
+  let attempts = 0;
+  const controller = new AbortController();
+  const target: DeliveryTarget = {
+    async deliver() {
+      return { status: "accepted" };
+    },
+    async close() {},
+  };
+  const relay = new NotificationRelay({
+    journal: first.journal,
+    deliveryTarget: target,
+    receiveMessages: async (signal) => {
+      attempts += 1;
+      if (attempts === 1) throw new RetryableNotificationReceiveError(1);
+      return pending(signal);
+    },
+    acknowledgeMessage: async () => undefined,
+    retryDelayMs: 1,
+  });
+  const running = relay.run(controller.signal);
+  await waitFor(() => attempts === 2);
   controller.abort();
   await running;
 
-  const invalid = new NotificationRelay(
-    options(
-      value,
-      async () => Array.from({ length: 257 }, (_, index) => ({ ...MESSAGE, id: `m-${index}` })),
-      async () => new Response(null, { status: 202 }),
-    ),
-  );
+  const second = journal(t);
+  const invalid = new NotificationRelay({
+    journal: second.journal,
+    deliveryTarget: target,
+    receiveMessages: async () =>
+      Array.from({ length: 257 }, (_, index) => ({ ...MESSAGE, id: `m-${index}` })),
+    acknowledgeMessage: async () => undefined,
+    retryDelayMs: 1,
+  });
   await assert.rejects(
     invalid.run(new AbortController().signal),
     (error: unknown) =>
