@@ -32,6 +32,16 @@ Any change should define duplicate handling and idempotent acknowledgement.
 Update server tests, the gateway protocol, fixtures, client, and live
 qualification together.
 
+## Action results
+
+Central can deliver permission and action messages but has no general reply or
+action-result endpoint. A future result contract should define correlation,
+authorization, payload schema, terminal state, idempotency, expiry, and what
+the requester receives.
+
+Until that route exists, Ambassador discards bounded direct-agent output and
+does not present webhook or ACP completion as a response to the sender.
+
 ## Credential lifecycle
 
 Token refresh, revocation, and deliberate identity recovery would improve

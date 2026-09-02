@@ -10,7 +10,10 @@ After a lock-owning process exits abruptly, the OS can briefly continue reportin
 
 ## Decision
 
-Allow the singleton lock's `BEGIN EXCLUSIVE` operation to wait for up to one second. If the lock remains busy, acquisition fails with `daemon_running` before the process resolves tokens, opens credentials, binds MCP, polls, forwards a tool, or sends a webhook.
+Allow the singleton lock's `BEGIN EXCLUSIVE` operation to wait for up to one
+second. If the lock remains busy, acquisition fails with `daemon_running`
+before Ambassador resolves tokens, opens credentials, binds MCP, polls,
+forwards a tool, starts an ACP agent, or sends a webhook.
 
 ## Costs
 

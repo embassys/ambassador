@@ -1,30 +1,14 @@
-# A2A Codex connector
+# Historical Codex connector package
 
-This private package contains the provider-neutral connector foundation and the
-Codex command entrypoint. ADR 0034 selects Codex App Server `0.149.0`, and CX03
-implements that adapter against the fake selected interface. CX04 supplies an
-offline manual qualification runner, but no real authenticated Codex run has
-succeeded. The package has no provider or platform support claim and is not
-approved for publication.
+Status: superseded by ADR 0038 and scheduled for removal
 
-Its central-facing workflow assumes conversation and reply routes that the
-current server does not have. Do not run it against the live service until the
-connector is redesigned around permission and action messages.
+This private package implements the old provider-specific Codex App Server
+connector. It is not part of the accepted Embassys Ambassador product and has
+no support or publication claim.
 
-The foreground command is:
+Do not extend or qualify this package. Direct agent delivery now belongs inside
+Ambassador and uses ACP v1. Any future Codex profile must follow
+[ADR 0038](../../docs/adr/0038-ambassador-delivery-modes.md) and the common
+[delivery qualification](../../docs/qualification.md).
 
-```text
-a2a-codex-connector start --webhook-port=<port> --webhook-token-env=<name> --working-directory=<absolute-directory> --policy=<read-only|workspace-write>
-```
-
-The gateway must be running on `127.0.0.1:8787`. Put its 48-character
-lowercase hexadecimal webhook token in the named environment variable. The
-connector accepts authenticated webhook wakes only on the selected loopback
-port.
-
-Provider-neutral setup, policy, history, retention, and retirement guidance is
-in [connector setup and retention](../../docs/connector-setup-and-retention.md).
-
-To retire all Codex correlation state for the current account, use the
-separate confirmed command described in the project architecture. Retirement
-is permanent for the version 1 state location.
+Git history and superseded ADR 0034 retain the old adapter design.
