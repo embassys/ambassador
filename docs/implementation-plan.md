@@ -15,6 +15,14 @@ interfaces have been removed.
   `scripts/qualify-agents.mjs`. Do not record prompts, messages, credentials,
   secrets, paths containing user data, or provider output.
 - Rerun the controlled live-central qualification with the packed candidate.
+  Two Mailosaur-backed attempts on 2026-09-02 registered and verified both
+  disposable identities and exercised the protected DPoP routes. The first
+  timed out before the recipient observed the accepted permission request. The
+  second delivered and acknowledged the request and accepted the recipient's
+  permission response, but the requester's webhook did not receive that
+  response before the qualification deadline. Live compatibility therefore
+  remains unqualified; do not treat the successful writes or partial route
+  coverage as a pass.
 - Replace the source-reviewed candidate version labels in the getting-started
   guides with real-agent qualification evidence after all four cases pass.
 - Obtain explicit publication approval. The CI publication job remains

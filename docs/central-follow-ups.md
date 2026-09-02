@@ -28,6 +28,15 @@ The consuming poll can lose a delivered message when the gateway crashes
 before acknowledgement. Server-side retrieval or redelivery would solve the
 problem without storing message bodies in the gateway.
 
+Investigate live delivery liveness after accepted permission writes. In two
+controlled runs on 2026-09-02, central accepted the permission operation but
+the corresponding recipient did not observe the queued message before the
+qualification deadline: once for the initial request and once for the
+response. The second run successfully delivered and acknowledged the initial
+request before exhibiting the response failure. Keep this as a central
+investigation; Ambassador must not infer success or add a speculative polling
+or route fallback.
+
 Any change should define duplicate handling and idempotent acknowledgement.
 Update server tests, the gateway protocol, fixtures, client, and live
 qualification together.
