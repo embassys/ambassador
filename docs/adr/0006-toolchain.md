@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-23
 
-Updated: 2026-08-27 to clarify that pnpm is the repository toolchain
+Updated: 2026-09-02 for ACP v1
 
 ## Problem
 
@@ -21,6 +21,7 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 | Lint and format | Biome 2.5.10 |
 | Runtime schemas | Zod 4.4.3 with strict objects |
 | HTTP | Node `fetch`, `AbortSignal`, and Web Crypto behind a project wrapper |
+| Direct agent protocol | `@agentclientprotocol/sdk` 1.4.0 under ADR 0038 |
 | CLI parsing | `node:util.parseArgs` with project-owned subcommand dispatch |
 | Logging | Project-owned typed NDJSON writer with allowlisted fields |
 | CI | GitHub Actions on Linux and macOS; ADR 0033 excludes Windows from the initial-release matrix |
@@ -50,7 +51,7 @@ The final npm-registry upload continues to use the exact npm CLI qualified for t
 ## Maintenance and licenses
 
 - Node.js and Zod use the MIT license.
-- TypeScript uses Apache-2.0.
+- TypeScript and the Agent Client Protocol TypeScript SDK use Apache-2.0.
 - Biome uses MIT or Apache-2.0.
 - pnpm uses MIT. npm uses Artistic-2.0 and supplies `npx` for end-user execution as well as the trusted registry publisher.
 
@@ -58,8 +59,14 @@ All selected projects are active as of this decision. Exact versions remain in `
 
 ## Packaging impact
 
-Biome and TypeScript are development tools. Zod is the only pure JavaScript runtime dependency selected here. Packaging the Node runtime remains a release task.
+Biome and TypeScript are development tools. The ACP SDK is a pure JavaScript
+runtime dependency. Packaging the Node runtime remains a release task.
 
 ## Approval
 
-The user delegated the initial choice on 2026-08-23. On 2026-08-26, the user approved the existing tools, preferred pnpm over npm for its repository security controls, and approved immediate migration. On 2026-08-27, the user clarified that pnpm is for repository development and release work only; end-user usage stays on `npx`.
+The user delegated the initial choice on 2026-08-23. On 2026-08-26, the user
+approved the existing tools, preferred pnpm over npm for its repository
+security controls, and approved immediate migration. On 2026-08-27, the user
+clarified that pnpm is for repository development and release work only;
+end-user usage stays on `npx`. On 2026-09-02, the user approved ACP v1 and
+delegated the exact SDK choice recorded in ADR 0038.

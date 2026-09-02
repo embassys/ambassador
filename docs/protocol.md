@@ -1,51 +1,55 @@
-# Gateway protocol
+# Ambassador protocol
 
-This document defines the current gateway behavior. It makes no compatibility
-or migration promise.
+Status: accepted target; open implementation work is listed in
+[Current work](implementation-plan.md)
 
-## Startup contract
+This document defines the current target without a compatibility or migration
+promise.
 
-The public command is:
+## Startup
+
+The public package and command are:
 
 ```text
-a2a-gateway start --webhook-url=<url> --webhook-token-env=<environment-variable>
+@embassys/ambassador
+ambassador start --local-token-env=<environment-variable>
 ```
 
-Both named options are required exactly once in `--name=value` form. Positional
-values, unknown options, literal-token options, endpoint options, setup
-options, runtime selectors, binding IDs, configuration paths, and verbose
-transcript options are rejected.
+`--local-token-env` is required exactly once in `--name=value` form. The
+environment-variable name matches `[A-Za-z_][A-Za-z0-9_]*`. Its value is a
+locally generated 192-bit token encoded as 48 lowercase hexadecimal characters.
+The token authenticates loopback MCP and derives the central credential
+encryption key.
 
-`--webhook-url` accepts a literal-loopback URL with an explicit port and no
-credentials or fragment. `--webhook-token-env` names an environment variable
-matching `[A-Za-z_][A-Za-z0-9_]*`. Its value must contain exactly 192 random
-bits encoded as 48 lowercase hexadecimal characters.
+Positional values, unknown options, literal-token options, webhook options,
+agent selectors, delivery-mode selectors, endpoint options, and configuration
+paths are rejected. In particular, there is no `--acp-agent` option.
 
 The process acquires its singleton lock before reading credentials, binding a
-listener, calling central, or sending a webhook. It binds
+listener, calling central, starting an agent, or sending a webhook. It binds
 `127.0.0.1:8787` and prints this line after the endpoint is ready:
 
 ```text
 MCP endpoint: http://127.0.0.1:8787/mcp
 ```
 
-`SIGINT` and `SIGTERM` stop new work, cancel the central poll, allow bounded
-in-flight work to settle, close the listener and journal, and release the
-lock.
+`SIGINT` and `SIGTERM` stop new work, cancel central polling, cancel or close
+the active delivery target within its deadline, close local state, and release
+the lock.
 
-## Local MCP boundary
+## Local MCP
 
 Every local MCP request uses Streamable HTTP at `/mcp` and sends:
 
 ```http
-Authorization: Bearer <resolved-webhook-token>
+Authorization: Bearer <local-token>
 ```
 
-The gateway requires `Host: 127.0.0.1:8787`. A present `Origin` must be exactly
-`http://127.0.0.1:8787`. Authentication and these origin checks happen before
-body parsing.
+Ambassador requires `Host: 127.0.0.1:8787`. A present `Origin` must be
+exactly `http://127.0.0.1:8787`. Authentication and origin checks happen
+before body parsing.
 
-The existing limits remain:
+The boundary keeps these limits:
 
 | Boundary | Limit |
 | --- | --- |
@@ -56,21 +60,13 @@ The existing limits remain:
 | Concurrent tool calls | 8 |
 | Serialized structured tool result | 512 KiB |
 
-JSON-RPC batches are rejected. Redirects are rejected. Errors do not reflect
-request bodies, remote bodies, URLs, headers, or credentials.
+JSON-RPC batches and redirects are rejected. Errors do not reflect request
+bodies, remote bodies, URLs, headers, or credentials.
 
-## Central origin
-
-The current central REST origin is fixed:
-
-```text
-https://mcp.embassys.ai
-```
-
-Production code has no central MCP URL and no API-version selector. Test
-harnesses may inject a local REST origin through an internal seam. That seam is
-not a CLI option, user configuration, fallback, or production discovery
-mechanism.
+MCP initialization `clientInfo` is retained as bounded session metadata. A
+recognized name may suggest `codex`, `claude`, `openclaw`, or `hermes`
+during registration. It is not authenticated identity and never silently
+selects a delivery profile.
 
 ## Tool catalog
 
@@ -80,31 +76,33 @@ Before enrollment, expose exactly:
 - `verify_email`
 - `resend_verification`
 
-After a credential is durably stored, expose these REST-backed tools:
+After a credential is durably stored, expose exactly these REST-backed tools:
 
 - `list_action_types`
 - `request_permission`
 - `respond_to_permission`
 - `call_action`
-- `poll_messages`
 - `get_my_permissions`
-- `ack_message`
 
-The gateway owns these tool schemas. It does not fetch or mirror a central MCP
-catalog. `list_action_types` returns the server's dynamic action names and
-payload schemas; those action definitions are data returned by a REST tool,
-not new gateway tools.
+Incoming delivery and central acknowledgement belong to Ambassador. The target
+catalog has no local `poll_messages` or `ack_message` tools. It also has no
+reply, completion, outcome, conversation, activation, or token-reissue tool
+because central has no corresponding REST operation.
 
-Every local tool call still requires local MCP authentication. Reject any
-local argument named `token`, `jwt`, `access_token`, `authorization`,
-`private_key`, `proof`, or `dpop` before central dispatch. Reject an upstream
-result containing those credential fields or the stored token bytes.
+Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
+catalog. `list_action_types` returns central action definitions as data; those
+definitions do not become additional local tools.
 
-## Enrollment REST contract
+Every local call requires MCP authentication. Reject any argument named
+`token`, `jwt`, `access_token`, `authorization`, `private_key`,
+`secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
+containing those credential fields or stored token bytes.
 
-### `register_agent`
+## Guided registration
 
-Local input and central body:
+### Initial call
+
+`register_agent` accepts:
 
 ```json
 {
@@ -113,27 +111,93 @@ Local input and central body:
 }
 ```
 
-`display_name` may be omitted. There is no username field. The central request
-is `POST /api/register_agent` with `Content-Type: application/json` and no
-central authorization header.
+If no delivery profile exists and `delivery` is absent, Ambassador makes no
+central request. It returns structured content equivalent to:
 
-The successful central response contains `agent_id`, `email`, and `message`.
-The gateway returns those fields after its general credential-field scan.
+```json
+{
+  "status": "input_required",
+  "prompt": "How should incoming requests reach this agent?",
+  "required": ["delivery"],
+  "choices": [
+    {"value": "direct", "label": "Send directly to this agent"},
+    {"value": "webhook", "label": "Send to a webhook"}
+  ]
+}
+```
 
-### `resend_verification`
+When `clientInfo` identifies a recognized profile, the direct label may name
+it, such as "Send directly to this OpenClaw agent". The agent presents the
+question to the user and makes a follow-up call. MCP elicitation may improve the
+experience where available, but correctness cannot depend on it.
 
-Local input and central body:
+### Direct follow-up
+
+```json
+{
+  "email": "agent@example.test",
+  "display_name": "Optional display name",
+  "delivery": {
+    "mode": "direct",
+    "agent": "openclaw"
+  }
+}
+```
+
+`agent` is one of `codex`, `claude`, `openclaw`, or `hermes`. It may be
+omitted only when the current MCP session has one recognized `clientInfo`
+profile. If neither source provides one, Ambassador returns another
+`input_required` result with the fixed agent choices. User input never
+supplies an executable, argument list, shell fragment, transport, or path.
+
+### Webhook follow-up
+
+```json
+{
+  "email": "agent@example.test",
+  "display_name": "Optional display name",
+  "delivery": {
+    "mode": "webhook",
+    "url": "https://agent.example.test/embassys",
+    "secret_env": "EMBASSYS_WEBHOOK_SECRET"
+  }
+}
+```
+
+`secret_env` is an environment-variable name, never a secret. Its value must
+be present in the Ambassador process and contain 32 through 256 header-safe
+ASCII characters. A newly generated 48-character lowercase hexadecimal value
+is recommended.
+
+Webhook URLs may use HTTPS. Plain HTTP is accepted only for a literal loopback
+host. Credentials, fragments, control characters, unsupported schemes, and
+redirect-based target changes are rejected.
+
+Ambassador validates and atomically stores the nonsecret delivery profile
+before it sends `POST /api/register_agent`. A conflicting stored profile or
+partially valid state fails closed. Development reset removes the complete
+state; there is no profile migration or compatibility reader.
+
+The central registration body remains:
+
+```json
+{
+  "email": "agent@example.test",
+  "display_name": "Optional display name"
+}
+```
+
+The successful response contains `agent_id`, `email`, and `message`.
+
+### Resend and verification
+
+`resend_verification` sends:
 
 ```json
 {"email":"agent@example.test"}
 ```
 
-The central request is `POST /api/resend_verification` with no central access
-token. A successful response contains a `message`.
-
-### `verify_email`
-
-Local input:
+`verify_email` accepts:
 
 ```json
 {
@@ -142,186 +206,113 @@ Local input:
 }
 ```
 
-The gateway serializes verification attempts. It generates one P-256 key pair
-for the attempt and sends:
+Ambassador serializes verification attempts, generates one P-256 key pair, and
+sends the email, code, and public JWK to `POST /api/verify_email`. It
+intercepts the returned token before generic result serialization and checks:
 
-```json
-{
-  "email": "agent@example.test",
-  "code": "123456",
-  "jwk": {
-    "kty": "EC",
-    "crv": "P-256",
-    "x": "base64url-x-coordinate",
-    "y": "base64url-y-coordinate"
-  }
-}
+- bounded compact-JWT structure;
+- string `sub` and `email`;
+- numeric `iat` and `exp`, with `exp` in the future and later than `iat`;
+- token `cnf.jkt`, response `jkt`, and generated-key thumbprint agreement;
+  and
+- response identity agreement with the requested email.
+
+The server uses an HS256 signature that the client cannot verify. Ambassador
+does not invent issuer, audience, token type, token ID, or lifetime requirements
+that the server does not expose.
+
+The token and PKCS#8 private key are stored as one atomic encrypted credential.
+Only after persistence succeeds does Ambassador enable protected tools and
+automatic delivery. The local result contains identity and token-free success,
+never the token, JWK, thumbprint, or key.
+
+## Delivery profile
+
+The profile contains only the minimum nonsecret fields:
+
+| Mode | Fields |
+| --- | --- |
+| `webhook` | mode, canonical URL, secret environment-variable name |
+| `direct` | mode, fixed agent kind, canonical startup working directory, minimum opaque ACP session metadata when safe and supported |
+
+The profile uses the same protected application-state directory as the central
+credential and journal. It is written atomically with restrictive ownership and
+permissions. It never contains secret values, message bodies, prompts, provider
+output, provider credentials, or executable input.
+
+One profile belongs to one central identity. Runtime mode switching is not part
+of this development cutover.
+
+## Central REST and DPoP
+
+The production origin is fixed:
+
+```text
+https://mcp.embassys.ai
 ```
 
-The request is `POST /api/verify_email` with no central access token or DPoP
-proof. A successful response has `Cache-Control: no-store` and this shape:
+Production code has no central MCP URL or API-version selector. Tests may
+inject a local REST origin through an internal seam. That seam is not user
+configuration, fallback, or discovery.
 
-```json
-{
-  "agent_id": "opaque-agent-id",
-  "email": "agent@example.test",
-  "token": "compact-jwt",
-  "jkt": "public-key-thumbprint",
-  "message": "Email verified successfully. Store this token securely - it will not be shown again."
-}
-```
-
-The gateway intercepts `token` before generic result serialization. It checks:
-
-- the token is a bounded three-segment compact JWT;
-- the payload contains string `sub` and `email`, numeric `iat` and `exp`, and
-  `cnf.jkt`;
-- `exp` is later than the current time and later than `iat`;
-- the payload thumbprint matches the generated public key;
-- a present response `jkt` matches the same key; and
-- the response identity matches the requested email.
-
-The central token uses an HS256 server signature that the client cannot
-verify. The gateway does not invent issuer, audience, token ID, token type, or
-24-hour lifetime requirements that are absent from the server.
-
-The token and PKCS#8 private key are written as one atomic encrypted
-credential using ADR 0019's Node-core AES-256-GCM store. The exact internal
-format is current-only. No old credential reader or migration path is kept.
-
-Only after persistence succeeds does the gateway enable protected tools and
-return:
-
-```json
-{
-  "verified": true,
-  "agent_id": "opaque-agent-id",
-  "email": "agent@example.test",
-  "message": "Email verified successfully."
-}
-```
-
-The token, public thumbprint, and key never appear in the local result. If
-persistence fails after remote verification, the gateway reports an uncertain
-failure and does not return the credential.
-
-## DPoP request contract
-
-Every protected REST request sends:
+Every protected request sends:
 
 ```http
 Authorization: Bearer <central-token>
 DPoP: <proof-jwt>
 ```
 
-The authorization scheme is `Bearer`. `Authorization: DPoP` is not supported
-by the server.
+`Authorization: DPoP` is not supported. Each proof is signed with ES256 by
+the credential's P-256 key. Its header contains `typ: dpop+jwt`,
+`alg: ES256`, and the public JWK. Its payload contains a unique `jti`, exact
+uppercase `htm`, exact request URL in `htu`, current `iat`, and
+`base64url(sha256(access_token))` in `ath`.
 
-The proof is signed with ES256 by the credential's P-256 key. Its protected
-header is:
+If a `401` supplies one valid `DPoP-Nonce`, cache it for the REST origin and
+repeat the same operation once with a fresh proof and the nonce claim. The
+first request does not include a nonce proactively. Any other authentication
+failure does not trigger registration, token replacement, or a bearer-only
+retry.
 
-```json
-{
-  "typ": "dpop+jwt",
-  "alg": "ES256",
-  "jwk": {"kty":"EC","crv":"P-256","x":"...","y":"..."}
-}
-```
+The current protected routes are:
 
-Its payload contains:
-
-```json
-{
-  "jti": "unique-per-proof-value",
-  "htm": "GET",
-  "htu": "https://mcp.embassys.ai/api/poll_messages?timeout=30",
-  "iat": 1788220800,
-  "ath": "base64url-sha256-of-access-token"
-}
-```
-
-`htm` is the exact uppercase method. `htu` is the exact request URL seen by the
-client, including the query string and its order. A proof is never reused.
-
-If a `401` contains one valid `DPoP-Nonce` value, cache it for the REST origin
-and repeat the same operation once with a new `jti`, current `iat`, and the
-nonce claim. The first request does not proactively include a nonce. Invalid,
-duplicate, or repeated challenges fail closed. Any other `401`, wrong-key
-response, expired credential, proof failure, or replay response disables that
-operation and does not trigger registration, token replacement, or a
-bearer-only retry.
-
-## Protected REST tools
-
-All request bodies are JSON. The following fields are the current source
-contract.
-
-| Tool | Method and path | Input |
+| Operation | Method and path | Input |
 | --- | --- | --- |
-| `list_action_types` | `GET /api/list_action_types` | none |
-| `request_permission` | `POST /api/request_permission` | `target_email`, `action_type`, optional `scope` object |
-| `respond_to_permission` | `POST /api/respond_to_permission` | `permission_id`, `decision` equal to `granted` or `denied` |
-| `call_action` | `POST /api/call_action` | `target_email`, `action_type`, `payload` object |
-| `poll_messages` | `GET /api/poll_messages?timeout=<0..60>` | optional `timeout`; gateway background poll uses 30 |
-| `get_my_permissions` | `GET /api/get_my_permissions` | none |
-| `ack_message` | `POST /api/ack_message` | `message_id` |
+| List actions | `GET /api/list_action_types` | none |
+| Request permission | `POST /api/request_permission` | `target_email`, `action_type`, optional `scope` |
+| Respond to permission | `POST /api/respond_to_permission` | `permission_id`, `decision` |
+| Call action | `POST /api/call_action` | `target_email`, `action_type`, `payload` |
+| List permissions | `GET /api/get_my_permissions` | none |
+| Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
+| Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
 
-`call_action` delivers a request to another agent after central confirms a
-granted permission. It does not execute the action. The gateway does not add a
-free-text reply, completion, outcome, conversation, activation, or reissue
-tool because the server has no such REST route.
+`call_action` delivers a request after central confirms permission. It does
+not execute an action or provide a general response channel.
 
-The deployed action catalog defines the exact action names and their payload
-schemas. The current catalog includes `get_email` and `get_phone_number`; each
-accepts an object with required string `reason`. Their `reason` properties
-also carry the deployed descriptions recorded in the fixture inventory.
+## Incoming queue
 
-## Message polling and local retrieval
+Ambassador holds one 30-second central long poll. The response has a
+`messages` array. Current central messages contain `id`,
+`sender_agent_id`, optional `action_type_id`, `payload`, and
+`created_at`.
 
-The gateway holds one long poll:
-
-```http
-GET /api/poll_messages?timeout=30
-Authorization: Bearer <central-token>
-DPoP: <fresh-proof>
-```
-
-The response is an object with a `messages` array. Current source returns each
-message with `id`, `sender_agent_id`, optional `action_type_id`, `payload`, and
-`created_at`. The server changes each selected row from `queued` to
-`delivered` in the same database statement that returns it.
-
-Before accepting a batch, the gateway enforces the existing 4 MiB response,
-100-level nesting, 16,384 structural-token, 256-message, and 512 KiB normalized
-local-result limits. A present message ID must be a bounded opaque string.
+Central marks selected rows delivered in the same database statement that
+returns them. Before accepting a batch, Ambassador enforces its response,
+nesting, structural-token, batch-count, and normalized-message limits.
 Conflicting duplicate IDs reject the batch.
 
-Message bodies remain only in the bounded in-memory inbox. SQLite stores only
-present IDs and relay state. Background central polling pauses while the inbox
-contains work.
+Message bodies remain only in a bounded in-memory queue. SQLite stores present
+IDs and delivery state only. Polling pauses while the queue contains work. An
+ID-less message may be delivered once but cannot be acknowledged.
 
-The local `poll_messages` tool reads that inbox without another central
-request. ID-bearing messages remain available until acknowledgement. An
-ID-less message is returned once and is never sent to `ack_message`.
+## Webhook delivery
 
-For an ID-bearing message, local `ack_message` forwards exactly one protected
-REST request. Only a response with the matching `message_id` and
-`status: "acked"` removes the body and journal row. A failed or uncertain
-acknowledgement is not retried automatically because the current server treats
-a repeat as not found.
-
-The server has no lease or delivered-message retrieval. A crash clears the
-in-memory inbox. Startup removes stale wake rows whose bodies cannot be
-recovered. This can lose a delivered message and is an accepted development
-limitation.
-
-## Webhook wake
-
-The gateway sends the existing ID-only webhook:
+Webhook mode sends the complete normalized central message as the JSON request
+body. There is no ID-only wake envelope and no provider-specific body:
 
 ```http
-POST <webhook-url>
-Authorization: Bearer <resolved-webhook-token>
+POST <configured-url>
+Authorization: Bearer <webhook-secret>
 Idempotency-Key: <message-id>
 X-Request-ID: <message-id>
 X-Webhook-Timestamp: <current-Unix-seconds>
@@ -329,62 +320,126 @@ X-Webhook-Signature-V2: <hex-HMAC-SHA256>
 Content-Type: application/json
 ```
 
-The HMAC covers the ASCII timestamp, one `.` byte, and the exact request body.
-The body tells the webhook owner that an A2A message is ready and includes only
-the opaque message ID. A `2xx` response means the webhook accepted the wake.
-It does not mean the message was processed.
+The HMAC uses the webhook secret and covers the ASCII timestamp, one `.` byte,
+and the exact body bytes. The receiver validates the bearer, signature,
+timestamp window, body bounds, and idempotency key before accepting custody.
 
-Failed or uncertain wakes retry the same ID with a fresh timestamp and
-signature. Accepted wakes may be repeated while the corresponding in-memory
-message remains unacknowledged.
+A `2xx` means the receiver accepted responsibility for the complete message.
+Ambassador records that transfer before acknowledging central. A non-`2xx`
+or pre-acceptance transport failure may retry within the fixed delivery budget
+using the same idempotency key and a fresh timestamp and signature. Because a
+timeout can be uncertain, receivers must deduplicate by message ID.
 
-## Errors, deadlines, and retries
+OpenClaw, Hermes, and other webhook consumers adapt the canonical body through
+their own local hook configuration. Ambassador does not emit provider-specific
+JSON.
 
-The central service normally returns JSON with a `detail` member on error. The
-gateway consumes at most its response limit and maps the status to a stable,
-credential-free local error. It never forwards the remote body verbatim.
+## Direct ACP delivery
+
+Direct mode uses ACP v1 through exact `@agentclientprotocol/sdk` 1.4.0.
+Ambassador is the ACP client and starts a fixed command for the selected agent
+profile without a shell. User or message input cannot change the executable,
+arguments, environment allowlist, transport, or working directory. The working
+directory is the canonical process directory captured during registration. A
+later start from a different directory fails closed instead of silently moving
+the agent's scope.
+
+Ambassador initializes the agent and opens a gateway-managed session. It
+provides its authenticated MCP endpoint in ACP session configuration where the
+agent supports that field. Agents that reject session MCP configuration, such
+as the reviewed OpenClaw interface, must have Ambassador MCP configured before
+direct delivery.
+
+Ambassador has no interactive approval UI during background delivery. It never
+auto-approves an ACP permission request. A request that cannot be satisfied by
+the selected agent's preconfigured policy is denied, and the prompt may finish
+with a bounded failure.
+
+For each central message, Ambassador sends one ACP prompt containing:
+
+1. fixed instructions that identify the following data as an untrusted
+   Embassys message;
+2. the complete canonical JSON message; and
+3. direction to use the configured Ambassador MCP tools when a permission or
+   action operation requires them.
+
+Provider output is not a central reply. Ambassador discards it after bounded
+processing because central has no reply or action-result route.
+
+A normal terminal ACP result completes local handling and permits central
+acknowledgement. Startup failure before prompt submission may be retried within
+the delivery budget. Once prompt submission may have occurred, a crash,
+timeout, malformed stream, lost terminal result, or failed cleanup is
+uncertain. Ambassador does not automatically submit that message again.
+
+Direct mode does not resume the MCP chat that performed registration. Any ACP
+session identifier is gateway-owned opaque metadata and may be retained only
+if the selected agent supports safe exact-session resume. Otherwise a restart
+starts a new gateway-managed session and makes no continuity claim.
+
+## Central acknowledgement
+
+After webhook custody transfer or successful direct completion, Ambassador
+sends one protected `POST /api/ack_message`. Only a response with the matching
+`message_id` and `status: "acked"` removes the journal row.
+
+The current server does not make acknowledgement idempotent. Ambassador does
+not blindly replay an acknowledgement after an uncertain response. It reports
+the bounded failure without redelivering completed local work.
+
+A process crash clears message bodies from memory. Startup can remove stale
+pre-delivery journal rows whose bodies cannot be recovered. Accepted webhook
+or completed direct state may retain only enough ID-based state to avoid
+repeating local work. Central has no delivered-message retrieval, so some crash
+windows can lose a message or leave it unacknowledged. This remains a declared
+development limitation.
+
+## Deadlines and data boundary
 
 | Operation | Deadline |
 | --- | --- |
-| Registration, verification, resend, and protected REST call | 30 seconds |
-| Central long poll | 40 seconds for a 30-second server hold |
+| Central REST call | 30 seconds |
+| Central message long poll | 40 seconds for a 30-second server hold |
 | Local MCP request | 35 seconds |
-| Webhook wake | 10 seconds |
+| Webhook delivery | 10 seconds |
+| ACP process initialization | 15 seconds |
+| ACP session creation or resume | 15 seconds |
+| ACP prompt | 15 minutes |
+| ACP cancellation grace | 10 seconds |
+| ACP child cleanup | 5 seconds |
 
-No client follows a central redirect. No side-effecting call is retried after
-an uncertain outcome. The optional one-time DPoP nonce response is the only
-authentication retry.
-
-## Data boundary
+One 15-minute-and-30-second outer ACP delivery budget includes all ACP stages.
+A stage never extends it. Tests may inject shorter positive deadlines through
+internal seams. No deadline is a CLI option.
 
 Never write message bodies, action payloads, permission details, MCP arguments
 or results, registration emails, verification codes, tokens, private keys,
-proofs, nonces, remote response bodies, or webhook secrets to SQLite,
-configuration, normal logs, diagnostics, metrics, temporary files, crash
-artifacts, or support bundles.
+proofs, nonces, webhook secrets, prompts, or provider output to SQLite,
+profiles, normal logs, diagnostics, metrics, temporary files, crash artifacts,
+or support bundles.
 
-The encrypted credential contains only the central token and DPoP private key
-plus the minimum format metadata needed to decrypt and validate them. The
-notification journal remains ID-only.
+The encrypted central credential contains only the central token and DPoP
+private key plus minimum format metadata. The delivery profile is nonsecret.
+The journal remains ID-only.
 
 ## Acceptance cases
 
-The current integration must prove at least:
+The cutover must prove at least:
 
-- bootstrap REST paths and email-only request shapes;
-- token interception and token-free local verification results;
-- key binding between the submitted JWK, response `jkt`, token `cnf.jkt`, and
-  stored private key;
-- `Authorization: Bearer` plus a separate proof on every protected request;
-- rejection of missing proofs, wrong keys, stale proofs, future proofs, wrong
-  method or URL, wrong token hash, and replayed `jti` values;
-- optional nonce retry only when the server supplies a nonce;
-- no central MCP traffic or token argument;
-- fixed permission, action, poll, permission-list, and acknowledgement REST
-  shapes;
-- bounded in-memory message custody and ID-only durable state;
-- honest restart-loss behavior for a consumed message;
-- no old credential, central MCP fallback, `/api/v2`, reissue, activation,
-  lease, conversation, or migration path in the built artifact; and
-- no credential or content in logs, databases, temporary files, packages, or
-  test output.
+- the new package, binary, startup contract, and rejection of old interfaces;
+- guided MCP registration for direct and webhook choices;
+- safe `clientInfo` handling and explicit user confirmation;
+- no raw secret in MCP, profile data, output, or process arguments;
+- complete-message webhook delivery, authentication, deduplication, retry, and
+  acknowledgement ordering;
+- ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
+  cancellation, crash, and uncertainty handling;
+- deterministic CI coverage with a mock webhook receiver and mock ACP agent;
+- opt-in local OpenClaw and Hermes coverage in both modes;
+- unchanged central REST and DPoP behavior from ADR 0037;
+- bounded in-memory body custody and ID-only durable state;
+- no local delivery-control or nonexistent central reply tools;
+- no separate connector process, provider-specific webhook body, old package
+  alias, old CLI, compatibility reader, or migration path in the artifact; and
+- no credential or content leakage in logs, databases, profiles, temporary
+  files, packages, or qualification output.

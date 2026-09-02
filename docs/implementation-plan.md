@@ -1,55 +1,112 @@
 # Current work
 
-The gateway REST integration is implemented and live-qualified. Completed work
-belongs in the architecture, protocol, tests, and Git history, not in this
-plan.
+The central REST and DPoP integration is implemented and live-qualified. The
+next work is one clean delivery cutover to the accepted Ambassador design in
+ADR 0038. There is no compatibility or migration requirement for development
+state, the old package name, the old CLI, ID-only wakes, or connector packages.
 
-## Provider connector redesign
+## 1. Red specifications and package boundary
 
-The next engineering task is to replace the connector's obsolete central
-conversation workflow with one based on current permission and action
-messages.
+- Change package expectations from `@a2adev/gateway` to
+  `@embassys/ambassador` and from `a2a-gateway` to `ambassador`.
+- Specify `ambassador start --local-token-env=<name>` and rejection of the old
+  webhook startup flags, agent flags, secret-value flags, and unknown options.
+- Specify atomic delivery-profile storage with no secret or message content.
+- Specify canonical startup-directory capture and rejection of a conflicting
+  direct-mode restart directory.
+- Add a delivery-target interface that has webhook and direct fakes.
+- Keep all existing central REST and DPoP contract tests green.
 
-Before changing production connector code:
+## 2. Guided MCP registration
 
-1. Decide which message types may invoke a provider.
-2. Define which local actor makes permission decisions.
-3. Define how an action request becomes provider input and how the result is
-   represented through the current REST tools.
-4. Amend ADRs 0024, 0029, and 0030 where their conversation assumptions no
-   longer apply.
-5. Replace the affected connector tests before implementation.
+- Retain MCP initialization `clientInfo` as a bounded per-session hint.
+- Extend `register_agent` with the optional delivery union in the protocol.
+- Return structured `input_required` results until the user supplies all local
+  delivery choices.
+- Validate and persist the delivery profile before contacting central.
+- Reject raw secret values and credential-shaped fields before dispatch.
+- Remove local `poll_messages` and `ack_message` from the post-enrollment MCP
+  catalog once automatic delivery owns acknowledgement.
 
-Keep the existing process isolation, local policy limits, credential
-separation, content-free durable state, and uncertain-provider-outcome rules.
-Do not add central credentials to a connector or provider credentials to the
-gateway.
+## 3. Webhook delivery
 
-## Provider qualification
+- Replace the ID-only wake with the complete canonical message body.
+- Allow HTTPS endpoints and literal-loopback HTTP endpoints. Reject URL
+  credentials, fragments, unsupported schemes, and other plaintext remote
+  targets.
+- Resolve the webhook secret directly from its configured environment-variable
+  name. Never return, log, or persist it.
+- Keep bearer authentication, HMAC V2 signing, request IDs, idempotency keys,
+  deadlines, bounded retries before acceptance, and body limits.
+- Treat `2xx` as transfer of custody and then acknowledge central. Do not wait
+  for a later MCP poll or acknowledgement.
 
-After the redesign passes fixture and package tests:
+## 4. Direct ACP v1 delivery
 
-- run the real Codex qualification;
-- run the real Claude Code qualification; and
-- decide separately whether to propose another Gemini interface.
+- Add exact `@agentclientprotocol/sdk` 1.4.0 and record its license in the
+  existing dependency audit.
+- Implement a gateway-owned ACP client, child lifecycle, fixed supported-agent
+  profiles, and safe environment handling.
+- Supply Ambassador MCP to ACP sessions that accept session MCP configuration.
+  Require provider-side MCP setup where they do not.
+- Submit a fixed instruction plus the complete validated message as one ACP
+  prompt.
+- Acknowledge central only after a successful terminal ACP result.
+- Do not automatically replay after prompt dispatch when completion is
+  uncertain.
+- Keep provider output, prompts, message bodies, credentials, and secrets out
+  of durable state and observability.
 
-No provider has a live-central support claim until its new workflow passes
-qualification.
+## 5. Remove the superseded implementation
 
-## Distribution
+- Remove connector packages, connector scripts, connector fixtures, and the
+  old provider-specific transport code.
+- Remove the old package and binary names without aliases.
+- Remove ID-only wake text and delivery-control MCP paths.
+- Remove obsolete setup and qualification documents after their useful history
+  is represented by ADR 0038 and the ADR ledger.
+- Scan the built package for old names, retired commands, message content, and
+  credential markers.
 
-The current source has passed gateway live qualification, but publication is
-a separate decision. Before publishing:
+## 6. Qualification
 
-- rerun Linux and macOS CI and package installation;
-- rerun the controlled live qualification against the current server;
-- review dependency and signature audits;
-- update the user setup guides with the exact package version; and
-- obtain explicit publication approval.
+### Required in CI
 
-Windows remains unsupported under ADR 0033.
+- Run the full central fixture matrix.
+- Run webhook delivery against a mock receiver that validates the complete
+  body, bearer, HMAC, timestamp, idempotency, retry, and acknowledgement order.
+- Run direct delivery against a mock ACP v1 agent that validates initialize,
+  session setup, MCP configuration, full-message prompt, terminal success,
+  failure, cancellation, crash, and uncertain-outcome handling.
+- Prove both modes obey queue, body, deadline, concurrency, shutdown, and
+  no-content-persistence limits.
 
-## Central service work
+### Required as opt-in local qualification
 
-Optional server changes are tracked in [Central follow-ups](central-follow-ups.md).
-They do not block the gateway or authorize client-side compatibility code.
+Run real OpenClaw and Hermes against the local central fixture in this matrix:
+
+| Agent | Webhook | Direct ACP |
+| --- | --- | --- |
+| OpenClaw | required | required |
+| Hermes | required | required |
+
+Each run uses an isolated account/profile, synthetic message data, a bounded
+working directory, normal provider authentication, and the exact candidate
+package. Record provider and adapter versions plus pass/fail evidence, but no
+prompts, messages, credentials, or secret values.
+
+Codex and Claude may be added to the same matrix after their ACP adapters are
+implemented. They do not block the first OpenClaw and Hermes qualification.
+
+### Required before publication
+
+- Pass Linux and macOS CI and packed-package installation.
+- Pass all four OpenClaw/Hermes local real-agent cases.
+- Rerun controlled live central qualification against the current server.
+- Review dependency, license, provenance, and artifact scans.
+- Update setup instructions with the exact qualified version.
+- Obtain explicit publication approval.
+
+Windows remains unsupported under ADR 0033. Optional central service changes
+remain in [Central follow-ups](central-follow-ups.md) and do not authorize
+client-side compatibility code.

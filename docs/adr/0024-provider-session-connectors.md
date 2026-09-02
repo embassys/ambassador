@@ -1,6 +1,6 @@
 # 0024 Provider session connectors
 
-Status: provider-separation reference; central workflow pending redesign
+Status: superseded by ADR 0038; historical reference only
 
 Date: 2026-08-29
 
