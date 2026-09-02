@@ -146,8 +146,15 @@ export async function startFakeClaudeCli(
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
+    const handleControlError = (error: NodeJS.ErrnoException): void => {
+      if (error.code !== "ECONNRESET" && error.code !== "EPIPE") {
+        fixtureErrors.push("fake CLI control socket failed");
+      }
+    };
+    socket.on("error", handleControlError);
     let record: MutableLaunchRecord | undefined;
     const lines = createInterface({ input: socket, crlfDelay: Number.POSITIVE_INFINITY });
+    lines.on("error", handleControlError);
     lines.on("line", (line) => {
       let message: WorkerMessage;
       try {
