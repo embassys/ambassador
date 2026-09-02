@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -129,6 +130,16 @@ function signalRecordedDescendant(pid: number, signal: NodeJS.Signals): boolean 
 
 function processExists(pid: number | undefined): boolean {
   if (pid === undefined) return false;
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const state = stat.at(stat.lastIndexOf(")") + 2);
+      if (state === "Z" || state === "X") return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
   try {
     process.kill(pid, 0);
     return true;
