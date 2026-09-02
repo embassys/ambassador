@@ -88,11 +88,12 @@ After a credential is durably stored, expose exactly these REST-backed tools:
 - `request_permission`
 - `respond_to_permission`
 - `call_action`
+- `submit_action_result`
 - `get_my_permissions`
 
 Incoming delivery and central acknowledgement belong to Ambassador. The target
 catalog has no local `poll_messages` or `ack_message` tools. It also has no
-reply, completion, outcome, conversation, activation, or token-reissue tool
+general reply, conversation, outcome-lookup, activation, or token-reissue tool
 because central has no corresponding REST operation.
 
 Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
@@ -319,19 +320,32 @@ The current protected routes are:
 | Request permission | `POST /api/request_permission` | `target_email`, `action_type`, optional `scope` |
 | Respond to permission | `POST /api/respond_to_permission` | `permission_id`, `decision` |
 | Call action | `POST /api/call_action` | `target_email`, `action_type`, `payload` |
+| Submit action result | `POST /api/submit_action_result` | `call_id`, `result`, `status` |
 | List permissions | `GET /api/get_my_permissions` | none |
 | Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
 | Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
 
 `call_action` delivers a request after central confirms permission. It does
-not execute an action or provide a general response channel.
+not execute the action. Its `call_id` correlates the one permitted result.
+
+Only the target of the original call may invoke `submit_action_result`.
+`status` is `success` or `error`, and `result` is a structured object. Central
+maps those values to the action-call states `completed` or `failed`, then
+queues an `action_response` for the original caller with the same `call_id`,
+action type, submitted status, and result. A later submission for a finished
+call returns `409`. This is an action result, not a general chat reply.
+
+Ambassador does not retry a result submission after an uncertain response.
+The endpoint has no idempotency key or outcome lookup, and a repeated accepted
+submission returns `409` without recovering the first response's message ID.
 
 ## Incoming queue
 
 Ambassador holds one 30-second central long poll. The response has a
 `messages` array. Current central messages contain `id`,
 `sender_agent_id`, optional `action_type_id`, `payload`, and
-`created_at`.
+`created_at`. The payload type may be `permission_request`,
+`permission_response`, `action_call`, or `action_response`.
 
 Central marks selected rows delivered in the same database statement that
 returns them. Before accepting a batch, Ambassador enforces its response,
@@ -419,8 +433,11 @@ For each central message, Ambassador sends one ACP prompt containing:
 3. direction to use the configured Ambassador MCP tools when a permission or
    action operation requires them.
 
-Provider output is not a central reply. Ambassador discards it after bounded
-processing because central has no reply or action-result route.
+For an `action_call`, the agent submits exactly one structured success or error
+through `submit_action_result` with the supplied `call_id` before it finishes.
+The agent constructs this result through MCP. Ambassador does not reinterpret
+free-form provider output as an action result and still discards that output
+after bounded processing.
 
 A normal terminal ACP result completes local handling and permits central
 acknowledgement. Startup failure before prompt submission may be retried within
@@ -497,7 +514,8 @@ The cutover must prove at least:
   CLI in both modes;
 - unchanged central REST and DPoP behavior from ADR 0037;
 - bounded in-memory body custody and ID-only durable state;
-- no local delivery-control or nonexistent central reply tools;
+- exact target-authorized action-result submission and correlated response
+  delivery, with no general reply or local delivery-control tools;
 - no separate connector process, provider-specific webhook body, old package
   alias, old CLI, compatibility reader, or migration path in the artifact; and
 - no credential or content leakage in logs, databases, profiles, temporary

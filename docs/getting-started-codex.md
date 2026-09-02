@@ -5,7 +5,10 @@ Status: implementation candidate; source-reviewed against Codex 0.149.0 and
 initialization contract probed and the direct real-agent case passed. Webhook
 qualification is still required before publication. The direct pass included
 the live central REST service, a controlled peer, polling, ACP delivery, an
-Ambassador MCP call, and central acknowledgement.
+Ambassador permission decision and correlated action-result call, delivery of
+the `action_response` to the peer, and central acknowledgement. It used an
+isolated preapproval policy rather than an interactive user prompt and must be
+repeated on a supported Node release before publication.
 
 Ambassador enables Codex only for this exact contract:
 

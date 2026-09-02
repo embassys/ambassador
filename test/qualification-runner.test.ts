@@ -52,6 +52,9 @@ test("live runner has a fixed, separately confirmed real-Codex mode", async () =
   assert.match(source, /0\.152\.1/u);
   assert.match(source, /codex-acp/u);
   assert.match(source, /get_my_permissions/u);
+  assert.match(source, /submit_action_result/u);
+  assert.match(source, /Controlled Embassys qualification policy/u);
+  assert.match(source, /RESTART_POLL_DRAIN_MS/u);
   assert.match(source, /ack_message/u);
   assert.equal(
     /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),

@@ -118,6 +118,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
       "request_permission",
       "respond_to_permission",
       "call_action",
+      "submit_action_result",
       "get_my_permissions",
     ],
   );

@@ -32,6 +32,7 @@ The mock is a small NDJSON ACP v1 peer controlled by the test. It validates:
 - new-session and supported resume behavior;
 - Ambassador MCP session configuration;
 - one complete-message prompt with fixed untrusted-input instructions;
+- target-side `submit_action_result` and correlated `action_response` delivery;
 - normal terminal completion and acknowledgement order;
 - pre-dispatch startup failure;
 - permission request denial or bounded handling;
@@ -90,9 +91,10 @@ For each row:
    dual-mode result asks, and prove direct is its advertised default.
 5. Inject one permission message and one action message through the fixture.
 6. Prove the real agent receives the complete message.
-7. Prove the agent can call an allowed Ambassador MCP tool.
-8. Prove local completion or webhook acceptance precedes fixture
-   acknowledgement.
+7. Prove the agent can call an allowed Ambassador MCP tool. For an action call,
+   require one correlated `submit_action_result` call.
+8. Prove the requester receives the resulting `action_response` before both
+   delivered messages are acknowledged.
 9. Exercise one bounded failure and confirm no unsafe replay.
 10. Stop all processes and scan the isolated state and output.
 
@@ -117,15 +119,21 @@ On 2026-09-02, isolated installs of the three approved entry points passed ACP
 v1 initialization and returned the exact `agentInfo` identities in ADR 0038.
 The reviewed OpenClaw and Hermes images also passed their version and ACP
 startup probes. These are safe contract probes, not real-agent delivery passes.
-The Codex direct case first passed against the local fixture. It then passed
-against the live central service with packed candidate
-`22a65d370897172a726b4890bade780e907c2c38ccf5d6cb5e347c9c01f14ec7`.
-Two disposable identities registered and verified through Mailosaur. The
-controlled peer requested and granted permission, central delivered an action
-through a consuming poll, real Codex called `get_my_permissions`, and
-Ambassador acknowledged the message. The runner deleted captured mail,
-Ambassador state, and isolated Codex credentials. The other nine cases remain
-open.
+The Codex direct case first passed against the local fixture. On 2026-09-03 it
+passed the live correlated-result flow with packed candidate
+`7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`
+and reviewed central revision
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`. Two disposable identities
+registered and verified through Mailosaur. The controlled requester obtained a
+synthetic phone permission, central polled the request and action to real Codex,
+Codex called `respond_to_permission` and `submit_action_result` through the
+injected Ambassador MCP server, and the requester received the correlated
+`action_response` through its webhook before acknowledgement. The pass used a
+narrow isolated policy representing the user's prior approval; it did not test
+an interactive user prompt. Captured mail and temporary state were deleted.
+The isolated credential copy was also removed. The installed Node was 24.14.0,
+below the supported 24.19.0 floor, so repeat this case on a supported runtime
+before publication. The other nine cases remain open.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation
@@ -193,8 +201,9 @@ lockfile, audit, provenance, and packed-artifact checks.
 ## Live central suite
 
 Live central qualification remains separate. It proves email registration,
-DPoP, current REST schemas, permissions, message consumption, and
-acknowledgement against [mcp.embassys.ai](https://mcp.embassys.ai).
+DPoP, current REST schemas, permissions, correlated action results, message
+consumption, and acknowledgement against
+[mcp.embassys.ai](https://mcp.embassys.ai).
 
 After the delivery cutover, its deterministic local target should exercise one
 webhook delivery and one mock-ACP direct delivery. Running a paid real agent

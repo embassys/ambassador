@@ -2,7 +2,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
-const SOURCE_REVISION = "c226d7c4318996c67e8caaad36b978a2e61aa2cc";
+const SOURCE_REVISION = "ac3f7a6e33829eb80301c7944f611d29cc2499b5";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
@@ -20,6 +20,7 @@ const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "0.0.0" };
 const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "0.152.1" };
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
+const RESTART_POLL_DRAIN_MS = 31_000;
 const execFileAsync = promisify(execFile);
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -715,9 +716,14 @@ async function main() {
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
   ];
+  const syntheticPhone = "+447700900123";
   const actionReason = realCodex
-    ? `synthetic-live-qualification-${randomUUID()}; call the configured Ambassador get_my_permissions MCP tool exactly once, then finish without disclosing any values`
+    ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
     : `synthetic-live-qualification-${randomUUID()}`;
+  const permissionScope = {
+    qualification:
+      "The operator approved this synthetic phone-number test. Grant it through respond_to_permission.",
+  };
   const capturedMail = [];
   const roots = [];
   const gateways = [];
@@ -728,9 +734,9 @@ async function main() {
   const directMessages = [];
   const routeCounts = [new Map(), new Map()];
   const successfulAckCounts = [0, 0];
-  const acknowledgedByRecipient = new Set();
-  let observeCodexMcp = false;
-  let codexMcpObserved = false;
+  const acknowledgedByGateway = [new Set(), new Set()];
+  const codexSubmittedCallIds = new Set();
+  let codexPermissionDecisionObserved = false;
   let catalogObservation;
   const centralFetchFor = (gatewayIndex) => async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input);
@@ -739,23 +745,40 @@ async function main() {
     const route = `${init?.method ?? "GET"} ${target.pathname}`;
     centralRoutes.add(route);
     routeCounts[gatewayIndex].set(route, (routeCounts[gatewayIndex].get(route) ?? 0) + 1);
-    const isCodexMcpCall =
-      realCodex && gatewayIndex === 1 && observeCodexMcp && route === "GET /api/get_my_permissions";
+    const isCodexPermissionDecision =
+      realCodex && gatewayIndex === 1 && route === "POST /api/respond_to_permission";
+    const isCodexActionResult =
+      realCodex && gatewayIndex === 1 && route === "POST /api/submit_action_result";
     let acknowledgedMessageId;
-    if (gatewayIndex === 1 && route === "POST /api/ack_message") {
+    let submittedCallId;
+    if (route === "POST /api/ack_message" || isCodexActionResult) {
       try {
         const requestBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-        if (isRecord(requestBody) && typeof requestBody.message_id === "string") {
+        if (
+          route === "POST /api/ack_message" &&
+          isRecord(requestBody) &&
+          typeof requestBody.message_id === "string"
+        ) {
           acknowledgedMessageId = requestBody.message_id;
+        }
+        if (
+          isCodexActionResult &&
+          isRecord(requestBody) &&
+          typeof requestBody.call_id === "string" &&
+          requestBody.status === "success" &&
+          canonicalJson(requestBody.result) === canonicalJson({ phone_number: syntheticPhone })
+        ) {
+          submittedCallId = requestBody.call_id;
         }
       } catch {
         // The production client owns request validation and serialization.
       }
     }
     const response = await fetch(input, init);
-    if (isCodexMcpCall && response.ok) codexMcpObserved = true;
+    if (isCodexPermissionDecision && response.ok) codexPermissionDecisionObserved = true;
+    if (submittedCallId !== undefined && response.ok) codexSubmittedCallIds.add(submittedCallId);
     if (acknowledgedMessageId !== undefined && response.ok) {
-      acknowledgedByRecipient.add(acknowledgedMessageId);
+      acknowledgedByGateway[gatewayIndex].add(acknowledgedMessageId);
       successfulAckCounts[gatewayIndex] += 1;
     }
     let expectedEmail;
@@ -806,6 +829,21 @@ async function main() {
       ...roots.map((root) => mkdir(root, { recursive: true })),
       mkdir(codexWorkingDirectory, { recursive: true }),
     ]);
+    if (realCodex) {
+      await writeFile(
+        join(codexWorkingDirectory, "AGENTS.md"),
+        [
+          "# Controlled Embassys qualification policy",
+          "",
+          "The user approved only the synthetic get_phone_number qualification in this directory.",
+          "For its permission_request, call respond_to_permission with decision granted.",
+          "For its action_call, use the explicitly supplied synthetic phone number and call submit_action_result exactly once with status success and a result containing only phone_number.",
+          "Do not grant, execute, or answer any other request.",
+          "",
+        ].join("\n"),
+        { encoding: "utf8", flag: "wx", mode: 0o600 },
+      );
+    }
 
     const clientInfoFor = (index) =>
       realCodex && index === 1 ? CODEX_CLIENT_INFO : OPENCLAW_CLIENT_INFO;
@@ -912,6 +950,10 @@ async function main() {
 
     phase = "restart";
     for (const gateway of gateways.splice(0)) await gateway.stop();
+    // Central polling is consuming, and aborting the local HTTP request does not
+    // guarantee that its server-side 30-second long poll is cancelled. Do not
+    // enqueue qualification messages until those abandoned polls have expired.
+    await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_DRAIN_MS));
     for (let index = 0; index < 2; index += 1) {
       gateways.push(
         await startGateway(
@@ -933,6 +975,7 @@ async function main() {
             "request_permission",
             "respond_to_permission",
             "call_action",
+            "submit_action_result",
             "get_my_permissions",
           ]),
         "restart_catalog",
@@ -992,7 +1035,8 @@ async function main() {
     const recipientAckCountBeforePermission = successfulAckCounts[1];
     const requested = await gateways[0].client.call("request_permission", {
       target_email: addresses[1],
-      action_type: "get_email",
+      action_type: "get_phone_number",
+      scope: permissionScope,
     });
     assert(
       typeof requested.permission_id === "string" && requested.status === "pending",
@@ -1041,14 +1085,15 @@ async function main() {
       permissionListing = { status: "server_error", fields: [] };
     }
 
-    if (permissionStatus === "pending") {
+    if (permissionStatus === "pending" && !realCodex) {
       await gateways[1].client.call("respond_to_permission", {
         permission_id: requested.permission_id,
         decision: "granted",
       });
     } else {
-      assert(realCodex && permissionStatus === "granted", "permission_decision");
+      assert(permissionStatus === "granted", "permission_decision");
     }
+    if (realCodex) assert(codexPermissionDecisionObserved, "codex_permission_decision");
     phase = "permission_response_webhook";
     const responseMessage = await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
@@ -1061,21 +1106,24 @@ async function main() {
     );
 
     phase = "action";
-    observeCodexMcp = realCodex;
     const called = await gateways[0].client.call("call_action", {
       target_email: addresses[1],
-      action_type: "get_email",
+      action_type: "get_phone_number",
       payload: { reason: actionReason },
     });
-    assert(typeof called.message_id === "string" && called.status === "delivered", "action");
+    assert(
+      typeof called.call_id === "string" &&
+        typeof called.message_id === "string" &&
+        called.status === "delivered",
+      "action",
+    );
     phase = "action_direct";
     if (realCodex) {
       await waitForObservation(
-        () => acknowledgedByRecipient.has(called.message_id),
+        () => acknowledgedByGateway[1].has(called.message_id),
         "action_direct_timeout",
       );
-      assert(codexMcpObserved, "codex_mcp_call");
-      observeCodexMcp = false;
+      assert(codexSubmittedCallIds.has(called.call_id), "codex_action_result");
     } else {
       const actionMessage = await waitForDelivered(
         directMessages,
@@ -1087,7 +1135,31 @@ async function main() {
         "action_direct_timeout",
       );
       assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
+      await gateways[1].client.call("submit_action_result", {
+        call_id: called.call_id,
+        result: { phone_number: syntheticPhone },
+        status: "success",
+      });
     }
+
+    phase = "action_response_webhook";
+    const actionResponse = await webhooks[0].wait("action_response_webhook_timeout");
+    assert(
+      isRecord(actionResponse) &&
+        typeof actionResponse.id === "string" &&
+        isRecord(actionResponse.payload) &&
+        actionResponse.payload.type === "action_response" &&
+        actionResponse.payload.call_id === called.call_id &&
+        actionResponse.payload.action_type === "get_phone_number" &&
+        actionResponse.payload.status === "success" &&
+        canonicalJson(actionResponse.payload.result) ===
+          canonicalJson({ phone_number: syntheticPhone }),
+      "action_response",
+    );
+    await waitForObservation(
+      () => acknowledgedByGateway[0].has(actionResponse.id),
+      "action_response_ack_timeout",
+    );
 
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
@@ -1113,6 +1185,7 @@ async function main() {
       { name: "identity-a-jwk-x", value: loadedCredential.publicJwk.x },
       { name: "identity-a-jwk-y", value: loadedCredential.publicJwk.y },
       { name: "action-payload", value: actionReason },
+      { name: "action-result", value: syntheticPhone },
       { name: "local-token-a", value: gateways[0].token },
       { name: "local-token-b", value: gateways[1].token },
       ...dpop.proofMarkers.map((value, index) => ({ name: `dpop-proof-${index + 1}`, value })),
@@ -1143,6 +1216,9 @@ async function main() {
       deployment_revision: "not_exposed",
       live_origin: LIVE_ORIGIN,
       package_sha256: createHash("sha256").update(tarball).digest("hex"),
+      qualification_runner_sha256: createHash("sha256")
+        .update(await readFile(fileURLToPath(import.meta.url)))
+        .digest("hex"),
       direct_agent: realCodex ? "codex-acp-1.8.0" : "deterministic-mock-acp",
       results: {
         registration: "passed",
@@ -1155,7 +1231,9 @@ async function main() {
         permission_listing: permissionListing,
         webhook_delivery_ack: "passed",
         direct_delivery_ack: "passed",
-        codex_mcp_call: realCodex ? "passed" : "not_applicable",
+        action_result_round_trip: "passed",
+        codex_permission_decision: realCodex ? "passed" : "not_applicable",
+        codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
         central_mcp_requests: 0,
         artifact_scan: "passed",
         mail_cleanup: "passed",
@@ -1166,6 +1244,8 @@ async function main() {
       observed_rest_routes: [...centralRoutes].sort(),
       restart_limitation:
         "A message consumed by central polling is lost if Ambassador exits before acknowledgement; no lease or redelivery exists.",
+      result_submission_limitation:
+        "A result submission has no idempotency key or outcome lookup and is not retried after an uncertain response.",
     };
     process.stdout.write(`${JSON.stringify(report)}\n`);
     return 0;
@@ -1173,7 +1253,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, direct_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, codex_mcp_call_observed: codexMcpObserved, successful_ack_counts: successfulAckCounts, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, direct_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, codex_permission_decision_observed: codexPermissionDecisionObserved, codex_action_result_call_count: codexSubmittedCallIds.size, successful_ack_counts: successfulAckCounts, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {

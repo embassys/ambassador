@@ -131,7 +131,7 @@ does not probe alternate contracts or keep an old client as fallback.
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, messages, acknowledgements | Local delivery or provider credentials |
+| Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
 | Ambassador | Local MCP authentication, encrypted central credential, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
@@ -171,7 +171,9 @@ or message body. SQLite remains ID-only.
 Each protected REST request carries Bearer authorization and a fresh DPoP proof
 for the exact method and URL. The central action catalog supplies action names
 and payload schemas. Permission requests and decisions control whether an
-action call may deliver a message to another identity.
+action call may deliver a message to another identity. The target submits one
+structured success or error result for the call. Central correlates it by
+`call_id` and queues an `action_response` for the original caller.
 
 ### Incoming message
 
@@ -196,15 +198,16 @@ retrieval or redelivery is the proper future fix.
 - A separate connector process or provider-specific gateway transport.
 - Recovering the exact MCP chat used during registration.
 - Passing raw secrets through the model.
-- Inventing reply, conversation, lease, outcome, activation, or token-reissue
-  APIs that central does not expose.
+- Inventing general reply, conversation, lease, outcome-lookup, activation, or
+  token-reissue APIs that central does not expose.
 - Persisting message bodies locally.
 - Native service management or a GUI.
 
 ## Current limitations
 
 - Central has no message retrieval or redelivery after a consuming poll.
-- Central has no general reply or action-result endpoint.
+- Action results have no per-action output schema or outcome lookup. A
+  completed submission cannot be repeated to recover its response.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.

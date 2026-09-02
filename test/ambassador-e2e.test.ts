@@ -18,6 +18,7 @@ const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 const OPENCLAW = { name: "openclaw-bundle-mcp", version: "0.0.0" };
+const JSON_HEADERS = { "content-type": "application/json" };
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-e2e-"));
@@ -79,6 +80,7 @@ test("registers by client capability, delivers the full webhook, then acknowledg
       "request_permission",
       "respond_to_permission",
       "call_action",
+      "submit_action_result",
       "get_my_permissions",
     ],
   );
@@ -113,6 +115,73 @@ test("registers by client capability, delivers the full webhook, then acknowledg
   assert.equal((await readFile(value.options.profilePath, "utf8")).includes(WEBHOOK_SECRET), false);
   await assert.rejects(client.callTool("poll_messages", { timeout: 0 }));
   await assert.rejects(client.callTool("ack_message", { message_id: messageId }));
+});
+
+test("returns a correlated action result from the target MCP tool to the requester", async (t) => {
+  const value = await fixture(t);
+  const gateway = await openGatewayApplication(value.options);
+  t.after(() => gateway.close());
+  const targetEmail = "ambassador-result-target@fixture.test";
+  const target = await enrollWebhook(gateway, value.central, value.webhook.url, targetEmail);
+  const requester = value.central.seedClient("ambassador-result-requester@fixture.test");
+
+  const permissionResponse = await requester.protectedFetch("/api/request_permission", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ target_email: targetEmail, action_type: "get_phone_number" }),
+  });
+  assert.equal(permissionResponse.status, 200);
+  const permission = (await permissionResponse.json()) as Record<string, unknown>;
+  assert.equal(typeof permission.permission_id, "string");
+  const permissionWake = await value.webhook.waitForWake();
+  assert.equal((permissionWake.body.payload as Record<string, unknown>).type, "permission_request");
+
+  const decided = await target.callTool("respond_to_permission", {
+    permission_id: permission.permission_id,
+    decision: "granted",
+  });
+  assert.equal(decided.status, "granted");
+  const requesterPermissionPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
+  const requesterPermissionMessages = (
+    (await requesterPermissionPoll.json()) as { messages: Array<Record<string, unknown>> }
+  ).messages;
+  assert.equal(requesterPermissionMessages.length, 1);
+
+  const actionResponse = await requester.protectedFetch("/api/call_action", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      target_email: targetEmail,
+      action_type: "get_phone_number",
+      payload: { reason: "deterministic result round trip" },
+    }),
+  });
+  assert.equal(actionResponse.status, 200);
+  const action = (await actionResponse.json()) as Record<string, unknown>;
+  assert.equal(typeof action.call_id, "string");
+  const actionWake = await value.webhook.waitForWake();
+  assert.equal((actionWake.body.payload as Record<string, unknown>).call_id, action.call_id);
+
+  const submitted = await target.callTool("submit_action_result", {
+    call_id: action.call_id,
+    result: { phone_number: "+447700900001" },
+    status: "success",
+  });
+  assert.equal(submitted.call_id, action.call_id);
+  assert.equal(submitted.status, "completed");
+
+  const requesterResultPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
+  const requesterResultMessages = (
+    (await requesterResultPoll.json()) as { messages: Array<Record<string, unknown>> }
+  ).messages;
+  assert.equal(requesterResultMessages.length, 1);
+  assert.deepEqual(requesterResultMessages[0]?.payload, {
+    type: "action_response",
+    call_id: action.call_id,
+    action_type: "get_phone_number",
+    status: "success",
+    result: { phone_number: "+447700900001" },
+  });
 });
 
 test("honestly loses a consumed pre-delivery body across restart", async (t) => {
