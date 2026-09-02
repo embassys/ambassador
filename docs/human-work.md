@@ -1,14 +1,14 @@
 # Human work queue
 
-Status: current action view as of 2026-09-01
+Status: current action view as of 2026-09-02
 
 ## Central coordination
 
 - [x] Central owner: deploy the JSON codec and `list_action_types` fix.
 - [x] Gateway owner: record the live `get_email` and `get_phone_number`
   schemas. Both accept an object with required string `reason`.
-- [ ] Central owner: fix or confirm `get_my_permissions`, which has a response
-  field mismatch in the pinned source.
+- [x] Central owner: fix `get_my_permissions`. The final protected I05 call
+  returned the declared email-field model and passed gateway validation.
 - [ ] Central owner: optionally expose build metadata before a release claim.
   Generated OpenAPI now works.
 
@@ -21,10 +21,10 @@ outcome design.
 | Task | State | Evidence needed |
 | --- | --- | --- |
 | I01 source and live contract pin | Complete | ADR 0037, source inventory, and live DPoP observations |
-| I02 fixture and test replacement | Next | Current REST and DPoP red suite reviewed before production changes |
-| I03 enrollment, credential, and DPoP simplification | Pending I02 | Replacement tests pass and old credential/MCP paths are absent |
-| I04 protected tools and consuming message lifecycle | Pending I03 | REST, relay, process, package, and artifact tests pass |
-| I05 two-identity live E2E | Pending I04 | Permission, action, poll, ack, and packed-install run passes |
+| I02 fixture and test replacement | Complete | Current Node and Python REST/DPoP fixtures and CI replacement pass |
+| I03 enrollment, credential, and DPoP simplification | Complete | Replacement tests pass and old credential/MCP paths are absent |
+| I04 protected tools and consuming message lifecycle | Complete | REST, relay, process, package, and artifact tests pass |
+| I05 two-identity live E2E | Complete | Packed permission, action, poll, ack, restart, and artifact run passed on 2026-09-02 |
 
 ## Provider work
 
@@ -41,7 +41,8 @@ but no provider connector currently has a live-central support claim.
 
 ## Product and release decisions
 
-- [ ] Approve a development package only after I05 and artifact review.
+- [ ] Decide whether to approve a development package now that I05 and artifact
+  review are complete. This task does not publish one.
 - [ ] Approve any public preview or stable publication separately.
 - [ ] If Windows support is reconsidered, approve and run the separate native
   qualification plan. It remains unsupported under ADR 0033.

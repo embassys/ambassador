@@ -805,6 +805,7 @@ test("CX02-X14 normalizes only three supported approval requests and sends no re
         execution_id: CX02_EXECUTION_ID,
         approval_request_id: typeof id === "number" ? `n:${id}` : `s:${id}`,
       });
+      await fake.waitForRequests(4);
       assert.equal(fake.launches.at(-1)?.requests.length, 4);
       assert.ok(!JSON.stringify(fake.launches).includes("fixture detail must stay private"));
       await adapter.cancel(cancelRequest());

@@ -1,6 +1,6 @@
 # Project wiki
 
-Status: current documentation map as of 2026-09-01
+Status: current documentation map as of 2026-09-02
 
 ## Start here
 
@@ -17,7 +17,7 @@ summary. The [human work queue](human-work.md) shows what remains.
 
 ## Current baseline
 
-There is one development target. The gateway will integrate with the current
+There is one development target. The gateway integrates with the current
 unversioned REST API at `https://mcp.embassys.ai` using the DPoP behavior in
 `embassys/agent2agent` commit
 `b769896b7cfb1ee3540195be9e7a61cf777b9388`.
@@ -28,14 +28,15 @@ gateway does not support the older bearer-only client, the earlier central MCP
 fallback, or the repository's speculative `/api/v2` design. This is a fresh
 development cutover with no migration path.
 
-The current repository code still contains parts of those superseded designs.
-The next implementation work replaces them test-first. Do not use the
-published `0.2.6` package as evidence of current central compatibility.
+The superseded designs have been removed from the active gateway source,
+fixtures, tests, and package. Do not use the published `0.2.6` package as
+evidence of current central compatibility; this source candidate has not been
+published.
 
-Live registration, verification, DPoP binding, missing-proof rejection,
-wrong-key rejection, replay rejection, generated OpenAPI, and the six-action
-catalog have been observed. The remaining live work is the full two-identity
-permission and action flow through the rebuilt gateway.
+The packed gateway passed the full two-identity live registration,
+verification, restart, DPoP, permission, action, consuming-poll,
+acknowledgement, and artifact flow. The final protected `get_my_permissions`
+call returned the declared email-field model and passed gateway validation.
 
 ## Documentation map
 

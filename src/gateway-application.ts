@@ -1,33 +1,18 @@
 import {
-  CentralConversationClient,
-  CentralConversationError,
-  VERSION_TWO_LOCAL_TOOLS,
-  validateCompletionArguments,
-  validateMessageIdArguments,
-  validateReplyArguments,
-} from "./central-conversation.js";
-import {
   CentralEnrollmentClient,
   CentralEnrollmentError,
-  type CentralTokenProfile,
   REST_BOOTSTRAP_TOOLS,
 } from "./central-enrollment.js";
-import { CentralMcpClient, CentralMcpError } from "./central-mcp.js";
 import { CentralProtectedTransport } from "./central-protected-transport.js";
-import { CentralReissueController } from "./central-reissue.js";
+import { CentralRestClient, CentralRestError, REST_AUTHENTICATED_TOOLS } from "./central-rest.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
-import type { DevelopmentVerboseTranscript } from "./development-verbose.js";
 import { DpopNonceCache } from "./dpop.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
 import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "./local-mcp.js";
 import {
   assertSafeUpstreamResult,
-  type CentralToolDefinition,
-  localToolDefinition,
   McpContractError,
   safeLocalToolArguments,
-  selectCentralTools,
-  upstreamToolArguments,
 } from "./mcp-contract.js";
 import { NotificationJournal, validateNotificationId } from "./notification-journal.js";
 import {
@@ -36,26 +21,26 @@ import {
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
 
-const MCP_NOTIFICATION_POLL_SECONDS = 20;
-const VERSION_TWO_LOCAL_TOOL_NAMES = new Set(VERSION_TWO_LOCAL_TOOLS.map((tool) => tool.name));
+export const CENTRAL_ORIGIN = "https://mcp.embassys.ai";
+const CENTRAL_POLL_SECONDS = 30;
 
 export interface GatewayApplicationOptions {
-  webhookUrl: string;
-  webhookToken: string;
-  journalPath: string;
-  credentialPath: string;
-  centralApiUrl?: string;
-  centralMcpUrl?: string;
-  centralEnrollmentProfile?: CentralTokenProfile;
-  centralEnrollmentFetch?: typeof fetch;
-  credentialStore?: CredentialStore;
-  verboseTranscript?: DevelopmentVerboseTranscript;
-  signal?: AbortSignal;
+  readonly webhookUrl: string;
+  readonly webhookToken: string;
+  readonly journalPath: string;
+  readonly credentialPath: string;
+  readonly centralOrigin?: string;
+  readonly centralFetch?: typeof fetch;
+  readonly webhookFetch?: typeof fetch;
+  readonly credentialStore?: CredentialStore;
+  readonly localMcpPort?: number;
+  readonly nowSeconds?: () => number;
+  readonly signal?: AbortSignal;
 }
 
 export interface RunningGatewayApplication {
-  endpoint: string;
-  failure: Promise<Error>;
+  readonly endpoint: string;
+  readonly failure: Promise<Error>;
   close(): Promise<void>;
 }
 
@@ -63,650 +48,210 @@ function safeFailure(): Error {
   return new Error("Gateway operation failed");
 }
 
-function credentialScope(options: GatewayApplicationOptions): string {
-  return JSON.stringify({
-    centralApiUrl: options.centralApiUrl === undefined ? null : new URL(options.centralApiUrl).href,
-    centralMcpUrl: options.centralMcpUrl === undefined ? null : new URL(options.centralMcpUrl).href,
-  });
+function localError(error: unknown): LocalMcpToolError {
+  if (error instanceof LocalMcpToolError) return error;
+  if (error instanceof IdentityError) return new LocalMcpToolError(error.code);
+  if (error instanceof CentralEnrollmentError) return new LocalMcpToolError(error.code);
+  if (error instanceof CentralRestError) return new LocalMcpToolError(error.code);
+  if (error instanceof McpContractError) return new LocalMcpToolError("invalid_arguments");
+  if (error instanceof NotificationRelayError) return new LocalMcpToolError(error.code);
+  return new LocalMcpToolError("gateway_operation_failed");
 }
 
-function contentAcknowledgement(
-  result: Record<string, unknown>,
-  arguments_: Record<string, unknown>,
-): string {
-  const keys = Object.keys(result).sort();
-  if (
-    keys.length !== 2 ||
-    keys[0] !== "message_id" ||
-    keys[1] !== "status" ||
-    typeof result.message_id !== "string" ||
-    result.message_id !== arguments_.message_id ||
-    result.status !== "acked"
-  ) {
+function timeout(arguments_: Record<string, unknown>): number {
+  if (Object.keys(arguments_).some((key) => key !== "timeout")) throw new McpContractError();
+  const value = arguments_.timeout ?? 30;
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 60) {
     throw new McpContractError();
   }
-  return validateNotificationId(result.message_id);
-}
-
-function pollTimeout(arguments_: Record<string, unknown>, contract: 1 | 2): number {
-  const keys = Object.keys(arguments_);
-  if (keys.some((key) => key !== "timeout")) throw new McpContractError();
-  if (arguments_.timeout === undefined) return 30;
-  if (
-    typeof arguments_.timeout !== "number" ||
-    !Number.isInteger(arguments_.timeout) ||
-    arguments_.timeout < 0 ||
-    arguments_.timeout > (contract === 2 ? 30 : 60)
-  ) {
-    throw new McpContractError();
-  }
-  return Math.min(arguments_.timeout, 30);
-}
-
-function rethrowMcpNotificationPollError(error: unknown): never {
-  if (error instanceof NotificationRelayError) throw error;
-  if (error instanceof McpContractError) {
-    throw new NotificationRelayError(
-      "invalid_notification_response",
-      "Central notification response is invalid",
-    );
-  }
-  if (error instanceof CentralMcpError) {
-    switch (error.code) {
-      case "central_mcp_authentication_failed":
-        throw new NotificationRelayError(
-          "central_authentication_failed",
-          "Central authentication failed",
-        );
-      case "central_mcp_redirect_rejected":
-        throw new NotificationRelayError(
-          "central_redirect_rejected",
-          "Central notification redirect was rejected",
-        );
-      case "central_mcp_response_invalid":
-        throw new NotificationRelayError(
-          "invalid_notification_response",
-          "Central notification response is invalid",
-        );
-      case "central_mcp_response_too_large":
-        throw new NotificationRelayError(
-          "notification_response_too_large",
-          "Central notification response exceeded its size limit",
-        );
-      case "central_mcp_closed":
-      case "invalid_configuration":
-        throw new NotificationRelayError("relay_failed", "Notification relay failed");
-      default:
-        break;
-    }
-  }
-  throw error;
+  return value as number;
 }
 
 export async function openGatewayApplication(
   options: GatewayApplicationOptions,
 ): Promise<RunningGatewayApplication> {
+  const centralOrigin = options.centralOrigin ?? CENTRAL_ORIGIN;
+  const nowSeconds = options.nowSeconds ?? (() => Date.now() / 1_000);
   const journal = new NotificationJournal(options.journalPath);
-  const credentialStore =
+  const store =
     options.credentialStore ??
     new EncryptedFileCredentialStore(
       options.credentialPath,
       options.webhookToken,
-      credentialScope(options),
+      JSON.stringify({ centralOrigin: new URL(centralOrigin).origin }),
     );
-  const central =
-    options.centralMcpUrl === undefined
-      ? undefined
-      : new CentralMcpClient({
-          centralMcpUrl: options.centralMcpUrl,
-          ...(options.verboseTranscript === undefined
-            ? {}
-            : { verboseTranscript: options.verboseTranscript }),
-        });
-  const protectedNonces = new DpopNonceCache();
-  const enrollment =
-    options.centralApiUrl === undefined || options.centralEnrollmentProfile === undefined
-      ? undefined
-      : new CentralEnrollmentClient({
-          centralApiUrl: options.centralApiUrl,
-          tokenProfile: options.centralEnrollmentProfile,
-          ...(options.centralEnrollmentFetch === undefined
-            ? {}
-            : { fetch: options.centralEnrollmentFetch }),
-          ...(options.verboseTranscript === undefined
-            ? {}
-            : { verboseTranscript: options.verboseTranscript }),
-        });
   const controller = new AbortController();
   const lifetimeSignal =
     options.signal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, options.signal]);
-  let identity: GatewayIdentity | undefined;
-  let protectedCentral: CentralMcpClient | undefined;
-  let protectedCatalog: readonly CentralToolDefinition[] | undefined;
-  let protectedConversation: CentralConversationClient | undefined;
-  let versionTwoDeliveryActive = false;
-  let versionTwoAuthenticationRejected = false;
-  let protectedIdentityActivation: Promise<void> | undefined;
-  let reissue: CentralReissueController | undefined;
+  let identity!: GatewayIdentity;
+  let local!: LocalMcpServer;
+  let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
-  let local: LocalMcpServer;
   let closed = false;
+  let activation: Promise<void> | undefined;
+  const acknowledgements = new Set<string>();
   let reportFailure: ((error: Error) => void) | undefined;
-  const enrollmentOperations = new Set<Promise<unknown>>();
   const failure = new Promise<Error>((resolve) => {
     reportFailure = resolve;
   });
 
-  const requireCentral = (): CentralMcpClient => {
-    const selected = identity?.credentialVersion === 2 ? protectedCentral : central;
-    if (selected === undefined) throw safeFailure();
-    return selected;
-  };
+  const enrollment = new CentralEnrollmentClient({
+    centralOrigin,
+    ...(options.centralFetch === undefined ? {} : { fetch: options.centralFetch }),
+    nowSeconds,
+  });
 
-  const requireEnrollment = (): CentralEnrollmentClient => {
-    if (enrollment === undefined) throw safeFailure();
-    return enrollment;
+  const requireRest = (): CentralRestClient => {
+    if (rest === undefined) throw safeFailure();
+    return rest;
   };
-
-  const requireIdentity = (): GatewayIdentity => {
-    if (identity === undefined) throw safeFailure();
-    return identity;
-  };
-
   const requireRelay = (): NotificationRelay => {
     if (relay === undefined) throw safeFailure();
     return relay;
   };
 
-  const runEnrollment = async <T>(operation: () => Promise<T>): Promise<T> => {
-    const pending = operation();
-    enrollmentOperations.add(pending);
-    try {
-      return await pending;
-    } finally {
-      enrollmentOperations.delete(pending);
-    }
-  };
-
-  const enableProtectedIdentity = async (): Promise<void> => {
-    if (versionTwoDeliveryActive) return;
-    if (protectedIdentityActivation !== undefined) {
-      await protectedIdentityActivation;
-      return;
-    }
-    const activation = (async (): Promise<void> => {
-      const currentIdentity = requireIdentity();
-      const credential = currentIdentity.authenticatedCredentialV2();
-      if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) {
-        currentIdentity.markAuthenticationFailed();
-        return;
-      }
-      if (options.centralApiUrl === undefined || options.centralMcpUrl === undefined) {
-        throw safeFailure();
-      }
-      options.verboseTranscript?.addSecret(credential.record.access_token);
-      options.verboseTranscript?.addSecret(credential.record.dpop_private_key_pkcs8);
-      const mcpTransport = new CentralProtectedTransport({
-        domain: "mcp",
-        credential: () => currentIdentity.authenticatedCredentialV2(),
-        nonceCache: protectedNonces,
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
+  const enableEnrolledIdentity = async (): Promise<void> => {
+    if (rest !== undefined && relay !== undefined) return;
+    if (activation !== undefined) return activation;
+    activation = (async () => {
+      const transport = new CentralProtectedTransport({
+        credential: () => identity.credential(),
+        nonceCache: new DpopNonceCache(),
+        ...(options.centralFetch === undefined ? {} : { fetch: options.centralFetch }),
+        now: nowSeconds,
       });
-      const nextProtectedCentral = new CentralMcpClient({
-        centralMcpUrl: options.centralMcpUrl,
-        fetch: async (url, init) => await mcpTransport.fetch(url, init),
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
-      });
-      const apiTransport = new CentralProtectedTransport({
-        domain: "api",
-        credential: () => currentIdentity.authenticatedCredentialV2(),
-        nonceCache: protectedNonces,
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
-      });
-      const receiveTransport = new CentralProtectedTransport({
-        domain: "api",
-        credential: () => currentIdentity.authenticatedCredentialV2(),
-        nonceCache: protectedNonces,
-        deadlineMs: 40_000,
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
-      });
-      const conversation = new CentralConversationClient({
-        centralApiUrl: options.centralApiUrl,
-        transport: apiTransport,
-        receiveTransport,
-      });
-      const nextReissue = new CentralReissueController({
-        centralApiUrl: options.centralApiUrl,
-        identity: currentIdentity,
-        transport: apiTransport,
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
-      });
-      reissue = nextReissue;
-      nextReissue.start();
-      try {
-        await conversation.activate(lifetimeSignal);
-      } catch (error) {
-        await nextProtectedCentral.close().catch(() => undefined);
-        throw error;
-      }
-      if (lifetimeSignal.aborted) {
-        await nextProtectedCentral.close().catch(() => undefined);
-        throw safeFailure();
-      }
-      protectedCentral = nextProtectedCentral;
-      protectedConversation = conversation;
-      versionTwoDeliveryActive = true;
-      versionTwoAuthenticationRejected = false;
-
+      const nextRest = new CentralRestClient({ centralOrigin, transport });
       const nextRelay = new NotificationRelay({
         journal,
-        centralApiUrl: options.centralApiUrl,
         webhookUrl: options.webhookUrl,
         webhookToken: options.webhookToken,
-        ...(options.verboseTranscript === undefined
-          ? {}
-          : { verboseTranscript: options.verboseTranscript }),
-        receiveMessagesThroughV2: async (signal) => {
+        ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
+        receiveMessages: async (signal) => {
           try {
-            return await conversation.receive(signal);
+            return (await nextRest.pollRemoteMessages(CENTRAL_POLL_SECONDS, signal)).messages;
           } catch (error) {
-            if (error instanceof CentralConversationError && error.authenticationFailure) {
-              throw new NotificationRelayError(
-                "central_authentication_failed",
-                "Central authentication failed",
-              );
-            }
             if (
-              error instanceof CentralConversationError &&
-              error.code === "central_conversation_outcome_uncertain"
+              error instanceof CentralRestError &&
+              (error.code === "central_request_failed" || error.code === "central_request_rejected")
             ) {
               throw new RetryableNotificationReceiveError();
             }
-            if (
-              error instanceof CentralConversationError &&
-              ["receive_in_progress", "temporarily_unavailable"].includes(error.code)
-            ) {
-              throw new RetryableNotificationReceiveError();
+            if (error instanceof CentralRestError && error.code === "central_response_invalid") {
+              throw new NotificationRelayError("invalid_notification_response");
             }
-            if (
-              error instanceof CentralConversationError &&
-              error.code === "rate_limited" &&
-              error.retryAfterMs !== undefined &&
-              error.retryAfterMs !== null
-            ) {
-              throw new RetryableNotificationReceiveError(error.retryAfterMs);
+            if (error instanceof CentralRestError) {
+              throw new NotificationRelayError("relay_failed");
             }
-            if (error instanceof CentralConversationError) {
-              throw new NotificationRelayError(
-                "invalid_notification_response",
-                "Central notification response is invalid",
-              );
-            }
-            throw new NotificationRelayError("relay_failed", "Notification relay failed");
+            throw error;
           }
         },
       });
+      rest = nextRest;
       relay = nextRelay;
-      relayRun = nextRelay.run(lifetimeSignal).catch(async (error: unknown) => {
-        if (
-          error instanceof NotificationRelayError &&
-          error.code === "central_authentication_failed"
-        ) {
-          await stopRelayForAuthenticationFailure();
-          return;
+      relayRun = nextRelay.run(lifetimeSignal);
+      void relayRun.catch((error: unknown) => {
+        if (!closed && !lifetimeSignal.aborted) {
+          reportFailure?.(error instanceof Error ? error : safeFailure());
         }
-        if (
-          error instanceof NotificationRelayError &&
-          ["invalid_notification_response", "notification_response_too_large"].includes(error.code)
-        ) {
-          // A deterministic version 2 receive contract failure stops central
-          // delivery without tearing down content-free recovery and outcome tools.
-          return;
-        }
-        relay = undefined;
-        reportFailure?.(safeFailure());
-        reportFailure = undefined;
       });
     })();
-    protectedIdentityActivation = activation;
     try {
       await activation;
     } finally {
-      if (protectedIdentityActivation === activation) protectedIdentityActivation = undefined;
+      activation = undefined;
     }
-  };
-
-  const remoteTool = async (
-    name: string,
-    enrolled: boolean,
-    signal: AbortSignal,
-  ): Promise<CentralToolDefinition> => {
-    if (identity?.credentialVersion === 2 && protectedCatalog !== undefined) {
-      const cached = protectedCatalog.find((candidate) => candidate.name === name);
-      if (cached === undefined) throw new McpContractError();
-      return cached;
-    }
-    const catalog = await requireCentral().listTools(signal);
-    const selected = selectCentralTools(catalog, enrolled);
-    if (identity?.credentialVersion === 2) protectedCatalog = selected;
-    const tool = selected.find((candidate) => candidate.name === name);
-    if (tool === undefined) throw new McpContractError();
-    return tool;
-  };
-
-  const stopRelayForAuthenticationFailure = async (): Promise<void> => {
-    requireIdentity().markAuthenticationFailed();
-    versionTwoAuthenticationRejected = true;
-    protectedCatalog = undefined;
-    await relay?.shutdown().catch(() => undefined);
-    relay = undefined;
-    await reissue?.close().catch(() => undefined);
-    reissue = undefined;
-    await local.sendToolListChanged().catch(() => undefined);
-  };
-
-  const startRelay = (centralToken: string): void => {
-    if (relay !== undefined) return;
-    if (options.centralApiUrl === undefined) throw safeFailure();
-    options.verboseTranscript?.addSecret(centralToken);
-    const nextRelay = new NotificationRelay({
-      journal,
-      centralApiUrl: options.centralApiUrl,
-      centralToken,
-      webhookUrl: options.webhookUrl,
-      webhookToken: options.webhookToken,
-      ...(options.verboseTranscript === undefined
-        ? {}
-        : { verboseTranscript: options.verboseTranscript }),
-      pollMessagesThroughMcp: async (signal) => {
-        try {
-          const result = await requireCentral().callTool(
-            "poll_messages",
-            { token: centralToken, timeout: MCP_NOTIFICATION_POLL_SECONDS },
-            signal,
-            centralToken,
-          );
-          assertSafeUpstreamResult(result, centralToken);
-          return result;
-        } catch (error) {
-          rethrowMcpNotificationPollError(error);
-        }
-      },
-    });
-    relay = nextRelay;
-    relayRun = nextRelay.run(controller.signal).catch(async (error: unknown) => {
-      if (
-        error instanceof NotificationRelayError &&
-        error.code === "central_authentication_failed"
-      ) {
-        await stopRelayForAuthenticationFailure();
-        return;
-      }
-      relay = undefined;
-      reportFailure?.(safeFailure());
-      reportFailure = undefined;
-    });
   };
 
   const router: LocalMcpRouter = {
     async listTools() {
-      const currentIdentity = requireIdentity();
-      if (!currentIdentity.enrolled && enrollment !== undefined) {
-        return [...REST_BOOTSTRAP_TOOLS];
-      }
-      if (currentIdentity.credentialVersion === 2) {
-        try {
-          if (versionTwoAuthenticationRejected) throw safeFailure();
-          if (!versionTwoDeliveryActive) return [];
-          const credential = currentIdentity.authenticatedCredentialV2();
-          if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) return [];
-          const catalog = await requireCentral().listTools();
-          const selected = selectCentralTools(catalog, true);
-          protectedCatalog = selected;
-          const localCatalog = [
-            ...selected
-              .filter((tool) => !VERSION_TWO_LOCAL_TOOL_NAMES.has(tool.name))
-              .map(localToolDefinition),
-            ...VERSION_TWO_LOCAL_TOOLS,
-          ];
-          assertSafeUpstreamResult(localCatalog, credential.record.access_token);
-          return localCatalog;
-        } catch (error) {
-          if (
-            error instanceof CentralMcpError &&
-            error.code === "central_mcp_authentication_failed"
-          ) {
-            await stopRelayForAuthenticationFailure();
-          }
-          throw safeFailure();
-        }
-      }
-      const catalog = await requireCentral().listTools();
-      const localCatalog = selectCentralTools(catalog, currentIdentity.enrolled).map(
-        localToolDefinition,
-      );
-      const centralToken = currentIdentity.enrolled
-        ? currentIdentity.authenticatedToken()
-        : undefined;
-      assertSafeUpstreamResult(localCatalog, centralToken);
-      return localCatalog;
+      return [...(identity.enrolled ? REST_AUTHENTICATED_TOOLS : REST_BOOTSTRAP_TOOLS)];
     },
-
-    async callTool(name, arguments_, signal) {
-      const currentIdentity = requireIdentity();
+    async callTool(name, untrustedArguments, signal) {
       try {
-        if (!currentIdentity.enrolled) {
-          if (enrollment !== undefined) {
-            const enrollmentSignal = AbortSignal.any([signal, controller.signal]);
-            if (name === "verify_email") {
-              const localResult = await runEnrollment(
-                async () =>
-                  await currentIdentity.enrollCredentialV2(
-                    async () => await requireEnrollment().verify(arguments_, enrollmentSignal),
-                  ),
-              );
-              try {
-                await enableProtectedIdentity();
-              } catch (error) {
-                if (error instanceof CentralConversationError && error.authenticationFailure) {
-                  await stopRelayForAuthenticationFailure();
-                } else if (!lifetimeSignal.aborted) {
-                  reportFailure?.(safeFailure());
-                  reportFailure = undefined;
-                }
-                throw error;
-              }
+        const arguments_ = safeLocalToolArguments(untrustedArguments);
+        let result: Record<string, unknown>;
+        if (!identity.enrolled) {
+          switch (name) {
+            case "register_agent":
+              result = await enrollment.register(arguments_, signal);
+              break;
+            case "resend_verification":
+              result = await enrollment.resend(arguments_, signal);
+              break;
+            case "verify_email":
+              result = await identity.enroll(() => enrollment.verify(arguments_, signal));
+              await enableEnrolledIdentity();
               await local.sendToolListChanged();
-              return localResult;
-            }
-            if (name === "register_agent") {
-              return await runEnrollment(
-                async () => await requireEnrollment().register(arguments_, enrollmentSignal),
-              );
-            }
-            if (name === "resend_verification") {
-              return await runEnrollment(
-                async () => await requireEnrollment().resend(arguments_, enrollmentSignal),
-              );
-            }
-            throw new McpContractError();
+              break;
+            default:
+              throw new LocalMcpToolError("tool_not_found");
           }
-          if (name === "verify_email") {
-            const localResult = await currentIdentity.verify(async () => {
-              const tool = await remoteTool(name, false, signal);
-              const upstreamArguments = upstreamToolArguments(tool, arguments_, undefined);
-              return await requireCentral().callTool(name, upstreamArguments, signal);
-            });
-            const centralToken = currentIdentity.authenticatedToken();
-            startRelay(centralToken);
-            await local.sendToolListChanged();
-            return localResult;
-          }
-
-          const tool = await remoteTool(name, false, signal);
-          const upstreamArguments = upstreamToolArguments(tool, arguments_, undefined);
-          const result = await requireCentral().callTool(name, upstreamArguments, signal);
           assertSafeUpstreamResult(result);
           return result;
         }
 
-        if (currentIdentity.credentialVersion === 2) {
-          if (!versionTwoDeliveryActive) throw new McpContractError();
-          const credential = currentIdentity.authenticatedCredentialV2();
-          if (credential.token.expiresAt <= Math.floor(Date.now() / 1_000)) {
-            throw new McpContractError();
-          }
-          const conversation = protectedConversation;
-          if (conversation === undefined) throw new McpContractError();
-          if (name === "poll_messages") {
-            const localArguments = safeLocalToolArguments(arguments_);
-            return await requireRelay().pollMessages(pollTimeout(localArguments, 2), signal);
-          }
-          if (name === "start_conversation") {
-            return await conversation.start(arguments_, signal);
-          }
-          if (name === "get_conversation_start") {
-            return await conversation.getStart(arguments_, signal);
-          }
-          if (name === "reply_message") {
-            const input = validateReplyArguments(arguments_);
-            const conversationId = requireRelay().currentMessageConversationId(input.message_id);
-            if (conversationId === undefined) throw new McpContractError();
-            return await conversation.reply(input, signal, conversationId);
-          }
-          if (name === "complete_message") {
-            const input = validateCompletionArguments(arguments_);
-            if (!requireRelay().hasCurrentMessage(input.message_id)) throw new McpContractError();
-            return await conversation.complete(input, signal);
-          }
-          if (name === "get_message_outcome") {
-            return await conversation.outcome(arguments_, signal);
-          }
-          if (name === "ack_message") {
-            const input = validateMessageIdArguments(arguments_);
-            if (!requireRelay().canAcknowledge(input.message_id)) throw new McpContractError();
-            const result = await conversation.acknowledge(input, signal);
-            if (!requireRelay().confirmContentAcknowledgement(input.message_id)) {
-              throw new McpContractError();
+        switch (name) {
+          case "list_action_types":
+            result = { action_types: await requireRest().listActionTypes(signal) };
+            break;
+          case "request_permission":
+            result = await requireRest().requestPermission(arguments_, signal);
+            break;
+          case "respond_to_permission":
+            result = await requireRest().respondToPermission(arguments_, signal);
+            break;
+          case "call_action":
+            result = await requireRest().callAction(arguments_, signal);
+            break;
+          case "poll_messages":
+            result = await requireRelay().pollMessages(timeout(arguments_), signal);
+            break;
+          case "get_my_permissions":
+            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
+            result = { permissions: await requireRest().getMyPermissions(signal) };
+            break;
+          case "ack_message": {
+            if (Object.keys(arguments_).length !== 1) throw new McpContractError();
+            const messageId = validateNotificationId(arguments_.message_id);
+            if (!requireRelay().hasCurrentMessage(messageId) || acknowledgements.has(messageId)) {
+              throw new LocalMcpToolError("message_not_available");
             }
-            return result;
+            acknowledgements.add(messageId);
+            try {
+              result = await requireRest().ackMessage({ message_id: messageId }, signal);
+              if (!requireRelay().confirmAcknowledgement(messageId)) {
+                throw new LocalMcpToolError("message_not_available");
+              }
+            } finally {
+              acknowledgements.delete(messageId);
+            }
+            break;
           }
-          const tool = await remoteTool(name, true, signal);
-          const upstreamArguments = upstreamToolArguments(tool, arguments_, undefined);
-          const result = await requireCentral().callTool(
-            name,
-            upstreamArguments,
-            signal,
-            credential.record.access_token,
-          );
-          assertSafeUpstreamResult(result, credential.record.access_token);
-          return result;
+          default:
+            throw new LocalMcpToolError("tool_not_found");
         }
-
-        const centralToken = currentIdentity.authenticatedToken();
-        if (name === "poll_messages") {
-          const localArguments = safeLocalToolArguments(arguments_);
-          const result = await requireRelay().pollMessages(pollTimeout(localArguments, 1), signal);
-          assertSafeUpstreamResult(result, centralToken);
-          return result;
-        }
-        const tool = await remoteTool(name, true, signal);
-        const upstreamArguments = upstreamToolArguments(tool, arguments_, centralToken);
-        const result = await requireCentral().callTool(
-          name,
-          upstreamArguments,
-          signal,
-          centralToken,
-        );
-        assertSafeUpstreamResult(result, centralToken);
-        if (name === "ack_message") {
-          requireRelay().confirmContentAcknowledgement(contentAcknowledgement(result, arguments_));
-        }
+        assertSafeUpstreamResult(result, identity.credential().record.access_token);
         return result;
       } catch (error) {
-        options.verboseTranscript?.record({
-          boundary: "gateway",
-          direction: "error",
-          body: {
-            tool: name,
-            error:
-              error instanceof Error
-                ? { name: error.name, message: error.message }
-                : { value: String(error) },
-          },
-        });
-        if (
-          error instanceof CentralMcpError &&
-          error.code === "central_mcp_authentication_failed"
-        ) {
-          await stopRelayForAuthenticationFailure();
-        }
-        if (error instanceof CentralConversationError && error.authenticationFailure) {
-          await stopRelayForAuthenticationFailure();
-        }
-        if (
-          error instanceof CentralEnrollmentError ||
-          error instanceof CentralConversationError ||
-          error instanceof CentralMcpError ||
-          error instanceof IdentityError ||
-          error instanceof McpContractError
-        ) {
-          if (error instanceof CentralEnrollmentError) {
-            throw new LocalMcpToolError(error.code);
-          }
-          if (error instanceof CentralConversationError && error.applicationError) {
-            throw new LocalMcpToolError(error.code, error.retryAfterMs);
-          }
-          throw safeFailure();
-        }
-        throw safeFailure();
+        throw localError(error);
       }
     },
   };
 
-  local = new LocalMcpServer(options.webhookToken, router, {
-    ...(options.verboseTranscript === undefined
-      ? {}
-      : { verboseTranscript: options.verboseTranscript }),
-  });
   try {
+    identity = await GatewayIdentity.open(store, nowSeconds);
+    local = new LocalMcpServer(options.webhookToken, router, {
+      ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
+    });
     await local.listen();
-    identity = await GatewayIdentity.open(credentialStore);
-    if (identity.enrolled) {
-      if (identity.credentialVersion === 2) {
-        try {
-          await enableProtectedIdentity();
-        } catch (error) {
-          if (error instanceof CentralConversationError && error.authenticationFailure) {
-            identity.markAuthenticationFailed();
-            versionTwoAuthenticationRejected = true;
-            await reissue?.close().catch(() => undefined);
-            reissue = undefined;
-          } else {
-            throw error;
-          }
-        }
-      } else startRelay(identity.authenticatedToken());
-    }
+    if (identity.enrolled) await enableEnrolledIdentity();
   } catch (error) {
     controller.abort();
-    await local.close().catch(() => undefined);
-    await central?.close().catch(() => undefined);
-    await reissue?.close().catch(() => undefined);
-    await protectedCentral?.close().catch(() => undefined);
+    await relay?.shutdown().catch(() => undefined);
+    await local?.close().catch(() => undefined);
     journal.close();
     throw error;
   }
@@ -718,13 +263,9 @@ export async function openGatewayApplication(
       if (closed) return;
       closed = true;
       controller.abort();
-      await Promise.allSettled([...enrollmentOperations]);
-      await local.close();
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
-      await reissue?.close().catch(() => undefined);
-      await protectedCentral?.close().catch(() => undefined);
-      await central?.close().catch(() => undefined);
+      await local.close();
       journal.close();
     },
   };

@@ -15,26 +15,12 @@ const files = compiledTests
       !basename(file).startsWith("t04-") &&
       !basename(file).startsWith("k02-") &&
       !basename(file).startsWith("cx02-") &&
-      !basename(file).startsWith("cl02-") &&
-      !basename(file).startsWith("k04-") &&
-      !basename(file).startsWith("q01-"),
+      !basename(file).startsWith("cl02-"),
   )
   .sort();
-const k04Files = compiledTests.filter((file) => basename(file).startsWith("k04-"));
-const expectedK04Tests = ["k04-fake-provider-crash-e2e.test.js", "k04-fake-provider-e2e.test.js"];
-const q01Files = compiledTests.filter((file) => basename(file).startsWith("q01-"));
-const expectedQ01Tests = ["q01-provider-matrix.test.js"];
 
 if (files.length === 0) {
   throw new Error(`No compiled tests found under ${root}`);
-}
-if (
-  k04Files.length !== expectedK04Tests.length ||
-  k04Files.some((file, index) => basename(file) !== expectedK04Tests[index]) ||
-  q01Files.length !== expectedQ01Tests.length ||
-  q01Files.some((file, index) => basename(file) !== expectedQ01Tests[index])
-) {
-  throw new Error("serialized provider test inventory changed");
 }
 
 const flags = process.argv.includes("--coverage") ? ["--experimental-test-coverage"] : [];
@@ -56,7 +42,6 @@ function run(arguments_) {
 
 try {
   await run(["--test", ...flags, ...files]);
-  await run(["--test", "--test-concurrency=1", ...flags, ...k04Files, ...q01Files]);
 } catch {
   process.exitCode = 1;
 }

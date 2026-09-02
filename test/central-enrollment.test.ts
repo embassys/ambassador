@@ -1,190 +1,138 @@
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
-
+import { test } from "node:test";
+import { parseCentralCredential } from "../src/central-credential.js";
 import {
   CentralEnrollmentClient,
   CentralEnrollmentError,
-  type CentralTokenProfile,
+  REST_BOOTSTRAP_TOOLS,
 } from "../src/central-enrollment.js";
-import { T03_CODE, T03_EMAIL, T03_USERNAME } from "./support/t03-contract-fixtures.js";
-import {
-  startT03ScriptedCentralApi,
-  type T03ResponsePlan,
-  waitForT03Observation,
-} from "./support/t03-observation.js";
+import { startFakeCentral } from "./support/fake-central.js";
 
-const TOKEN_PROFILE: CentralTokenProfile = {
-  issuer: "urn:a2a:fixture:issuer:v2",
-  audiences: ["urn:a2a:fixture:resource:api:v2", "urn:a2a:fixture:resource:mcp:v2"],
-};
-const OVERSIZED_BYTES = 65_537;
+const NOW_SECONDS = 1_788_220_800;
 
-interface BodyProbe {
-  cancelCalls: number;
-  readerCalls: number;
-}
-
-function client(centralApiUrl: string, injectedFetch?: typeof fetch): CentralEnrollmentClient {
-  return new CentralEnrollmentClient({
-    centralApiUrl,
-    tokenProfile: TOKEN_PROFILE,
-    deadlineMs: 10_000,
-    ...(injectedFetch === undefined ? {} : { fetch: injectedFetch }),
-  });
-}
-
-function injectedResponse(
-  status: number,
-  headers: Readonly<Record<string, string>>,
-  probe: BodyProbe,
-): Response {
-  const pending = new Promise<never>(() => undefined);
-  return {
-    status,
-    headers: new Headers(headers),
-    body: {
-      cancel: async () => {
-        probe.cancelCalls += 1;
-      },
-      getReader: () => {
-        probe.readerCalls += 1;
-        return {
-          cancel: async () => {
-            probe.cancelCalls += 1;
-          },
-          read: async () => await pending,
-        };
-      },
-    },
-  } as unknown as Response;
-}
-
-async function rejectsWithin(
-  operation: Promise<unknown>,
-  controller: AbortController,
-  code: string,
-): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error("enrollment waited for a response body after its headers were decisive"));
-    }, 500);
-    timer.unref();
-  });
-  try {
-    await assert.rejects(Promise.race([operation, timeout]), (error: unknown) => {
-      assert.ok(error instanceof CentralEnrollmentError);
-      assert.equal(error.code, code);
-      return true;
-    });
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
-async function nativeFailure(
-  t: TestContext,
-  plan: T03ResponsePlan,
-  route: "register" | "verify",
-  code: string,
-): Promise<void> {
-  const api = await startT03ScriptedCentralApi(t, [plan]);
-  const controller = new AbortController();
-  const enrollment = client(api.url);
-  const operation =
-    route === "verify"
-      ? enrollment.verify({ email: T03_EMAIL, code: T03_CODE }, controller.signal)
-      : enrollment.register({ email: T03_EMAIL, username: T03_USERNAME }, controller.signal);
-  await rejectsWithin(operation, controller, code);
-  assert.equal(api.requests.length, 1);
-  const request = api.requests[0];
-  assert.ok(request !== undefined);
-  await waitForT03Observation(request.connectionClosed);
-  assert.equal(
-    request.responseFinished(),
-    false,
-    "decisive headers still drained the response body",
+test("I02-E01 bootstrap catalog contains only current enrollment tools", () => {
+  assert.deepEqual(
+    REST_BOOTSTRAP_TOOLS.map((tool) => tool.name),
+    ["register_agent", "verify_email", "resend_verification"],
   );
-}
-
-async function injectedFailure(
-  status: number,
-  headers: Readonly<Record<string, string>>,
-  route: "register" | "verify",
-  code: string,
-): Promise<void> {
-  const probe: BodyProbe = { cancelCalls: 0, readerCalls: 0 };
-  const injectedFetch = (async () => injectedResponse(status, headers, probe)) as typeof fetch;
-  const controller = new AbortController();
-  const enrollment = client("https://central.invalid", injectedFetch);
-  const operation =
-    route === "verify"
-      ? enrollment.verify({ email: T03_EMAIL, code: T03_CODE }, controller.signal)
-      : enrollment.register({ email: T03_EMAIL, username: T03_USERNAME }, controller.signal);
-  await rejectsWithin(operation, controller, code);
-  assert.equal(probe.readerCalls, 0, "decisive headers opened the injected response reader");
-  assert.equal(probe.cancelCalls, 1, "decisive headers did not discard the injected body");
-}
-
-test("native enrollment classifies decisive headers before oversized or held bodies", async (t) => {
-  await t.test("missing verification no-store precedes an oversized body", async (subtest) => {
-    await nativeFailure(
-      subtest,
-      {
-        status: 400,
-        headers: { "content-length": String(OVERSIZED_BYTES), "content-type": "application/json" },
-        hold: true,
-      },
-      "verify",
-      "central_verification_response_unsafe",
-    );
-  });
-  await t.test("redirect precedes an oversized body", async (subtest) => {
-    await nativeFailure(
-      subtest,
-      {
-        status: 307,
-        headers: { "content-length": String(OVERSIZED_BYTES), location: "/not-followed" },
-        hold: true,
-      },
-      "register",
-      "central_enrollment_outcome_uncertain",
-    );
-  });
-  await t.test("redirect does not wait for a held body", async (subtest) => {
-    await nativeFailure(
-      subtest,
-      { status: 302, headers: { location: "/not-followed" }, hold: true },
-      "register",
-      "central_enrollment_outcome_uncertain",
-    );
-  });
+  for (const tool of REST_BOOTSTRAP_TOOLS) {
+    assert.equal(JSON.stringify(tool).includes("username"), false);
+    assert.equal(JSON.stringify(tool).includes("token"), false);
+  }
 });
 
-test("injected enrollment classifies decisive headers before oversized or held bodies", async (t) => {
-  await t.test("missing verification no-store precedes an oversized body", async () => {
-    await injectedFailure(
-      400,
-      { "content-length": String(OVERSIZED_BYTES), "content-type": "application/json" },
-      "verify",
-      "central_verification_response_unsafe",
-    );
+test("I02-E02 enrollment sends exact REST bodies and returns token-free results", async (t) => {
+  const central = await startFakeCentral(t);
+  const acceptEncodings: Array<string | null> = [];
+  const client = new CentralEnrollmentClient({
+    centralOrigin: central.apiUrl,
+    fetch: async (input, init) => {
+      acceptEncodings.push(new Headers(init?.headers).get("accept-encoding"));
+      return fetch(input, init);
+    },
+    nowSeconds: () => NOW_SECONDS,
   });
-  await t.test("redirect precedes an oversized body", async () => {
-    await injectedFailure(
-      307,
-      { "content-length": String(OVERSIZED_BYTES), location: "/not-followed" },
-      "register",
-      "central_enrollment_outcome_uncertain",
-    );
+  const email = "gateway-enrollment@fixture.test";
+
+  const registered = await client.register({ email, display_name: "Gateway fixture" });
+  assert.equal(registered.email, email);
+  assert.deepEqual(Object.keys(registered).sort(), ["agent_id", "email", "message"]);
+  const resent = await client.resend({ email });
+  assert.deepEqual(Object.keys(resent), ["message"]);
+
+  const verified = await client.verify({ email, code: central.verificationCode(email) });
+  assert.deepEqual(verified.localResult, {
+    verified: true,
+    agent_id: registered.agent_id,
+    email,
+    message: "Email verified successfully.",
   });
-  await t.test("redirect does not wait for a held body", async () => {
-    await injectedFailure(
-      302,
-      { location: "/not-followed" },
-      "register",
-      "central_enrollment_outcome_uncertain",
-    );
+  assert.equal(JSON.stringify(verified.localResult).includes("token"), false);
+  assert.equal(JSON.stringify(verified.localResult).includes("jkt"), false);
+  const loaded = parseCentralCredential(verified.credential, () => NOW_SECONDS);
+  assert.equal(loaded.token.email, email);
+  assert.equal(loaded.token.subject, registered.agent_id);
+  assert.equal(loaded.token.expiresAt - loaded.token.issuedAt, 30 * 24 * 60 * 60);
+  assert.deepEqual(acceptEncodings, ["identity", "identity", "identity"]);
+
+  assert.deepEqual(
+    central.requests().map(({ method, path, authorizationScheme, dpopCount, bodyKeys }) => ({
+      method,
+      path,
+      authorizationScheme,
+      dpopCount,
+      bodyKeys,
+    })),
+    [
+      {
+        method: "POST",
+        path: "/api/register_agent",
+        authorizationScheme: null,
+        dpopCount: 0,
+        bodyKeys: ["display_name", "email"],
+      },
+      {
+        method: "POST",
+        path: "/api/resend_verification",
+        authorizationScheme: null,
+        dpopCount: 0,
+        bodyKeys: ["email"],
+      },
+      {
+        method: "POST",
+        path: "/api/verify_email",
+        authorizationScheme: null,
+        dpopCount: 0,
+        bodyKeys: ["code", "email", "jwk"],
+      },
+    ],
+  );
+});
+
+test("I02-E03 invalid bootstrap arguments stop before dispatch", async (t) => {
+  const central = await startFakeCentral(t);
+  const client = new CentralEnrollmentClient({ centralOrigin: central.apiUrl });
+  await assert.rejects(
+    client.register({ email: "invalid", username: "removed" } as never),
+    (error: unknown) =>
+      error instanceof CentralEnrollmentError &&
+      error.code === "central_enrollment_contract_failed",
+  );
+  await assert.rejects(
+    client.verify({ email: "valid@fixture.test", code: "12345" }),
+    (error: unknown) =>
+      error instanceof CentralEnrollmentError &&
+      error.code === "central_enrollment_contract_failed",
+  );
+  assert.deepEqual(central.requests(), []);
+});
+
+test("I02-E04 redirects and uncertain verification outcomes are never retried", async () => {
+  let calls = 0;
+  const client = new CentralEnrollmentClient({
+    centralOrigin: "https://central.invalid",
+    fetch: async () => {
+      calls += 1;
+      throw new TypeError("synthetic transport failure");
+    },
   });
+  await assert.rejects(
+    client.verify({ email: "uncertain@fixture.test", code: "123456" }),
+    (error: unknown) =>
+      error instanceof CentralEnrollmentError &&
+      error.code === "central_enrollment_outcome_uncertain",
+  );
+  assert.equal(calls, 1);
+
+  const redirectClient = new CentralEnrollmentClient({
+    centralOrigin: "https://central.invalid",
+    fetch: async () =>
+      new Response(null, { status: 307, headers: { location: "https://elsewhere.invalid" } }),
+  });
+  await assert.rejects(
+    redirectClient.register({ email: "redirect@fixture.test" }),
+    (error: unknown) =>
+      error instanceof CentralEnrollmentError &&
+      error.code === "central_enrollment_contract_failed",
+  );
 });

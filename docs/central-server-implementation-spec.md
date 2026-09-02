@@ -211,9 +211,9 @@ After `b769896` was deployed, the live route returned six action definitions:
 | Name | Required input |
 | --- | --- |
 | `create_calendar_event` | strings `title`, `start_time`, and `end_time`; optional string-array `attendees` and string `description` |
-| `get_email` | string `reason` |
+| `get_email` | string `reason` with description `Reason for requesting email address` |
 | `get_free_busy_permission` | optional strings `date_from`, `date_to`, and `calendar_id` |
-| `get_phone_number` | string `reason` |
+| `get_phone_number` | string `reason` with description `Reason for requesting phone number` |
 | `read_calendar_event_by_title` | string `title`; optional strings `date_from` and `date_to` |
 | `read_calendar_permission` | optional string `calendar_id` |
 
@@ -325,8 +325,9 @@ before returning them. There is no explicit batch limit, lease, or redelivery.
 The declared response model contains `id`, `grantor_email`, `grantee_email`,
 `action_type`, `status`, optional `scope`, timestamps, and optional expiry.
 The route implementation currently constructs `grantor_username` and
-`grantee_username` instead. This mismatch needs a central fix or live
-confirmation before the gateway depends on the route.
+`grantee_username` instead. The protected I05 call returned a server error, so
+the gateway keeps the declared response validator and fails closed. Central
+must fix the route before clients can depend on permission listing.
 
 ### Acknowledge message
 

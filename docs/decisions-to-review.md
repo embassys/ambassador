@@ -1,6 +1,6 @@
 # Decisions to review
 
-Status: consolidated review record as of 2026-09-01
+Status: consolidated review record as of 2026-09-02
 
 The ADRs are the decision authority. This page records the current result and
 the few remaining choices. It no longer repeats every implementation judgment
@@ -58,9 +58,9 @@ conversation lifecycle.
 - ADR 0036 rejects the reviewed Gemini CLI interface. No Gemini adapter is
   selected.
 
-The central-facing portion of the provider execution design must be revisited
-after the live permission/action gateway flow works. Current connector fixture
-success is not live-central evidence.
+The central-facing portion of the provider execution design must now be
+revisited against the qualified permission/action gateway flow. Current
+connector fixture success is not live-central evidence.
 
 ## Superseded decisions
 

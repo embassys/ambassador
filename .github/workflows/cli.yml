@@ -38,10 +38,6 @@ jobs:
           test "$(pnpm --version)" = 11.22.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
-      - name: Validate classified T03 REST and DPoP inventory
-        run: node scripts/run-red-inventory.mjs --suite=t03
-      - name: Validate classified T04 conversation recovery inventory
-        run: node scripts/run-red-inventory.mjs --suite=t04
       - name: Validate classified CX02 Codex App Server adapter inventory
         run: node scripts/run-red-inventory.mjs --suite=cx02
       - name: Validate classified CL02 Claude Code adapter inventory
@@ -96,7 +92,7 @@ jobs:
             --allow-build=better-sqlite3 \
             add "$tarball"
           test -x "$install_root/node_modules/.bin/a2a-gateway"
-      - name: Run packaged gateway against FastMCP
+      - name: Run packaged gateway against current REST fixture
         shell: bash
         run: |
           set -euo pipefail
@@ -117,11 +113,8 @@ jobs:
 
           curl --fail --silent http://127.0.0.1:8000/readyz >/dev/null
           A2A_PACKED_GATEWAY_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/@a2adev/gateway/dist/cli.js" \
-            A2A_FASTMCP_FIXTURE_URL=http://127.0.0.1:8000 \
-            node --test .test-dist/test/fastmcp-e2e.test.js
-          A2A_PACKED_GATEWAY_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/@a2adev/gateway/dist/cli.js" \
-            A2A_FASTMCP_FIXTURE_URL=http://127.0.0.1:8000 \
-            node scripts/run-red-inventory.mjs --suite=packaged-docker
+            A2A_CENTRAL_REST_FIXTURE_URL=http://127.0.0.1:8000 \
+            node --test .test-dist/test/current-rest-docker-e2e.test.js
       - name: Verify hardened runtime fixture
         shell: bash
         run: |
@@ -158,11 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            openclaw: true
-          - os: macos-latest
-            openclaw: false
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -211,35 +200,10 @@ jobs:
               if (!allVerified && !localOnly) process.exit(1);
             '
           test -x "$install_root/node_modules/.bin/a2a-gateway"
-          test_output=$(
-            A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-              node --test \
-                --test-reporter=tap \
-                --test-name-pattern="the CLI completes the flow through development central URLs" \
-                .test-dist/test/single-webhook-e2e.test.js
-          )
-          printf '%s\n' "$test_output"
-          grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
           A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-            node --test .test-dist/test/hermes-e2e.test.js
+            node --test .test-dist/test/current-packed-e2e.test.js
           A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
             node --test .test-dist/test/hermes-webhook-bridge.test.js
-      - name: Verify OpenClaw interoperability
-        if: matrix.openclaw
-        shell: bash
-        run: |
-          set -euo pipefail
-          install_root="$RUNNER_TEMP/a2a-install"
-          openclaw_root="$RUNNER_TEMP/openclaw-install"
-          mkdir -p "$openclaw_root"
-          pnpm \
-            --dir "$openclaw_root" \
-            add --ignore-scripts openclaw@2026.7.1-2
-          # OpenClaw is a pinned test runtime, not a gateway dependency. Verify its registry graph before execution.
-          pnpm --dir "$openclaw_root" audit signatures
-          A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-          A2A_OPENCLAW_CLI="$openclaw_root/node_modules/openclaw/openclaw.mjs" \
-            node --test .test-dist/test/openclaw-e2e.test.js
 
   publish:
     name: Publish npm package
@@ -312,17 +276,8 @@ jobs:
               if (!allVerified && !localOnly) process.exit(1);
             '
           test -x "$install_root/node_modules/.bin/a2a-gateway"
-          test_output=$(
-            A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-              node --test \
-                --test-reporter=tap \
-                --test-name-pattern="the CLI completes the flow through development central URLs" \
-                .test-dist/test/single-webhook-e2e.test.js
-          )
-          printf '%s\n' "$test_output"
-          grep --fixed-strings --line-regexp '# pass 1' <<< "$test_output"
           A2A_PACKED_GATEWAY_CLI="$install_root/node_modules/@a2adev/gateway/dist/cli.js" \
-            node --test .test-dist/test/hermes-e2e.test.js
+            node --test .test-dist/test/current-packed-e2e.test.js
           A2A_PACKED_HERMES_BRIDGE="$install_root/node_modules/@a2adev/gateway/docs/hermes-webhook-bridge.mjs" \
             node --test .test-dist/test/hermes-webhook-bridge.test.js
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"

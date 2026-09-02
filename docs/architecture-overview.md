@@ -1,6 +1,6 @@
 # Architecture overview
 
-Status: current human overview as of 2026-09-01
+Status: current human overview as of 2026-09-02
 
 ## One development architecture
 
@@ -11,8 +11,8 @@ The gateway has one central target: the unversioned REST API at
 The current target does not use central MCP, `/api/v2`, token reissue,
 activation, leases, free-text conversations, replies, or migration. The
 published bearer-only gateway and the repository's speculative versioned
-implementation are both superseded. The next code changes replace them rather
-than preserving compatibility.
+implementation are both superseded. The Phase 3A release candidate replaced
+them without a compatibility path.
 
 ## System shape
 
@@ -114,9 +114,8 @@ on the current server.
 
 Provider process isolation, local policy, credential separation, and
 content-free state remain useful. Live connector integration is paused until
-the gateway's permission/action message behavior is working and the connector
-flow is redesigned around that behavior. It is not a blocker for the gateway
-REST switch.
+the connector flow is redesigned around the now-qualified permission/action
+message behavior. It did not block the completed gateway REST switch.
 
 ## Failure behavior
 
@@ -135,12 +134,12 @@ REST switch.
 
 ## Release boundary
 
-The current code has not completed the switch described here. A live
-compatibility claim requires:
+The release candidate completed the switch described here. Its evidence
+includes:
 
 - replacement tests and fixtures for the pinned REST contract;
 - deletion of old bearer/MCP and speculative versioned paths;
 - the pinned six-action catalog and generated OpenAPI;
 - two-identity permission, action, poll, and acknowledgement E2E;
 - packed-install and artifact scans; and
-- explicit publication approval.
+- no publication action; publication still requires explicit approval.

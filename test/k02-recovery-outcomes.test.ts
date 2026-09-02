@@ -744,12 +744,14 @@ test("K02-O04 retains one mailbox-full reply in memory and retries no provider t
     code: "mailbox_full",
   });
   const message = k02Message("o04_message", "o04_conversation");
+  const firstRetryAt = clock.nowMs() + 30_000;
   scenario.enqueue(message);
   assert.equal((await scenario.wake(message.id)).status, 202);
   await waitFor(
     () => scenario.gatewayProxy?.calls.filter((call) => call.tool === "reply_message").length === 1,
     "mailbox-full reply",
   );
+  await waitForRetrySchedule(scenario, "reply", firstRetryAt, "mailbox-full reply retry schedule");
   assert.equal(scenario.gateway.tombstone(message.id), undefined);
   clock.advance(29_999);
   assert.equal(

@@ -1,6 +1,6 @@
 # Central server integration status
 
-Status: evidence snapshot as of 2026-09-01
+Status: evidence snapshot as of 2026-09-02
 
 This page records observed facts. ADR 0037 and the gateway protocol own the
 client decision.
@@ -14,8 +14,11 @@ client decision.
 - REST prefix: `https://mcp.embassys.ai/api`
 
 The live service does not expose a build revision. Its observed registration,
-verification, and DPoP behavior matches the pinned source. The user reports
-that this source has been deployed. This is the accepted development pin.
+verification, and DPoP behavior matches the pinned source. The permission-list
+route now returns the declared email-field response model rather than the
+username-field construction in the pinned source. The source revision remains
+the accepted development pin, with that live deployment difference recorded
+below.
 
 ## Live observations
 
@@ -33,11 +36,20 @@ that this source has been deployed. This is the accepted development pin.
 | Reuse of an accepted proof | `401` |
 | Initial valid proof without a nonce | Accepted; no nonce challenge required |
 | `GET /api/list_action_types` with valid DPoP | `200` with six action definitions |
+| Packed two-identity registration, verification, and restart | Passed with two disposable Mailosaur identities |
+| Missing, wrong-key, stale, future, wrong-method, wrong-URL, wrong-hash, and replayed DPoP proofs | Rejected |
+| Permission request, target decision, response delivery, and acknowledgement | Passed through the packed gateway |
+| `GET /api/get_my_permissions` with valid DPoP | `200`; returned the pending permission with `id`, `grantor_email`, `grantee_email`, `action_type`, `scope`, `status`, `created_at`, `decided_at`, and `expires_at` |
+| Granted `get_email` action, consuming poll, and acknowledgement | Passed with a synthetic in-memory payload |
+| Central MCP traffic during the packed run | Zero requests |
+| Package, state, and captured-output forbidden-marker scan | Passed |
 | `GET /openapi.json` | `200`; raw response SHA-256 `da0ddc402935c7112cebae1604a84f412c003c8d81493a566a901c199bba9544` |
 
+The final packed qualification used artifact SHA-256
+`a46beb66c2bdcd9c724f638cfdb39c22694097a56bc27990b1286aa0ea086612`.
 No token, private key, proof, email address, or verification code was written
 to the repository or printed in captured output. The disposable Mailosaur
-message was deleted after use.
+messages were deleted after use.
 
 ## Source-derived REST inventory
 
@@ -86,7 +98,7 @@ is no lease, redelivery, or delivered-message lookup.
 
 | Issue | Effect | Plan |
 | --- | --- | --- |
-| `get_my_permissions` constructs username fields while its response model declares email fields | Route may return `500` | Confirm live; keep it covered but nonessential to the first action E2E |
+| The pinned `get_my_permissions` source constructs username fields while its response model declares email fields | The earlier live check returned `500`; the final I05 run returned the declared email-field model | Keep the strict email-field validator and record the source/deployment difference until build metadata is available |
 | Verification-code expiry is set to `NULL` | Codes do not expire | Accept for current development; track as server hardening |
 | Duplicate grant/deny endpoints write a different message shape | Their behavior may diverge from the canonical response route | Do not use them |
 | Invitation sending helper is disconnected from permission requests | Automatic first-contact invitation is not active | Do not rely on it |
@@ -101,17 +113,21 @@ files, `.env`, shell arguments, logs, or test output.
 
 The live run uses unique catch-all addresses, searches only the current time
 window, extracts the six-digit code in memory, and deletes the captured
-message. Keep the qualification loop within the 500-message daily allowance.
+messages. The completed I05 run stayed within the 500-message daily allowance.
 
-## Remaining live work
+## Completed Phase 3A live work
 
 - [x] Observe the fixed `list_action_types` response and pin `get_email` and
-  `get_phone_number`. Both require a string `reason`.
-- [ ] Confirm `get_my_permissions` after the same deployment.
-- [ ] Run two disposable identities through permission request, permission
+  `get_phone_number`. Both require a string `reason`; the schemas also include
+  their deployed property descriptions.
+- [x] Recheck `get_my_permissions` during final qualification. The route
+  returned the declared email-field model and passed the gateway validator.
+- [x] Run two disposable identities through permission request, permission
   decision, action call, poll, and acknowledgement.
-- [ ] Run the packed gateway after I02 through I04 replace the old client.
-- [ ] Scan all run artifacts without storing content or credentials.
+- [x] Run the packed gateway after I02 through I04 replaced the old client.
+- [x] Scan all run artifacts without storing content or credentials.
 
-Server build metadata remains desirable for a release. Generated OpenAPI and
-the dynamic catalog now corroborate the pinned source.
+Server build metadata remains a central follow-up. Generated OpenAPI and the
+dynamic catalog corroborate the pinned source for the rest of the implemented
+surface; the corrected live permission-list response is the recorded
+deployment difference.

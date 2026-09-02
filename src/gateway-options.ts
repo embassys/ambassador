@@ -9,14 +9,8 @@ export class GatewayOptionsError extends Error {
 }
 
 export interface GatewayStartOptions {
-  webhookUrl: string;
-  webhookTokenEnv: string;
-  verbose: boolean;
-}
-
-export interface DevelopmentCentralUrls {
-  centralApiUrl: string;
-  centralMcpUrl: string;
+  readonly webhookUrl: string;
+  readonly webhookTokenEnv: string;
 }
 
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
@@ -36,14 +30,12 @@ function parseWebhookUrl(value: string): string {
   ) {
     throw new GatewayOptionsError(2);
   }
-
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
     throw new GatewayOptionsError(2);
   }
-
   if (
     (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
     parsed.hostname !== "127.0.0.1" ||
@@ -53,103 +45,32 @@ function parseWebhookUrl(value: string): string {
   ) {
     throw new GatewayOptionsError(2);
   }
-
-  return value;
-}
-
-function parseDevelopmentCentralUrl(value: string | undefined): string {
-  if (value === undefined || value.length === 0 || /\s/u.test(value)) {
-    throw new Error("Invalid development central endpoints");
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error("Invalid development central endpoints");
-  }
-  const loopback =
-    parsed.hostname === "127.0.0.1" ||
-    parsed.hostname === "[::1]" ||
-    parsed.hostname === "localhost";
-  if (
-    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.search !== "" ||
-    parsed.hash !== ""
-  ) {
-    throw new Error("Invalid development central endpoints");
-  }
   return value;
 }
 
 export function parseGatewayStartOptions(args: string[]): GatewayStartOptions {
-  if ((args.length !== 3 && args.length !== 4) || args[0] !== "start") {
-    throw new GatewayOptionsError(2);
-  }
-
+  if (args.length !== 3 || args[0] !== "start") throw new GatewayOptionsError(2);
   let webhookUrl: string | undefined;
   let webhookTokenEnv: string | undefined;
-  let verbose = false;
-  let verboseSeen = false;
-
   for (const argument of args.slice(1)) {
-    if (argument.startsWith("--webhook-url=")) {
-      if (webhookUrl !== undefined) {
-        throw new GatewayOptionsError(2);
-      }
+    if (argument.startsWith("--webhook-url=") && webhookUrl === undefined) {
       webhookUrl = parseWebhookUrl(argument.slice("--webhook-url=".length));
       continue;
     }
-
-    if (argument.startsWith("--webhook-token-env=")) {
-      if (webhookTokenEnv !== undefined) {
-        throw new GatewayOptionsError(2);
-      }
+    if (argument.startsWith("--webhook-token-env=") && webhookTokenEnv === undefined) {
       const value = argument.slice("--webhook-token-env=".length);
-      if (!ENVIRONMENT_NAME.test(value)) {
-        throw new GatewayOptionsError(2);
-      }
+      if (!ENVIRONMENT_NAME.test(value)) throw new GatewayOptionsError(2);
       webhookTokenEnv = value;
       continue;
     }
-
-    if (argument === "--verbose=true") {
-      if (verboseSeen) throw new GatewayOptionsError(2);
-      verbose = true;
-      verboseSeen = true;
-      continue;
-    }
-
     throw new GatewayOptionsError(2);
   }
-
-  if (webhookUrl === undefined || webhookTokenEnv === undefined) {
-    throw new GatewayOptionsError(2);
-  }
-
-  return { webhookUrl, webhookTokenEnv, verbose };
+  if (webhookUrl === undefined || webhookTokenEnv === undefined) throw new GatewayOptionsError(2);
+  return { webhookUrl, webhookTokenEnv };
 }
 
 export function resolveWebhookToken(environment: NodeJS.ProcessEnv, variableName: string): string {
   const value = environment[variableName];
-  if (value === undefined || !GENERATED_HOOK_TOKEN.test(value)) {
-    throw new GatewayOptionsError(4);
-  }
+  if (value === undefined || !GENERATED_HOOK_TOKEN.test(value)) throw new GatewayOptionsError(4);
   return value;
-}
-
-export function resolveDevelopmentCentralUrls(
-  environment: NodeJS.ProcessEnv,
-): DevelopmentCentralUrls | undefined {
-  const centralApiUrl = environment.A2A_DEV_CENTRAL_API_URL;
-  const centralMcpUrl = environment.A2A_DEV_CENTRAL_MCP_URL;
-  if (centralApiUrl === undefined && centralMcpUrl === undefined) return undefined;
-  if (centralApiUrl === undefined || centralMcpUrl === undefined) {
-    throw new Error("Invalid development central endpoints");
-  }
-  return {
-    centralApiUrl: parseDevelopmentCentralUrl(centralApiUrl),
-    centralMcpUrl: parseDevelopmentCentralUrl(centralMcpUrl),
-  };
 }
