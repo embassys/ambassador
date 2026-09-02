@@ -55,7 +55,8 @@ Registration cases also prove:
   `unsupported_agent` before state or a central call;
 - supplying a delivery object cannot bypass profile resolution;
 - a complete direct-only test profile proceeds without a question;
-- OpenClaw and Hermes ask direct versus webhook with direct as the default;
+- all five enabled profiles ask direct versus webhook with direct as the
+  default;
 - agent kind and process configuration are rejected as tool input; and
 - a failed direct launch never falls back to webhook.
 
@@ -69,12 +70,15 @@ authenticated agent software and may incur model cost. It uses the local
 central fixture by default, so provider integration can be tested without a
 production identity or verification email.
 
-The first required matrix is:
+The required matrix is:
 
 | Agent | Webhook mode | Direct mode |
 | --- | --- | --- |
 | OpenClaw | required | required |
 | Hermes | required | required |
+| Codex | required | required |
+| Claude Code | required | required |
+| Gemini CLI | required | required |
 
 For each row:
 
@@ -101,8 +105,25 @@ Hermes webhook qualification uses its authenticated generic webhook path.
 Direct qualification uses its ACP command and session MCP configuration when
 supported by the tested version.
 
-The runner must require explicit confirmation, use already installed
-executables, and never install or update an agent. It records:
+Codex direct qualification uses `@agentclientprotocol/codex-acp` 1.8.0 and
+proves that the adapter injects Ambassador MCP into its Codex App Server
+session. Claude Code direct qualification uses
+`@agentclientprotocol/claude-agent-acp` 0.73.0 and its exact Claude Agent SDK
+0.3.257 dependency. Gemini CLI direct qualification uses native
+`gemini --acp` at 0.58.0. All three receive Ambassador MCP through ACP session
+configuration.
+
+On 2026-09-02, isolated installs of the three approved entry points passed ACP
+v1 initialization and returned the exact `agentInfo` identities in ADR 0038.
+The reviewed OpenClaw and Hermes images also passed their version and ACP
+startup probes. This is safe contract evidence only. None of those probes
+counts as a real-agent delivery pass without an authenticated prompt and an
+observed Ambassador MCP call.
+
+The runner must require explicit confirmation and use exact executables already
+available on `PATH`. Those executables may come from an isolated installation
+or a reviewed container wrapper prepared before the run. The runner never
+installs, updates, or pulls an agent. It records:
 
 - operating system and architecture;
 - packed Ambassador digest;
@@ -116,17 +137,23 @@ tokens, secrets, provider credentials, paths containing user data, or raw
 provider output.
 
 Build and pack the exact candidate, start the independent central fixture on
-the default `http://127.0.0.1:8000`, and configure the two already-authenticated
+the default `http://127.0.0.1:8000`, and configure the five authenticated
 webhook receivers. Then run:
 
 ```sh
 export AMBASSADOR_CANDIDATE_TARBALL=/absolute/path/to/ambassador.tgz
-export AMBASSADOR_QUALIFY_CONFIRM=run-installed-openclaw-and-hermes
+export AMBASSADOR_QUALIFY_CONFIRM=run-installed-supported-agents
 export AMBASSADOR_QUALIFICATION_LOCAL_TOKEN='<48-lowercase-hex-token>'
 export AMBASSADOR_OPENCLAW_WEBHOOK_URL=https://receiver.example/openclaw
 export AMBASSADOR_OPENCLAW_WEBHOOK_SECRET='<secret>'
 export AMBASSADOR_HERMES_WEBHOOK_URL=https://receiver.example/hermes
 export AMBASSADOR_HERMES_WEBHOOK_SECRET='<secret>'
+export AMBASSADOR_CODEX_WEBHOOK_URL=https://receiver.example/codex
+export AMBASSADOR_CODEX_WEBHOOK_SECRET='<secret>'
+export AMBASSADOR_CLAUDE_WEBHOOK_URL=https://receiver.example/claude
+export AMBASSADOR_CLAUDE_WEBHOOK_SECRET='<secret>'
+export AMBASSADOR_GEMINI_WEBHOOK_URL=https://receiver.example/gemini
+export AMBASSADOR_GEMINI_WEBHOOK_SECRET='<secret>'
 pnpm run build
 pnpm run qualify:agents
 ```
@@ -134,21 +161,27 @@ pnpm run qualify:agents
 Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, verifies the
 installed provider versions, loads the code from the exact candidate archive,
-runs all four delivery cases, and prints one safe JSON report. Configure the
+runs all ten delivery cases, and prints one safe JSON report. Configure the
 OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` with the local
-token above before starting the runner; Hermes receives the same endpoint by
-ACP session injection. Each direct case must call the qualification
-`get_my_permissions` tool, which proves the real MCP client's exact
-`clientInfo` match. Missing, mismatched, unauthenticated, or failing agents
-make the run fail; the runner never invokes an installer or updater.
+token above before starting the runner. The other four profiles receive the
+same endpoint by ACP session injection. Each direct case must call the
+qualification `get_my_permissions` tool, which proves the real MCP client's
+exact `clientInfo` match. Missing, mismatched, unauthenticated, or failing
+agents make the run fail; the runner never invokes an installer or updater.
+
+The reviewed OpenClaw 2026.8.1 and Hermes 0.21.0 images may provide their exact
+executables. Pin `ghcr.io/openclaw/openclaw:2026.8.1` to manifest digest
+`sha256:e7849cb6c1ef1ead39ab4be7d85edb2df89611f486e283284c7cf35ce39a20d4`
+and `nousresearch/hermes-agent:v2026.8.31` to manifest digest
+`sha256:64923faeae267792bf9bf87fe3b4c4869e35004e360c7df01730ad801b74d524`.
+Use isolated writable copies of provider configuration. Do not mount a user's
+live configuration directory into a qualification container. Container
+networking must preserve access to Ambassador's authenticated loopback MCP
+listener; an image version or ACP handshake alone is not a real-agent pass.
 
 The production ACP dependency is exact `@agentclientprotocol/sdk` 1.4.0. It is
 Apache-2.0 licensed, as approved by ADR 0038, and remains subject to the normal
 lockfile, audit, provenance, and packed-artifact checks.
-
-Codex and Claude can join this matrix after their exact ACP adapter contracts
-are approved, implemented, and qualified. Until then, their `clientInfo`
-values are unsupported rather than partially recognized.
 
 ## Live central suite
 

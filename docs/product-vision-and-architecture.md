@@ -82,11 +82,13 @@ fixed executable and argument list for direct delivery, MCP setup behavior, and
 qualification evidence. User input and remote content cannot add or modify an
 entry.
 
-The first version enables OpenClaw and Hermes with direct and webhook modes.
-Direct is the default. Codex and Claude are not enabled merely because their
-names can be recognized; each needs a separately approved, implemented, and
-qualified ACP adapter contract. Unknown, ambiguous, disabled, and incomplete
-profiles are unsupported.
+The enabled profiles are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+All five support direct and webhook modes, with direct as the default. Codex
+uses `@agentclientprotocol/codex-acp` 1.8.0, Claude Code uses
+`@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0 uses its
+native `--acp` mode. Exact aliases, agent identities, environment allowlists,
+and version policies remain compiled in. Unknown, ambiguous, disabled, and
+incomplete profiles are unsupported.
 
 ## Guided registration
 

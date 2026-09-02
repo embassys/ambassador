@@ -10,6 +10,9 @@ test("real-agent runner loads the packed candidate without installing agents", a
   assert.match(source, /@embassys\/ambassador/u);
   assert.match(source, /resolveAgentCapability\(clientInfo/u);
   assert.match(source, /get_my_permissions/u);
+  assert.match(source, /codex-acp/u);
+  assert.match(source, /claude-agent-acp/u);
+  assert.match(source, /gemini/u);
   assert.equal(source.includes('import("../dist/'), false);
   assert.equal(/\b(?:npm|pnpm|npx|pip|brew)\b[^\n]*(?:install|add|update)/u.test(source), false);
 });
@@ -36,4 +39,7 @@ test("real-agent runner refuses to act without the explicit confirmation", async
   assert.match(stderr, /explicit|confirm|AMBASSADOR_QUALIFY_CONFIRM/u);
   assert.equal(stderr.includes("OPENCLAW_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("HERMES_WEBHOOK_SECRET"), false);
+  assert.equal(stderr.includes("CODEX_WEBHOOK_SECRET"), false);
+  assert.equal(stderr.includes("CLAUDE_WEBHOOK_SECRET"), false);
+  assert.equal(stderr.includes("GEMINI_WEBHOOK_SECRET"), false);
 });

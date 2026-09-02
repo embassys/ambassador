@@ -36,12 +36,12 @@ scope on your own.
   working directory from MCP input.
 - Direct is the default. A complete direct-only profile proceeds without a
   delivery question. Ask direct versus webhook only for a complete dual-mode
-  profile, and present direct as the default. The initial dual-mode profiles
-  are OpenClaw and Hermes.
+  profile, and present direct as the default. The enabled dual-mode profiles
+  are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
-  central registration state. Do not offer a generic webhook fallback. Codex
-  and Claude remain unsupported until exact ACP adapter contracts are approved,
-  implemented, and qualified.
+  central registration state. Do not offer a generic webhook fallback. Keep the
+  exact Codex, Claude Code, and Gemini CLI contracts approved in ADR 0038; do
+  not substitute adapters or widen version matching.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts a URL and a webhook secret environment-variable
@@ -89,7 +89,8 @@ scope on your own.
   `Origin`, and authenticates before parsing a request.
 - Write or update tests and CI expectations before production implementation.
   CI delivery tests use a mock webhook receiver and a mock ACP v1 agent. Real
-  OpenClaw and Hermes tests are explicit local qualification, not CI.
+  OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI tests are explicit local
+  qualification, not CI.
 - Do not select or install a framework, library, runtime, package manager,
   database driver, or build tool without explicit user approval. ACP v1 and
   exact `@agentclientprotocol/sdk` 1.4.0 are approved by ADR 0038.

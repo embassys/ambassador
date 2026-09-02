@@ -16,6 +16,11 @@ plan contains only work that is not complete.
 | Need | Read |
 | --- | --- |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
+| Set up Codex | [Codex setup](getting-started-codex.md) |
+| Set up Claude Code | [Claude Code setup](getting-started-claude.md) |
+| Set up Gemini CLI | [Gemini CLI setup](getting-started-gemini.md) |
+| Set up Hermes | [Hermes setup](getting-started-hermes.md) |
+| Set up OpenClaw | [OpenClaw setup](getting-started-openclaw.md) |
 | Track worthwhile central service changes | [Central follow-ups](central-follow-ups.md) |
 | Understand an accepted design change | [ADR ledger](adr/README.md) |
 
