@@ -21,8 +21,9 @@
   codes, tokens, proofs, messages, and action payloads out of arguments, files,
   logs, and test output. Delete captured messages after use and stay within the
   500-message daily allowance.
-- [ ] Central follow-up: correct `get_my_permissions`; the protected live call
-  returned a server error matching the pinned response-field mismatch.
+- [x] Central follow-up: recheck `get_my_permissions`; the final protected live
+  call returned the declared email-field response and passed gateway
+  validation.
 - [ ] After I05, redesign the optional provider connector around actual
   permission/action messages before rerunning real-provider qualification.
 

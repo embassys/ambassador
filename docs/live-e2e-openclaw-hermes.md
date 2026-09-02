@@ -93,7 +93,7 @@ validation, permission request and decision, permission-response delivery,
 `get_email` delivery, consuming polls, acknowledgements, and forbidden-marker
 scans. It made no central MCP request and observed no initial nonce challenge.
 
-The protected `get_my_permissions` check returned a server error, consistent
-with the pinned source mismatch. This did not bypass the gateway validator or
-the permission/action flow. Captured Mailosaur messages and all temporary
-gateway state were deleted.
+The final protected `get_my_permissions` check returned the declared
+email-field model and passed the strict gateway validator. This differs from
+the pinned source construction and the earlier live server error. Captured
+Mailosaur messages and all temporary gateway state were deleted.
