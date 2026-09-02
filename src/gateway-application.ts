@@ -260,6 +260,9 @@ export async function openGatewayApplication(
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;
+          case "submit_action_result":
+            result = await requireRest().submitActionResult(arguments_, signal);
+            break;
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
             result = { permissions: await requireRest().getMyPermissions(signal) };

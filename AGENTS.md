@@ -55,7 +55,8 @@ scope on your own.
   identity.
 - MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
   control through local `poll_messages` or `ack_message` tools after the
-  cutover. Do not invent a reply tool while central has no reply endpoint.
+  cutover. Expose the exact central `submit_action_result` operation for the
+  target of an action call. Do not treat it as a general chat reply tool.
 - Direct-agent work is a gateway-managed ACP session. It is not the exact chat
   in which registration happened. Configure Ambassador MCP in that session
   when the agent supports session MCP injection; otherwise require normal
@@ -82,9 +83,9 @@ scope on your own.
   URLs, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts,
   or support bundles.
 - Do not add old-client support, central MCP fallbacks, speculative versioned
-  routes, credential migration, activation, token reissue, leases,
-  conversations, replies, or outcomes unless the current server adds the
-  behavior and the user accepts the client change.
+  routes, credential migration, activation, token reissue, leases, general
+  conversations or replies, or outcome lookup unless the current server adds
+  the behavior and the user accepts the client change.
 - The local MCP listener always binds to `127.0.0.1`, validates `Host` and
   `Origin`, and authenticates before parsing a request.
 - Write or update tests and CI expectations before production implementation.

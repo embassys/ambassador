@@ -79,6 +79,15 @@ interface PermissionRecord {
   decidedAt?: string;
 }
 
+interface ActionCallRecord {
+  readonly id: string;
+  readonly callerEmail: string;
+  readonly targetEmail: string;
+  readonly actionType: string;
+  status: "pending" | "completed" | "failed";
+  result?: Record<string, unknown>;
+}
+
 interface MessageRecord {
   readonly recipientEmail: string;
   readonly message: FixtureMessage;
@@ -106,6 +115,7 @@ interface FixtureState {
   readonly identities: Map<string, IdentityRecord>;
   readonly tokens: Map<string, string>;
   readonly permissions: Map<string, PermissionRecord>;
+  readonly actionCalls: Map<string, ActionCallRecord>;
   readonly messages: Map<string, MessageRecord>;
   readonly replay: Set<string>;
   readonly nonces: Map<string, string>;
@@ -429,6 +439,11 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 function nextId(state: FixtureState, prefix: string): string {
   state.sequence += 1;
   return `${prefix}.${state.sequence.toString().padStart(6, "0")}`;
+}
+
+function nextUuid(state: FixtureState): string {
+  state.sequence += 1;
+  return `00000000-0000-4000-8000-${state.sequence.toString().padStart(12, "0")}`;
 }
 
 function currentTimestamp(state: FixtureState): string {
@@ -846,7 +861,14 @@ async function route(
       detail(response, 403, "Action not permitted");
       return;
     }
-    const callId = nextId(state, "call");
+    const callId = nextUuid(state);
+    state.actionCalls.set(callId, {
+      id: callId,
+      callerEmail: identity.email,
+      targetEmail: body.target_email,
+      actionType: action.name,
+      status: "pending",
+    });
     const messageId = queueMessage(
       state,
       body.target_email,
@@ -855,6 +877,44 @@ async function route(
       action.name,
     );
     safeJson(response, 200, { call_id: callId, message_id: messageId, status: "delivered" });
+    return;
+  }
+
+  if (request.method === "POST" && target.pathname === "/api/submit_action_result") {
+    if (
+      !exactKeys(body, ["call_id", "result", "status"]) ||
+      typeof body.call_id !== "string" ||
+      !isRecord(body.result) ||
+      (body.status !== "success" && body.status !== "error")
+    ) {
+      detail(response, 422, "Invalid action result");
+      return;
+    }
+    const call = state.actionCalls.get(body.call_id);
+    if (call === undefined || call.targetEmail !== identity.email) {
+      detail(response, 404, "Action call not found");
+      return;
+    }
+    if (call.status !== "pending") {
+      detail(response, 409, "Action call already completed");
+      return;
+    }
+    call.status = body.status === "success" ? "completed" : "failed";
+    call.result = body.result;
+    const messageId = queueMessage(
+      state,
+      call.callerEmail,
+      identity.email,
+      {
+        type: "action_response",
+        call_id: call.id,
+        action_type: call.actionType,
+        status: body.status,
+        result: body.result,
+      },
+      call.actionType,
+    );
+    safeJson(response, 200, { call_id: call.id, status: call.status, message_id: messageId });
     return;
   }
 
@@ -973,6 +1033,7 @@ export async function startFakeCentral(t?: TestContext): Promise<FakeCentral> {
     identities: new Map(),
     tokens: new Map(),
     permissions: new Map(),
+    actionCalls: new Map(),
     messages: new Map(),
     replay: new Set(),
     nonces: new Map(),

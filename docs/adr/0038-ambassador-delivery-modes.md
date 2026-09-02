@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-09-02
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Problem
 
@@ -17,8 +17,9 @@ through a provider-specific interface. That design no longer fits the product:
 - MCP is a request channel from an agent to the gateway, not a reverse channel
   that can wake the original chat later;
 - ACP v1 provides a common client-to-agent invocation protocol;
-- the current central REST service has permission and action messages but no
-  conversation, reply, completion, or outcome routes; and
+- the central REST service has permission messages, action calls, and
+  correlated action results but no general conversation, reply, or
+  outcome-lookup routes; and
 - maintaining separate connector products adds process, state, CLI, packaging,
   and documentation cost without adding a necessary trust boundary.
 
@@ -186,19 +187,24 @@ before prompt dispatch, a bounded retry is allowed. If prompt dispatch may have
 happened and the terminal result is lost, the outcome is uncertain and the
 message is not automatically submitted again.
 
-Provider output is not sent to central because the server has no general reply
-or action-result endpoint. An agent may use the existing Ambassador MCP tools
-for supported permission and action operations.
+For an `action_call`, the agent uses the Ambassador `submit_action_result` MCP
+tool before finishing. It supplies the received `call_id`, one structured
+result, and `success` or `error`. Central authorizes the original target,
+updates the call, and sends an `action_response` to the original caller.
+
+Ambassador does not turn free-form provider output into the result. It discards
+that output after bounded processing. The result operation is not a general
+chat reply and cannot be used without an action call.
 
 ### MCP catalog
 
 MCP remains the agent-to-Ambassador business tool channel. After enrollment,
 the target catalog keeps action listing, permission request and decision,
-action call, and permission listing.
+action call, action-result submission, and permission listing.
 
 Remove local "poll_messages" and "ack_message" after automatic delivery owns
-those operations. Do not add a reply or completion tool until central exposes a
-real contract for it.
+those operations. Do not present `submit_action_result` as a general reply or
+completion tool.
 
 ### Custody and restart behavior
 
@@ -235,7 +241,8 @@ output. A source or container contract probe does not replace a real
 authenticated prompt and MCP call.
 
 Live central qualification remains a separate controlled test for email,
-DPoP, REST schemas, permissions, consuming polls, and acknowledgement.
+DPoP, REST schemas, permissions, action results, consuming polls, and
+acknowledgement.
 
 ## Consequences
 
@@ -314,3 +321,7 @@ also approved isolated copies of existing provider configuration or disposable
 provider credentials for local qualification. This approval does not permit
 Ambassador to install adapters at runtime, copy credentials into its state, or
 relax exact version matching.
+
+On 2026-09-03, the user approved adopting central's deployed
+`submit_action_result` route and requested a live result round trip between a
+controlled requester and real Codex.

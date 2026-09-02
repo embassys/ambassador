@@ -10,7 +10,7 @@ import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
@@ -107,6 +107,12 @@ class ActionCall(StrictModel):
     payload: dict[str, Any]
 
 
+class ActionResult(StrictModel):
+    call_id: str
+    result: dict[str, Any]
+    status: Literal["success", "error"]
+
+
 class MessageAck(StrictModel):
     message_id: str
 
@@ -134,6 +140,16 @@ class Permission:
 
 
 @dataclass
+class ActionCallRecord:
+    id: str
+    caller_email: str
+    target_email: str
+    action_type: str
+    status: Literal["pending", "completed", "failed"] = "pending"
+    result: dict[str, Any] | None = None
+
+
+@dataclass
 class Message:
     id: str
     recipient_email: str
@@ -151,6 +167,7 @@ class FixtureState:
     identities: dict[str, Identity] = field(default_factory=dict)
     tokens: dict[str, str] = field(default_factory=dict)
     permissions: dict[str, Permission] = field(default_factory=dict)
+    action_calls: dict[str, ActionCallRecord] = field(default_factory=dict)
     messages: dict[str, Message] = field(default_factory=dict)
     replay: set[tuple[str, str]] = field(default_factory=set)
     nonces: dict[str, str] = field(default_factory=dict)
@@ -608,7 +625,13 @@ async def call_action(input: ActionCall, request: Request) -> dict[str, str]:
         or any(not isinstance(input.payload.get(name), str) for name in required)
     ):
         raise HTTPException(status_code=403, detail="Action not permitted")
-    call_id = state.next_id("call")
+    call_id = str(uuid4())
+    state.action_calls[call_id] = ActionCallRecord(
+        id=call_id,
+        caller_email=identity.email,
+        target_email=target_email,
+        action_type=input.action_type,
+    )
     message_id = queue_message(
         target_email,
         identity.email,
@@ -621,6 +644,35 @@ async def call_action(input: ActionCall, request: Request) -> dict[str, str]:
         input.action_type,
     )
     return {"call_id": call_id, "message_id": message_id, "status": "delivered"}
+
+
+@app.post("/api/submit_action_result")
+async def submit_action_result(input: ActionResult, request: Request) -> dict[str, str]:
+    identity = validate_dpop(request)
+    try:
+        call_id = str(UUID(input.call_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=404, detail="Action call not found") from None
+    action_call = state.action_calls.get(call_id)
+    if action_call is None or action_call.target_email != identity.email:
+        raise HTTPException(status_code=404, detail="Action call not found")
+    if action_call.status != "pending":
+        raise HTTPException(status_code=409, detail="Action call already completed")
+    action_call.status = "completed" if input.status == "success" else "failed"
+    action_call.result = input.result
+    message_id = queue_message(
+        action_call.caller_email,
+        identity.email,
+        {
+            "type": "action_response",
+            "call_id": action_call.id,
+            "action_type": action_call.action_type,
+            "status": input.status,
+            "result": input.result,
+        },
+        action_call.action_type,
+    )
+    return {"call_id": action_call.id, "status": action_call.status, "message_id": message_id}
 
 
 @app.get("/api/poll_messages")
