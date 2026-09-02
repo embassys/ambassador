@@ -1,140 +1,87 @@
 import assert from "node:assert/strict";
-import { createHash, createPublicKey, verify } from "node:crypto";
-import test from "node:test";
+import { createPublicKey, verify } from "node:crypto";
+import { test } from "node:test";
 
 import {
   createDpopProof,
-  DpopError,
-  DpopNonceCache,
+  dpopAccessTokenHash,
+  dpopJwkThumbprint,
   generateDpopKeyMaterial,
-  normalizeDpopTargetUri,
-  parseDpopNonce,
 } from "../src/dpop.js";
 
-function jwtPart(proof: string, index: number): Record<string, unknown> {
-  const segment = proof.split(".")[index];
-  assert.ok(segment !== undefined);
-  return JSON.parse(Buffer.from(segment, "base64url").toString("utf8")) as Record<string, unknown>;
+function segment(proof: string, index: number): Record<string, unknown> {
+  const value = proof.split(".")[index];
+  assert.ok(value !== undefined);
+  return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Record<string, unknown>;
 }
 
-test("creates an exact ES256 issuance proof from a fresh P-256 key", () => {
+test("I02-D01 proof binds exact full URL, method, token hash, and current key", () => {
   const key = generateDpopKeyMaterial();
+  const accessToken = "header.payload.signature";
   const proof = createDpopProof({
-    method: "POST",
-    targetUri: "HTTPS://Central.Example:443/api/./verify_email?ignored=true#fragment",
+    method: "GET",
+    targetUri: "https://mcp.embassys.ai/api/poll_messages?timeout=30",
     privateKey: key.privateKey,
     publicJwk: key.publicJwk,
-    nonce: "A".repeat(76),
-    now: () => 1_788_000_000,
-    uuid: () => "00000000-0000-4000-8000-000000000001",
+    accessToken,
+    now: () => 1_788_220_800,
+    uuid: () => "123e4567-e89b-42d3-a456-426614174000",
   });
-  const parts = proof.split(".");
-  assert.equal(parts.length, 3);
-  assert.deepEqual(jwtPart(proof, 0), {
-    typ: "dpop+jwt",
-    alg: "ES256",
-    jwk: key.publicJwk,
+  const header = segment(proof, 0);
+  const payload = segment(proof, 1);
+  assert.deepEqual(header, { typ: "dpop+jwt", alg: "ES256", jwk: key.publicJwk });
+  assert.deepEqual(payload, {
+    jti: "123e4567-e89b-42d3-a456-426614174000",
+    htm: "GET",
+    htu: "https://mcp.embassys.ai/api/poll_messages?timeout=30",
+    iat: 1_788_220_800,
+    ath: dpopAccessTokenHash(accessToken),
   });
-  assert.deepEqual(jwtPart(proof, 1), {
-    jti: "00000000-0000-4000-8000-000000000001",
-    htm: "POST",
-    htu: "https://central.example/api/verify_email",
-    iat: 1_788_000_000,
-    nonce: "A".repeat(76),
-  });
-  const encodedHeader = parts[0];
-  const encodedPayload = parts[1];
-  const encodedSignature = parts[2];
-  assert.ok(
-    encodedHeader !== undefined && encodedPayload !== undefined && encodedSignature !== undefined,
-  );
-  assert.ok(
+  const [headerSegment, payloadSegment, signatureSegment] = proof.split(".") as [
+    string,
+    string,
+    string,
+  ];
+  assert.equal(
     verify(
       "sha256",
-      Buffer.from(`${encodedHeader}.${encodedPayload}`, "ascii"),
+      Buffer.from(`${headerSegment}.${payloadSegment}`, "ascii"),
       { key: createPublicKey(key.privateKey), dsaEncoding: "ieee-p1363" },
-      Buffer.from(encodedSignature, "base64url"),
+      Buffer.from(signatureSegment, "base64url"),
     ),
+    true,
   );
 });
 
-test("rejects caller JWK extensions and emits only the derived public key", () => {
+test("I02-D02 each proof has a fresh identifier and query order is not normalized", () => {
   const key = generateDpopKeyMaterial();
-  const extensions: ReadonlyArray<Readonly<Record<string, unknown>>> = [
-    { d: "A".repeat(43) },
-    { kid: "caller-selected" },
-    { jku: "https://attacker.invalid/jwks" },
-    { x5u: "https://attacker.invalid/key" },
-  ];
-  for (const extension of extensions) {
-    assert.throws(
-      () =>
-        createDpopProof({
-          method: "POST",
-          targetUri: "https://central.example/api/verify_email",
-          privateKey: key.privateKey,
-          publicJwk: { ...key.publicJwk, ...extension } as typeof key.publicJwk,
-          now: () => 1_788_000_000,
-          uuid: () => "00000000-0000-4000-8000-000000000011",
-        }),
-      DpopError,
-    );
-  }
-});
-
-test("protected proofs bind the token hash and never reuse an injected proof identifier", () => {
-  const key = generateDpopKeyMaterial();
-  const token = "header.payload.signature";
   const first = createDpopProof({
     method: "GET",
-    targetUri: "https://central.example/api/v2/messages/receive?timeout=30&limit=100",
+    targetUri: "https://mcp.embassys.ai/api/poll_messages?timeout=30&marker=one",
     privateKey: key.privateKey,
     publicJwk: key.publicJwk,
-    accessToken: token,
-    now: () => 1_788_000_000,
-    uuid: () => "00000000-0000-4000-8000-000000000002",
+    accessToken: "header.payload.signature",
   });
   const second = createDpopProof({
     method: "GET",
-    targetUri: "https://central.example/api/v2/messages/receive?timeout=30&limit=100",
+    targetUri: "https://mcp.embassys.ai/api/poll_messages?marker=one&timeout=30",
     privateKey: key.privateKey,
     publicJwk: key.publicJwk,
-    accessToken: token,
-    now: () => 1_788_000_000,
-    uuid: () => "00000000-0000-4000-8000-000000000003",
+    accessToken: "header.payload.signature",
   });
-  assert.notEqual(first, second);
+  assert.notEqual(segment(first, 1).jti, segment(second, 1).jti);
   assert.equal(
-    jwtPart(first, 1).ath,
-    createHash("sha256").update(token, "ascii").digest("base64url"),
+    segment(first, 1).htu,
+    "https://mcp.embassys.ai/api/poll_messages?timeout=30&marker=one",
   );
-  assert.equal(jwtPart(first, 1).htu, "https://central.example/api/v2/messages/receive");
+  assert.equal(
+    segment(second, 1).htu,
+    "https://mcp.embassys.ai/api/poll_messages?marker=one&timeout=30",
+  );
 });
 
-test("normalizes the fixed RFC 3986 URI features used by DPoP", () => {
-  const vectors: ReadonlyArray<readonly [string, string]> = [
-    ["https://EXAMPLE.com:443", "https://example.com/"],
-    ["http://EXAMPLE.com:80/a/./b/../c", "http://example.com/a/c"],
-    ["https://example.com/%7euser/%2fkeep", "https://example.com/~user/%2Fkeep"],
-    ["https://example.com/a//b/", "https://example.com/a//b/"],
-    ["https://example.com/Case?x=1#part", "https://example.com/Case"],
-  ];
-  for (const [input, expected] of vectors) assert.equal(normalizeDpopTargetUri(input), expected);
-  assert.throws(() => normalizeDpopTargetUri("ftp://example.com/resource"), DpopError);
-  assert.throws(() => normalizeDpopTargetUri("https://user@example.com/path"), DpopError);
-});
-
-test("keeps at most one validated nonce in each fixed security domain", () => {
-  const cache = new DpopNonceCache();
-  assert.equal(cache.updateFromHeader("issuance", null), false);
-  cache.set("issuance", "A".repeat(76));
-  cache.set("api", "B".repeat(76));
-  cache.set("mcp", "C".repeat(76));
-  cache.set("api", "D".repeat(76));
-  assert.equal(cache.get("issuance"), "A".repeat(76));
-  assert.equal(cache.get("api"), "D".repeat(76));
-  assert.equal(cache.get("mcp"), "C".repeat(76));
-  assert.throws(() => parseDpopNonce("short"), DpopError);
-  cache.clear();
-  assert.equal(cache.get("issuance"), undefined);
+test("I02-D03 generated key thumbprint matches RFC 7638 canonical members", () => {
+  const key = generateDpopKeyMaterial();
+  assert.equal(dpopJwkThumbprint(key.publicJwk), key.thumbprint);
+  assert.deepEqual(Object.keys(key.publicJwk).sort(), ["crv", "kty", "x", "y"]);
 });

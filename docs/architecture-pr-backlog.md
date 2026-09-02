@@ -1,6 +1,6 @@
 # Architecture PR backlog
 
-Status: active PR sequence after ADR 0037
+Status: Phase 3A complete; R01 and C01 remain
 
 The immediate goal is a small gateway that works with the current Embassys
 REST server. Each PR is independently reviewable. Tests change before the
@@ -21,6 +21,8 @@ I05 -> C01 provider connector flow redesign -> provider requalification
 
 ## D00: documentation rebaseline
 
+State: complete
+
 Scope:
 
 - add ADR 0037;
@@ -35,6 +37,8 @@ authorization headers, DPoP claims, token lifetime, message behavior, and the
 absence of old-client support.
 
 ## I02: fixture and test replacement
+
+State: complete on 2026-09-02
 
 Primary ownership:
 
@@ -58,6 +62,8 @@ behavior and is necessary to run the new fixture.
 
 ## I03: enrollment, credential, and DPoP switch
 
+State: complete on 2026-09-02
+
 Primary ownership:
 
 - `src/central-enrollment.ts`
@@ -79,6 +85,8 @@ Required changes:
 The PR passes the I02 enrollment and security tests before merge.
 
 ## I04: protected tools and message switch
+
+State: complete on 2026-09-02
 
 Primary ownership:
 
@@ -102,6 +110,8 @@ identity, tool exposure, errors, and test support.
 
 ## I05: live E2E and package evidence
 
+State: complete on 2026-09-02
+
 Use two disposable Mailosaur addresses. Run the packed gateway against the
 live origin and prove:
 
@@ -118,11 +128,15 @@ gateway crash. It does not claim lease recovery.
 
 ## R01: development release review
 
+State: next; publication is not approved by this work
+
 Review source pin, live behavior, package contents, dependency audit, Linux and
 macOS evidence, docs, and the current server limitations. Publication requires
 separate user approval. No old package is kept as a supported fallback.
 
 ## C01: provider connector redesign
+
+State: ready for separate planning after Phase 3A
 
 Start only after I05. Decide how actual permission and action messages map to
 provider work and central completion. Update ADR 0030 and connector tests

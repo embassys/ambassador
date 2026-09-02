@@ -13,23 +13,8 @@ const TABLE_SQL = `
       length(message_id) BETWEEN 1 AND 128
       AND message_id NOT GLOB '*[^A-Za-z0-9._~-]*'
     ),
-    notification_ack_state TEXT NOT NULL CHECK (
-      notification_ack_state IN ('pending', 'in_flight', 'confirmed')
-    ),
-    notification_ack_attempt_count INTEGER NOT NULL CHECK (
-      notification_ack_attempt_count BETWEEN 0 AND ${MAX_SAFE_INTEGER}
-    ),
-    notification_ack_next_attempt_at_ms INTEGER CHECK (
-      notification_ack_next_attempt_at_ms BETWEEN 0 AND ${MAX_TIMESTAMP_MS}
-    ),
     wake_state TEXT NOT NULL CHECK (
-      wake_state IN (
-        'pending',
-        'in_flight',
-        'retry_wait',
-        'accepted_wait',
-        'content_acknowledged'
-      )
+      wake_state IN ('pending', 'in_flight', 'retry_wait', 'accepted_wait')
     ),
     wake_attempt_count INTEGER NOT NULL CHECK (
       wake_attempt_count BETWEEN 0 AND ${MAX_SAFE_INTEGER}
@@ -38,18 +23,6 @@ const TABLE_SQL = `
       wake_next_attempt_at_ms BETWEEN 0 AND ${MAX_TIMESTAMP_MS}
     ),
     wake_may_have_reached INTEGER NOT NULL CHECK (wake_may_have_reached IN (0, 1)),
-    CHECK (
-      (notification_ack_state = 'pending' AND notification_ack_next_attempt_at_ms IS NOT NULL)
-      OR (
-        notification_ack_state = 'in_flight'
-        AND notification_ack_attempt_count > 0
-        AND notification_ack_next_attempt_at_ms IS NULL
-      )
-      OR (
-        notification_ack_state = 'confirmed'
-        AND notification_ack_next_attempt_at_ms IS NULL
-      )
-    ),
     CHECK (
       (
         wake_state = 'pending'
@@ -63,28 +36,12 @@ const TABLE_SQL = `
         AND wake_next_attempt_at_ms IS NULL
       )
       OR (
-        wake_state = 'retry_wait'
+        wake_state IN ('retry_wait', 'accepted_wait')
         AND wake_attempt_count > 0
         AND wake_next_attempt_at_ms IS NOT NULL
-      )
-      OR (
-        wake_state = 'accepted_wait'
-        AND wake_attempt_count > 0
-        AND wake_next_attempt_at_ms IS NOT NULL
-        AND wake_may_have_reached = 1
-      )
-      OR (
-        wake_state = 'content_acknowledged'
-        AND wake_next_attempt_at_ms IS NULL
       )
     )
   ) STRICT
-`;
-
-const ACK_INDEX_SQL = `
-  CREATE INDEX notification_relay_ack_due_idx
-  ON notification_relay (notification_ack_next_attempt_at_ms, message_id)
-  WHERE notification_ack_state = 'pending'
 `;
 
 const WAKE_INDEX_SQL = `
@@ -93,59 +50,37 @@ const WAKE_INDEX_SQL = `
   WHERE wake_state IN ('pending', 'retry_wait', 'accepted_wait')
 `;
 
-export type NotificationAcknowledgementState = "pending" | "in_flight" | "confirmed";
-export type NotificationWakeState =
-  | "pending"
-  | "in_flight"
-  | "retry_wait"
-  | "accepted_wait"
-  | "content_acknowledged";
+export type NotificationWakeState = "pending" | "in_flight" | "retry_wait" | "accepted_wait";
 
 export interface NotificationRelayRecord {
-  messageId: string;
-  notificationAcknowledgementState: NotificationAcknowledgementState;
-  notificationAcknowledgementAttemptCount: number;
-  notificationAcknowledgementNextAttemptAtMs?: number;
-  wakeState: NotificationWakeState;
-  wakeAttemptCount: number;
-  wakeNextAttemptAtMs?: number;
-  wakeMayHaveReachedWebhook: boolean;
+  readonly messageId: string;
+  readonly wakeState: NotificationWakeState;
+  readonly wakeAttemptCount: number;
+  readonly wakeNextAttemptAtMs?: number;
+  readonly wakeMayHaveReachedWebhook: boolean;
 }
 
 export interface NotificationIngestResult {
-  inserted: number;
-  duplicates: number;
-}
-
-export interface NotificationAcknowledgementClaim {
-  messageId: string;
-  attemptCount: number;
+  readonly inserted: number;
+  readonly duplicates: number;
 }
 
 export interface NotificationWakeClaim {
-  messageId: string;
-  attemptCount: number;
-  mayHaveReachedWebhook: boolean;
-}
-
-export interface NotificationRecoveryResult {
-  notificationAcknowledgements: number;
-  wakes: number;
+  readonly messageId: string;
+  readonly attemptCount: number;
+  readonly mayHaveReachedWebhook: boolean;
 }
 
 interface NotificationRow {
-  message_id: string;
-  notification_ack_state: string;
-  notification_ack_attempt_count: bigint;
-  notification_ack_next_attempt_at_ms: bigint | null;
-  wake_state: string;
-  wake_attempt_count: bigint;
-  wake_next_attempt_at_ms: bigint | null;
-  wake_may_have_reached: bigint;
+  readonly message_id: string;
+  readonly wake_state: string;
+  readonly wake_attempt_count: bigint;
+  readonly wake_next_attempt_at_ms: bigint | null;
+  readonly wake_may_have_reached: bigint;
 }
 
 interface JournalResources {
-  database: Database.Database;
+  readonly database: Database.Database;
 }
 
 const journalResources = new WeakMap<object, JournalResources>();
@@ -155,7 +90,7 @@ export function validateNotificationId(value: unknown): string {
     typeof value !== "string" ||
     value.length < 1 ||
     value.length > 128 ||
-    !/^[A-Za-z0-9._~-]+$/.test(value)
+    !/^[A-Za-z0-9._~-]+$/u.test(value)
   ) {
     throw new TypeError("notification ID must use 1 to 128 URI-unreserved ASCII characters");
   }
@@ -181,92 +116,38 @@ function safeInteger(value: unknown, field: string): number {
   return value;
 }
 
-function inputTimestamp(value: number, field: string): number {
-  const timestamp = safeInteger(value, field);
-  if (timestamp > MAX_TIMESTAMP_MS) {
-    throw new RangeError(`${field} is outside the supported timestamp range`);
-  }
-  return timestamp;
-}
-
-function attemptCount(value: unknown, field: string): number {
-  return safeInteger(value, field);
-}
-
-function nextAttemptCount(current: unknown, field: string): number {
-  const count = attemptCount(current, field);
-  if (count === MAX_SAFE_INTEGER) throw new Error("notification attempt count is exhausted");
-  return count + 1;
-}
-
-function acknowledgementState(value: string): NotificationAcknowledgementState {
-  switch (value) {
-    case "pending":
-    case "in_flight":
-    case "confirmed":
-      return value;
-    default:
-      throw new Error("notification journal contains an invalid acknowledgement state");
-  }
+function timestamp(value: number, field: string): number {
+  const result = safeInteger(value, field);
+  if (result > MAX_TIMESTAMP_MS) throw new RangeError(`${field} is outside the timestamp range`);
+  return result;
 }
 
 function wakeState(value: string): NotificationWakeState {
-  switch (value) {
-    case "pending":
-    case "in_flight":
-    case "retry_wait":
-    case "accepted_wait":
-    case "content_acknowledged":
-      return value;
-    default:
-      throw new Error("notification journal contains an invalid wake state");
+  if (["pending", "in_flight", "retry_wait", "accepted_wait"].includes(value)) {
+    return value as NotificationWakeState;
   }
+  throw new Error("notification journal contains an invalid wake state");
 }
 
-function booleanInteger(value: unknown, field: string): boolean {
-  const integer = safeInteger(value, field);
-  if (integer !== 0 && integer !== 1) {
-    throw new Error(`notification journal ${field} is not a boolean integer`);
-  }
-  return integer === 1;
-}
-
-function optionalTimestamp(value: bigint | null, field: string): number | undefined {
-  return value === null ? undefined : inputTimestamp(safeInteger(value, field), field);
-}
-
-function recordFromRow(row: NotificationRow): NotificationRelayRecord {
-  const notificationAcknowledgementNextAttemptAtMs = optionalTimestamp(
-    row.notification_ack_next_attempt_at_ms,
-    "notification_ack_next_attempt_at_ms",
-  );
-  const wakeNextAttemptAtMs = optionalTimestamp(
-    row.wake_next_attempt_at_ms,
-    "wake_next_attempt_at_ms",
-  );
+function rowRecord(row: NotificationRow): NotificationRelayRecord {
   return {
     messageId: validateNotificationId(row.message_id),
-    notificationAcknowledgementState: acknowledgementState(row.notification_ack_state),
-    notificationAcknowledgementAttemptCount: attemptCount(
-      row.notification_ack_attempt_count,
-      "notification_ack_attempt_count",
-    ),
-    ...(notificationAcknowledgementNextAttemptAtMs === undefined
-      ? {}
-      : { notificationAcknowledgementNextAttemptAtMs }),
     wakeState: wakeState(row.wake_state),
-    wakeAttemptCount: attemptCount(row.wake_attempt_count, "wake_attempt_count"),
-    ...(wakeNextAttemptAtMs === undefined ? {} : { wakeNextAttemptAtMs }),
-    wakeMayHaveReachedWebhook: booleanInteger(row.wake_may_have_reached, "wake_may_have_reached"),
+    wakeAttemptCount: safeInteger(row.wake_attempt_count, "wake attempt count"),
+    ...(row.wake_next_attempt_at_ms === null
+      ? {}
+      : {
+          wakeNextAttemptAtMs: timestamp(
+            safeInteger(row.wake_next_attempt_at_ms, "wake next attempt"),
+            "wake next attempt",
+          ),
+        }),
+    wakeMayHaveReachedWebhook: safeInteger(row.wake_may_have_reached, "wake uncertainty") === 1,
   };
 }
 
-function invalidJournalArtifact(): Error {
-  return new Error("Notification journal path must be a private regular file");
-}
-
 function normalizedSql(value: string): string {
-  return value.replaceAll(/\s+/g, " ").trim().toLowerCase();
+  return value.replaceAll(/\s+/gu, " ").trim().toLowerCase();
 }
 
 function migrate(database: Database.Database): void {
@@ -276,87 +157,55 @@ function migrate(database: Database.Database): void {
         database.pragma("user_version", { simple: true }),
         "schema version",
       );
-      if (version > SCHEMA_VERSION) {
-        throw new Error("notification journal schema is newer than this gateway supports");
-      }
-
+      if (version > SCHEMA_VERSION) throw new Error("notification journal schema is too new");
       if (version === 0) {
         const row = database
-          .prepare<[], { count: bigint }>(`
-            SELECT count(*) AS count
-            FROM sqlite_schema
-            WHERE name NOT LIKE 'sqlite_%'
-          `)
+          .prepare<[], { count: bigint }>(
+            "SELECT count(*) AS count FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'",
+          )
           .get();
         if (row === undefined || safeInteger(row.count, "schema object count") !== 0) {
-          throw new Error("notification journal has an unversioned schema");
+          throw new Error("notification journal has an obsolete or unversioned schema");
         }
-        database.exec(`${TABLE_SQL}; ${ACK_INDEX_SQL}; ${WAKE_INDEX_SQL};`);
+        database.exec(`${TABLE_SQL}; ${WAKE_INDEX_SQL};`);
         database.pragma(`user_version = ${SCHEMA_VERSION}`);
       }
-
-      validateSchema(database);
+      const expected = new Map([
+        ["notification_relay", normalizedSql(TABLE_SQL)],
+        ["notification_relay_wake_due_idx", normalizedSql(WAKE_INDEX_SQL)],
+      ]);
+      const rows = database
+        .prepare<[], { name: string; sql: string | null }>(
+          "SELECT name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .all();
+      if (rows.length !== expected.size) throw new Error("notification journal schema is invalid");
+      for (const schema of rows) {
+        if (
+          schema.sql === null ||
+          expected.get(schema.name) === undefined ||
+          normalizedSql(schema.sql) !== expected.get(schema.name)
+        ) {
+          throw new Error("notification journal schema is invalid");
+        }
+      }
     })
     .immediate();
 }
 
-function validateSchema(database: Database.Database): void {
-  const expected = new Map([
-    ["notification_relay", normalizedSql(TABLE_SQL)],
-    ["notification_relay_ack_due_idx", normalizedSql(ACK_INDEX_SQL)],
-    ["notification_relay_wake_due_idx", normalizedSql(WAKE_INDEX_SQL)],
-  ]);
-  const rows = database
-    .prepare<[], { name: string; sql: string | null }>(`
-      SELECT name, sql
-      FROM sqlite_schema
-      WHERE name NOT LIKE 'sqlite_%'
-      ORDER BY name
-    `)
-    .all();
-  if (rows.length !== expected.size) throw new Error("notification journal schema is invalid");
-  for (const row of rows) {
-    const expectedSql = expected.get(row.name);
-    if (row.sql === null || expectedSql === undefined || normalizedSql(row.sql) !== expectedSql) {
-      throw new Error("notification journal schema is invalid");
-    }
-  }
-
-  const table = database
-    .prepare<[string], { strict: bigint }>(
-      "SELECT strict FROM pragma_table_list WHERE name = ? AND type = 'table'",
-    )
-    .get("notification_relay");
-  if (table === undefined || safeInteger(table.strict, "strict table flag") !== 1) {
-    throw new Error("notification journal table is not strict");
-  }
-}
-
 function getRow(database: Database.Database, messageId: string): NotificationRow | undefined {
   return database
-    .prepare<[string], NotificationRow>(`
-      SELECT
-        message_id,
-        notification_ack_state,
-        notification_ack_attempt_count,
-        notification_ack_next_attempt_at_ms,
-        wake_state,
-        wake_attempt_count,
-        wake_next_attempt_at_ms,
-        wake_may_have_reached
-      FROM notification_relay
-      WHERE message_id = ?
-    `)
+    .prepare<[string], NotificationRow>(
+      `SELECT message_id, wake_state, wake_attempt_count, wake_next_attempt_at_ms,
+              wake_may_have_reached
+       FROM notification_relay WHERE message_id = ?`,
+    )
     .get(messageId);
-}
-
-function changes(value: unknown, operation: string): number {
-  return safeInteger(value, `${operation} changes`);
 }
 
 export class NotificationJournal {
   constructor(path: string) {
-    const artifact = preparePrivateSqliteArtifact(path, invalidJournalArtifact);
+    const artifact = preparePrivateSqliteArtifact(path, () => new Error("Invalid journal path"));
     let database: Database.Database | undefined;
     try {
       database = new Database(path, { timeout: BUSY_TIMEOUT_MS });
@@ -384,46 +233,36 @@ export class NotificationJournal {
     if (database.open) database.close();
   }
 
+  discardAll(): number {
+    const result = resourcesFor(this).database.prepare("DELETE FROM notification_relay").run();
+    return safeInteger(result.changes, "discard changes");
+  }
+
   ingest(messageIds: readonly string[], observedAtMs: number): NotificationIngestResult {
-    const { database } = resourcesFor(this);
-    const observedAt = inputTimestamp(observedAtMs, "observedAtMs");
-    const uniqueIds = new Set<string>();
+    const observedAt = timestamp(observedAtMs, "observedAtMs");
+    const unique = new Set<string>();
     let duplicates = 0;
     for (const value of messageIds) {
-      const messageId = validateNotificationId(value);
-      if (uniqueIds.has(messageId)) duplicates += 1;
-      else uniqueIds.add(messageId);
+      const id = validateNotificationId(value);
+      if (unique.has(id)) duplicates += 1;
+      else unique.add(id);
     }
-
+    const database = resourcesFor(this).database;
     return database
       .transaction(() => {
-        const exists = database.prepare<[string], { present: bigint }>(`
-          SELECT EXISTS (
-            SELECT 1 FROM notification_relay WHERE message_id = ?
-          ) AS present
-        `);
-        const insert = database.prepare(`
-          INSERT INTO notification_relay (
-            message_id,
-            notification_ack_state,
-            notification_ack_attempt_count,
-            notification_ack_next_attempt_at_ms,
-            wake_state,
-            wake_attempt_count,
-            wake_next_attempt_at_ms,
-            wake_may_have_reached
-          ) VALUES (?, 'pending', 0, ?, 'pending', 0, ?, 0)
-        `);
+        const insert = database.prepare(
+          `INSERT INTO notification_relay (
+             message_id, wake_state, wake_attempt_count,
+             wake_next_attempt_at_ms, wake_may_have_reached
+           ) VALUES (?, 'pending', 0, ?, 0)
+           ON CONFLICT(message_id) DO NOTHING`,
+        );
         let inserted = 0;
-        for (const messageId of uniqueIds) {
-          const row = exists.get(messageId);
-          if (row === undefined) throw new Error("failed to inspect notification journal");
-          if (safeInteger(row.present, "notification presence") === 1) {
-            duplicates += 1;
-            continue;
-          }
-          insert.run(messageId, observedAt, observedAt);
-          inserted += 1;
+        for (const id of unique) {
+          const result = insert.run(id, observedAt);
+          const changes = safeInteger(result.changes, "ingest changes");
+          inserted += changes;
+          if (changes === 0) duplicates += 1;
         }
         return { inserted, duplicates };
       })
@@ -431,141 +270,60 @@ export class NotificationJournal {
   }
 
   get(messageId: string): NotificationRelayRecord | undefined {
-    const id = validateNotificationId(messageId);
-    const row = getRow(resourcesFor(this).database, id);
-    return row === undefined ? undefined : recordFromRow(row);
+    const row = getRow(resourcesFor(this).database, validateNotificationId(messageId));
+    return row === undefined ? undefined : rowRecord(row);
   }
 
-  claimDueNotificationAcknowledgement(nowMs: number): NotificationAcknowledgementClaim | undefined {
-    const { database } = resourcesFor(this);
-    const now = inputTimestamp(nowMs, "nowMs");
-    return database
-      .transaction(() => {
-        const row = database
-          .prepare<
-            [number],
-            Pick<NotificationRow, "message_id" | "notification_ack_attempt_count">
-          >(`
-            SELECT message_id, notification_ack_attempt_count
-            FROM notification_relay
-            WHERE notification_ack_state = 'pending'
-              AND notification_ack_next_attempt_at_ms <= ?
-            ORDER BY notification_ack_next_attempt_at_ms, message_id
-            LIMIT 1
-          `)
-          .get(now);
-        if (row === undefined) return undefined;
-        const count = nextAttemptCount(
-          row.notification_ack_attempt_count,
-          "notification_ack_attempt_count",
-        );
-        const update = database
-          .prepare(`
-            UPDATE notification_relay
-            SET notification_ack_state = 'in_flight',
-                notification_ack_attempt_count = ?,
-                notification_ack_next_attempt_at_ms = NULL
-            WHERE message_id = ?
-              AND notification_ack_state = 'pending'
-              AND notification_ack_next_attempt_at_ms <= ?
-          `)
-          .run(count, row.message_id, now);
-        if (changes(update.changes, "notification acknowledgement claim") !== 1) return undefined;
-        return { messageId: row.message_id, attemptCount: count };
-      })
-      .immediate();
-  }
-
-  recordNotificationAcknowledgementSuccess(messageId: string): void {
-    const id = validateNotificationId(messageId);
-    const { database } = resourcesFor(this);
-    database
-      .transaction(() => {
-        const row = getRow(database, id);
-        if (row === undefined) throw new Error("cannot acknowledge an unknown notification");
-        if (row.notification_ack_state === "confirmed") return;
-        if (row.notification_ack_state !== "in_flight") {
-          throw new Error("notification acknowledgement is not in flight");
-        }
-        database
-          .prepare(`
-            UPDATE notification_relay
-            SET notification_ack_state = 'confirmed',
-                notification_ack_next_attempt_at_ms = NULL
-            WHERE message_id = ? AND notification_ack_state = 'in_flight'
-          `)
-          .run(id);
-      })
-      .immediate();
-  }
-
-  recordNotificationAcknowledgementRetry(messageId: string, nextAttemptAtMs: number): void {
-    const id = validateNotificationId(messageId);
-    const nextAttemptAt = inputTimestamp(nextAttemptAtMs, "nextAttemptAtMs");
-    const { database } = resourcesFor(this);
-    database
-      .transaction(() => {
-        const row = getRow(database, id);
-        if (row === undefined) throw new Error("cannot retry an unknown notification");
-        if (row.notification_ack_state === "confirmed") return;
-        if (row.notification_ack_state !== "in_flight") {
-          throw new Error("notification acknowledgement is not in flight");
-        }
-        database
-          .prepare(`
-            UPDATE notification_relay
-            SET notification_ack_state = 'pending',
-                notification_ack_next_attempt_at_ms = ?
-            WHERE message_id = ? AND notification_ack_state = 'in_flight'
-          `)
-          .run(nextAttemptAt, id);
-      })
-      .immediate();
+  count(): number {
+    const row = resourcesFor(this)
+      .database.prepare<[], { count: bigint }>("SELECT count(*) AS count FROM notification_relay")
+      .get();
+    if (row === undefined) throw new Error("notification journal count failed");
+    return safeInteger(row.count, "row count");
   }
 
   claimDueWake(nowMs: number): NotificationWakeClaim | undefined {
-    const { database } = resourcesFor(this);
-    const now = inputTimestamp(nowMs, "nowMs");
+    const now = timestamp(nowMs, "nowMs");
+    const database = resourcesFor(this).database;
     return database
       .transaction(() => {
         const row = database
           .prepare<
             [number],
             Pick<NotificationRow, "message_id" | "wake_attempt_count" | "wake_may_have_reached">
-          >(`
-            SELECT message_id, wake_attempt_count, wake_may_have_reached
-            FROM notification_relay
-            WHERE wake_state IN ('pending', 'retry_wait', 'accepted_wait')
-              AND wake_next_attempt_at_ms <= ?
-            ORDER BY wake_next_attempt_at_ms, message_id
-            LIMIT 1
-          `)
+          >(
+            `SELECT message_id, wake_attempt_count, wake_may_have_reached
+             FROM notification_relay
+             WHERE wake_state IN ('pending', 'retry_wait', 'accepted_wait')
+               AND wake_next_attempt_at_ms <= ?
+             ORDER BY wake_next_attempt_at_ms, message_id LIMIT 1`,
+          )
           .get(now);
         if (row === undefined) return undefined;
-        const count = nextAttemptCount(row.wake_attempt_count, "wake_attempt_count");
-        const update = database
-          .prepare(`
-            UPDATE notification_relay
-            SET wake_state = 'in_flight',
-                wake_attempt_count = ?,
-                wake_next_attempt_at_ms = NULL
-            WHERE message_id = ?
-              AND wake_state IN ('pending', 'retry_wait', 'accepted_wait')
-              AND wake_next_attempt_at_ms <= ?
-          `)
-          .run(count, row.message_id, now);
-        if (changes(update.changes, "wake claim") !== 1) return undefined;
+        const current = safeInteger(row.wake_attempt_count, "wake attempt count");
+        if (current === MAX_SAFE_INTEGER) throw new Error("wake attempt count exhausted");
+        const attemptCount = current + 1;
+        const result = database
+          .prepare(
+            `UPDATE notification_relay
+             SET wake_state = 'in_flight', wake_attempt_count = ?, wake_next_attempt_at_ms = NULL
+             WHERE message_id = ?
+               AND wake_state IN ('pending', 'retry_wait', 'accepted_wait')
+               AND wake_next_attempt_at_ms <= ?`,
+          )
+          .run(attemptCount, row.message_id, now);
+        if (safeInteger(result.changes, "wake claim changes") !== 1) return undefined;
         return {
           messageId: row.message_id,
-          attemptCount: count,
-          mayHaveReachedWebhook: booleanInteger(row.wake_may_have_reached, "wake_may_have_reached"),
+          attemptCount,
+          mayHaveReachedWebhook: safeInteger(row.wake_may_have_reached, "wake uncertainty") === 1,
         };
       })
       .immediate();
   }
 
   recordWakeAccepted(messageId: string, nextAttemptAtMs: number): void {
-    this.recordWakeOutcome(messageId, "accepted_wait", nextAttemptAtMs, true);
+    this.#recordWakeOutcome(messageId, "accepted_wait", nextAttemptAtMs, true);
   }
 
   recordWakeRetry(
@@ -573,190 +331,51 @@ export class NotificationJournal {
     nextAttemptAtMs: number,
     mayHaveReachedWebhook: boolean,
   ): void {
-    if (typeof mayHaveReachedWebhook !== "boolean") {
-      throw new TypeError("mayHaveReachedWebhook must be a boolean");
-    }
-    this.recordWakeOutcome(messageId, "retry_wait", nextAttemptAtMs, mayHaveReachedWebhook);
+    this.#recordWakeOutcome(messageId, "retry_wait", nextAttemptAtMs, mayHaveReachedWebhook);
   }
 
-  private recordWakeOutcome(
+  #recordWakeOutcome(
     messageId: string,
     state: "retry_wait" | "accepted_wait",
     nextAttemptAtMs: number,
     mayHaveReachedWebhook: boolean,
   ): void {
     const id = validateNotificationId(messageId);
-    const nextAttemptAt = inputTimestamp(nextAttemptAtMs, "nextAttemptAtMs");
-    const { database } = resourcesFor(this);
-    database
-      .transaction(() => {
-        const row = getRow(database, id);
-        // A successful ack may delete the row while its final webhook attempt is in flight.
-        if (row === undefined) return;
-        if (row.wake_state === "content_acknowledged") return;
-        if (row.wake_state !== "in_flight") throw new Error("notification wake is not in flight");
-        const previousMayHaveReached = booleanInteger(
-          row.wake_may_have_reached,
-          "wake_may_have_reached",
-        );
-        database
-          .prepare(`
-            UPDATE notification_relay
-            SET wake_state = ?,
-                wake_next_attempt_at_ms = ?,
-                wake_may_have_reached = ?
-            WHERE message_id = ? AND wake_state = 'in_flight'
-          `)
-          .run(state, nextAttemptAt, previousMayHaveReached || mayHaveReachedWebhook ? 1 : 0, id);
-      })
-      .immediate();
+    const next = timestamp(nextAttemptAtMs, "nextAttemptAtMs");
+    const database = resourcesFor(this).database;
+    const row = getRow(database, id);
+    if (row === undefined || row.wake_state !== "in_flight") {
+      throw new Error("notification wake is not in flight");
+    }
+    const result = database
+      .prepare(
+        `UPDATE notification_relay
+         SET wake_state = ?, wake_next_attempt_at_ms = ?,
+             wake_may_have_reached = CASE WHEN wake_may_have_reached = 1 OR ? = 1 THEN 1 ELSE 0 END
+         WHERE message_id = ? AND wake_state = 'in_flight'`,
+      )
+      .run(state, next, mayHaveReachedWebhook ? 1 : 0, id);
+    if (safeInteger(result.changes, "wake outcome changes") !== 1) {
+      throw new Error("notification wake outcome failed");
+    }
   }
 
-  /** Call only after the central ack_message operation has returned success. */
-  confirmContentAcknowledgement(messageId: string): boolean {
-    const id = validateNotificationId(messageId);
+  remove(messageId: string): boolean {
     const result = resourcesFor(this)
       .database.prepare("DELETE FROM notification_relay WHERE message_id = ?")
-      .run(id);
-    return changes(result.changes, "content acknowledgement deletion") === 1;
-  }
-
-  /** Remove wakes whose message bodies were consumed by central but lost with the prior process. */
-  discardUnrecoverable(): number {
-    return this.discardUnrecoverableMessageIds().length;
-  }
-
-  /**
-   * Clear stale wake state while returning only the opaque IDs that may still
-   * need an idempotent version 2 acknowledgement retry.
-   */
-  discardUnrecoverableMessageIds(): string[] {
-    const { database } = resourcesFor(this);
-    return database
-      .transaction(() => {
-        const rows = database
-          .prepare<[], { message_id: string }>(`
-            SELECT message_id
-            FROM notification_relay
-            ORDER BY message_id
-          `)
-          .all();
-        const result = database.prepare("DELETE FROM notification_relay").run();
-        if (changes(result.changes, "unrecoverable notification discard") !== rows.length) {
-          throw new Error("failed to clear unrecoverable notifications");
-        }
-        return rows.map((row) => validateNotificationId(row.message_id));
-      })
-      .immediate();
-  }
-
-  /**
-   * Keep only opaque IDs across a version 2 restart and suppress stale wakes
-   * until central either accepts an acknowledgement retry or redelivers the
-   * immutable message body.
-   */
-  prepareVersionTwoRecoveryIds(): string[] {
-    const { database } = resourcesFor(this);
-    return database
-      .transaction(() => {
-        const rows = database
-          .prepare<[], { message_id: string }>(`
-            SELECT message_id
-            FROM notification_relay
-            ORDER BY message_id
-          `)
-          .all();
-        database
-          .prepare(`
-            UPDATE notification_relay
-            SET wake_state = 'content_acknowledged',
-                wake_next_attempt_at_ms = NULL
-          `)
-          .run();
-        return rows.map((row) => validateNotificationId(row.message_id));
-      })
-      .immediate();
-  }
-
-  recoverInFlight(
-    nowMs: number,
-    nextWakeRetryAtMs: (attemptCount: number) => number,
-  ): NotificationRecoveryResult {
-    const { database } = resourcesFor(this);
-    const now = inputTimestamp(nowMs, "nowMs");
-    return database
-      .transaction(() => {
-        const acknowledgementUpdate = database
-          .prepare(`
-            UPDATE notification_relay
-            SET notification_ack_state = 'pending',
-                notification_ack_next_attempt_at_ms = ?
-            WHERE notification_ack_state = 'in_flight'
-          `)
-          .run(now);
-        const wakeRows = database
-          .prepare<[], Pick<NotificationRow, "message_id" | "wake_attempt_count">>(`
-            SELECT message_id, wake_attempt_count
-            FROM notification_relay
-            WHERE wake_state = 'in_flight'
-            ORDER BY message_id
-          `)
-          .all();
-        const updateWake = database.prepare(`
-          UPDATE notification_relay
-          SET wake_state = 'retry_wait',
-              wake_next_attempt_at_ms = ?,
-              wake_may_have_reached = 1
-          WHERE message_id = ? AND wake_state = 'in_flight'
-        `);
-        for (const row of wakeRows) {
-          const count = attemptCount(row.wake_attempt_count, "wake_attempt_count");
-          const nextAttemptAt = inputTimestamp(nextWakeRetryAtMs(count), "nextWakeRetryAtMs");
-          const update = updateWake.run(nextAttemptAt, row.message_id);
-          if (changes(update.changes, "wake recovery") !== 1) {
-            throw new Error("failed to recover an in-flight wake");
-          }
-        }
-        return {
-          notificationAcknowledgements: changes(
-            acknowledgementUpdate.changes,
-            "notification acknowledgement recovery",
-          ),
-          wakes: wakeRows.length,
-        };
-      })
-      .immediate();
-  }
-
-  nextNotificationAcknowledgementAtMs(): number | null {
-    const row = resourcesFor(this)
-      .database.prepare<[], { next_attempt_at_ms: bigint | null }>(`
-        SELECT MIN(notification_ack_next_attempt_at_ms) AS next_attempt_at_ms
-        FROM notification_relay
-        WHERE notification_ack_state = 'pending'
-      `)
-      .get();
-    return row?.next_attempt_at_ms === null || row?.next_attempt_at_ms === undefined
-      ? null
-      : inputTimestamp(
-          safeInteger(row.next_attempt_at_ms, "notification_ack_next_attempt_at_ms"),
-          "notification_ack_next_attempt_at_ms",
-        );
+      .run(validateNotificationId(messageId));
+    return safeInteger(result.changes, "remove changes") === 1;
   }
 
   nextWakeAtMs(): number | null {
     const row = resourcesFor(this)
-      .database.prepare<[], { next_attempt_at_ms: bigint | null }>(`
-        SELECT MIN(wake_next_attempt_at_ms) AS next_attempt_at_ms
-        FROM notification_relay
-        WHERE wake_state IN ('pending', 'retry_wait', 'accepted_wait')
-      `)
+      .database.prepare<[], { value: bigint | null }>(
+        `SELECT min(wake_next_attempt_at_ms) AS value
+         FROM notification_relay
+         WHERE wake_state IN ('pending', 'retry_wait', 'accepted_wait')`,
+      )
       .get();
-    return row?.next_attempt_at_ms === null || row?.next_attempt_at_ms === undefined
-      ? null
-      : inputTimestamp(
-          safeInteger(row.next_attempt_at_ms, "wake_next_attempt_at_ms"),
-          "wake_next_attempt_at_ms",
-        );
+    if (row === undefined || row.value === null) return null;
+    return timestamp(safeInteger(row.value, "next wake"), "next wake");
   }
 }

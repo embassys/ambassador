@@ -1,0 +1,508 @@
+import {
+  assertNoCentralCredentialFields,
+  CentralJsonError,
+  isCentralRecord,
+  readCentralJson,
+} from "./central-json.js";
+import {
+  type CentralProtectedTransport,
+  CentralProtectedTransportError,
+} from "./central-protected-transport.js";
+import type { CentralToolDefinition } from "./mcp-contract.js";
+import { validateNotificationId } from "./notification-journal.js";
+
+const MAX_NORMALIZED_RESULT_BYTES = 512 * 1024;
+const MAX_MESSAGES = 256;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
+const FORBIDDEN_ARGUMENT_NAMES = new Set([
+  "access_token",
+  "authorization",
+  "dpop",
+  "jwt",
+  "private_key",
+  "proof",
+  "token",
+]);
+
+export type CentralRestErrorCode =
+  | "central_authentication_failed"
+  | "central_request_failed"
+  | "central_request_rejected"
+  | "central_response_invalid"
+  | "invalid_arguments";
+
+export class CentralRestError extends Error {
+  constructor(readonly code: CentralRestErrorCode) {
+    super("Central REST operation failed");
+    this.name = "CentralRestError";
+  }
+}
+
+export interface CentralActionType {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly input_schema: Record<string, unknown>;
+}
+
+export interface CentralMessage {
+  readonly id?: string;
+  readonly sender_agent_id: string;
+  readonly action_type_id?: string | null;
+  readonly payload: Record<string, unknown>;
+  readonly created_at: string;
+}
+
+export interface CentralPermission {
+  readonly id: string;
+  readonly grantor_email: string;
+  readonly grantee_email: string;
+  readonly action_type: string;
+  readonly status: "pending" | "granted" | "denied";
+  readonly scope?: Record<string, unknown> | null;
+  readonly created_at?: string | null;
+  readonly decided_at?: string | null;
+  readonly expires_at?: string | null;
+}
+
+export interface CentralRestClientOptions {
+  readonly centralOrigin: string;
+  readonly transport: CentralProtectedTransport;
+}
+
+function objectSchema(
+  properties: Record<string, unknown>,
+  required: readonly string[] = [],
+): Record<string, unknown> {
+  return { type: "object", properties, required: [...required], additionalProperties: false };
+}
+
+export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
+  {
+    name: "list_action_types",
+    description: "List the deployed action names and input schemas.",
+    inputSchema: objectSchema({}),
+  },
+  {
+    name: "request_permission",
+    description: "Request permission to call an action on another registered identity.",
+    inputSchema: objectSchema(
+      {
+        target_email: { type: "string", minLength: 3, maxLength: 254 },
+        action_type: { type: "string", minLength: 1, maxLength: 128 },
+        scope: { type: "object" },
+      },
+      ["target_email", "action_type"],
+    ),
+  },
+  {
+    name: "respond_to_permission",
+    description: "Grant or deny one pending permission request.",
+    inputSchema: objectSchema(
+      {
+        permission_id: { type: "string", minLength: 1, maxLength: 128 },
+        decision: { type: "string", enum: ["granted", "denied"] },
+      },
+      ["permission_id", "decision"],
+    ),
+  },
+  {
+    name: "call_action",
+    description: "Deliver an allowed action request to another registered identity.",
+    inputSchema: objectSchema(
+      {
+        target_email: { type: "string", minLength: 3, maxLength: 254 },
+        action_type: { type: "string", minLength: 1, maxLength: 128 },
+        payload: { type: "object" },
+      },
+      ["target_email", "action_type", "payload"],
+    ),
+  },
+  {
+    name: "poll_messages",
+    description: "Read messages currently held in gateway memory.",
+    inputSchema: objectSchema({ timeout: { type: "integer", minimum: 0, maximum: 60 } }),
+  },
+  {
+    name: "get_my_permissions",
+    description: "List permissions involving the enrolled identity.",
+    inputSchema: objectSchema({}),
+  },
+  {
+    name: "ack_message",
+    description: "Acknowledge one delivered message after processing it.",
+    inputSchema: objectSchema({ message_id: { type: "string", minLength: 1, maxLength: 128 } }, [
+      "message_id",
+    ]),
+  },
+] as const;
+
+function failure(code: CentralRestErrorCode): CentralRestError {
+  return new CentralRestError(code);
+}
+
+function origin(value: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw failure("invalid_arguments");
+  }
+  const loopback = ["127.0.0.1", "::1", "localhost"].includes(parsed.hostname);
+  if (
+    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== ""
+  ) {
+    throw failure("invalid_arguments");
+  }
+  return parsed;
+}
+
+function exactKeys(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): value is Record<string, unknown> {
+  if (!isCentralRecord(value)) return false;
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((name) => Object.hasOwn(value, name)) &&
+    Object.keys(value).every((name) => allowed.has(name))
+  );
+}
+
+function noForbiddenArguments(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) noForbiddenArguments(item);
+    return;
+  }
+  if (!isCentralRecord(value)) return;
+  for (const [name, nested] of Object.entries(value)) {
+    if (FORBIDDEN_ARGUMENT_NAMES.has(name.toLowerCase())) throw failure("invalid_arguments");
+    noForbiddenArguments(nested);
+  }
+}
+
+function requestEmail(value: unknown): string {
+  if (typeof value !== "string" || value.length > 254 || !EMAIL.test(value)) {
+    throw failure("invalid_arguments");
+  }
+  return value;
+}
+
+function requestName(value: unknown): string {
+  if (typeof value !== "string" || !NAME.test(value)) throw failure("invalid_arguments");
+  return value;
+}
+
+function requestObject(value: unknown): Record<string, unknown> {
+  if (!isCentralRecord(value)) throw failure("invalid_arguments");
+  noForbiddenArguments(value);
+  return value;
+}
+
+function safeResultSize(value: unknown): void {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw failure("central_response_invalid");
+  }
+  if (Buffer.byteLength(serialized, "utf8") > MAX_NORMALIZED_RESULT_BYTES) {
+    throw failure("central_response_invalid");
+  }
+}
+
+function actionType(value: unknown): CentralActionType {
+  if (
+    !exactKeys(value, ["id", "name", "description", "input_schema"]) ||
+    typeof value.id !== "string" ||
+    !NAME.test(value.id) ||
+    typeof value.name !== "string" ||
+    !NAME.test(value.name) ||
+    typeof value.description !== "string" ||
+    value.description.length > 1_024 ||
+    !isCentralRecord(value.input_schema) ||
+    value.input_schema.type !== "object"
+  ) {
+    throw failure("central_response_invalid");
+  }
+  assertNoCentralCredentialFields(value.input_schema);
+  return {
+    id: value.id,
+    name: value.name,
+    description: value.description,
+    input_schema: value.input_schema,
+  };
+}
+
+function message(value: unknown): CentralMessage {
+  if (
+    !exactKeys(value, ["sender_agent_id", "payload", "created_at"], ["id", "action_type_id"]) ||
+    (value.id !== undefined && (typeof value.id !== "string" || !NAME.test(value.id))) ||
+    typeof value.sender_agent_id !== "string" ||
+    value.sender_agent_id.length > 256 ||
+    (value.action_type_id !== undefined &&
+      value.action_type_id !== null &&
+      (typeof value.action_type_id !== "string" || value.action_type_id.length > 256)) ||
+    !isCentralRecord(value.payload) ||
+    typeof value.created_at !== "string" ||
+    value.created_at.length > 128
+  ) {
+    throw failure("central_response_invalid");
+  }
+  assertNoCentralCredentialFields(value.payload);
+  return {
+    ...(value.id === undefined ? {} : { id: value.id }),
+    sender_agent_id: value.sender_agent_id,
+    ...(value.action_type_id === undefined ? {} : { action_type_id: value.action_type_id }),
+    payload: value.payload,
+    created_at: value.created_at,
+  };
+}
+
+function permission(value: unknown): CentralPermission {
+  if (
+    !exactKeys(
+      value,
+      ["id", "grantor_email", "grantee_email", "action_type", "status"],
+      ["scope", "created_at", "decided_at", "expires_at"],
+    ) ||
+    typeof value.id !== "string" ||
+    !NAME.test(value.id) ||
+    typeof value.grantor_email !== "string" ||
+    !EMAIL.test(value.grantor_email) ||
+    typeof value.grantee_email !== "string" ||
+    !EMAIL.test(value.grantee_email) ||
+    typeof value.action_type !== "string" ||
+    !NAME.test(value.action_type) ||
+    !["pending", "granted", "denied"].includes(value.status as string) ||
+    (value.scope !== undefined && value.scope !== null && !isCentralRecord(value.scope)) ||
+    !["created_at", "decided_at", "expires_at"].every(
+      (name) =>
+        value[name] === undefined || value[name] === null || typeof value[name] === "string",
+    )
+  ) {
+    throw failure("central_response_invalid");
+  }
+  assertNoCentralCredentialFields(value);
+  return value as unknown as CentralPermission;
+}
+
+async function cancel(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
+export class CentralRestClient {
+  readonly #origin: URL;
+  readonly #transport: CentralProtectedTransport;
+
+  constructor(options: CentralRestClientOptions) {
+    this.#origin = origin(options.centralOrigin);
+    this.#transport = options.transport;
+  }
+
+  async listActionTypes(signal?: AbortSignal): Promise<CentralActionType[]> {
+    const result = await this.#request("GET", "/api/list_action_types", undefined, signal);
+    if (!Array.isArray(result) || result.length > 128) throw failure("central_response_invalid");
+    const actions = result.map(actionType);
+    if (new Set(actions.map((action) => action.name)).size !== actions.length) {
+      throw failure("central_response_invalid");
+    }
+    safeResultSize(actions);
+    return actions;
+  }
+
+  async requestPermission(
+    arguments_: unknown,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (!exactKeys(arguments_, ["target_email", "action_type"], ["scope"])) {
+      throw failure("invalid_arguments");
+    }
+    const body = {
+      target_email: requestEmail(arguments_.target_email),
+      action_type: requestName(arguments_.action_type),
+      ...(arguments_.scope === undefined ? {} : { scope: requestObject(arguments_.scope) }),
+    };
+    const result = await this.#request("POST", "/api/request_permission", body, signal);
+    if (
+      !exactKeys(result, ["permission_id", "status", "message"]) ||
+      typeof result.permission_id !== "string" ||
+      !NAME.test(result.permission_id) ||
+      !["pending", "granted", "denied"].includes(result.status as string) ||
+      typeof result.message !== "string" ||
+      result.message.length > 512
+    ) {
+      throw failure("central_response_invalid");
+    }
+    return result;
+  }
+
+  async respondToPermission(
+    arguments_: unknown,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (
+      !exactKeys(arguments_, ["permission_id", "decision"]) ||
+      (arguments_.decision !== "granted" && arguments_.decision !== "denied")
+    ) {
+      throw failure("invalid_arguments");
+    }
+    const permissionId = requestName(arguments_.permission_id);
+    const result = await this.#request(
+      "POST",
+      "/api/respond_to_permission",
+      { permission_id: permissionId, decision: arguments_.decision },
+      signal,
+    );
+    if (
+      !exactKeys(result, ["permission_id", "status", "decided_at"]) ||
+      result.permission_id !== permissionId ||
+      result.status !== arguments_.decision ||
+      typeof result.decided_at !== "string" ||
+      result.decided_at.length > 128
+    ) {
+      throw failure("central_response_invalid");
+    }
+    return result;
+  }
+
+  async callAction(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!exactKeys(arguments_, ["target_email", "action_type", "payload"])) {
+      throw failure("invalid_arguments");
+    }
+    const result = await this.#request(
+      "POST",
+      "/api/call_action",
+      {
+        target_email: requestEmail(arguments_.target_email),
+        action_type: requestName(arguments_.action_type),
+        payload: requestObject(arguments_.payload),
+      },
+      signal,
+    );
+    if (
+      !exactKeys(result, ["call_id", "message_id", "status"]) ||
+      typeof result.call_id !== "string" ||
+      !NAME.test(result.call_id) ||
+      typeof result.message_id !== "string" ||
+      !NAME.test(result.message_id) ||
+      result.status !== "delivered"
+    ) {
+      throw failure("central_response_invalid");
+    }
+    return result;
+  }
+
+  async pollRemoteMessages(
+    timeout: number,
+    signal?: AbortSignal,
+  ): Promise<{ readonly messages: CentralMessage[] }> {
+    if (!Number.isInteger(timeout) || timeout < 0 || timeout > 60) {
+      throw failure("invalid_arguments");
+    }
+    const result = await this.#request(
+      "GET",
+      `/api/poll_messages?timeout=${timeout}`,
+      undefined,
+      signal,
+    );
+    if (!exactKeys(result, ["messages"]) || !Array.isArray(result.messages)) {
+      throw failure("central_response_invalid");
+    }
+    if (result.messages.length > MAX_MESSAGES) throw failure("central_response_invalid");
+    const messages = result.messages.map(message);
+    const byId = new Map<string, string>();
+    for (const value of messages) {
+      if (value.id === undefined) continue;
+      const serialized = JSON.stringify(value);
+      const existing = byId.get(value.id);
+      if (existing !== undefined && existing !== serialized)
+        throw failure("central_response_invalid");
+      byId.set(value.id, serialized);
+    }
+    safeResultSize({ messages });
+    return { messages };
+  }
+
+  async getMyPermissions(signal?: AbortSignal): Promise<CentralPermission[]> {
+    const result = await this.#request("GET", "/api/get_my_permissions", undefined, signal);
+    if (!Array.isArray(result) || result.length > 512) throw failure("central_response_invalid");
+    const permissions = result.map(permission);
+    safeResultSize(permissions);
+    return permissions;
+  }
+
+  async ackMessage(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!exactKeys(arguments_, ["message_id"])) throw failure("invalid_arguments");
+    let messageId: string;
+    try {
+      messageId = validateNotificationId(arguments_.message_id);
+    } catch {
+      throw failure("invalid_arguments");
+    }
+    const result = await this.#request(
+      "POST",
+      "/api/ack_message",
+      { message_id: messageId },
+      signal,
+    );
+    if (
+      !exactKeys(result, ["message_id", "status"]) ||
+      result.message_id !== messageId ||
+      result.status !== "acked"
+    ) {
+      throw failure("central_response_invalid");
+    }
+    return { message_id: messageId, status: "acked" };
+  }
+
+  async #request(
+    method: "GET" | "POST",
+    path: string,
+    body: Record<string, unknown> | undefined,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.#transport.fetch(new URL(path, this.#origin), {
+        method,
+        ...(body === undefined
+          ? {}
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+        ...(signal === undefined ? {} : { signal }),
+      });
+    } catch (error) {
+      if (error instanceof CentralProtectedTransportError) {
+        if (error.code === "central_protected_authentication_failed") {
+          throw failure("central_authentication_failed");
+        }
+        if (error.code === "central_protected_request_failed") {
+          throw failure("central_request_failed");
+        }
+      }
+      throw failure("central_request_failed");
+    }
+    if (!response.ok) {
+      await cancel(response);
+      throw failure(
+        response.status === 401 ? "central_authentication_failed" : "central_request_rejected",
+      );
+    }
+    try {
+      const result = await readCentralJson(response);
+      assertNoCentralCredentialFields(result);
+      return result;
+    } catch (error) {
+      if (error instanceof CentralJsonError) throw failure("central_response_invalid");
+      if (error instanceof CentralRestError) throw error;
+      throw failure("central_response_invalid");
+    }
+  }
+}

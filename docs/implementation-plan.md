@@ -1,6 +1,6 @@
 # Implementation plan
 
-Status: active plan for the current central REST integration
+Status: Phase 3A complete in the 2026-09-02 release candidate
 
 ## Rules
 
@@ -41,7 +41,7 @@ OpenAPI. The live catalog returned six actions. `get_email` and
 
 ### I02: replace central fixtures and tests
 
-State: next
+State: complete on 2026-09-02
 
 Work:
 
@@ -62,15 +62,15 @@ Work:
 
 Completion evidence:
 
-- the replacement fixture self-tests pass;
-- new gateway contract tests fail only because production code still uses the
-  removed contracts;
-- no test expects central MCP or `/api/v2`; and
-- artifact checks find no credential or content.
+- the independent Python fixture passes all five self-tests;
+- the current Node fixture and gateway contract tests pass;
+- the old T03/T04, central MCP, versioned, reissue, conversation, and provider
+  assumptions were removed from the active gateway suite and CI; and
+- the packed gateway passes against the independent Docker fixture.
 
 ### I03: simplify enrollment, credentials, and DPoP transport
 
-State: blocked on I02
+State: complete on 2026-09-02
 
 Work:
 
@@ -87,11 +87,13 @@ Work:
   and verbose-transcript code.
 
 Completion evidence: the I02 enrollment, credential, DPoP, corruption,
-restart, and artifact tests pass.
+restart, and artifact tests pass. The release candidate also requests identity
+content encoding so the live CDN does not return a transparently decoded body
+with a retained `Content-Encoding` header.
 
 ### I04: replace protected tools and message lifecycle
 
-State: blocked on I03
+State: complete on 2026-09-02
 
 Work:
 
@@ -105,11 +107,13 @@ Work:
 - make restart-loss behavior explicit in errors and tests.
 
 Completion evidence: all replacement integration, local MCP, relay, process,
-package, and artifact tests pass with no old path in the built files.
+package, and artifact tests pass with no old path in the built files. The
+current suite records the unavoidable loss when central has consumed a body
+and the gateway restarts before acknowledgement.
 
 ### I05: live development E2E
 
-State: blocked on I04
+State: complete on 2026-09-02
 
 Use two disposable Mailosaur identities and the deployed REST server. Keep all
 addresses, codes, tokens, proofs, messages, and action payloads in memory and
@@ -134,6 +138,14 @@ Prove:
 The E2E records the consuming-poll restart limitation instead of pretending
 to prove redelivery.
 
+The packed live run completed every step above with two disposable identities.
+It observed all nine REST routes used by the flow, no central MCP request, no
+initial nonce challenge, and no forbidden marker in the package, temporary
+state, or captured process output. Captured Mailosaur messages and temporary
+state were deleted. The live `get_my_permissions` call returned a server error,
+matching the pinned source's response-construction mismatch; the gateway keeps
+the declared response validator and fails closed.
+
 ## Follow-on provider work
 
 Provider connectors do not block I02 through I05. After the gateway's live
@@ -153,17 +165,16 @@ shows a direct conflict. Gemini still has no approved interface.
 
 | Gate | Required evidence |
 | --- | --- |
-| A | I02 replacement tests and fixtures reviewed |
-| B | I03 and I04 code passes local, Docker, package, and artifact suites |
-| C | I05 passes against the pinned live REST service and fixed action catalog |
-| D | Documentation, package contents, dependency audit, and supported platforms match the implementation |
+| A | Complete: I02 replacement tests and fixtures reviewed |
+| B | Complete: I03 and I04 pass local, Docker, package, and artifact suites |
+| C | Complete: I05 passed against the pinned live REST service and fixed action catalog |
+| D | Complete for the release candidate: documentation, package contents, audits, and platform CI expectations match |
 | E | User explicitly approves publication |
 
 No old package or old fixture result can substitute for these gates.
 
 ## Current blockers
 
-- Existing central tests and production modules still implement the removed
-  contracts and must be replaced in the order above.
-- `get_my_permissions` still needs a protected live check because the source
-  constructs fields that differ from its response model.
+Phase 3A has no gateway implementation blocker. Publishing remains unapproved,
+and the deployed `get_my_permissions` server error remains a central follow-up.
+Provider connector redesign is separate follow-on work.

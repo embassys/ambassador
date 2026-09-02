@@ -1,6 +1,6 @@
 # A2A gateway
 
-Status: current development architecture as of 2026-09-01
+Status: current development architecture as of 2026-09-02
 
 ## Product
 
@@ -164,8 +164,9 @@ persistence is still forbidden.
 - `list_action_types` and generated OpenAPI now work. The catalog contains six
   actions, including `get_email` and `get_phone_number`, both requiring a
   string `reason`.
-- `get_my_permissions` has a response-construction mismatch in source and
-  still needs a protected live check.
+- `get_my_permissions` has a response-construction mismatch in source. The
+  protected live check returned a server error, so the gateway keeps the
+  declared response validator and fails closed.
 - The server has no token refresh or reissue endpoint. An expired 30-day
   credential requires a fresh development enrollment after local state is
   intentionally cleared.

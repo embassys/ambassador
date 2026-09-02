@@ -7,6 +7,7 @@
       "!.test-dist",
       "!.build",
       "!.stage",
+      "!.pnpm-store",
       "!node_modules",
       "!test/fixtures/codex-app-server/0.149.0/codex_app_server_protocol.v2.schemas.json"
     ]

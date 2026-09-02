@@ -32,7 +32,7 @@
     "connectors:check": "node scripts/connectors-check.mjs",
     "format": "biome check --write .",
     "lint": "biome check .",
-    "prepack": "pnpm run build",
+    "prepack": "pnpm run clean && pnpm run build",
     "test": "pnpm run test:build && node scripts/run-tests.mjs",
     "test:build": "node scripts/clean.mjs .test-dist && tsc -p tsconfig.test.json",
     "test:coverage": "pnpm run test:build && node scripts/run-tests.mjs --coverage",
