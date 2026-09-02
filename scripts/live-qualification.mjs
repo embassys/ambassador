@@ -5,14 +5,19 @@ import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
+const SOURCE_REVISION = "c226d7c4318996c67e8caaad36b978a2e61aa2cc";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
-const CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
+const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
+const CODEX_CONFIRMATION =
+  "run-live-qualification-with-real-codex-and-two-disposable-mailosaur-identities";
+const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "0.0.0" };
+const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "0.152.1" };
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
 const execFileAsync = promisify(execFile);
@@ -232,16 +237,17 @@ class QualificationMcpClient {
   #nextId = 1;
   #sessionId;
 
-  constructor(endpoint, token) {
+  constructor(endpoint, token, clientInfo) {
     this.endpoint = endpoint;
     this.authorization = `Bearer ${token}`;
+    this.clientInfo = clientInfo;
   }
 
   async initialize() {
     await this.#request("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
+      clientInfo: this.clientInfo,
     });
     await this.#post({ jsonrpc: "2.0", method: "notifications/initialized" }, false);
   }
@@ -406,7 +412,25 @@ async function waitForDelivered(messages, predicate, phase) {
   throw safeFailure(phase);
 }
 
-async function startGateway(packed, stateRoot, centralFetch, token, deliveryTargetFactory) {
+async function waitForObservation(predicate, phase) {
+  const deadline = Date.now() + WEBHOOK_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw safeFailure(phase);
+}
+
+async function startGateway(
+  packed,
+  stateRoot,
+  centralFetch,
+  token,
+  deliveryTargetFactory,
+  clientInfo,
+  extraEnvironment = {},
+  workingDirectory = repositoryRoot,
+) {
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
@@ -428,10 +452,11 @@ async function startGateway(packed, stateRoot, centralFetch, token, deliveryTarg
       },
     },
     env: {
+      ...extraEnvironment,
       LIVE_QUALIFICATION_LOCAL_TOKEN: token,
       LIVE_QUALIFICATION_WEBHOOK_SECRET: token,
     },
-    cwd: repositoryRoot,
+    cwd: workingDirectory,
     signal: controller.signal,
     testOverrides: {
       centralOrigin: LIVE_ORIGIN,
@@ -442,7 +467,7 @@ async function startGateway(packed, stateRoot, centralFetch, token, deliveryTarg
     },
   });
   const endpoint = await waitForEndpoint(() => stdout);
-  const client = new QualificationMcpClient(endpoint, token);
+  const client = new QualificationMcpClient(endpoint, token, clientInfo);
   await client.initialize();
   return {
     client,
@@ -639,13 +664,44 @@ function schemaDigest(value) {
 }
 
 async function main() {
-  if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== CONFIRMATION) {
+  const directAgent = process.env.AMBASSADOR_LIVE_DIRECT_AGENT ?? "mock";
+  assert(["mock", "codex"].includes(directAgent), "direct_agent");
+  const realCodex = directAgent === "codex";
+  const confirmation = realCodex ? CODEX_CONFIRMATION : MOCK_CONFIRMATION;
+  if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== confirmation) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
   }
   const cliPath = process.env.AMBASSADOR_PACKED_CLI;
   const tarballPath = process.env.AMBASSADOR_PACKED_TARBALL;
   assert(cliPath !== undefined && tarballPath !== undefined, "package_input");
+
+  let codexHome;
+  if (realCodex) {
+    const configuredHome = process.env.AMBASSADOR_CODEX_QUALIFICATION_HOME;
+    assert(configuredHome !== undefined && isAbsolute(configuredHome), "codex_isolation");
+    codexHome = await realpath(configuredHome).catch(() => undefined);
+    const ordinaryHome =
+      process.env.HOME === undefined
+        ? undefined
+        : await realpath(process.env.HOME).catch(() => undefined);
+    assert(codexHome !== undefined && codexHome !== ordinaryHome, "codex_isolation");
+    const configuredAuthPath = join(codexHome, ".codex", "auth.json");
+    const codexAuthPath = await realpath(configuredAuthPath).catch(() => undefined);
+    assert(codexAuthPath === configuredAuthPath, "codex_isolation");
+    const { stdout } = await execFileAsync("codex-acp", ["--version"], {
+      encoding: "utf8",
+      env: {
+        HOME: codexHome,
+        ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+      },
+      maxBuffer: 4_096,
+      timeout: 10_000,
+    }).catch(() => {
+      throw safeFailure("codex_version");
+    });
+    assert(stdout.trim() === "@agentclientprotocol/codex-acp 1.8.0", "codex_version");
+  }
 
   const credentials = {
     apiKey: await keychain("api-key"),
@@ -659,7 +715,9 @@ async function main() {
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
   ];
-  const actionReason = `synthetic-live-qualification-${randomUUID()}`;
+  const actionReason = realCodex
+    ? `synthetic-live-qualification-${randomUUID()}; call the configured Ambassador get_my_permissions MCP tool exactly once, then finish without disclosing any values`
+    : `synthetic-live-qualification-${randomUUID()}`;
   const capturedMail = [];
   const roots = [];
   const gateways = [];
@@ -668,13 +726,38 @@ async function main() {
   const centralRoutes = new Set();
   const centralObservations = [];
   const directMessages = [];
+  const routeCounts = [new Map(), new Map()];
+  const successfulAckCounts = [0, 0];
+  const acknowledgedByRecipient = new Set();
+  let observeCodexMcp = false;
+  let codexMcpObserved = false;
   let catalogObservation;
-  const centralFetch = async (input, init) => {
+  const centralFetchFor = (gatewayIndex) => async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input);
     assert(target.origin === LIVE_ORIGIN && target.pathname.startsWith("/api/"), "central_route");
     assert(target.pathname !== "/mcp", "central_route");
-    centralRoutes.add(`${init?.method ?? "GET"} ${target.pathname}`);
+    const route = `${init?.method ?? "GET"} ${target.pathname}`;
+    centralRoutes.add(route);
+    routeCounts[gatewayIndex].set(route, (routeCounts[gatewayIndex].get(route) ?? 0) + 1);
+    const isCodexMcpCall =
+      realCodex && gatewayIndex === 1 && observeCodexMcp && route === "GET /api/get_my_permissions";
+    let acknowledgedMessageId;
+    if (gatewayIndex === 1 && route === "POST /api/ack_message") {
+      try {
+        const requestBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+        if (isRecord(requestBody) && typeof requestBody.message_id === "string") {
+          acknowledgedMessageId = requestBody.message_id;
+        }
+      } catch {
+        // The production client owns request validation and serialization.
+      }
+    }
     const response = await fetch(input, init);
+    if (isCodexMcpCall && response.ok) codexMcpObserved = true;
+    if (acknowledgedMessageId !== undefined && response.ok) {
+      acknowledgedByRecipient.add(acknowledgedMessageId);
+      successfulAckCounts[gatewayIndex] += 1;
+    }
     let expectedEmail;
     if (target.pathname === "/api/register_agent") {
       try {
@@ -718,7 +801,54 @@ async function main() {
     phase = "state_setup";
     const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
     roots.push(join(qualificationRoot, "identity-a"), join(qualificationRoot, "identity-b"));
-    await Promise.all(roots.map((root) => mkdir(root, { recursive: true })));
+    const codexWorkingDirectory = join(qualificationRoot, "codex-work");
+    await Promise.all([
+      ...roots.map((root) => mkdir(root, { recursive: true })),
+      mkdir(codexWorkingDirectory, { recursive: true }),
+    ]);
+
+    const clientInfoFor = (index) =>
+      realCodex && index === 1 ? CODEX_CLIENT_INFO : OPENCLAW_CLIENT_INFO;
+    const environmentFor = (index) =>
+      realCodex && index === 1
+        ? {
+            HOME: codexHome,
+            ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+            ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+            ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+          }
+        : {};
+    const deliveryTargetFactoryFor = (index, token) => {
+      if (index === 0 || realCodex) return undefined;
+      return ({ endpoint }) => {
+        const target = new directDeliveryModule.DirectDeliveryTarget({
+          capability: {
+            command: process.execPath,
+            args: [
+              join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
+              "success-provider-mcp",
+            ],
+            agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+            mcp: "provider_config",
+            environment: ["HOME", "PATH", "TMPDIR"],
+          },
+          workingDirectory: repositoryRoot,
+          environment: process.env,
+          mcpEndpoint: endpoint,
+          localToken: token,
+        });
+        return {
+          async deliver(message, signal) {
+            const result = await target.deliver(message, signal);
+            directMessages.push(message);
+            return result;
+          },
+          async close() {
+            await target.close();
+          },
+        };
+      };
+    };
 
     for (let index = 0; index < 2; index += 1) {
       phase = `webhook_setup_${index + 1}`;
@@ -727,39 +857,17 @@ async function main() {
       const webhook = await startWebhook(token);
       webhooks.push(webhook);
       phase = `gateway_setup_${index + 1}`;
-      const deliveryTargetFactory =
-        index === 0
-          ? undefined
-          : ({ endpoint }) => {
-              const target = new directDeliveryModule.DirectDeliveryTarget({
-                capability: {
-                  command: process.execPath,
-                  args: [
-                    join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
-                    "success-provider-mcp",
-                  ],
-                  agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
-                  mcp: "provider_config",
-                  environment: ["HOME", "PATH", "TMPDIR"],
-                },
-                workingDirectory: repositoryRoot,
-                environment: process.env,
-                mcpEndpoint: endpoint,
-                localToken: token,
-              });
-              return {
-                async deliver(message, signal) {
-                  const result = await target.deliver(message, signal);
-                  directMessages.push(message);
-                  return result;
-                },
-                async close() {
-                  await target.close();
-                },
-              };
-            };
       gateways.push(
-        await startGateway(packed, roots[index], centralFetch, token, deliveryTargetFactory),
+        await startGateway(
+          packed,
+          roots[index],
+          centralFetchFor(index),
+          token,
+          deliveryTargetFactoryFor(index, token),
+          clientInfoFor(index),
+          environmentFor(index),
+          realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
+        ),
       );
     }
 
@@ -809,38 +917,12 @@ async function main() {
         await startGateway(
           packed,
           roots[index],
-          centralFetch,
+          centralFetchFor(index),
           localTokens[index],
-          index === 0
-            ? undefined
-            : ({ endpoint }) => {
-                const target = new directDeliveryModule.DirectDeliveryTarget({
-                  capability: {
-                    command: process.execPath,
-                    args: [
-                      join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
-                      "success-provider-mcp",
-                    ],
-                    agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
-                    mcp: "provider_config",
-                    environment: ["HOME", "PATH", "TMPDIR"],
-                  },
-                  workingDirectory: repositoryRoot,
-                  environment: process.env,
-                  mcpEndpoint: endpoint,
-                  localToken: localTokens[index],
-                });
-                return {
-                  async deliver(message, signal) {
-                    const result = await target.deliver(message, signal);
-                    directMessages.push(message);
-                    return result;
-                  },
-                  async close() {
-                    await target.close();
-                  },
-                };
-              },
+          deliveryTargetFactoryFor(index, localTokens[index]),
+          clientInfoFor(index),
+          environmentFor(index),
+          realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
         ),
       );
       const names = (await gateways[index].client.listTools()).map((tool) => tool.name);
@@ -907,6 +989,7 @@ async function main() {
     );
 
     phase = "permission";
+    const recipientAckCountBeforePermission = successfulAckCounts[1];
     const requested = await gateways[0].client.call("request_permission", {
       target_email: addresses[1],
       action_type: "get_email",
@@ -916,22 +999,30 @@ async function main() {
       "permission",
     );
     phase = "permission_request_direct";
-    const permissionMessage = await waitForDelivered(
-      directMessages,
-      (message) =>
-        isRecord(message) &&
-        isRecord(message.payload) &&
-        message.payload.type === "permission_request" &&
-        message.payload.permission_id === requested.permission_id,
-      "permission_request_direct_timeout",
-    );
-    assert(
-      isRecord(permissionMessage) && typeof permissionMessage.id === "string",
-      "permission_poll",
-    );
+    if (realCodex) {
+      await waitForObservation(
+        () => successfulAckCounts[1] > recipientAckCountBeforePermission,
+        "permission_request_direct_timeout",
+      );
+    } else {
+      const permissionMessage = await waitForDelivered(
+        directMessages,
+        (message) =>
+          isRecord(message) &&
+          isRecord(message.payload) &&
+          message.payload.type === "permission_request" &&
+          message.payload.permission_id === requested.permission_id,
+        "permission_request_direct_timeout",
+      );
+      assert(
+        isRecord(permissionMessage) && typeof permissionMessage.id === "string",
+        "permission_poll",
+      );
+    }
 
     phase = "permission_listing";
     let permissionListing = { status: "server_error", fields: [] };
+    let permissionStatus;
     try {
       const listing = await gateways[1].client.call("get_my_permissions", {});
       assert(Array.isArray(listing.permissions), "permission_listing");
@@ -939,15 +1030,25 @@ async function main() {
         (permission) => isRecord(permission) && permission.id === requested.permission_id,
       );
       assert(isRecord(listed), "permission_listing");
-      permissionListing = { status: "ok", fields: Object.keys(listed).sort() };
+      assert(typeof listed.status === "string", "permission_listing");
+      permissionStatus = listed.status;
+      permissionListing = {
+        status: "ok",
+        decision: permissionStatus,
+        fields: Object.keys(listed).sort(),
+      };
     } catch {
       permissionListing = { status: "server_error", fields: [] };
     }
 
-    await gateways[1].client.call("respond_to_permission", {
-      permission_id: requested.permission_id,
-      decision: "granted",
-    });
+    if (permissionStatus === "pending") {
+      await gateways[1].client.call("respond_to_permission", {
+        permission_id: requested.permission_id,
+        decision: "granted",
+      });
+    } else {
+      assert(realCodex && permissionStatus === "granted", "permission_decision");
+    }
     phase = "permission_response_webhook";
     const responseMessage = await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
@@ -960,6 +1061,7 @@ async function main() {
     );
 
     phase = "action";
+    observeCodexMcp = realCodex;
     const called = await gateways[0].client.call("call_action", {
       target_email: addresses[1],
       action_type: "get_email",
@@ -967,16 +1069,25 @@ async function main() {
     });
     assert(typeof called.message_id === "string" && called.status === "delivered", "action");
     phase = "action_direct";
-    const actionMessage = await waitForDelivered(
-      directMessages,
-      (message) =>
-        isRecord(message) &&
-        message.id === called.message_id &&
-        isRecord(message.payload) &&
-        message.payload.type === "action_call",
-      "action_direct_timeout",
-    );
-    assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
+    if (realCodex) {
+      await waitForObservation(
+        () => acknowledgedByRecipient.has(called.message_id),
+        "action_direct_timeout",
+      );
+      assert(codexMcpObserved, "codex_mcp_call");
+      observeCodexMcp = false;
+    } else {
+      const actionMessage = await waitForDelivered(
+        directMessages,
+        (message) =>
+          isRecord(message) &&
+          message.id === called.message_id &&
+          isRecord(message.payload) &&
+          message.payload.type === "action_call",
+        "action_direct_timeout",
+      );
+      assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
+    }
 
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
@@ -1025,11 +1136,14 @@ async function main() {
       catalog.map((action) => [action.name, schemaDigest(action.input_schema)]),
     );
     const report = {
-      qualification: "ambassador-live",
+      qualification: realCodex ? "ambassador-live-codex" : "ambassador-live",
       date: new Date().toISOString().slice(0, 10),
       source_repository: SOURCE_REPOSITORY,
+      reviewed_source_revision: SOURCE_REVISION,
+      deployment_revision: "not_exposed",
       live_origin: LIVE_ORIGIN,
       package_sha256: createHash("sha256").update(tarball).digest("hex"),
+      direct_agent: realCodex ? "codex-acp-1.8.0" : "deterministic-mock-acp",
       results: {
         registration: "passed",
         email_delivery: "passed",
@@ -1041,6 +1155,7 @@ async function main() {
         permission_listing: permissionListing,
         webhook_delivery_ack: "passed",
         direct_delivery_ack: "passed",
+        codex_mcp_call: realCodex ? "passed" : "not_applicable",
         central_mcp_requests: 0,
         artifact_scan: "passed",
         mail_cleanup: "passed",
@@ -1058,7 +1173,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, direct_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, codex_mcp_call_observed: codexMcpObserved, successful_ack_counts: successfulAckCounts, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {

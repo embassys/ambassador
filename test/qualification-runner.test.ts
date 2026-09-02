@@ -43,3 +43,20 @@ test("real-agent runner refuses to act without the explicit confirmation", async
   assert.equal(stderr.includes("CLAUDE_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("GEMINI_WEBHOOK_SECRET"), false);
 });
+
+test("live runner has a fixed, separately confirmed real-Codex mode", async () => {
+  const source = await readFile(join(process.cwd(), "scripts", "live-qualification.mjs"), "utf8");
+  assert.match(source, /AMBASSADOR_LIVE_DIRECT_AGENT/u);
+  assert.match(source, /run-live-qualification-with-real-codex/u);
+  assert.match(source, /codex-mcp-client/u);
+  assert.match(source, /0\.152\.1/u);
+  assert.match(source, /codex-acp/u);
+  assert.match(source, /get_my_permissions/u);
+  assert.match(source, /ack_message/u);
+  assert.equal(
+    /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
+    false,
+    "the live runner must not accept an arbitrary agent command",
+  );
+  assert.equal(/\b(?:npm|pnpm|npx|pip|brew)\b[^\n]*(?:install|add|update)/u.test(source), false);
+});

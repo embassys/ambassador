@@ -117,11 +117,15 @@ On 2026-09-02, isolated installs of the three approved entry points passed ACP
 v1 initialization and returned the exact `agentInfo` identities in ADR 0038.
 The reviewed OpenClaw and Hermes images also passed their version and ACP
 startup probes. These are safe contract probes, not real-agent delivery passes.
-The Codex direct case then passed separately against packed candidate
-`48cda0f9efa86030f2ddca90b992cda89ad3cef85cb368d1ed934e4927e827d4`: an
-authenticated prompt completed and the exact allowlisted Codex MCP client
-called `get_my_permissions`. The isolated credential copy was removed after
-the run. The other nine cases remain open.
+The Codex direct case first passed against the local fixture. It then passed
+against the live central service with packed candidate
+`22a65d370897172a726b4890bade780e907c2c38ccf5d6cb5e347c9c01f14ec7`.
+Two disposable identities registered and verified through Mailosaur. The
+controlled peer requested and granted permission, central delivered an action
+through a consuming poll, real Codex called `get_my_permissions`, and
+Ambassador acknowledged the message. The runner deleted captured mail,
+Ambassador state, and isolated Codex credentials. The other nine cases remain
+open.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation
