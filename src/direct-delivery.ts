@@ -178,7 +178,7 @@ export class DirectDeliveryTarget {
       process.platform === "win32" ||
       this.#capability.command.length === 0 ||
       this.#capability.args.length > 16 ||
-      this.#capability.agentInfo.versions.length === 0 ||
+      this.#capability.agentInfo.name.length === 0 ||
       !this.#mcpEndpoint.startsWith("http://127.0.0.1:") ||
       ![
         this.#initializationDeadlineMs,
@@ -281,8 +281,7 @@ export class DirectDeliveryTarget {
       );
       if (
         initialized.protocolVersion !== acp.PROTOCOL_VERSION ||
-        initialized.agentInfo?.name !== this.#capability.agentInfo.name ||
-        !this.#capability.agentInfo.versions.includes(initialized.agentInfo.version)
+        initialized.agentInfo?.name !== this.#capability.agentInfo.name
       ) {
         throw new DirectDeliveryError("startup_failed");
       }

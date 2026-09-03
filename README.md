@@ -23,12 +23,31 @@ npx --yes @embassys/ambassador@latest start
 Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
 Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
 fail closed. The agent cannot choose an executable, adapter, or arbitrary
-delivery implementation.
+delivery implementation. Ambassador matches exact known MCP client and ACP
+agent names, but treats their reported versions as diagnostic metadata. It
+tries the fixed ACP v1 contract and reports an actual incompatibility at
+startup, initialization, session creation, or delivery.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
 Ambassador-owned P-256 key. Protected requests use Bearer authorization plus a
 separate DPoP proof. Ambassador does not use the central MCP endpoint.
+
+## Repeat a local registration test
+
+Stop the foreground Ambassador process, then move the entire local Ambassador
+state directory to Trash or to an owner-only backup:
+
+- macOS: `~/Library/Application Support/ambassador`
+- Linux: `$XDG_STATE_HOME/ambassador`, or `~/.local/state/ambassador` when
+  `XDG_STATE_HOME` is unset
+
+Remove the directory as one unit. Deleting only `delivery-profile.json`, the
+encrypted credential, or its key leaves an intentionally invalid partial state.
+The next `ambassador start` creates clean local state. This does not delete the
+central registration, so use a new disposable email when rerunning without
+server-side cleanup. It does not change the agent's normal provider
+configuration or credentials.
 
 ## Implementation status
 

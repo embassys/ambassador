@@ -102,7 +102,6 @@ test("live runner has a fixed, separately confirmed real-Codex mode", async () =
   assert.match(source, /AMBASSADOR_LIVE_DIRECT_AGENT/u);
   assert.match(source, /run-live-qualification-with-real-codex/u);
   assert.match(source, /codex-mcp-client/u);
-  assert.match(source, /0\.152\.1/u);
   assert.match(source, /codex-acp/u);
   assert.match(source, /observeAgentVersion/u);
   assert.match(source, /get_my_permissions/u);
@@ -123,7 +122,7 @@ test("live runner has fixed, separately confirmed real-Hermes modes", async () =
   assert.match(source, /run-live-qualification-with-real-hermes-direct/u);
   assert.match(source, /run-live-qualification-with-real-hermes-webhook/u);
   assert.match(source, /AMBASSADOR_HERMES_QUALIFICATION_HOME/u);
-  assert.match(source, /const HERMES_CLIENT_INFO = \{ name: "mcp", version: "0\.1\.0" \}/u);
+  assert.match(source, /const HERMES_CLIENT_INFO = \{ name: "mcp", version: "qualification" \}/u);
   assert.match(source, /target_version_probe/u);
   assert.doesNotMatch(source, /HERMES_VERSION|startsWith\(HERMES_VERSION\)/u);
   assert.match(source, /hermes-acp/u);

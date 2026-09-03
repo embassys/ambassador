@@ -30,11 +30,12 @@ scope on your own.
 - Resolve delivery during MCP registration through a fixed capability
   registry. The two modes are `webhook` and `direct`. Do not add a third
   connector or polling mode.
-- Match bounded MCP `clientInfo` metadata exactly against reviewed aliases.
-  It is not authenticated identity, but it may select only a compiled-in
-  profile whose command, arguments, capabilities, and qualification are
-  fixed. Never accept an agent kind, executable, arguments, adapter, or
-  working directory from MCP input.
+- Match the bounded MCP `clientInfo.name` exactly against reviewed client
+  names. Treat `clientInfo.version` as bounded diagnostic metadata, not a
+  compatibility gate. `clientInfo` is not authenticated identity, but it may
+  select only a compiled-in profile whose command, arguments, capabilities,
+  and qualification are fixed. Never accept an agent kind, executable,
+  arguments, adapter, or working directory from MCP input.
 - Direct is the default. A complete direct-only profile proceeds without a
   delivery question. Ask direct versus webhook only for a complete dual-mode
   profile, and present direct as the default. Only OpenClaw and Hermes are
@@ -42,8 +43,8 @@ scope on your own.
   without a delivery question.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
   central registration state. Do not offer a generic webhook fallback. Keep the
-  exact Codex, Claude Code, and Gemini CLI contracts approved in ADR 0038; do
-  not substitute adapters or widen version matching.
+  fixed Codex, Claude Code, and Gemini CLI commands and ACP agent names approved
+  in ADR 0038; do not substitute adapters or accept arbitrary agent names.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts a URL and a webhook secret environment-variable
@@ -55,6 +56,10 @@ scope on your own.
   selected local agent and submits the complete message as an ACP prompt. It
   does not attempt to call back through the MCP connection that registered the
   identity.
+- Require the exact ACP v1 protocol and compiled-in `agentInfo.name`, but treat
+  `agentInfo.version` as diagnostic metadata. Attempt the fixed profile and let
+  startup, initialization, session, or delivery incompatibility fail through
+  the normal bounded error path.
 - MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
   control through local `poll_messages` or `ack_message` tools after the
   cutover. Expose the exact central `submit_action_result` operation for the

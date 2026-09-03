@@ -11,10 +11,10 @@ general reply operations. It does test the deployed, action-specific
 The runner covers the current package name, guided registration, one
 full-message webhook target, and one direct target. The default direct target
 is the deterministic mock ACP agent. Separately confirmed modes use the fixed
-Codex or Hermes profiles and their supported exact agent and adapter versions.
-Real-provider modes use isolated provider configuration copies. Their
-installed-version probes are observational; the compiled-in production profile
-still decides ACP compatibility by exact identity matching.
+Codex or Hermes profiles. Real-provider modes use isolated provider
+configuration copies. Installed-version probes are observational; production
+requires the exact known client and ACP agent names and then tries the fixed
+ACP v1 contract.
 
 ## Safety
 
@@ -29,7 +29,7 @@ still decides ACP compatibility by exact identity matching.
 
 1. Pack and scan the exact candidate package.
 2. Create two disposable identities through loopback local MCP.
-3. Use the exact enabled `clientInfo` aliases for one webhook profile and one
+3. Use the exact enabled `clientInfo.name` for one webhook profile and one
    direct profile. Prove a dual-mode profile advertises direct as its default;
    prove a direct-only profile proceeds without a delivery question.
 4. Receive and use both verification emails without persisting their codes.
@@ -63,8 +63,8 @@ mode, the runner uses the mock ACP fixture compiled by `pnpm run test:build`
 and does not run a paid provider.
 
 For the real Codex mode, prepare an owner-only temporary home containing only
-the copied Codex authentication needed for the run. Put exact
-`codex-acp` 1.8.0 on `PATH`, then set:
+the copied Codex authentication needed for the run. Put the installed
+`codex-acp` on `PATH`, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=codex
@@ -76,15 +76,16 @@ pnpm run qualify:live
 The runner rejects an ordinary user home, records the installed version when
 one can be observed, uses the compiled-in Codex command and profile, and never
 accepts a command override. The observation does not establish compatibility;
-the exact ACP identity check remains authoritative. The runner also lets
+ACP v1 initialization with the exact known agent name remains authoritative.
+The runner also lets
 abandoned server-side polls expire after the restart check before it enqueues a
 message. Delete the isolated home after the run.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and
 `.hermes/shared/nous_auth.json` copied from the authenticated installation.
-Remove unrelated MCP entries only from that copy. Put Hermes Agent 0.20.5 or
-0.21.0 and `hermes-acp` on `PATH`, then choose one fixed mode:
+Remove unrelated MCP entries only from that copy. Put the installed Hermes
+Agent and `hermes-acp` on `PATH`, then choose one fixed mode:
 
 ```sh
 export AMBASSADOR_HERMES_QUALIFICATION_HOME=/absolute/path/to/isolated/home
@@ -103,11 +104,12 @@ pnpm run qualify:live
 ```
 
 The runner rejects the ordinary Hermes home and non-owner-only copies. It uses
-exact MCP `clientInfo` `mcp` / `0.1.0`, launches only compiled-in
-`hermes-acp` for direct mode, and configures Ambassador MCP only in the isolated
-copy. The runner records the installed Hermes version when it can, but does not
-use that observation as a compatibility gate; direct ACP identity matching
-remains exact. Webhook mode starts Hermes's authenticated generic route,
+the exact MCP client name `mcp` with a deliberately non-release version value,
+launches only compiled-in `hermes-acp` for direct mode, and configures
+Ambassador MCP only in the isolated copy. The runner records the installed
+Hermes version when it can, but does not use that observation as a compatibility
+gate; direct mode requires ACP v1 and the exact `hermes-agent` name. Webhook
+mode starts Hermes's authenticated generic route,
 requires its bearer filter and native HMAC V2 validation, and suppresses
 provider output. Delete the isolated home after every attempt.
 

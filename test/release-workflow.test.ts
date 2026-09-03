@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", async () => {
+test("main publishes the Ambassador 0.2.9 candidate through npm OIDC after approval", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
@@ -21,7 +21,7 @@ test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", as
     await readFile(join(process.cwd(), "package.json"), "utf8"),
   ) as Record<string, unknown>;
   assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.8");
+  assert.equal(packageJson.version, "0.2.9");
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });
 
@@ -35,6 +35,11 @@ test("every supported-agent guide uses the latest zero-configuration start and c
 
     assert.match(contents, /npx --yes @embassys\/ambassador@latest start/u, guide);
     assert.match(contents, /latest/iu, guide);
+    assert.doesNotMatch(
+      contents,
+      /0\.149\.0|0\.152\.1|2\.1\.257|2\.1\.258|0\.58\.0|0\.20\.5|0\.21\.0|2026\.8\.1|1\.8\.0|0\.73\.0/u,
+      guide,
+    );
     assert.doesNotMatch(contents, /local-token|AMBASSADOR_LOCAL_TOKEN/u, guide);
     assert.match(contents, /register_agent/u, guide);
     if (guide === "hermes" || guide === "openclaw") {
