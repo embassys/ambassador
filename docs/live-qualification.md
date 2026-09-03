@@ -11,7 +11,7 @@ general reply operations. It does test the deployed, action-specific
 The runner covers the current package name, guided registration, one
 full-message webhook target, and one direct target. The default direct target
 is the deterministic mock ACP agent. Separately confirmed modes use the fixed
-Codex, Hermes, or OpenClaw profiles. Real-provider modes use isolated provider
+Codex, Claude Code, Hermes, or OpenClaw profiles. Real-provider modes use isolated provider
 configuration copies. Installed-version probes are observational; production
 requires the exact known client and ACP agent names and then tries the fixed
 ACP v1 contract.
@@ -81,6 +81,29 @@ ACP v1 initialization with the exact known agent name remains authoritative.
 The runner also lets
 abandoned server-side polls expire after the restart check before it enqueues a
 message. Delete the isolated home after the run.
+
+For the real Claude Code mode, prepare an owner-only temporary home containing
+an owner-only copy of `.claude.json` and a minimal
+`.claude/settings.json`. The settings copy may pre-authorize only
+`mcp__ambassador__respond_to_permission` and
+`mcp__ambassador__submit_action_result` for this controlled synthetic run.
+Provide the copy with the existing Claude authentication needed for the run
+without printing it or saving it in the repository. Put the installed
+`claude-agent-acp` on `PATH`, then set:
+
+```sh
+export AMBASSADOR_LIVE_DIRECT_AGENT=claude
+export AMBASSADOR_CLAUDE_QUALIFICATION_HOME=/absolute/path/to/isolated/home
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-claude-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+The runner rejects the ordinary user home, non-owner-only configuration files,
+and command overrides. It registers with exact MCP client name `claude-code`
+and a deliberately non-release diagnostic version, launches only the
+compiled-in `claude-agent-acp` command, requires ACP v1 and exact agent name
+`@agentclientprotocol/claude-agent-acp`, and injects Ambassador MCP into the
+ACP session. Delete the isolated home after every attempt.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and
@@ -217,6 +240,47 @@ The live process used installed Node 24.14.0, below the package's declared
 behavior passed. The supported-Node repeat remains part of the qualification
 record even though the user approved 0.2.6 as a one-release exception before
 that repeat.
+
+## Claude Code observations
+
+On 2026-09-03, real Claude Code passed the complete direct live-central flow on
+macOS 26.5.2 arm64 and Node 24.19.0 using the actual published
+`@embassys/ambassador@0.2.11` registry artifact. The clean-installed artifact
+had npm integrity
+`sha512-Tm8BxWFtsOso+Ns52bhxjI4VyEawUITlWF9qVcFlUK7mM+aaBmMYtUXiJwWum5TeUsLCM/zFRszP+dMAxTMO9A==`,
+registry SHA-1 `184715279a4251f025c5fe438b08dedc7cd17816`, and tarball
+SHA-256 `bca6d939b5c7faef975e3bb67b9c5f619d14cebe86a13b3b6f2341242be83d4c`.
+Its installed CLI passed the current REST fixture before the live run. The live
+runner SHA-256 was
+`ba71e8e736e3c1ef2705062befb16294e79a24488e4163127b46d57e1ca0f96f`,
+and the reviewed central source revision was
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`.
+
+The fixed `claude-agent-acp` adapter was version 0.73.0 and used its official
+Claude Agent SDK executable, observed as Claude Code 2.1.257. The separately
+installed host Claude Code CLI was 2.1.259; the fixed adapter profile did not
+substitute that executable. Version values were recorded only as diagnostics.
+ACP v1 initialization with exact agent name
+`@agentclientprotocol/claude-agent-acp`, real model execution, and injected
+Ambassador MCP calls provided the compatibility evidence.
+
+The run registered and email-verified two disposable Mailosaur identities
+through separate local Ambassador MCP endpoints. The direct-only Claude target
+registered with exact MCP client name `claude-code` and a deliberately
+non-release version value, then reloaded its encrypted central credential and
+delivery profile after Ambassador restarted. Live REST and DPoP behavior and
+the deployed six-action catalog passed. The real model received the
+`permission_request`, called `respond_to_permission` with a grant, received the
+complete correlated `action_call`, and called `submit_action_result` exactly
+once with the supplied call ID, success status, and approved synthetic phone
+result. The requester received the matching `action_response`. Local direct
+completion preceded each central acknowledgement.
+
+The artifact scan and cleanup checks passed. Captured mail and temporary
+Ambassador state were deleted. The external owner-only Claude configuration
+copy was removed after the run, and the normal Claude home was not changed. No
+credential, identity, code, prompt, message body, or provider output was
+recorded.
 
 ## Hermes 0.20.5 observations
 

@@ -33,8 +33,16 @@ and record the following work after the release. The published 0.2.7 registry
 artifact and installed CLI have now been independently verified; completed
 artifact checks are recorded in [Live central qualification](live-qualification.md).
 
-- Complete the remaining two opt-in real-agent profile cases with authenticated
-  installations: Claude Code direct and Gemini CLI direct.
+- Complete the remaining opt-in real-agent profile case with an authenticated
+  installation: Gemini CLI direct.
+- Claude Code direct passed the complete live correlated-result flow on
+  2026-09-03 with published Ambassador 0.2.11, Claude Agent ACP 0.73.0, and its
+  bundled Claude Code 2.1.257 executable. The host's separate Claude Code
+  2.1.259 installation was observed but was not substituted for the fixed ACP
+  adapter executable. The real model called `respond_to_permission` and
+  `submit_action_result` exactly once, and the controlled requester received
+  the correlated response. The run used Node 24.19.0 and an isolated
+  owner-only provider configuration, which was removed afterward.
 - Codex direct passed the
   complete live correlated-result flow on 2026-09-03 against packed candidate
   `7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`
@@ -51,8 +59,9 @@ artifact checks are recorded in [Live central qualification](live-qualification.
   MCP client information `mcp` / `0.1.0`; direct delivery retained exact ACP
   v1 agent-name checks. The isolated copies of their existing credentials were
   removed after the runs.
-- The isolated ACP initialization probes already pass for Codex ACP 1.8.0,
-  Claude Agent ACP 0.73.0, and native Gemini CLI ACP 0.58.0. OpenClaw and
+- The isolated ACP initialization probes already pass for Codex ACP 1.8.0 and
+  native Gemini CLI ACP 0.58.0. Claude Agent ACP 0.73.0 has now also passed the
+  complete authenticated live flow. OpenClaw and
   Hermes also pass their version and ACP startup probes.
   These probes do not replace an authenticated prompt and observed Ambassador
   MCP call.

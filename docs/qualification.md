@@ -89,6 +89,39 @@ difference. A clean Node 24.19.0 install passed the installed-CLI REST E2E and
 production vulnerability audit. The registry-artifact signature audit verified
 29 packages and 22 attestations with no invalid or missing entries.
 
+## Claude Code direct with published Ambassador 0.2.11
+
+On 2026-09-03, the actual published `@embassys/ambassador@0.2.11` registry
+artifact passed the complete live-central Claude Code direct flow on macOS
+26.5.2 arm64 and Node 24.19.0. Its registry SRI was
+`sha512-Tm8BxWFtsOso+Ns52bhxjI4VyEawUITlWF9qVcFlUK7mM+aaBmMYtUXiJwWum5TeUsLCM/zFRszP+dMAxTMO9A==`,
+its registry SHA-1 was `184715279a4251f025c5fe438b08dedc7cd17816`,
+and its tarball SHA-256 was
+`bca6d939b5c7faef975e3bb67b9c5f619d14cebe86a13b3b6f2341242be83d4c`.
+The installed CLI first passed the current REST fixture. The live runner
+SHA-256 was
+`ba71e8e736e3c1ef2705062befb16294e79a24488e4163127b46d57e1ca0f96f`,
+and the reviewed central source revision was
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`.
+
+The fixed `claude-agent-acp` adapter was 0.73.0 and its official bundled Claude
+Code executable reported 2.1.257. The separately installed host Claude Code
+CLI reported 2.1.259, but the fixed adapter used its bundled executable.
+Version observations did not gate the run. Direct registration used exact MCP
+client name `claude-code`, ACP v1 required exact agent name
+`@agentclientprotocol/claude-agent-acp`, and Ambassador MCP was injected into
+the ACP session.
+
+The real model granted the synthetic `get_phone_number` permission and called
+`submit_action_result` exactly once with the correlated call ID, success
+status, and approved synthetic result. The requester received the matching
+`action_response`; local direct completion preceded central acknowledgement.
+Encrypted state reload, live REST and DPoP behavior, the deployed six-action
+catalog, the artifact scan, and Mailosaur cleanup passed. The isolated
+owner-only Claude configuration was removed after the run, and the normal
+Claude home was unchanged. No credential, identity, code, prompt, message body,
+or provider output was recorded.
+
 ## Ambassador 0.2.10
 
 On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central
@@ -344,8 +377,9 @@ not evidence that the already published 0.2.7 artifact has that support.
 
 That evidence is retained to distinguish the published 0.2.7 artifact from its
 later source candidate. The 0.2.10 matrix above supersedes its former list of
-open cases: OpenClaw webhook and direct are now complete. Claude Code direct
-and Gemini CLI direct remain open. Hermes 0.21.0 retains only its earlier
+open cases: OpenClaw webhook and direct are complete, and the published 0.2.11
+Claude Code observation above completes Claude direct. Gemini CLI direct
+remains open. Hermes 0.21.0 retains only its earlier
 contract and ACP startup probe and has not run the full real-model round trip.
 
 The runner must require explicit confirmation and use exact executables already
