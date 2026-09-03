@@ -5,18 +5,18 @@ Status: accepted target; implementation progress is tracked separately
 ## Product boundary
 
 Embassys Ambassador is one foreground process between a local agent and the
-Embassys REST service. It exposes an authenticated loopback MCP server, enrolls
+Embassys REST service. It exposes a loopback MCP server, enrolls
 one email-based central identity, and owns one local delivery profile.
 
 The public package and command are:
 
 ```text
 @embassys/ambassador
-ambassador start --local-token-env=<environment-variable>
+ambassador start
 ```
 
-The local token authenticates MCP and encrypts the central credential. The
-command does not select an agent or delivery mode. Ambassador resolves a fixed
+The command accepts no options and does not select an agent or delivery mode.
+Ambassador resolves a fixed
 agent profile from MCP `clientInfo` during registration. It asks for a delivery
 choice only when that profile supports both modes, then stores the result as
 nonsecret local profile data.
@@ -26,7 +26,7 @@ nonsecret local profile data.
 ```text
 Local agent during setup and normal tool use
   |
-  | authenticated loopback MCP
+  | loopback MCP within the local-machine trust boundary
   v
 Embassys Ambassador on 127.0.0.1:8787
   |
@@ -132,23 +132,28 @@ does not probe alternate contracts or keep an old client as fallback.
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
-| Ambassador | Local MCP authentication, encrypted central credential, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
+| Ambassador | Loopback MCP boundary checks, encrypted central credential, internal wrapping key, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
 The central token and P-256 private key persist only inside one encrypted
-credential file. The delivery profile may persist the mode, recognized agent
-kind, webhook URL, webhook secret environment-variable name, canonical direct
-working directory, and minimum ACP session metadata. It never contains a secret
-or message body. SQLite remains ID-only.
+credential file. Its wrapping material is generated internally and stored in a
+separate owner-only state file. This protects against disclosure of the
+credential file alone, not compromise of the owner's complete state directory.
+Local MCP trusts other processes running as the owner; strict loopback, Host,
+and Origin checks protect the browser and network boundary. The delivery
+profile may persist the mode, recognized agent kind, webhook URL, webhook
+secret environment-variable name, canonical direct working directory, and
+minimum ACP session metadata. It never contains a secret or message body.
+SQLite remains ID-only.
 
 ## Main flows
 
 ### Startup
 
 1. Acquire the singleton lock.
-2. Resolve and validate the local token from `--local-token-env`.
-3. Bind authenticated MCP on `127.0.0.1:8787`.
+2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
+3. Reject supplied local Authorization credentials.
 4. Load the delivery profile and encrypted central credential if present.
 5. Prepare the configured delivery target.
 6. Start REST polling only when both stored records are valid.

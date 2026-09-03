@@ -50,19 +50,13 @@ function parseResponse(contentType: string | null, body: string): JsonRpcRespons
 
 export class TestMcpClient {
   readonly #endpoint: string;
-  readonly #authorization: string;
   readonly #forbiddenResponseValues: string[];
   #nextId = 1;
   #sessionId: string | undefined;
   serverCapabilities: Record<string, unknown> = {};
 
-  constructor(
-    endpoint: string,
-    bearerToken: string,
-    options: { forbiddenResponseValues?: string[] } = {},
-  ) {
+  constructor(endpoint: string, options: { forbiddenResponseValues?: string[] } = {}) {
     this.#endpoint = endpoint;
-    this.#authorization = `Bearer ${bearerToken}`;
     this.#forbiddenResponseValues = options.forbiddenResponseValues ?? [];
   }
 
@@ -119,7 +113,6 @@ export class TestMcpClient {
       method: "POST",
       headers: {
         accept: "application/json, text/event-stream",
-        authorization: this.#authorization,
         "content-type": "application/json",
         "mcp-protocol-version": "2025-06-18",
         "mcp-session-id": this.#sessionId,
@@ -135,7 +128,6 @@ export class TestMcpClient {
       method: "GET",
       headers: {
         accept: "text/event-stream",
-        authorization: this.#authorization,
         "mcp-session-id": this.#sessionId,
         "mcp-protocol-version": "2025-06-18",
       },
@@ -195,7 +187,6 @@ export class TestMcpClient {
   ): Promise<{ response: Response; parsed: JsonRpcResponse }> {
     const headers: Record<string, string> = {
       accept: "application/json, text/event-stream",
-      authorization: this.#authorization,
       "content-type": "application/json",
     };
     if (this.#sessionId !== undefined) {

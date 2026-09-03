@@ -4,12 +4,7 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  AmbassadorOptionsError,
-  type AmbassadorStartOptions,
-  parseAmbassadorStartOptions,
-  resolveLocalToken,
-} from "./ambassador-options.js";
+import { AmbassadorOptionsError, parseAmbassadorStartOptions } from "./ambassador-options.js";
 import type { CredentialStore } from "./credential-store.js";
 import { GatewayError } from "./errors.js";
 import {
@@ -76,9 +71,8 @@ function homeDirectory(environment: NodeJS.ProcessEnv): string {
 }
 
 export async function runCli(args: string[], context: CliContext): Promise<number> {
-  let parsed: AmbassadorStartOptions;
   try {
-    parsed = parseAmbassadorStartOptions(args);
+    parseAmbassadorStartOptions(args);
   } catch (error) {
     context.io.stderr.write(
       `${error instanceof AmbassadorOptionsError ? error.message : "Invalid command or arguments"}\n`,
@@ -98,11 +92,10 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
 
   try {
     lock = await ProcessLock.acquire(paths.lockPath);
-    const localToken = resolveLocalToken(context.env, parsed.localTokenEnv);
     application = await openGatewayApplication({
-      localToken,
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
+      credentialKeyPath: paths.credentialKeyPath,
       profilePath: paths.profilePath,
       workingDirectory: context.cwd,
       environment: context.env,

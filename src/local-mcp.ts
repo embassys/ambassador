@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import {
   createServer as createHttpServer,
@@ -81,13 +81,6 @@ function safeHttpError(response: ServerResponse, status: number): void {
     });
   }
   response.end("Request rejected\n");
-}
-
-function authenticate(value: string | undefined, expectedDigest: Buffer): boolean {
-  const actualDigest = createHash("sha256")
-    .update(value ?? "", "utf8")
-    .digest();
-  return timingSafeEqual(actualDigest, expectedDigest);
 }
 
 function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -226,7 +219,6 @@ async function writeWebResponse(
 
 export class LocalMcpServer {
   readonly #http: HttpServer;
-  readonly #expectedAuthorizationDigest: Buffer;
   readonly #requestTimeoutMs: number;
   readonly #port: number;
   readonly #sessions = new Map<string, McpSession>();
@@ -236,7 +228,6 @@ export class LocalMcpServer {
   #endpoint: string | undefined;
 
   constructor(
-    localToken: string,
     private readonly router: LocalMcpRouter,
     options: LocalMcpServerOptions = {},
   ) {
@@ -249,9 +240,6 @@ export class LocalMcpServer {
       throw new Error("Invalid MCP request timeout");
     }
 
-    this.#expectedAuthorizationDigest = createHash("sha256")
-      .update(`Bearer ${localToken}`, "utf8")
-      .digest();
     this.#http = createHttpServer(
       { maxHeaderSize: MAX_HEADERS_BYTES, requestTimeout: this.#requestTimeoutMs },
       (request, response) => {
@@ -421,8 +409,8 @@ export class LocalMcpServer {
       safeHttpError(response, 403);
       return;
     }
-    if (!authenticate(request.headers.authorization, this.#expectedAuthorizationDigest)) {
-      safeHttpError(response, 401);
+    if (request.headers.authorization !== undefined) {
+      safeHttpError(response, 400);
       return;
     }
 

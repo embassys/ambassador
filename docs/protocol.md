@@ -12,18 +12,13 @@ The public package and command are:
 
 ```text
 @embassys/ambassador
-ambassador start --local-token-env=<environment-variable>
+ambassador start
 ```
 
-`--local-token-env` is required exactly once in `--name=value` form. The
-environment-variable name matches `[A-Za-z_][A-Za-z0-9_]*`. Its value is a
-locally generated 192-bit token encoded as 48 lowercase hexadecimal characters.
-The token authenticates loopback MCP and derives the central credential
-encryption key.
-
-Positional values, unknown options, literal-token options, webhook options,
-agent selectors, delivery-mode selectors, endpoint options, and configuration
-paths are rejected. In particular, there is no `--acp-agent` option.
+`start` accepts no options or positional values. Webhook secrets are supplied
+only through the environment and selected by name during registration. There
+is no local token, agent selector, delivery-mode selector, endpoint option,
+configuration path, or `--acp-agent` option.
 
 The process acquires its singleton lock before reading credentials, binding a
 listener, calling central, starting an agent, or sending a webhook. It binds
@@ -39,15 +34,14 @@ the lock.
 
 ## Local MCP
 
-Every local MCP request uses Streamable HTTP at `/mcp` and sends:
+Every local MCP request uses Streamable HTTP at `/mcp` without bearer
+authentication. Ambassador requires `Host: 127.0.0.1:8787`. A present
+`Origin` must be exactly `http://127.0.0.1:8787`. A supplied `Authorization`
+header is rejected. Host and Origin checks happen before body parsing.
 
-```http
-Authorization: Bearer <local-token>
-```
-
-Ambassador requires `Host: 127.0.0.1:8787`. A present `Origin` must be
-exactly `http://127.0.0.1:8787`. Authentication and origin checks happen
-before body parsing.
+The local MCP boundary trusts processes running as the owner on the same
+machine. Host and Origin validation protect against DNS rebinding and ordinary
+cross-origin browser requests, not a malicious same-user process.
 
 The boundary keeps these limits:
 
@@ -100,8 +94,7 @@ Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
 catalog. `list_action_types` returns central action definitions as data; those
 definitions do not become additional local tools.
 
-Every local call requires MCP authentication. Reject any argument named
-`token`, `jwt`, `access_token`, `authorization`, `private_key`,
+Reject any argument named `token`, `jwt`, `access_token`, `authorization`, `private_key`,
 `secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
 containing those credential fields or stored token bytes.
 
@@ -415,7 +408,7 @@ Claude Agent SDK 0.3.257 dependency. Gemini CLI provides native ACP. Versions
 outside the table remain unsupported.
 
 Ambassador initializes the agent and opens a gateway-managed session. It
-provides its authenticated MCP endpoint in ACP session configuration where the
+provides its loopback MCP endpoint in ACP session configuration where the
 agent supports that field. Agents that reject session MCP configuration, such
 as the reviewed OpenClaw interface, must have Ambassador MCP configured before
 direct delivery.
@@ -492,8 +485,11 @@ profiles, normal logs, diagnostics, metrics, temporary files, crash artifacts,
 or support bundles.
 
 The encrypted central credential contains only the central token and DPoP
-private key plus minimum format metadata. The delivery profile is nonsecret.
-The journal remains ID-only.
+private key plus minimum format metadata. Ambassador generates its wrapping
+material internally and stores it in a separate owner-only state file. The two
+files have the same strict ownership, link, permission, and atomic-write
+checks. A credential without its matching key fails closed; there is no
+migration. The delivery profile is nonsecret. The journal remains ID-only.
 
 ## Acceptance cases
 

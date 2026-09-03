@@ -1,10 +1,10 @@
 # 0019 Central credential storage
 
-Status: accepted; terminology amended by ADR 0038
+Status: accepted; key custody superseded by ADR 0039
 
 Date: 2026-08-25
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Problem
 
@@ -17,8 +17,9 @@ to configuration or SQLite.
 Store the current central token and P-256 private key together as one atomic
 encrypted credential file.
 
-Derive a 256-bit encryption key from the supplied 192-bit local token and a
-fresh random salt with Node's approved scrypt parameters. Encrypt with
+ADR 0039 replaces the user-supplied local token with internally generated,
+owner-only state key material. Derive a 256-bit encryption key from that
+material and a fresh random salt with Node's approved scrypt parameters. Encrypt with
 AES-256-GCM and a fresh IV. Persist only the format metadata, salt, IV,
 authentication tag, and ciphertext. Use Node core cryptography and add no
 credential-storage dependency.
@@ -63,5 +64,6 @@ bundles.
 ## Approval
 
 The user approved the Node-core encrypted-file design on 2026-08-25, the
-current-only DPoP amendment through ADR 0037 on 2026-09-01, and the local-token
-terminology through ADR 0038 on 2026-09-02.
+current-only DPoP amendment through ADR 0037 on 2026-09-01. The user approved
+internal key custody and removal of the local token through ADR 0039 on
+2026-09-03.
