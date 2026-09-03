@@ -6,7 +6,12 @@ delivery, correlated action-result submission, automatic central
 acknowledgement, restart loss, bounded state, and packed-package installation.
 The former connector packages and compatibility interfaces have been removed.
 
-## Required before publication
+## Post-release qualification for 0.2.6
+
+The user explicitly approved publication of `@embassys/ambassador@0.2.6` on
+2026-09-03 before completion of the real-agent matrix. This is a one-release
+exception to ADR 0015, not evidence that the remaining cases passed. Complete
+and record the following work after the release:
 
 - Complete the remaining nine opt-in real-agent cases with exact authenticated
   profiles:
@@ -31,11 +36,8 @@ The former connector packages and compatibility interfaces have been removed.
 - Record only the safe version and pass/fail evidence produced by
   `scripts/qualify-agents.mjs`. Do not record prompts, messages, credentials,
   secrets, paths containing user data, or provider output.
-- Replace the remaining source-reviewed candidate version labels in the
-  getting-started guides with real-agent qualification evidence after all ten
-  cases pass.
-- Obtain explicit publication approval. The CI publication job remains
-  disabled until then.
+- Replace the remaining source-reviewed version labels in the getting-started
+  guides with real-agent qualification evidence after all ten cases pass.
 
 Windows remains unsupported under ADR 0033. Optional central service work
 remains in [Central follow-ups](central-follow-ups.md) and does not authorize

@@ -1,8 +1,9 @@
 # Get started with Gemini CLI
 
-Status: implementation candidate; source-reviewed against Gemini CLI 0.58.0,
-with the exact ACP initialization contract probed and real-agent qualification
-still required before publication
+Release target: `@embassys/ambassador@0.2.6`. The profile is source-reviewed
+against Gemini CLI 0.58.0, and its exact ACP initialization contract passed.
+Real-agent direct and webhook qualification remain open under the one-release
+qualification exception in ADR 0015.
 
 Ambassador enables Gemini CLI only for this exact contract:
 
@@ -29,31 +30,57 @@ Other versions fail closed until the registry is reviewed and updated.
 
 ## Setup
 
-1. Install and authenticate Gemini CLI 0.58.0 using its normal setup.
-   Ambassador never installs or updates it.
+1. Install Node.js `>=24.19.0 <25`, then install and authenticate Gemini CLI
+   0.58.0 using its normal setup. Ambassador never installs or updates Gemini.
 2. For noninteractive provider authentication, set the appropriate approved
    Gemini or Vertex variables outside chat. The profile accepts
    `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_PROJECT`,
    `GOOGLE_CLOUD_LOCATION`, and `GOOGLE_GENAI_USE_VERTEXAI`.
-3. Generate a 48-character lowercase hexadecimal local token and export it,
-   for example as `AMBASSADOR_LOCAL_TOKEN`.
-4. Start Ambassador from the directory the direct agent may access:
+3. Generate the local MCP token without putting its value in chat or a command
+   argument:
 
    ```sh
-   ambassador start --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   export AMBASSADOR_LOCAL_TOKEN="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
    ```
 
-5. Configure Gemini CLI MCP to call the printed loopback endpoint with
-   `Authorization: Bearer <local-token>`.
-6. Ask Gemini CLI to call `register_agent`. Ambassador asks direct versus
-   webhook and advertises direct as the default.
-7. For direct mode, make the follow-up with `delivery.mode` set to `direct`.
-   Ambassador starts `gemini --acp` and injects its authenticated HTTP MCP
-   server into the new ACP session.
-8. For webhook mode, configure an authenticated receiver for the canonical
-   Ambassador message and supply only its URL and webhook-secret environment
-   variable name.
-9. Complete email verification through MCP.
+4. If you may choose webhook delivery, create its secret in the same shell
+   before starting Ambassador:
+
+   ```sh
+   export AMBASSADOR_WEBHOOK_SECRET="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
+   ```
+
+5. From the directory the direct agent may access, start the exact release and
+   keep it running in the foreground:
+
+   ```sh
+   npx --yes @embassys/ambassador@0.2.6 start \
+     --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   ```
+
+6. Configure Gemini CLI's MCP client to use the loopback endpoint printed by
+   Ambassador, with a bearer token read from `AMBASSADOR_LOCAL_TOKEN`. Use the
+   provider's normal MCP configuration mechanism; do not copy the token value
+   into chat.
+7. Ask Gemini CLI to register with your email and optional display name. The
+   first `register_agent` call contains `email` and, if wanted, `display_name`.
+   Ambassador recognizes the Gemini CLI profile and asks direct versus webhook,
+   with direct as the default.
+8. For direct mode, choose direct. The follow-up repeats the same `email` and
+   optional `display_name` and adds `delivery: {"mode":"direct"}`. Ambassador
+   starts `gemini --acp` and injects its authenticated HTTP MCP server into the
+   new ACP session.
+9. For webhook mode, choose webhook and provide the HTTPS receiver URL plus
+   the environment-variable name `AMBASSADOR_WEBHOOK_SECRET`. The follow-up
+   repeats the registration fields and adds `delivery.mode`, `delivery.url`,
+   and `delivery.secret_env`; it never sends the secret value.
+10. Enter the email verification code when Gemini CLI asks for it. Gemini CLI
+    calls `verify_email` with that `email` and six-digit `code`; the central
+    token and DPoP key stay inside Ambassador.
 
 Gemini owns provider authentication and history. Ambassador never receives the
 provider credentials, central token, or DPoP private key. Never put the local

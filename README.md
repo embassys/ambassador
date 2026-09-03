@@ -31,10 +31,11 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 ## Implementation status
 
 The REST and DPoP integration and deterministic Ambassador delivery cutover
-are implemented. The live-central qualification with real Codex passed. Nine
-cases in the five-profile real-agent matrix and explicit publication approval
-remain in the [implementation plan](docs/implementation-plan.md). Do not
-publish a package until those gates are complete.
+are implemented. The live-central qualification with real Codex passed. The
+user approved publication of `@embassys/ambassador@0.2.6` before the remaining
+real-agent matrix is complete. That one-release exception is recorded in
+[ADR 0015](docs/adr/0015-npm-distribution.md); the outstanding qualification
+work remains visible in the [implementation plan](docs/implementation-plan.md).
 
 ## Development
 
