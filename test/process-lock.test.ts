@@ -110,6 +110,8 @@ async function startWorker(t: TestContext, path: string): Promise<LockWorker> {
 test("allows one owner and can be reacquired while retaining its artifact", async (t) => {
   const path = await lockPath(t);
   const first = await ProcessLock.acquire(path);
+  t.after(() => first.release());
+  assert.ok((await stat(path)).size > 0);
 
   await assert.rejects(ProcessLock.acquire(path), { code: "daemon_running" });
   const contender = await startWorker(t, path);
@@ -119,6 +121,7 @@ test("allows one owner and can be reacquired while retaining its artifact", asyn
   await first.release();
   await first.release();
   await access(path);
+  assert.equal((await readFile(path)).subarray(0, 16).toString(), "SQLite format 3\0");
 
   const second = await ProcessLock.acquire(path);
   await second.release();
@@ -170,18 +173,21 @@ test("atomically selects one contender after its previous owner crashes", async 
   const ownerIndexes = settledOutcomes.flatMap((outcome, index) =>
     outcome.type === "acquired" ? [index] : [],
   );
+  await Promise.all(
+    ownerIndexes.map(async (index) => {
+      const winner = contenders[index];
+      assert.ok(winner !== undefined);
+      const released = nextMessage(winner);
+      winner.child.send("release");
+      assert.deepEqual(await released, { type: "released" });
+    }),
+  );
   assert.equal(ownerIndexes.length, 1);
   for (const outcome of settledOutcomes) {
     if (outcome.type !== "acquired") {
       assert.deepEqual(outcome, { type: "rejected", code: "daemon_running" });
     }
   }
-
-  const winner = contenders[ownerIndexes[0] as number];
-  assert.ok(winner !== undefined);
-  const released = nextMessage(winner);
-  winner.child.send("release");
-  assert.deepEqual(await released, { type: "released" });
 
   const reacquired = await ProcessLock.acquire(path);
   await reacquired.release();
