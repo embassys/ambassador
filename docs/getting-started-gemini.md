@@ -3,7 +3,7 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and sign in to the latest Gemini CLI release.
+- Install and sign in to Gemini CLI.
 - Gemini supplies native ACP through `gemini --acp`; no adapter is needed.
 - Ambassador never receives your Gemini or Google credential.
 
