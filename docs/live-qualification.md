@@ -192,6 +192,36 @@ provider output, or remote error bodies.
 
 ## Correlated-result observation
 
+### Ambassador 0.2.12
+
+On 2026-09-03, the byte-final 0.2.12 candidate passed the controlled
+live-central run on macOS 26.5.2 arm64 and Node 24.19.0. Its tarball SHA-256 was
+`287a3b4907e19d07bbc11974bb3cefdf55589d4a37b01f27474d4b82c01b93a0`,
+and the qualification runner SHA-256 was
+`ba71e8e736e3c1ef2705062befb16294e79a24488e4163127b46d57e1ca0f96f`.
+The reviewed central source revision was
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`; the deployment did not expose its
+revision.
+
+The deterministic webhook requester and ACP target registered and verified
+through their local MCP endpoints, then reloaded encrypted state after restart.
+The live Bearer plus DPoP positive and negative cases passed, as did the
+deployed six-action catalog. The requester completed the correlated synthetic
+permission and action-result round trip. Local custody or completion preceded
+each central acknowledgement. The run observed no DPoP nonce and made no
+central MCP request. Artifact scanning, Mailosaur cleanup, and temporary-state
+cleanup passed.
+
+The main workflow later published `@embassys/ambassador@0.2.12`. The downloaded
+registry tarball had SRI
+`sha512-0DyBFNwTntRvk1YdlNSppqrtzvWy+T07uQL0VueLA9S249XeEYpOgoOXKOjkmt9bBG70dVmVWkM1bOnynkcnTw==`,
+registry SHA-1 `ec23fb8c6f5859604e7131672ed1730cd404ec32`, and SHA-256
+`089a0555c9a70e2dd954137756d621548020a593705cc45edeac91ffa8b71a45`.
+Its extracted file tree matched the qualified candidate, and its installed CLI
+passed the cleanup E2E plus the vulnerability and signature audits.
+
+### Earlier Codex observation
+
 At 00:43 BST on 2026-09-03, the real Codex mode passed against the live service
 with `codex-acp` 1.8.0 and packed candidate
 `7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`.
