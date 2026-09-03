@@ -3,7 +3,7 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## Ambassador 0.2.11 candidate
+## Ambassador 0.2.11
 
 On 2026-09-03, the byte-final 0.2.11 candidate passed the complete
 live-central correlated-result webhook flow with OpenClaw and Hermes on macOS
@@ -71,6 +71,23 @@ to verify. Both live artifact scans passed. The runner deleted captured mail
 and temporary Ambassador state, and the owner-only OpenClaw and Hermes
 credential copies were removed after their runs. The normal provider homes
 were not changed.
+
+PR 23 passed all seven required checks and merged as
+`227538f5a81977467ad59482bae1fda571d6480a`. The main-branch run repeated the
+Linux, macOS, Windows, package-install, audit, and Docker central-fixture gates,
+then published `@embassys/ambassador@0.2.11` through npm OIDC. The npm `latest`
+tag resolves to 0.2.11.
+
+The artifact downloaded from npm's published `dist.tarball` URL had registry
+SRI
+`sha512-Tm8BxWFtsOso+Ns52bhxjI4VyEawUITlWF9qVcFlUK7mM+aaBmMYtUXiJwWum5TeUsLCM/zFRszP+dMAxTMO9A==`,
+registry SHA-1 `184715279a4251f025c5fe438b08dedc7cd17816`, and tarball
+SHA-256 `bca6d939b5c7faef975e3bb67b9c5f619d14cebe86a13b3b6f2341242be83d4c`.
+Its extracted file tree was identical to the byte-final candidate used by both
+live runs; npm's archive encoding accounts for the archive-level digest
+difference. A clean Node 24.19.0 install passed the installed-CLI REST E2E and
+production vulnerability audit. The registry-artifact signature audit verified
+29 packages and 22 attestations with no invalid or missing entries.
 
 ## Ambassador 0.2.10
 

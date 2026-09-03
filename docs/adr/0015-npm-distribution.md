@@ -88,6 +88,11 @@ correlated-result webhook flow with both OpenClaw and Hermes. The user directed
 that the pull request merge when green. Main-branch OIDC publication and
 post-publication registry-artifact verification still apply.
 
+Those conditions passed. PR 23 merged on 2026-09-03, all main-branch gates
+passed, the OIDC job published 0.2.11 with the npm `latest` tag, and the
+registry artifact was independently downloaded and verified. Digests and
+artifact checks are recorded in the qualification document.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
