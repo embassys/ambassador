@@ -63,6 +63,16 @@ export interface LocalMcpServerOptions {
   requestTimeoutMs?: number;
 }
 
+export class LocalMcpServerError extends Error {
+  constructor(
+    readonly code: "address_in_use" | "listen_failed",
+    readonly port: number,
+  ) {
+    super("Local MCP server failed");
+    this.name = "LocalMcpServerError";
+  }
+}
+
 interface McpSession {
   id?: string;
   sdk: Server;
@@ -258,7 +268,13 @@ export class LocalMcpServer {
       throw new Error("MCP listener is already bound");
     }
     await new Promise<void>((resolve, reject) => {
-      const onError = (): void => reject(new Error("MCP listener failed to bind"));
+      const onError = (error: NodeJS.ErrnoException): void =>
+        reject(
+          new LocalMcpServerError(
+            error.code === "EADDRINUSE" ? "address_in_use" : "listen_failed",
+            this.#port,
+          ),
+        );
       this.#http.once("error", onError);
       this.#http.listen(this.#port, "127.0.0.1", () => {
         this.#http.off("error", onError);

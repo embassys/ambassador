@@ -13,11 +13,17 @@ import {
   DeliveryProfileStore,
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
-import { DirectDeliveryTarget } from "./direct-delivery.js";
+import { DirectDeliveryError, DirectDeliveryTarget } from "./direct-delivery.js";
 import { DpopNonceCache } from "./dpop.js";
+import { GatewayError } from "./errors.js";
 import { GuidedRegistration, GuidedRegistrationError } from "./guided-registration.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
-import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "./local-mcp.js";
+import {
+  type LocalMcpRouter,
+  LocalMcpServer,
+  LocalMcpServerError,
+  LocalMcpToolError,
+} from "./local-mcp.js";
 import {
   assertSafeUpstreamResult,
   McpContractError,
@@ -75,6 +81,98 @@ function safeFailure(): Error {
   return new Error("Ambassador operation failed");
 }
 
+function startupFailure(error: unknown): GatewayError {
+  if (error instanceof GatewayError) return error;
+  if (error instanceof LocalMcpServerError) {
+    if (error.code === "address_in_use") {
+      return new GatewayError(
+        "local_mcp_address_in_use",
+        `Ambassador could not bind its local MCP endpoint because 127.0.0.1:${error.port} is already in use`,
+        7,
+      );
+    }
+    return new GatewayError(
+      "local_mcp_listen_failed",
+      "Ambassador could not bind its local MCP endpoint. Check local network permissions and try again",
+      7,
+    );
+  }
+  const code =
+    error !== null && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+  if (code === "SQLITE_NOTADB" || code === "SQLITE_FORMAT" || code === "SQLITE_CORRUPT") {
+    return new GatewayError(
+      "local_state_invalid",
+      "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
+      7,
+    );
+  }
+  if (code === "ERR_DLOPEN_FAILED" || code === "MODULE_NOT_FOUND") {
+    return new GatewayError(
+      "local_runtime_unavailable",
+      "Ambassador could not load its local database runtime for this Node platform. Reinstall the latest Ambassador with a supported Node.js release",
+      7,
+    );
+  }
+  return new GatewayError(
+    "local_state_unavailable",
+    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `npx --yes @embassys/ambassador@latest clean`",
+    7,
+  );
+}
+
+function directDeliveryFailure(error: unknown): DirectDeliveryError["code"] | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current instanceof DirectDeliveryError) return current.code;
+    if (current === null || typeof current !== "object") return undefined;
+    const candidate = current as { cause?: unknown; code?: unknown; name?: unknown };
+    if (
+      candidate.name === "DirectDeliveryError" &&
+      [
+        "agent_unavailable",
+        "cancelled",
+        "invalid_configuration",
+        "startup_failed",
+        "uncertain_outcome",
+      ].includes(String(candidate.code))
+    ) {
+      return candidate.code as DirectDeliveryError["code"];
+    }
+    current = candidate.cause;
+  }
+  return undefined;
+}
+
+function runtimeFailure(error: unknown, agentName: string): GatewayError {
+  const direct = directDeliveryFailure(error);
+  if (direct === "agent_unavailable") {
+    return new GatewayError(
+      "direct_agent_unavailable",
+      `Ambassador could not start direct delivery for ${agentName}. Reinstall the latest Ambassador, then confirm ${agentName} is installed and signed in`,
+      7,
+    );
+  }
+  if (direct === "startup_failed") {
+    return new GatewayError(
+      "direct_agent_startup_failed",
+      `Ambassador could not initialize ${agentName} over ACP v1. Confirm the agent is signed in, then restart Ambassador`,
+      7,
+    );
+  }
+  if (direct === "uncertain_outcome") {
+    return new GatewayError(
+      "direct_delivery_uncertain",
+      `Ambassador lost confirmation after sending a message to ${agentName}. It stopped without retrying to avoid a duplicate action`,
+      7,
+    );
+  }
+  return new GatewayError(
+    "delivery_failed",
+    "Ambassador stopped because incoming-message delivery failed. Check the configured agent or webhook, then restart Ambassador",
+    7,
+  );
+}
+
 function localError(error: unknown): LocalMcpToolError {
   if (error instanceof LocalMcpToolError) return error;
   if (error instanceof IdentityError) return new LocalMcpToolError(error.code);
@@ -92,7 +190,12 @@ export async function openGatewayApplication(
 ): Promise<RunningGatewayApplication> {
   const centralOrigin = options.centralOrigin ?? CENTRAL_ORIGIN;
   const nowSeconds = options.nowSeconds ?? (() => Date.now() / 1_000);
-  const journal = new NotificationJournal(options.journalPath);
+  let journal: NotificationJournal;
+  try {
+    journal = new NotificationJournal(options.journalPath);
+  } catch (error) {
+    throw startupFailure(error);
+  }
   const profileStore = new DeliveryProfileStore(options.profilePath);
   const webhookSecretStore =
     options.webhookSecretStore ??
@@ -217,7 +320,7 @@ export async function openGatewayApplication(
       relayRun = nextRelay.run(lifetimeSignal);
       void relayRun.catch((error: unknown) => {
         if (!closed && !lifetimeSignal.aborted) {
-          reportFailure?.(error instanceof Error ? error : safeFailure());
+          reportFailure?.(runtimeFailure(error, profile.capability.displayName));
         }
       });
     })();
@@ -269,6 +372,16 @@ export async function openGatewayApplication(
           case "request_permission":
             result = await requireRest().requestPermission(arguments_, signal);
             break;
+          case "list_pending_permission_requests": {
+            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
+            const enrolledEmail = identity.credential().token.email;
+            const pending = (await requireRest().getMyPermissions(signal)).filter(
+              (permission) =>
+                permission.status === "pending" && permission.grantor_email === enrolledEmail,
+            );
+            result = { count: pending.length, pending_permission_requests: pending };
+            break;
+          }
           case "respond_to_permission":
             result = await requireRest().respondToPermission(arguments_, signal);
             break;
@@ -306,7 +419,7 @@ export async function openGatewayApplication(
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
     journal.close();
-    throw error;
+    throw startupFailure(error);
   }
 
   return {

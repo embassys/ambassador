@@ -1,12 +1,17 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import * as acp from "@agentclientprotocol/sdk";
 
-import type { DirectAgentCapability, WindowsNodePackageEntrypoint } from "./agent-capabilities.js";
+import type {
+  DirectAgentCapability,
+  NodePackageEntrypoint,
+  WindowsNodePackageEntrypoint,
+} from "./agent-capabilities.js";
 import type { CentralMessage } from "./central-rest.js";
 
 const DEFAULT_INITIALIZATION_DEADLINE_MS = 15_000;
@@ -29,6 +34,7 @@ export type SpawnProcess = (
 ) => ManagedChild;
 
 export type DirectDeliveryErrorCode =
+  | "agent_unavailable"
   | "cancelled"
   | "invalid_configuration"
   | "startup_failed"
@@ -52,7 +58,7 @@ function pathWithin(root: string, path: string): boolean {
   return value === "" || (!value.startsWith(`..${sep}`) && value !== ".." && !isAbsolute(value));
 }
 
-function validWindowsNodePackageContract(value: WindowsNodePackageEntrypoint): boolean {
+function validNodePackageContract(value: NodePackageEntrypoint): boolean {
   return (
     value.packageName.length > 0 &&
     value.packageName.length <= 128 &&
@@ -71,13 +77,82 @@ function validWindowsNodePackageContract(value: WindowsNodePackageEntrypoint): b
   );
 }
 
+async function validatedNodePackageEntrypoint(
+  contract: NodePackageEntrypoint,
+  manifestPath: string,
+): Promise<string> {
+  if (!validNodePackageContract(contract) || !isAbsolute(manifestPath)) {
+    throw new DirectDeliveryError("agent_unavailable");
+  }
+  try {
+    const canonicalManifestPath = await realpath(manifestPath);
+    const packageRoot = dirname(canonicalManifestPath);
+    const manifestStats = await lstat(canonicalManifestPath);
+    if (
+      !manifestStats.isFile() ||
+      manifestStats.size < 1 ||
+      manifestStats.size > MAXIMUM_PACKAGE_MANIFEST_BYTES
+    ) {
+      throw new DirectDeliveryError("agent_unavailable");
+    }
+    const manifest = JSON.parse(await readFile(canonicalManifestPath, "utf8")) as unknown;
+    if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) {
+      throw new DirectDeliveryError("agent_unavailable");
+    }
+    const record = manifest as Record<string, unknown>;
+    const bin = record.bin;
+    const declaredEntrypoint =
+      typeof bin === "string"
+        ? bin
+        : bin !== null && typeof bin === "object" && !Array.isArray(bin)
+          ? (bin as Record<string, unknown>)[contract.binName]
+          : undefined;
+    if (
+      record.name !== contract.packageName ||
+      typeof record.version !== "string" ||
+      !BOUNDED_PACKAGE_VERSION.test(record.version) ||
+      declaredEntrypoint !== contract.entrypoint
+    ) {
+      throw new DirectDeliveryError("agent_unavailable");
+    }
+    const entrypoint = await realpath(resolve(packageRoot, contract.entrypoint));
+    if (!pathWithin(packageRoot, entrypoint)) {
+      throw new DirectDeliveryError("agent_unavailable");
+    }
+    const entrypointStats = await lstat(entrypoint);
+    if (!entrypointStats.isFile() || entrypointStats.size < 1) {
+      throw new DirectDeliveryError("agent_unavailable");
+    }
+    return entrypoint;
+  } catch (error) {
+    if (error instanceof DirectDeliveryError) throw error;
+    throw new DirectDeliveryError("agent_unavailable");
+  }
+}
+
+const requireFromAmbassador = createRequire(import.meta.url);
+
+export async function resolveBundledNodePackageEntrypoint(
+  contract: NodePackageEntrypoint,
+  resolveManifest: (packageName: string) => string = (packageName) =>
+    requireFromAmbassador.resolve(`${packageName}/package.json`),
+): Promise<string> {
+  let manifestPath: string;
+  try {
+    manifestPath = resolveManifest(contract.packageName);
+  } catch {
+    throw new DirectDeliveryError("agent_unavailable");
+  }
+  return await validatedNodePackageEntrypoint(contract, manifestPath);
+}
+
 export async function resolveWindowsNodePackageEntrypoint(
   contract: WindowsNodePackageEntrypoint,
   environment: NodeJS.ProcessEnv,
 ): Promise<string> {
   const pathValue = environment.PATH;
   if (
-    !validWindowsNodePackageContract(contract) ||
+    !validNodePackageContract(contract) ||
     pathValue === undefined ||
     pathValue.length < 1 ||
     pathValue.length > 32_768 ||
@@ -98,41 +173,12 @@ export async function resolveWindowsNodePackageEntrypoint(
     try {
       const shim = await lstat(join(entry, `${contract.binName}.cmd`));
       if (!shim.isFile() && !shim.isSymbolicLink()) continue;
-      const packageRoot = await realpath(packageRootCandidate);
-      const manifestPath = join(packageRoot, "package.json");
-      const manifestStats = await lstat(manifestPath);
-      if (
-        !manifestStats.isFile() ||
-        manifestStats.size < 1 ||
-        manifestStats.size > MAXIMUM_PACKAGE_MANIFEST_BYTES
-      ) {
-        continue;
-      }
-      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
-      if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) continue;
-      const record = manifest as Record<string, unknown>;
-      const bin = record.bin;
-      const declaredEntrypoint =
-        typeof bin === "string"
-          ? bin
-          : bin !== null && typeof bin === "object" && !Array.isArray(bin)
-            ? (bin as Record<string, unknown>)[contract.binName]
-            : undefined;
-      if (
-        record.name !== contract.packageName ||
-        typeof record.version !== "string" ||
-        !BOUNDED_PACKAGE_VERSION.test(record.version) ||
-        declaredEntrypoint !== contract.entrypoint
-      ) {
-        continue;
-      }
-      const entrypoint = await realpath(resolve(packageRoot, contract.entrypoint));
-      if (!pathWithin(packageRoot, entrypoint)) continue;
-      const entrypointStats = await lstat(entrypoint);
-      if (!entrypointStats.isFile() || entrypointStats.size < 1) continue;
-      return entrypoint;
+      return await validatedNodePackageEntrypoint(
+        contract,
+        join(packageRootCandidate, "package.json"),
+      );
     } catch (error) {
-      if (errorCode(error) === "ENOENT") continue;
+      if (errorCode(error) === "ENOENT" || error instanceof DirectDeliveryError) continue;
     }
   }
   throw new DirectDeliveryError("startup_failed");
@@ -323,7 +369,13 @@ export class DirectDeliveryTarget {
       } catch (error) {
         const failure =
           error instanceof DirectDeliveryError ? error : new DirectDeliveryError("startup_failed");
-        if (failure.code === "uncertain_outcome" || failure.code === "cancelled") throw failure;
+        if (
+          failure.code === "uncertain_outcome" ||
+          failure.code === "cancelled" ||
+          failure.code === "agent_unavailable"
+        ) {
+          throw failure;
+        }
         lastFailure = failure;
       }
     }
@@ -335,7 +387,13 @@ export class DirectDeliveryTarget {
     try {
       let command = this.#capability.command;
       let args = this.#capability.args;
-      if (this.#platform === "win32" && this.#capability.windowsNodePackage !== undefined) {
+      if (this.#capability.bundledNodePackage !== undefined) {
+        command = process.execPath;
+        args = [
+          await resolveBundledNodePackageEntrypoint(this.#capability.bundledNodePackage),
+          ...args,
+        ];
+      } else if (this.#platform === "win32" && this.#capability.windowsNodePackage !== undefined) {
         command = process.execPath;
         args = [
           await resolveWindowsNodePackageEntrypoint(
@@ -357,6 +415,17 @@ export class DirectDeliveryTarget {
       throw new DirectDeliveryError("startup_failed");
     }
     this.#activeChildren.add(child);
+    const childFailure = new Promise<never>((_resolve, reject) => {
+      child.once("error", (error) => {
+        reject(
+          new DirectDeliveryError(
+            errorCode(error) === "ENOENT" ? "agent_unavailable" : "startup_failed",
+          ),
+        );
+      });
+    });
+    const withChildFailure = <T>(operation: Promise<T>): Promise<T> =>
+      Promise.race([operation, childFailure]);
     let promptDispatched = false;
     let connection: acp.ClientConnection | undefined;
     let session: acp.ActiveSession | undefined;
@@ -388,14 +457,16 @@ export class DirectDeliveryTarget {
       connection = client.connect(stream);
       const initializeSignal = stageSignal(outerSignal, this.#initializationDeadlineMs);
       const initialized = await raceSignal(
-        connection.agent.request(
-          acp.methods.agent.initialize,
-          {
-            protocolVersion: acp.PROTOCOL_VERSION,
-            clientCapabilities: {},
-            clientInfo: { name: "ambassador", version: "1" },
-          },
-          { cancellationSignal: initializeSignal },
+        withChildFailure(
+          connection.agent.request(
+            acp.methods.agent.initialize,
+            {
+              protocolVersion: acp.PROTOCOL_VERSION,
+              clientCapabilities: {},
+              clientInfo: { name: "ambassador", version: "1" },
+            },
+            { cancellationSignal: initializeSignal },
+          ),
         ),
         initializeSignal,
       );
@@ -419,9 +490,11 @@ export class DirectDeliveryTarget {
           : [];
       const sessionSignal = stageSignal(outerSignal, this.#sessionDeadlineMs);
       session = await raceSignal(
-        connection.agent
-          .buildSession({ cwd: this.#workingDirectory, mcpServers })
-          .start({ cancellationSignal: sessionSignal }),
+        withChildFailure(
+          connection.agent
+            .buildSession({ cwd: this.#workingDirectory, mcpServers })
+            .start({ cancellationSignal: sessionSignal }),
+        ),
         sessionSignal,
       );
 
@@ -439,8 +512,8 @@ export class DirectDeliveryTarget {
           if (update.kind === "stop") return update.response;
         }
       })();
-      const result = await raceSignal(drain, promptSignal);
-      await raceSignal(prompt, promptSignal);
+      const result = await raceSignal(withChildFailure(drain), promptSignal);
+      await raceSignal(withChildFailure(prompt), promptSignal);
       if (!["end_turn", "max_tokens", "max_turn_requests"].includes(result.stopReason)) {
         throw new DirectDeliveryError("uncertain_outcome");
       }

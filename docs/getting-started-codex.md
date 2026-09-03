@@ -1,40 +1,65 @@
 # Get started with Codex
 
-## Before you start
+## 1. Start Ambassador
 
-- Install Node.js `>=24.19.0`.
-- Install Codex.
-- For direct delivery, install `@agentclientprotocol/codex-acp` so `codex-acp`
-  is on `PATH`.
+- Install Node.js `>=24.19.0` and Codex.
 - Sign in to Codex normally. Ambassador never receives your Codex credential.
+- In the directory Codex may access, run:
 
-## Set up direct delivery
+  ```sh
+  npx --yes @embassys/ambassador@latest start
+  ```
 
-1. From the directory Codex may access, keep Ambassador running:
+- Keep that terminal open. Ambassador prints its MCP endpoint and the setup
+  commands below.
 
-   ```sh
-   npx --yes @embassys/ambassador@latest start
-   ```
+## 2. Add Ambassador to Codex
 
-2. In another terminal, add its token-free local MCP endpoint:
+Choose either method.
 
-   ```sh
-   codex mcp add ambassador --url http://127.0.0.1:8787/mcp
-   ```
+### Command
 
-3. Start or restart Codex so it sees the MCP server.
-4. Ask Codex to register your email; it calls Ambassador's `register_agent`
-   tool.
-5. Enter the six-digit code sent to your email. Codex is direct-only, so
-   Ambassador does not ask a delivery question.
+Run this in another terminal:
 
-Ambassador will launch `codex-acp` when a central message arrives. That is a
-new gateway-managed session, not the chat used for registration.
+```sh
+codex mcp add ambassador --url http://127.0.0.1:8787/mcp
+```
 
-Ambassador selects this profile by the exact known MCP client name, then tries
-the fixed `codex-acp` ACP v1 contract. Reported client and adapter versions are
-diagnostic only. An incompatible release fails at startup, ACP initialization,
-session creation, or delivery instead of being rejected by a version list. See
-[Qualification](qualification.md) for compatibility evidence.
+Check it with `codex mcp list`. Inside Codex, `/mcp` shows active servers.
 
-For local reruns, see [Reset local test state](development-reset.md).
+### Codex desktop app or IDE
+
+- Open **Settings → MCP servers → Add server**.
+- Name: `ambassador`
+- Transport: **Streamable HTTP**
+- URL: `http://127.0.0.1:8787/mcp`
+- Authentication: none
+- Save, then restart Codex or the extension.
+
+The desktop app, CLI, and IDE share Codex MCP configuration. ChatGPT web does
+not connect to this loopback server.
+
+## 3. Register
+
+- Start a fresh Codex chat.
+- Say: **Register me with Embassys using me@example.com.**
+- Give Codex the six-digit code sent to that address.
+- Codex uses direct delivery automatically.
+
+To review unanswered requests later, say: **Which Embassys permission requests
+are waiting for my response?** After Codex lists them, tell it which request to
+grant or deny.
+
+## Incoming messages
+
+Ambassador includes the approved Codex ACP adapter and launches it when a
+central message arrives. You do not install `codex-acp` separately. The
+incoming message runs in a new Ambassador-managed session, not the registration
+chat.
+
+If startup or ACP initialization fails, Ambassador prints a bounded reason.
+Confirm Codex is signed in, update Ambassador, and restart it. For a clean local
+registration test, see [Reset local test state](development-reset.md).
+
+Codex MCP setup follows the current
+[official MCP instructions](https://developers.openai.com/codex/mcp).

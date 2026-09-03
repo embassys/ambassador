@@ -22,8 +22,11 @@ export type NotificationRelayErrorCode =
   | "relay_failed";
 
 export class NotificationRelayError extends Error {
-  constructor(readonly code: NotificationRelayErrorCode) {
-    super("Notification relay failed");
+  constructor(
+    readonly code: NotificationRelayErrorCode,
+    cause?: unknown,
+  ) {
+    super("Notification relay failed", { cause });
     this.name = "NotificationRelayError";
   }
 }
@@ -182,7 +185,7 @@ export class NotificationRelay {
     } catch (error) {
       if (signal.aborted || this.#shutdownRequested) return;
       if (error instanceof NotificationRelayError) throw error;
-      throw new NotificationRelayError("relay_failed");
+      throw new NotificationRelayError("relay_failed", error);
     }
   }
 
