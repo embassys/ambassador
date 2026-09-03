@@ -25,7 +25,7 @@ test("main publishes the Ambassador 0.2.9 candidate through npm OIDC after appro
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });
 
-test("every supported-agent guide uses the latest zero-configuration start and current registration flow", async () => {
+test("every supported-agent guide uses latest Ambassador without pinning a provider release", async () => {
   const guides = ["codex", "claude", "gemini", "hermes", "openclaw"];
   for (const guide of guides) {
     const contents = await readFile(
@@ -35,6 +35,11 @@ test("every supported-agent guide uses the latest zero-configuration start and c
 
     assert.match(contents, /npx --yes @embassys\/ambassador@latest start/u, guide);
     assert.match(contents, /latest/iu, guide);
+    assert.doesNotMatch(
+      contents,
+      /\blatest\s+(?:Codex|Claude|Gemini|Hermes|OpenClaw|`?@agentclientprotocol)/iu,
+      guide,
+    );
     assert.doesNotMatch(
       contents,
       /0\.149\.0|0\.152\.1|2\.1\.257|2\.1\.258|0\.58\.0|0\.20\.5|0\.21\.0|2026\.8\.1|1\.8\.0|0\.73\.0/u,

@@ -3,7 +3,7 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate the latest Hermes Agent release.
+- Install and authenticate Hermes Agent.
 - Make sure `hermes-acp` is on `PATH` for direct delivery.
 - Ambassador never receives your provider credential.
 

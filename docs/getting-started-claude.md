@@ -3,9 +3,9 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate the latest Claude Code release.
-- For direct delivery, install the latest
-  `@agentclientprotocol/claude-agent-acp` so `claude-agent-acp` is on `PATH`.
+- Install Claude Code.
+- For direct delivery, install `@agentclientprotocol/claude-agent-acp` so
+  `claude-agent-acp` is on `PATH`.
 - Sign in to Claude Code normally. Ambassador never receives your Claude
   credential.
 

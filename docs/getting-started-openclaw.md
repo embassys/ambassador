@@ -3,7 +3,7 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate the latest OpenClaw release.
+- Install and authenticate OpenClaw.
 - Make sure `openclaw` is on `PATH` for direct delivery.
 - Ambassador never receives your provider credential.
 
