@@ -2,7 +2,7 @@
 
 ## Before you start
 
-- Install Node.js `>=24.19.0 <25`.
+- Install Node.js `>=24.19.0`.
 - Install Codex.
 - For direct delivery, install `@agentclientprotocol/codex-acp` so `codex-acp`
   is on `PATH`.

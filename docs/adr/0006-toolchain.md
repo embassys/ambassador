@@ -4,7 +4,7 @@ Status: accepted
 
 Date: 2026-08-23
 
-Updated: 2026-09-02 for ACP v1
+Updated: 2026-09-03 for the open-ended Node engine range
 
 ## Problem
 
@@ -14,7 +14,7 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 
 | Area | Choice |
 | --- | --- |
-| Runtime | Node.js 24.19 LTS |
+| Runtime | Node.js 24.19.0 or newer |
 | Repository package manager | pnpm 11.22.0 through Corepack, with a committed lockfile and frozen installs |
 | Language | TypeScript 7.0.2 with strict checks |
 | Tests | `node:test` and `node:assert/strict` |
@@ -26,7 +26,12 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 | Logging | Project-owned typed NDJSON writer with allowlisted fields |
 | CI | GitHub Actions on Linux, macOS, and Windows; Windows support remains gated by ADR 0040 |
 
-Pin direct dependencies exactly. CI and release builds use Node 24 even when a developer has a newer Current release.
+Pin direct dependencies exactly. CI and release builds use Node 24.19.0 as the
+reproducible minimum even when a developer has a newer release. The public npm
+engine declaration is `>=24.19.0` without an upper bound. A newer Node major
+must not produce an npm engine warning solely because it is newer. Qualify the
+packed artifact on the current Node major before release when it differs from
+the build runtime.
 
 Pin pnpm by version and SHA-512 through `packageManager`. Keep `pnpm-lock.yaml` authoritative. Enforce a strict 24-hour minimum package release age, reject exotic transitive dependency sources, and deny dependency build scripts except for the reviewed `better-sqlite3` native build.
 
@@ -70,3 +75,5 @@ security controls, and approved immediate migration. On 2026-08-27, the user
 clarified that pnpm is for repository development and release work only;
 end-user usage stays on `npx`. On 2026-09-02, the user approved ACP v1 and
 delegated the exact SDK choice recorded in ADR 0038.
+On 2026-09-03, the user removed the Node 25 ceiling and approved a new release
+with the open-ended engine declaration.

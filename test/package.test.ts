@@ -9,7 +9,7 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   ) as Record<string, unknown>;
 
   assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.12");
+  assert.equal(packageJson.version, "0.2.13");
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, "MIT");
   assert.equal(
@@ -17,6 +17,7 @@ test("package metadata exposes only the Ambassador package and binary", async ()
     "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621",
   );
   assert.deepEqual(packageJson.bin, { ambassador: "dist/cli.js" });
+  assert.deepEqual(packageJson.engines, { node: ">=24.19.0" });
   assert.equal(
     (packageJson.dependencies as Record<string, string>)["@agentclientprotocol/sdk"],
     "1.4.0",
