@@ -244,10 +244,11 @@ retrieval or redelivery is the proper future fix.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
   retroactively.
-- Codex direct delivery and both delivery modes for Hermes Agent 0.20.5 and
-  OpenClaw 2026.8.2 have passed with the live central service. Ambassador 0.2.8
-  includes the qualified Hermes name-based ACP profile. Claude Code direct and
-  Gemini CLI direct remain open in the seven-case real-agent matrix.
+- Codex and Claude Code direct delivery and both delivery modes for Hermes
+  Agent 0.20.5 and OpenClaw 2026.8.2 have passed with the live central service.
+  Ambassador 0.2.8 includes the qualified Hermes name-based ACP profile, and
+  published Ambassador 0.2.11 passed the Claude Code direct flow. Gemini CLI
+  direct remains open in the seven-case real-agent matrix.
   Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
   full real-model round trip.
 
