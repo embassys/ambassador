@@ -17,8 +17,9 @@ npx --yes @embassys/ambassador@latest start
 - OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
   Codex, Claude Code, and Gemini CLI proceed directly without a delivery
   question.
-- Webhook users set a receiver secret in Ambassador's environment before
-  startup and give the agent only the variable name during registration.
+- Webhook users run `ambassador webhook-secret`, copy the displayed value into
+  Hermes or OpenClaw's owner-only secret store, and give the agent only the
+  receiver URL during registration.
 
 Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
 Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
@@ -51,16 +52,18 @@ configuration or credentials.
 
 ## Implementation status
 
-The REST, DPoP, delivery, and zero-configuration startup paths are implemented.
-Live-central qualification has passed with real Codex and with Hermes Agent
-0.20.5 in both delivery modes. Ambassador 0.2.9 matches exact known client and
-ACP agent names while treating reported versions as observations. Four other
-profile/mode cases remain open under the disclosed release exception in
+The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
+startup paths are implemented. Live-central qualification has passed with
+real Codex and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2 in both delivery
+modes. Ambassador matches exact known client and ACP agent names while treating
+reported versions as observations. Claude Code direct and Gemini CLI direct
+remain open under the disclosed release exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 
-Published Ambassador 0.2.9 has no Windows support claim. Current repository
-code is qualified under [ADR 0040](docs/adr/0040-windows-qualification.md): the
+Published Ambassador releases through 0.2.9 have no Windows support claim.
+Current repository code is qualified under
+[ADR 0040](docs/adr/0040-windows-qualification.md): the
 native state, packed-package, and mock delivery lanes pass, while individual
 agent and mode claims still require exact real-agent Windows evidence and a
 future package publication requires separate approval.
@@ -91,6 +94,7 @@ agents and webhook delivery for OpenClaw and Hermes.
 - [Gemini CLI setup](docs/getting-started-gemini.md)
 - [Hermes setup](docs/getting-started-hermes.md)
 - [OpenClaw setup](docs/getting-started-openclaw.md)
+- [Reset local test state](docs/development-reset.md)
 - [Central service follow-ups](docs/central-follow-ups.md)
 
 ## License

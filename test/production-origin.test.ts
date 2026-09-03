@@ -20,12 +20,21 @@ test("production ignores legacy development endpoint variables", async (t) => {
     journalPath: join(root, "notifications.sqlite3"),
     credentialPath: join(root, "central-credential.enc"),
     credentialKeyPath: join(root, "central-credential.key"),
+    webhookSecretPath: join(root, "webhook-secret.json"),
+    webhookSecretKeyPath: join(root, "webhook-secret.key"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
     environment: {
-      EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
       [legacyEndpointName("API")]: "http://127.0.0.1:1",
       [legacyEndpointName("MCP")]: "http://127.0.0.1:2",
+    },
+    webhookSecretStore: {
+      async load() {
+        return WEBHOOK_SECRET;
+      },
+      async createOrLoad() {
+        return WEBHOOK_SECRET;
+      },
     },
     centralFetch: async (input) => {
       requestedUrls.push(
@@ -62,7 +71,6 @@ test("production ignores legacy development endpoint variables", async (t) => {
     delivery: {
       mode: "webhook",
       url: "https://receiver.invalid/embassys",
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
   });
 

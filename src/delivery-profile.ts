@@ -13,7 +13,6 @@ import { secureWindowsArtifact, type WindowsAccessControl } from "./windows-acce
 export type DeliveryProfileErrorCode =
   | "incompatible_profile"
   | "invalid_profile"
-  | "missing_secret"
   | "profile_conflict"
   | "profile_store_failed";
 
@@ -30,8 +29,7 @@ export interface DirectDeliveryInput {
 
 export interface WebhookDeliveryInput {
   readonly mode: "webhook";
-  readonly url: string;
-  readonly secret_env: string;
+  readonly url?: string;
 }
 
 export type DeliveryInput = DirectDeliveryInput | WebhookDeliveryInput;
@@ -48,7 +46,6 @@ export interface WebhookDeliveryProfile {
   readonly mode: "webhook";
   readonly agent_kind: string;
   readonly url: string;
-  readonly secret_env: string;
 }
 
 export type DeliveryProfile = DirectDeliveryProfile | WebhookDeliveryProfile;
@@ -58,8 +55,6 @@ export interface DeliveryProfileStoreOptions {
   readonly windowsAccessControl?: WindowsAccessControl;
 }
 
-const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-const HEADER_SAFE_SECRET = /^[\x21-\x7e]{32,256}$/u;
 const PROFILE_MAX_BYTES = 8 * 1024;
 
 function failure(code: DeliveryProfileErrorCode): DeliveryProfileError {
@@ -106,13 +101,6 @@ export function canonicalWebhookUrl(value: string): string {
   return parsed.href;
 }
 
-export function resolveWebhookSecret(environment: NodeJS.ProcessEnv, variableName: string): string {
-  if (!ENVIRONMENT_NAME.test(variableName)) throw failure("invalid_profile");
-  const secret = environment[variableName];
-  if (secret === undefined || !HEADER_SAFE_SECRET.test(secret)) throw failure("missing_secret");
-  return secret;
-}
-
 function parseProfile(value: unknown): DeliveryProfile {
   if (!isRecord(value) || value.version !== 1 || typeof value.agent_kind !== "string") {
     throw failure("invalid_profile");
@@ -133,10 +121,8 @@ function parseProfile(value: unknown): DeliveryProfile {
   }
   if (
     value.mode === "webhook" &&
-    exactKeys(value, ["version", "mode", "agent_kind", "url", "secret_env"]) &&
-    typeof value.url === "string" &&
-    typeof value.secret_env === "string" &&
-    ENVIRONMENT_NAME.test(value.secret_env)
+    exactKeys(value, ["version", "mode", "agent_kind", "url"]) &&
+    typeof value.url === "string"
   ) {
     const url = canonicalWebhookUrl(value.url);
     if (url !== value.url) throw failure("invalid_profile");
@@ -145,7 +131,6 @@ function parseProfile(value: unknown): DeliveryProfile {
       mode: "webhook",
       agent_kind: value.agent_kind,
       url,
-      secret_env: value.secret_env,
     };
   }
   throw failure("invalid_profile");
@@ -155,7 +140,6 @@ export async function createDeliveryProfile(
   capability: AgentCapability,
   delivery: DeliveryInput,
   workingDirectory: string,
-  environment: NodeJS.ProcessEnv,
 ): Promise<DeliveryProfile> {
   if (!capability.enabled || !capability.modes.includes(delivery.mode)) {
     throw failure("incompatible_profile");
@@ -175,13 +159,12 @@ export async function createDeliveryProfile(
       working_directory: canonicalDirectory,
     };
   }
-  resolveWebhookSecret(environment, delivery.secret_env);
+  if (delivery.url === undefined) throw failure("invalid_profile");
   return {
     version: 1,
     mode: "webhook",
     agent_kind: capability.kind,
     url: canonicalWebhookUrl(delivery.url),
-    secret_env: delivery.secret_env,
   };
 }
 

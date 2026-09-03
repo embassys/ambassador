@@ -6,6 +6,8 @@ export interface GatewayPaths {
   lockPath: string;
   credentialPath: string;
   credentialKeyPath: string;
+  webhookSecretPath: string;
+  webhookSecretKeyPath: string;
   profilePath: string;
 }
 
@@ -19,6 +21,8 @@ export function pathsForStateDirectory(
     lockPath: join(stateDirectory, "ambassador.lock"),
     credentialPath: join(stateDirectory, "central-credential.json"),
     credentialKeyPath: join(stateDirectory, "central-credential.key"),
+    webhookSecretPath: join(stateDirectory, "webhook-secret.json"),
+    webhookSecretKeyPath: join(stateDirectory, "webhook-secret.key"),
     profilePath: join(stateDirectory, "delivery-profile.json"),
   };
 }

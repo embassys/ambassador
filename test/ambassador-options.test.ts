@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { AmbassadorOptionsError, parseAmbassadorStartOptions } from "../src/ambassador-options.js";
+import {
+  AmbassadorOptionsError,
+  parseAmbassadorCommand,
+  parseAmbassadorStartOptions,
+} from "../src/ambassador-options.js";
 
 test("accepts only ambassador start without options", () => {
   assert.deepEqual(parseAmbassadorStartOptions(["start"]), {});
+});
+
+test("accepts the explicit webhook-secret command without options", () => {
+  assert.deepEqual(parseAmbassadorCommand(["webhook-secret"]), { command: "webhook-secret" });
+  assert.deepEqual(parseAmbassadorCommand(["start"]), { command: "start" });
+  assert.throws(() => parseAmbassadorCommand(["webhook-secret", "extra"]));
+  assert.throws(() => parseAmbassadorCommand(["webhook-secret", "--json"]));
 });
 
 test("rejects old, split, duplicate, positional, configuration, and secret-value options", () => {

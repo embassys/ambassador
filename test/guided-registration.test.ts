@@ -7,18 +7,31 @@ import { type TestContext, test } from "node:test";
 import { type AgentCapability, PRODUCTION_AGENT_CAPABILITIES } from "../src/agent-capabilities.js";
 import { DeliveryProfileStore } from "../src/delivery-profile.js";
 import { GuidedRegistration, GuidedRegistrationError } from "../src/guided-registration.js";
+import type { WebhookSecretStore } from "../src/webhook-secret-store.js";
 
-const SECRET = "0123456789abcdef0123456789abcdef";
+const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
-async function fixture(t: TestContext, registry = PRODUCTION_AGENT_CAPABILITIES) {
+async function fixture(
+  t: TestContext,
+  registry = PRODUCTION_AGENT_CAPABILITIES,
+  webhookSecret: string | undefined = SECRET,
+) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-registration-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const calls: unknown[] = [];
+  const webhookSecretStore: WebhookSecretStore = {
+    async load() {
+      return webhookSecret;
+    },
+    async createOrLoad() {
+      return webhookSecret ?? SECRET;
+    },
+  };
   const registration = new GuidedRegistration({
     registry,
     profileStore: new DeliveryProfileStore(join(root, "delivery-profile.json")),
+    webhookSecretStore,
     workingDirectory: root,
-    environment: { EMBASSYS_WEBHOOK_SECRET: SECRET },
     registerCentral: async (arguments_) => {
       calls.push(arguments_);
       return {
@@ -58,6 +71,26 @@ test("OpenClaw and Hermes ask for delivery with direct as the default", async (t
   }
 });
 
+test("webhook selection explains secret setup before creating local or central state", async (t) => {
+  const { calls, registration } = await fixture(t, PRODUCTION_AGENT_CAPABILITIES, undefined);
+  const result = await registration.register(
+    {
+      email: "webhook@example.test",
+      delivery: { mode: "webhook" },
+    },
+    { name: "mcp", version: "qualification" },
+    new AbortController().signal,
+  );
+  assert.deepEqual(result, {
+    status: "input_required",
+    prompt:
+      "Run `ambassador webhook-secret`, configure the displayed secret in Hermes, then retry with the receiver URL.",
+    required: ["delivery.url"],
+    command: "ambassador webhook-secret",
+  });
+  assert.deepEqual(calls, []);
+});
+
 test("Codex, Claude Code, and Gemini CLI register directly without a delivery question", async (t) => {
   for (const clientInfo of [
     { name: "codex-mcp-client", version: "qualification" },
@@ -92,7 +125,6 @@ test("direct-only production profiles reject webhook input before state or centr
             delivery: {
               mode: "webhook",
               url: "https://agent.example.test/embassys",
-              secret_env: "EMBASSYS_WEBHOOK_SECRET",
             },
           },
           clientInfo,
@@ -124,7 +156,6 @@ test("persists the derived direct or webhook profile before central registration
       delivery: {
         mode: "webhook",
         url: "https://agent.example.test/embassys",
-        secret_env: "EMBASSYS_WEBHOOK_SECRET",
       },
     },
     { name: "mcp", version: "qualification" },
@@ -182,7 +213,6 @@ test("unsupported metadata and model-supplied process fields fail before state o
         delivery: {
           mode: "webhook",
           url: "https://agent.example.test/embassys",
-          secret_env: "EMBASSYS_WEBHOOK_SECRET",
         },
       },
       clientInfo: { name: "unknown", version: "1" },

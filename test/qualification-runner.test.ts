@@ -139,3 +139,28 @@ test("live runner has fixed, separately confirmed real-Hermes modes", async () =
   );
   assert.equal(/\b(?:npm|pnpm|npx|pip|brew)\b[^\n]*(?:install|add|update)/u.test(source), false);
 });
+
+test("live runner has fixed, separately confirmed real-OpenClaw modes", async () => {
+  const source = await readFile(join(process.cwd(), "scripts", "live-qualification.mjs"), "utf8");
+  assert.match(source, /run-live-qualification-with-real-openclaw-direct/u);
+  assert.match(source, /run-live-qualification-with-real-openclaw-webhook/u);
+  assert.match(source, /AMBASSADOR_OPENCLAW_QUALIFICATION_HOME/u);
+  assert.match(
+    source,
+    /const OPENCLAW_CLIENT_INFO = \{ name: "openclaw-bundle-mcp", version: "qualification" \}/u,
+  );
+  assert.match(source, /\[\s*"mcp",\s*"set"/u);
+  assert.match(source, /\[\s*"gateway",\s*"run"/u);
+  assert.match(source, /\[\s*"plugins",\s*"install"/u);
+  assert.match(source, /\[\s*"secrets",\s*"store",\s*"set"/u);
+  assert.match(source, /\[\s*"plugins",\s*"enable"/u);
+  assert.match(source, /embassys\/ambassador/u);
+  assert.doesNotMatch(source, /OPENCLAW_VERSION|startsWith\(OPENCLAW_VERSION\)/u);
+  assert.match(source, /webhookAcceptedByGateway/u);
+  assert.match(source, /targetActionResultCallCount/u);
+  assert.equal(
+    /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
+    false,
+    "the live runner must not accept an arbitrary agent command",
+  );
+});

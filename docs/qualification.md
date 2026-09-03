@@ -3,6 +3,86 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.10 candidate
+
+On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central
+matrix for the locally installed, authenticated Hermes and OpenClaw agents on
+macOS 26.5.2 arm64 and Node 24.19.0:
+
+| Agent | Observed version | Direct | Webhook |
+| --- | --- | --- | --- |
+| Hermes Agent | `0.20.5` | passed | passed |
+| OpenClaw | `2026.8.2` | passed | passed |
+
+The same clean-installed tarball was used in all four cases. Its SHA-256 was
+`6517b01ce08eb30aed7b6bfbe82bdb6cc9db65bec04bf676903fb2d4d179e15c` and
+its SRI digest was
+`sha512-F+9tpCZR1EOXVTxTY5Vut/+TMpj1uj3HpbtR6vuYso0b/qu71zZMS3ZM9FA6v06UmmKxB7y6sQ4hyNYLX2Dzwg==`.
+The live runner SHA-256 was
+`ad9818a70514829c839c24ce3a6936341b623c98061f2d1c8e7fa96b92309259`,
+and the reviewed central source revision was
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`.
+
+Every case created two disposable Mailosaur identities, registered and
+verified them through their local Ambassador MCP servers, and registered the
+real target with exact MCP client information `mcp` / `0.1.0`. Each case then
+proved encrypted credential and delivery-profile reload after an Ambassador
+restart, production REST and DPoP behavior, the deployed action catalog, a
+real-model permission decision, and a correlated synthetic action result. The
+target called `submit_action_result` exactly once with the supplied call ID.
+The requester received the matching final response, and local acceptance or
+completion preceded the corresponding central acknowledgement.
+
+Direct delivery launched each installed ACP agent, initialized ACP v1 with the
+fixed agent name, injected Ambassador MCP, and observed the real model's two
+required MCP calls. Webhook delivery used the internally generated encrypted
+secret, bearer authentication, and HMAC V2. Hermes used its generic webhook
+route. OpenClaw used the shipped `embassys-ambassador` receiver, returned
+custody before model execution, and continued until the real model completed
+both MCP calls. Report and state scans passed. Mailosaur messages, temporary
+Ambassador state, and owner-only provider credential copies were removed; the
+normal provider homes were not changed.
+
+The observed agent versions are evidence, not compatibility gates. The same
+candidate also passed deterministic registration and ACP tests with arbitrary
+reported version strings while retaining exact MCP client names, ACP v1, and
+fixed ACP agent names.
+
+The safe failure record for this qualification is:
+
+- Two Hermes webhook attempts ended with `mail_timeout` after central accepted
+  registration but before Mailosaur delivered the verification message. No
+  Hermes dispatch, model execution, or MCP invocation occurred. A later run
+  passed unchanged, classifying these as transient central/email delivery
+  failures rather than Hermes webhook failures.
+- The first isolated OpenClaw direct attempt omitted the authenticated backend
+  credential used by that installation. ACP started, but provider
+  authentication failed before an MCP call. Supplying an owner-only isolated
+  copy made the unchanged flow pass; the normal OpenClaw and provider homes
+  remained untouched.
+- The first OpenClaw webhook receiver returned `2xx`, transferring custody and
+  allowing central acknowledgement, but its detached model task inherited the
+  HTTP request's released OpenClaw work lease and failed with the safe class
+  `GatewayDrainingError`. This was the model timeout: the message had reached
+  OpenClaw, but no model or MCP call ran. The receiver now places accepted
+  messages in a bounded, memory-only queue serviced outside the request
+  lifecycle. The final live run proved that queued model work and both MCP
+  calls complete.
+- Restarting Ambassador aborts its local long poll, but the already-issued
+  30-second central poll can remain active server-side. Starting the next poll
+  immediately can let the abandoned request consume a message because central
+  has no lease or redelivery. The qualification runner therefore allows that
+  poll to expire before continuing. This accounts for the intentional quiet
+  interval after restart and is distinct from an agent model timeout.
+
+The full repository check passed 184 tests: 178 passed and six opt-in lanes
+were skipped as designed. Type checking and linting passed. A clean package
+install passed its installed-CLI REST E2E and webhook-secret CLI checks. The
+production vulnerability audit found no known vulnerabilities; the signature
+audit verified 20 registry packages and 13 attestations with no invalid or
+missing entries. Docker was unavailable in the local environment, so the
+containerized central-fixture lane remains a required pull-request check.
+
 ## CI delivery suite
 
 CI uses the independent local central fixture plus two test targets. It does
@@ -150,12 +230,11 @@ delivery. Its installed CLI rejected Hermes ACP 0.20.5 with `startup_failed`,
 as expected. The candidate pass qualifies adding exact 0.20.5 to source; it is
 not evidence that the already published 0.2.7 artifact has that support.
 
-Four profile/mode cases remain open: OpenClaw webhook and direct, Claude Code
-direct, and Gemini CLI direct. The user approved 0.2.6 as a one-release
-exception before this evidence was complete; the remaining cases are still
-required to complete the qualification record. Hermes 0.21.0 retains only its
-earlier contract and ACP startup probe and has not run the full real-model
-round trip.
+That evidence is retained to distinguish the published 0.2.7 artifact from its
+later source candidate. The 0.2.10 matrix above supersedes its former list of
+open cases: OpenClaw webhook and direct are now complete. Claude Code direct
+and Gemini CLI direct remain open. Hermes 0.21.0 retains only its earlier
+contract and ACP startup probe and has not run the full real-model round trip.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation

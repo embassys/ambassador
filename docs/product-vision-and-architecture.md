@@ -8,18 +8,20 @@ Embassys Ambassador is one foreground process between a local agent and the
 Embassys REST service. It exposes a loopback MCP server, enrolls
 one email-based central identity, and owns one local delivery profile.
 
-The public package and command are:
+The public package and commands are:
 
 ```text
 @embassys/ambassador
 ambassador start
+ambassador webhook-secret
 ```
 
-The command accepts no options and does not select an agent or delivery mode.
-Ambassador resolves a fixed
-agent profile from MCP `clientInfo` during registration. It asks for a delivery
-choice only when that profile supports both modes, then stores the result as
-nonsecret local profile data.
+Neither command accepts options. `start` does not select an agent or delivery
+mode. `webhook-secret` creates or reveals the one encrypted receiver secret for
+owner-driven webhook setup. Ambassador resolves a fixed agent profile from MCP
+`clientInfo` during registration. It asks for a delivery choice only when that
+profile supports both modes, then stores the result as nonsecret local profile
+data.
 
 ## System
 
@@ -60,9 +62,16 @@ webhook. The receiver authenticates the request, accepts custody with a `2xx`,
 and handles any provider-specific mapping. Ambassador then acknowledges the
 message to central.
 
-The webhook contract is provider-neutral. OpenClaw or another receiver may need
-a local mapping from the canonical Embassys JSON body to its native hook input.
-That mapping is receiver setup, not gateway branching.
+Ambassador generates and encrypts the webhook secret internally. The owner
+runs `ambassador webhook-secret` and copies the displayed value into the
+receiver's secret store. The raw value never enters MCP, a delivery profile, or
+normal logs.
+
+The webhook contract is provider-neutral. Hermes uses its native generic
+receiver. The package includes an OpenClaw plugin that verifies the exact
+bearer/HMAC-v2 request bytes, deduplicates the message ID, transfers it to a
+bounded in-memory plugin-service queue, and starts a normal OpenClaw model turn.
+Provider mapping remains receiver-side behavior, not a gateway branch.
 
 ### Direct
 
@@ -107,8 +116,8 @@ registry before creating any state or calling central:
 - A complete direct-only profile selects direct automatically and continues.
 - A complete dual-mode profile returns structured `input_required` content
   asking the user to choose direct or webhook, with direct marked as the
-  default. The follow-up supplies only the mode and, for webhook, its setup
-  fields.
+  default. Selecting webhook returns the exact secret command and setup
+  instruction. The final follow-up supplies only the mode and receiver URL.
 - An unknown, ambiguous, disabled, or incomplete profile returns
   `unsupported_agent` and stops.
 
@@ -119,10 +128,10 @@ profile and cannot change process details or widen capabilities. Its reported
 version is bounded and observed but ignored for selection. A failed direct
 launch does not fall back to webhook.
 
-Webhook setup collects the URL and the name of an environment variable that
-contains the webhook secret. The raw secret never enters a prompt, tool
-argument, tool result, or profile file. Ambassador does not call central
-registration until the complete local delivery input validates.
+Webhook setup collects only the URL. Ambassador does not call central
+registration until that URL validates and its encrypted webhook secret exists.
+The raw secret never enters a prompt, tool argument, tool result, or profile
+file.
 
 ## Central service relationship
 
@@ -141,20 +150,20 @@ does not probe alternate contracts or keep an old client as fallback.
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
-| Ambassador | Loopback MCP boundary checks, encrypted central credential, internal wrapping key, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
+| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
 The central token and P-256 private key persist only inside one encrypted
-credential file. Its wrapping material is generated internally and stored in a
-separate owner-only state file. This protects against disclosure of the
-credential file alone, not compromise of the owner's complete state directory.
+credential file. The webhook secret persists in a different encrypted file.
+Each has independently generated wrapping material in a separate owner-only
+state file. This protects against disclosure of one encrypted value without
+its key, not compromise of the owner's complete state directory.
 Local MCP trusts other processes running as the owner; strict loopback, Host,
 and Origin checks protect the browser and network boundary. The delivery
-profile may persist the mode, recognized agent kind, webhook URL, webhook
-secret environment-variable name, canonical direct working directory, and
-minimum ACP session metadata. It never contains a secret or message body.
-SQLite remains ID-only.
+profile may persist the mode, recognized agent kind, webhook URL, canonical
+direct working directory, and minimum ACP session metadata. It never contains
+a secret or message body. SQLite remains ID-only.
 
 ## Main flows
 
@@ -164,9 +173,10 @@ SQLite remains ID-only.
 2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
 3. Reject supplied local Authorization credentials.
 4. Load the delivery profile and encrypted central credential if present.
-5. Prepare the configured delivery target.
-6. Start REST polling only when both stored records are valid.
-7. Print the MCP endpoint and remain in the foreground.
+5. For webhook mode, load the separately encrypted webhook secret.
+6. Prepare the configured delivery target.
+7. Start REST polling only when the required stored records are valid.
+8. Print the MCP endpoint and remain in the foreground.
 
 ### Enrollment
 
@@ -232,10 +242,10 @@ retrieval or redelivery is the proper future fix.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
   retroactively.
-- Codex direct delivery and both Hermes Agent 0.20.5 delivery modes have passed
-  with the live central service. Ambassador 0.2.8 includes the qualified Hermes
-  ACP 0.20.5 identity. Four profile/mode cases in the seven-case real-agent
-  matrix remain open.
+- Codex direct delivery and both delivery modes for Hermes Agent 0.20.5 and
+  OpenClaw 2026.8.2 have passed with the live central service. Ambassador 0.2.8
+  includes the qualified Hermes name-based ACP profile. Claude Code direct and
+  Gemini CLI direct remain open in the seven-case real-agent matrix.
   Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
   full real-model round trip.
 
