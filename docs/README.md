@@ -39,7 +39,6 @@ the ADR ledger.
 | Path | Contents |
 | --- | --- |
 | `src/` | Ambassador CLI, local MCP, REST client, credential custody, delivery modes, and journal |
-| `integrations/openclaw-ambassador/` | Authenticated OpenClaw webhook receiver plugin |
 | `test/` | Unit, integration, security, artifact, and qualification tests |
 | `test/fixtures/` | Independent central fixture, mock webhook receiver, and mock ACP agent |
 | `docs/adr/` | Accepted decisions and the historical ledger |

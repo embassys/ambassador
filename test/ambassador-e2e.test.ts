@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +25,7 @@ async function fixture(t: TestContext) {
   const webhook = await startFakeWebhook(undefined, {
     secret: WEBHOOK_SECRET,
     nowSeconds: NOW_SECONDS,
+    contract: "openclaw-agent",
   });
   t.after(async () => {
     for (const gateway of gateways) await gateway.close();
@@ -113,18 +113,11 @@ test("registers by client capability, delivers the full webhook, then acknowledg
     value: marker,
   });
   const request = await value.webhook.waitForWake();
-  assert.equal(request.body.id, messageId);
+  assert.equal(request.ambassadorMessage.id, messageId);
   assert.equal(JSON.stringify(request.body).includes(marker), true);
-  const timestamp = request.headers["x-webhook-timestamp"];
-  assert.equal(typeof timestamp, "string");
   assert.equal(request.headers.authorization, `Bearer ${WEBHOOK_SECRET}`);
   assert.equal(request.headers["idempotency-key"], messageId);
-  assert.equal(
-    request.headers["x-webhook-signature-v2"],
-    createHmac("sha256", WEBHOOK_SECRET)
-      .update(`${timestamp as string}.${request.rawBody.toString("utf8")}`)
-      .digest("hex"),
-  );
+  assert.equal(request.headers["x-webhook-signature-v2"], undefined);
   for (
     let attempt = 0;
     attempt < 100 && value.central.messageState(messageId) !== "acked";
@@ -155,7 +148,10 @@ test("returns a correlated action result from the target MCP tool to the request
   const permission = (await permissionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof permission.permission_id, "string");
   const permissionWake = await value.webhook.waitForWake();
-  assert.equal((permissionWake.body.payload as Record<string, unknown>).type, "permission_request");
+  assert.equal(
+    (permissionWake.ambassadorMessage.payload as Record<string, unknown>).type,
+    "permission_request",
+  );
 
   const decided = await target.callTool("respond_to_permission", {
     permission_id: permission.permission_id,
@@ -181,7 +177,10 @@ test("returns a correlated action result from the target MCP tool to the request
   const action = (await actionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof action.call_id, "string");
   const actionWake = await value.webhook.waitForWake();
-  assert.equal((actionWake.body.payload as Record<string, unknown>).call_id, action.call_id);
+  assert.equal(
+    (actionWake.ambassadorMessage.payload as Record<string, unknown>).call_id,
+    action.call_id,
+  );
 
   const submitted = await target.callTool("submit_action_result", {
     call_id: action.call_id,

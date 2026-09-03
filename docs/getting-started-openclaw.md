@@ -40,53 +40,54 @@ startup, initialization, session, or delivery failure if they are incompatible.
 
 ## Set up webhook delivery
 
-Webhook mode needs the receiver plugin shipped inside the latest Ambassador
-package. Install Ambassador and the plugin once:
-
-```sh
-npm install --global @embassys/ambassador@latest
-openclaw plugins install --accept-capabilities \
-  "$(npm root --global)/@embassys/ambassador/integrations/openclaw-ambassador"
-```
-
-The capability is an exact authenticated HTTP route. Review and accept it only
-from the Ambassador package you installed.
-
 1. With `ambassador start` still running, choose **Send to a webhook** during
    registration. Ambassador responds with this setup command:
 
    ```sh
-   ambassador webhook-secret
+   npx --yes @embassys/ambassador@latest webhook-secret
    ```
 
    Ambassador creates the secret, encrypts it in its own owner-only state, and
    displays it. Repeating the command displays the same value; it does not
    rotate it.
 
-2. Store the displayed value in OpenClaw without putting it in shell history:
+2. Open OpenClaw's native hook configuration:
 
    ```sh
-   openclaw secrets store set AMBASSADOR_WEBHOOK_SECRET --value-file -
+   openclaw config patch --stdin
    ```
 
-   Paste the value, press Enter, then send end-of-file (`Ctrl-D`). Point the
-   plugin at that store entry:
+   Paste this block with the displayed secret, then send end-of-file with
+   `Ctrl-D`:
+
+   ```json5
+   {
+     hooks: {
+       enabled: true,
+       token: "PASTE_AMBASSADOR_SECRET_HERE",
+       path: "/hooks",
+       allowedAgentIds: ["main"],
+       allowRequestSessionKey: false,
+     },
+   }
+   ```
+
+   OpenClaw stores `hooks.token` in its owner-only configuration. Its native
+   hook does not accept a SecretRef for this field. The secret does not enter a
+   command argument, shell history, or model prompt.
+
+3. Validate the configuration and restart the OpenClaw gateway:
 
    ```sh
-   openclaw config set plugins.entries.embassys-ambassador.config.secret \
-     --ref-source store --ref-provider default \
-     --ref-id AMBASSADOR_WEBHOOK_SECRET
-   openclaw plugins enable embassys-ambassador --accept-capabilities
+   openclaw config validate
+   openclaw gateway restart
    ```
 
-   The plugin starts the configured OpenClaw agent, which defaults to `main`.
-   It does not select a model or expose the webhook secret to the model.
-
-3. Restart the OpenClaw gateway and run `openclaw plugins doctor`. The local
-   receiver URL is normally:
+   If the gateway runs in the foreground, stop and start that process instead.
+   The local receiver URL is normally:
 
    ```text
-   http://127.0.0.1:18789/embassys/ambassador
+   http://127.0.0.1:18789/hooks/agent
    ```
 
    Use the actual configured gateway port. A non-loopback receiver must use an
@@ -96,17 +97,16 @@ from the Ambassador package you installed.
    `delivery.mode` and `delivery.url`; it never carries the secret or a secret
    name.
 
-The plugin verifies Ambassador's bearer token, exact-body HMAC V2 signature,
-five-minute timestamp window, request ID, and idempotency key before placing the
-message on a bounded in-memory service queue. That service starts the normal
-OpenClaw model turn outside the completed HTTP request. A webhook `202` proves
-that OpenClaw accepted custody. It does not by itself prove that the model later
-called Ambassador MCP; end-to-end checks must wait for the correlated
-permission or action response.
+Ambassador sends OpenClaw's native agent-hook body with the complete central
+message inside a fixed untrusted-input prompt. It selects agent `main`, uses an
+isolated session, suppresses announcement delivery, authenticates with the
+generated bearer secret, and sends the central message ID as the idempotency
+key. A webhook `200` proves that OpenClaw admitted the run. It does not prove
+that the model later called Ambassador MCP. End-to-end checks must wait for the
+correlated permission or action response.
 
-If OpenClaw reports `model execution failed`, run `openclaw plugins doctor` and
-check that the agent's own provider credential and Ambassador MCP entry are
-available to the OpenClaw gateway. Ambassador intentionally logs only a safe
-failure category, not the provider error or message body.
+If OpenClaw admits the run but the action times out, check that the agent's own
+provider credential and Ambassador MCP entry are available to the gateway.
+Ambassador does not receive either credential.
 
 For local reruns, see [Reset local test state](development-reset.md).
