@@ -21,6 +21,7 @@ plan contains only work that is not complete.
 | Set up Gemini CLI | [Gemini CLI setup](getting-started-gemini.md) |
 | Set up Hermes | [Hermes setup](getting-started-hermes.md) |
 | Set up OpenClaw | [OpenClaw setup](getting-started-openclaw.md) |
+| Remove local test residue | [Local development reset](development-reset.md) |
 | Track worthwhile central service changes | [Central follow-ups](central-follow-ups.md) |
 | Understand an accepted design change | [ADR ledger](adr/README.md) |
 
@@ -38,6 +39,7 @@ the ADR ledger.
 | Path | Contents |
 | --- | --- |
 | `src/` | Ambassador CLI, local MCP, REST client, credential custody, delivery modes, and journal |
+| `integrations/openclaw-ambassador/` | Authenticated OpenClaw webhook receiver plugin |
 | `test/` | Unit, integration, security, artifact, and qualification tests |
 | `test/fixtures/` | Independent central fixture, mock webhook receiver, and mock ACP agent |
 | `docs/adr/` | Accepted decisions and the historical ledger |

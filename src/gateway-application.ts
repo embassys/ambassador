@@ -11,7 +11,6 @@ import {
   type DeliveryProfile,
   DeliveryProfileError,
   DeliveryProfileStore,
-  resolveWebhookSecret,
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
 import { DirectDeliveryTarget } from "./direct-delivery.js";
@@ -32,6 +31,10 @@ import {
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
 import { WebhookDeliveryTarget } from "./webhook-delivery.js";
+import {
+  EncryptedFileWebhookSecretStore,
+  type WebhookSecretStore,
+} from "./webhook-secret-store.js";
 
 export const CENTRAL_ORIGIN = "https://mcp.embassys.ai";
 const CENTRAL_POLL_SECONDS = 30;
@@ -46,6 +49,8 @@ export interface GatewayApplicationOptions {
   readonly journalPath: string;
   readonly credentialPath: string;
   readonly credentialKeyPath: string;
+  readonly webhookSecretPath: string;
+  readonly webhookSecretKeyPath: string;
   readonly profilePath: string;
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -53,6 +58,7 @@ export interface GatewayApplicationOptions {
   readonly centralFetch?: typeof fetch;
   readonly webhookFetch?: typeof fetch;
   readonly credentialStore?: CredentialStore;
+  readonly webhookSecretStore?: WebhookSecretStore;
   readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
   readonly localMcpPort?: number;
   readonly nowSeconds?: () => number;
@@ -88,6 +94,9 @@ export async function openGatewayApplication(
   const nowSeconds = options.nowSeconds ?? (() => Date.now() / 1_000);
   const journal = new NotificationJournal(options.journalPath);
   const profileStore = new DeliveryProfileStore(options.profilePath);
+  const webhookSecretStore =
+    options.webhookSecretStore ??
+    new EncryptedFileWebhookSecretStore(options.webhookSecretPath, options.webhookSecretKeyPath);
   const store =
     options.credentialStore ??
     new EncryptedFileCredentialStore(
@@ -119,8 +128,8 @@ export async function openGatewayApplication(
   });
   const guidedRegistration = new GuidedRegistration({
     profileStore,
+    webhookSecretStore,
     workingDirectory: options.workingDirectory,
-    environment: options.environment,
     registerCentral: (arguments_, signal) => enrollment.register(arguments_, signal),
   });
 
@@ -132,19 +141,23 @@ export async function openGatewayApplication(
     if (profile === undefined) throw new DeliveryProfileError("invalid_profile");
     const validated = await validateStoredDeliveryProfile(profile, options.workingDirectory);
     if (validated.profile.mode === "webhook") {
-      resolveWebhookSecret(options.environment, validated.profile.secret_env);
+      if ((await webhookSecretStore.load()) === undefined) {
+        throw new DeliveryProfileError("invalid_profile");
+      }
     }
     return validated;
   };
 
-  const createDeliveryTarget = (context: DeliveryTargetContext): DeliveryTarget => {
+  const createDeliveryTarget = async (context: DeliveryTargetContext): Promise<DeliveryTarget> => {
     if (options.deliveryTargetFactory !== undefined) {
       return options.deliveryTargetFactory(context);
     }
     if (context.profile.mode === "webhook") {
+      const secret = await webhookSecretStore.load();
+      if (secret === undefined) throw new DeliveryProfileError("invalid_profile");
       return new WebhookDeliveryTarget({
         url: context.profile.url,
-        secret: resolveWebhookSecret(options.environment, context.profile.secret_env),
+        secret,
         now: () => nowSeconds() * 1_000,
         ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
       });
@@ -172,7 +185,7 @@ export async function openGatewayApplication(
         now: nowSeconds,
       });
       const nextRest = new CentralRestClient({ centralOrigin, transport });
-      const target = createDeliveryTarget({ ...profile, endpoint: local.endpoint });
+      const target = await createDeliveryTarget({ ...profile, endpoint: local.endpoint });
       const nextRelay = new NotificationRelay({
         journal,
         deliveryTarget: target,

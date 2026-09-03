@@ -17,11 +17,45 @@ interface ArtifactScanner {
   }): Promise<unknown>;
 }
 
-const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 
 function legacyEndpointName(kind: "API" | "MCP"): string {
   return ["A2A", "DEV", "CENTRAL", kind, "URL"].join("_");
+}
+
+async function createWebhookSecret(packed: PackedCli, root: string, centralOrigin: string) {
+  let stdout = "";
+  let stderr = "";
+  const result = await packed.runCli(["webhook-secret"], {
+    io: {
+      stdout: {
+        write(chunk) {
+          stdout += String(chunk);
+          return true;
+        },
+      },
+      stderr: {
+        write(chunk) {
+          stderr += String(chunk);
+          return true;
+        },
+      },
+    },
+    env: {},
+    cwd: root,
+    signal: new AbortController().signal,
+    testOverrides: {
+      centralOrigin,
+      stateRoot: root,
+      localMcpPort: 0,
+      nowSeconds: () => NOW_SECONDS,
+    },
+  });
+  assert.equal(result, 0);
+  assert.equal(stderr, "");
+  const secret = stdout.trim();
+  assert.match(secret, /^[a-f0-9]{48}$/u);
+  return secret;
 }
 
 interface PackedCli {
@@ -69,8 +103,9 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   const root = await mkdtemp(join(tmpdir(), "ambassador-current-packed-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const central = await startFakeCentral(t);
+  const webhookSecret = await createWebhookSecret(packed, root, central.apiUrl);
   const webhook = await startFakeWebhook(t, {
-    secret: WEBHOOK_SECRET,
+    secret: webhookSecret,
     nowSeconds: NOW_SECONDS,
   });
   const controller = new AbortController();
@@ -91,9 +126,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
         },
       },
     },
-    env: {
-      EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    },
+    env: {},
     cwd: root,
     signal: controller.signal,
     testOverrides: {
@@ -120,7 +153,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     delivery: {
       mode: "webhook",
       url: webhook.url,
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
   });
   const verificationCode = central.verificationCode(email);
@@ -172,7 +204,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       { name: "ambassador-stderr", value: stderr, truncated: false },
     ],
     markers: [
-      { name: "webhook-secret", encoding: "utf8", value: WEBHOOK_SECRET },
+      { name: "webhook-secret", encoding: "utf8", value: webhookSecret },
       { name: "registration-email", encoding: "utf8", value: email },
       { name: "verification-code", encoding: "utf8", value: verificationCode },
       { name: "message-body", encoding: "utf8", value: marker },

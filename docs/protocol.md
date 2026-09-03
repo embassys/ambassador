@@ -8,17 +8,20 @@ promise.
 
 ## Startup
 
-The public package and command are:
+The public package and commands are:
 
 ```text
 @embassys/ambassador
 ambassador start
+ambassador webhook-secret
 ```
 
-`start` accepts no options or positional values. Webhook secrets are supplied
-only through the environment and selected by name during registration. There
-is no local token, agent selector, delivery-mode selector, endpoint option,
-configuration path, or `--acp-agent` option.
+Neither command accepts options or positional values. `webhook-secret` creates
+one encrypted 48-character lowercase hexadecimal secret when absent and writes
+the stable value to standard output for the owner to copy into a receiver. It
+does not take the singleton process lock. `start` has no local token, agent
+selector, delivery-mode selector, endpoint option, configuration path, webhook
+secret option, or `--acp-agent` option.
 
 The process acquires its singleton lock before reading credentials, binding a
 listener, calling central, starting an agent, or sending a webhook. It binds
@@ -181,22 +184,37 @@ shell fragment, adapter, transport, or path.
 
 ### Webhook follow-up
 
+Selecting webhook without a URL, or before the local secret exists, returns
+structured content equivalent to:
+
+```json
+{
+  "status": "input_required",
+  "prompt": "Run `ambassador webhook-secret`, configure the displayed secret in this agent, then retry with the receiver URL.",
+  "required": ["delivery.url"],
+  "command": "ambassador webhook-secret"
+}
+```
+
+The label names the matched agent. The owner runs the command in a terminal
+and copies its output into that receiver's credential store. The agent never
+receives the value. The final call is:
+
 ```json
 {
   "email": "agent@example.test",
   "display_name": "Optional display name",
   "delivery": {
     "mode": "webhook",
-    "url": "https://agent.example.test/embassys",
-    "secret_env": "EMBASSYS_WEBHOOK_SECRET"
+    "url": "https://agent.example.test/embassys"
   }
 }
 ```
 
-`secret_env` is an environment-variable name, never a secret. Its value must
-be present in the Ambassador process and contain 32 through 256 header-safe
-ASCII characters. A newly generated 48-character lowercase hexadecimal value
-is recommended.
+Ambassador refuses central registration until its separately encrypted webhook
+secret exists. Neither the secret nor a selector for it is accepted through
+MCP. Repeating `ambassador webhook-secret` reveals the existing value and does
+not rotate it.
 
 Webhook URLs may use HTTPS. Plain HTTP is accepted only for a literal loopback
 host. Credentials, fragments, control characters, unsupported schemes, and
@@ -265,7 +283,7 @@ The profile contains only the minimum nonsecret fields:
 
 | Mode | Fields |
 | --- | --- |
-| `webhook` | mode, canonical URL, secret environment-variable name |
+| `webhook` | mode, registry-derived fixed agent kind, canonical URL |
 | `direct` | mode, registry-derived fixed agent kind, canonical startup working directory, minimum opaque ACP session metadata when safe and supported |
 
 The profile uses the same protected application-state directory as the central
@@ -377,9 +395,15 @@ or pre-acceptance transport failure may retry within the fixed delivery budget
 using the same idempotency key and a fresh timestamp and signature. Because a
 timeout can be uncertain, receivers must deduplicate by message ID.
 
-OpenClaw, Hermes, and other webhook consumers adapt the canonical body through
-their own local hook configuration. Ambassador does not emit provider-specific
-JSON.
+Hermes adapts the canonical body through its native generic webhook route. The
+package-shipped OpenClaw plugin verifies the exact request before parsing,
+deduplicates accepted IDs, and transfers the bounded message to a
+plugin-service queue before returning `202`. The service starts a durable
+embedded model turn outside the completed HTTP request's OpenClaw work-admission
+scope. Its route is `/embassys/ambassador`. A receiver `2xx` proves custody
+only; model execution, MCP invocation, and the final correlated response remain
+separate qualification observations. Ambassador does not emit
+provider-specific JSON.
 
 ## Direct ACP delivery
 
@@ -497,14 +521,16 @@ Never write message bodies, action payloads, permission details, MCP arguments
 or results, registration emails, verification codes, tokens, private keys,
 proofs, nonces, webhook secrets, prompts, or provider output to SQLite,
 profiles, normal logs, diagnostics, metrics, temporary files, crash artifacts,
-or support bundles.
+or support bundles. The only raw webhook-secret output is the explicit
+owner-invoked `webhook-secret` command.
 
 The encrypted central credential contains only the central token and DPoP
-private key plus minimum format metadata. Ambassador generates its wrapping
-material internally and stores it in a separate owner-only state file. The two
-files have the same strict ownership, link, permission, and atomic-write
-checks. A credential without its matching key fails closed; there is no
-migration. The delivery profile is nonsecret. The journal remains ID-only.
+private key plus minimum format metadata. The webhook secret uses a different
+encrypted file, wrapping key, and authenticated-data scope. Ambassador
+generates both wrapping keys internally. All four files have the same strict
+ownership, link, permission, and atomic-write checks. A value without its
+matching key fails closed; there is no migration. The delivery profile is
+nonsecret. The journal remains ID-only.
 
 ## Acceptance cases
 
@@ -515,7 +541,8 @@ The cutover must prove at least:
   dual-mode registration with direct as the default;
 - safe `clientInfo` handling, rejection of unknown or incomplete profiles, and
   no model-supplied agent or process configuration;
-- no raw secret in MCP, profile data, output, or process arguments;
+- no raw secret in MCP, profile data, normal output, logs, or process
+  arguments; the explicit secret command is the only display path;
 - complete-message webhook delivery, authentication, deduplication, retry, and
   acknowledgement ordering;
 - ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
