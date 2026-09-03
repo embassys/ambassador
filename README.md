@@ -6,16 +6,20 @@ agent over ACP v1 or to an authenticated webhook.
 
 ## Start
 
-- Install Node.js 24.19.0 or newer.
+- Install Node.js 24.19.0 or newer and sign in to a supported local agent.
+- From the directory the agent may access, run:
 
 ```sh
 npx --yes @embassys/ambassador@latest start
 ```
 
-- No Ambassador token or environment variable is needed for direct delivery.
-- Configure your agent's MCP client for `http://127.0.0.1:8787/mcp` without
-  authentication.
-- Ask the agent to register your email with Ambassador.
+- Keep that process open. It prints the MCP endpoint and ready-to-copy setup
+  commands for Codex, Claude Code, Hermes, and OpenClaw.
+- Add `http://127.0.0.1:8787/mcp` to the agent as a token-free Streamable HTTP
+  MCP server. Follow the linked agent guide below for its command or UI steps.
+- Restart or reload the agent, then say: **Register me with Embassys using
+  me@example.com.**
+- Give the agent the six-digit code sent to that address.
 - OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
   Codex and Claude Code proceed directly without a delivery question.
 - Webhook users run
@@ -27,10 +31,14 @@ npx --yes @embassys/ambassador@latest start
 Direct delivery supports OpenClaw, Hermes, Codex, and Claude Code.
 Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
 fail closed. The agent cannot choose an executable, adapter, or arbitrary
-delivery implementation. Ambassador matches exact known MCP client and ACP
-agent names, but treats their reported versions as diagnostic metadata. It
-tries the fixed ACP v1 contract and reports an actual incompatibility at
-startup, initialization, session creation, or delivery.
+delivery implementation. Ambassador includes the approved Codex and Claude
+Code ACP adapters; users do not install them separately. OpenClaw and Hermes
+provide their own ACP commands. Ambassador matches exact known MCP client and
+ACP agent names, but treats reported versions as diagnostic metadata.
+
+After registration, ask **Which Embassys permission requests are waiting for
+my response?** to list requests this identity can grant or deny. Give the agent
+an explicit decision and it submits that decision through Ambassador.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
@@ -68,7 +76,9 @@ provider configuration or credentials.
 ## Implementation status
 
 The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
-startup paths are implemented. Live-central qualification has passed with
+startup paths are implemented. The 0.2.14 release adds package-owned Codex and
+Claude Code adapters, printed agent setup, bounded startup diagnostics, and the
+pending permission-request view. Live-central qualification has passed with
 real Codex and Claude Code, and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2
 in both delivery modes. Ambassador matches exact known client and ACP agent
 names while treating reported versions as observations. Gemini CLI and

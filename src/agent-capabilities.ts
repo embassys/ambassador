@@ -6,11 +6,13 @@ export interface AgentClientInfo {
   readonly version: string;
 }
 
-export interface WindowsNodePackageEntrypoint {
+export interface NodePackageEntrypoint {
   readonly packageName: string;
   readonly binName: string;
   readonly entrypoint: string;
 }
+
+export type WindowsNodePackageEntrypoint = NodePackageEntrypoint;
 
 export interface DirectAgentCapability {
   readonly command: string;
@@ -21,6 +23,7 @@ export interface DirectAgentCapability {
   readonly mcp: McpConfigurationBehavior;
   readonly environment: readonly string[];
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
+  readonly bundledNodePackage?: NodePackageEntrypoint;
 }
 
 export type WebhookAgentCapability =
@@ -166,7 +169,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
         "XDG_RUNTIME_DIR",
         "XDG_STATE_HOME",
       ],
-      windowsNodePackage: {
+      bundledNodePackage: {
         packageName: "@agentclientprotocol/codex-acp",
         binName: "codex-acp",
         entrypoint: "dist/index.js",
@@ -208,7 +211,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
       ],
-      windowsNodePackage: {
+      bundledNodePackage: {
         packageName: "@agentclientprotocol/claude-agent-acp",
         binName: "claude-agent-acp",
         entrypoint: "dist/index.js",
@@ -224,6 +227,7 @@ function unique(values: readonly string[]): boolean {
 
 function completeDirect(value: DirectAgentCapability | undefined): boolean {
   const windowsNodePackage = value?.windowsNodePackage;
+  const bundledNodePackage = value?.bundledNodePackage;
   const completeWindowsNodePackage =
     windowsNodePackage === undefined ||
     (BOUNDED_METADATA.test(windowsNodePackage.packageName) &&
@@ -231,6 +235,15 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
       BOUNDED_METADATA.test(windowsNodePackage.entrypoint) &&
       !windowsNodePackage.entrypoint.includes("\\") &&
       windowsNodePackage.entrypoint
+        .split("/")
+        .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."));
+  const completeBundledNodePackage =
+    bundledNodePackage === undefined ||
+    (BOUNDED_METADATA.test(bundledNodePackage.packageName) &&
+      bundledNodePackage.binName === value?.command &&
+      BOUNDED_METADATA.test(bundledNodePackage.entrypoint) &&
+      !bundledNodePackage.entrypoint.includes("\\") &&
+      bundledNodePackage.entrypoint
         .split("/")
         .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."));
   return (
@@ -243,7 +256,9 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     value.environment.length <= 32 &&
     value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
     unique(value.environment) &&
-    completeWindowsNodePackage
+    completeWindowsNodePackage &&
+    completeBundledNodePackage &&
+    !(windowsNodePackage !== undefined && bundledNodePackage !== undefined)
   );
 }
 

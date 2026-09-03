@@ -104,8 +104,10 @@ ADR 0041. This keeps direct launch shell-free.
 
 The enabled direct profiles are OpenClaw, Hermes, Codex, and Claude Code. Only
 OpenClaw and Hermes also support webhook, with direct as their default. Codex
-and Claude Code register directly without a delivery question. Codex uses
-`codex-acp`, and Claude Code uses `claude-agent-acp`. Exact client and ACP agent
+and Claude Code register directly without a delivery question. Ambassador
+ships their reviewed ACP adapters as exact production dependencies, validates
+their package entrypoints, and launches them with its Node runtime. OpenClaw
+and Hermes provide their own fixed agent commands. Exact client and ACP agent
 names, commands, arguments, modes, and environment allowlists remain compiled
 in. Gemini CLI and Antigravity are not active profiles. Unknown, ambiguous,
 disabled, and incomplete profiles are unsupported.
@@ -179,7 +181,8 @@ a secret or message body. SQLite remains ID-only.
 5. For webhook mode, load the separately encrypted webhook secret.
 6. Prepare the configured delivery target.
 7. Start REST polling only when the required stored records are valid.
-8. Print the MCP endpoint and remain in the foreground.
+8. Print the MCP endpoint, fixed setup commands for all supported agents, the
+   registration prompt, and remain in the foreground.
 
 ### Local reset
 
@@ -218,6 +221,11 @@ and payload schemas. Permission requests and decisions control whether an
 action call may deliver a message to another identity. The target submits one
 structured success or error result for the call. Central correlates it by
 `call_id` and queues an `action_response` for the original caller.
+
+The agent-facing `list_pending_permission_requests` tool derives a user's
+unanswered inbox from `get_my_permissions`: pending rows where the enrolled
+identity is the grantor. It stores no second queue and requires an explicit
+grant or deny through `respond_to_permission`.
 
 ### Incoming message
 

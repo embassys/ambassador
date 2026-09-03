@@ -126,6 +126,16 @@ jobs, Docker central fixture, artifact audits, and a clean packed-artifact run
 on Node 26 pass. The compiled runtime and central contract are unchanged, so
 the existing live-central and real-agent evidence remains applicable.
 
+The user then approved version 0.2.14 for ADR 0045: package-owned Codex and
+Claude Code adapters, bounded startup and child-process diagnostics, printed
+agent setup guidance, model-oriented tool descriptions, and the pending
+permission-request projection. This release may publish after repository,
+cross-platform package, Docker central-fixture, installed-artifact, production
+audit, and mock delivery checks pass. The central REST and DPoP wire contract
+does not change, so the existing live-central evidence remains applicable. The
+downloaded registry artifact must be checked after the main-branch OIDC job
+publishes it.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -152,8 +162,10 @@ and disallow traditional publish tokens after trusted publishing works.
 ## Costs
 
 Users need Node.js 24 with npm and `npx`. Native `better-sqlite3` binaries
-need qualification on every supported operating system. Direct mode also adds
-the exact ACP SDK approved in ADR 0038.
+need qualification on every supported operating system. Direct mode adds the
+exact ACP SDK approved in ADR 0038. ADR 0045 also adds the exact Codex and
+Claude Code adapter dependency trees, which materially increases installed
+size in exchange for removing two user-managed adapter installations.
 
 ## Approval
 
@@ -163,9 +175,9 @@ user separately approved publication of version 0.2.6 with the qualification
 exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
-0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11, and
-0.2.12 and 0.2.13 releases described above. Later publications still require
-explicit approval after qualification.
+0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
+0.2.12, 0.2.13, and 0.2.14 releases described above. Later publications still
+require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the

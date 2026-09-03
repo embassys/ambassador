@@ -64,8 +64,8 @@ mode, the runner uses the mock ACP fixture compiled by `pnpm run test:build`
 and does not run a paid provider.
 
 For the real Codex mode, prepare an owner-only temporary home containing only
-the copied Codex authentication needed for the run. Put the installed
-`codex-acp` on `PATH`, then set:
+the copied Codex authentication needed for the run. Use the candidate's
+package-owned `codex-acp` dependency, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=codex
@@ -88,8 +88,8 @@ an owner-only copy of `.claude.json` and a minimal
 `mcp__ambassador__respond_to_permission` and
 `mcp__ambassador__submit_action_result` for this controlled synthetic run.
 Provide the copy with the existing Claude authentication needed for the run
-without printing it or saving it in the repository. Put the installed
-`claude-agent-acp` on `PATH`, then set:
+without printing it or saving it in the repository. Use the candidate's
+package-owned `claude-agent-acp` dependency, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude

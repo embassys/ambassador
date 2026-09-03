@@ -1,63 +1,62 @@
 # Get started with Hermes Agent
 
-## Before you start
+## 1. Start Ambassador
 
-- Install Node.js `>=24.19.0`.
-- Install and authenticate Hermes Agent.
-- Make sure `hermes-acp` is on `PATH` for direct delivery.
-- Ambassador never receives your provider credential.
+- Install Node.js `>=24.19.0` and Hermes Agent.
+- Sign in to Hermes normally and make sure `hermes-acp` is on `PATH`.
+- In the directory Hermes may access, run:
 
-## Set up direct delivery
+  ```sh
+  npx --yes @embassys/ambassador@latest start
+  ```
 
-1. From the directory Hermes may access, keep the latest Ambassador running:
+- Keep that terminal open.
 
-   ```sh
-   npx --yes @embassys/ambassador@latest start
-   ```
+## 2. Add Ambassador to Hermes
 
-2. Add the endpoint printed by Ambassador as an unauthenticated Streamable
-   HTTP MCP server:
+In another terminal, run:
 
-   ```sh
-   hermes mcp add ambassador \
-     --url http://127.0.0.1:8787/mcp \
-     --connect-timeout 15
-   ```
+```sh
+hermes mcp add ambassador --url http://127.0.0.1:8787/mcp
+hermes mcp test ambassador
+```
 
-   Replace the URL if Ambassador printed a different loopback port. Do not
-   configure authentication.
-3. Start or restart Hermes so it sees the MCP server.
-4. Ask Hermes to register your email. It calls Ambassador's `register_agent`
-   tool.
-5. Choose **Send directly to this Hermes agent**.
-6. Enter the six-digit code sent to your email.
+Start a fresh Hermes session or run `/reload-mcp`. Do not configure
+authentication for this loopback MCP server.
 
-Ambassador launches `hermes-acp` when a central message arrives. That is a new
-gateway-managed session, not the chat used for registration. Reported versions
-are diagnostic only: Ambassador tries the fixed ACP v1 command and exact
-`hermes-agent` identity, then reports a bounded startup, initialization,
-session, or delivery failure if they are incompatible.
+## 3. Register
 
-## Set up webhook delivery
+- Say: **Register me with Embassys using me@example.com.**
+- Choose **Send directly to this Hermes agent** (the default) or **Send to a
+  webhook**.
+- Give Hermes the six-digit code sent to your email.
 
-Hermes has a native generic webhook receiver. Configure one owner-controlled
-route that uses the same value for Ambassador's bearer and HMAC V2 contract:
+To review unanswered requests later, say: **Which Embassys permission requests
+are waiting for my response?** After Hermes lists them, tell it which request
+to grant or deny.
 
-1. With Ambassador running, choose **Send to a webhook** during registration.
-   Ambassador responds with:
+## Direct delivery
+
+Ambassador launches the installed `hermes-acp` command for incoming messages
+and injects its MCP endpoint into that new session. The incoming message does
+not return to the registration chat.
+
+## Optional webhook delivery
+
+Hermes can instead receive the complete message through its native webhook
+gateway.
+
+1. During registration, choose **Send to a webhook**.
+2. In another terminal, get Ambassador's receiver secret:
 
    ```sh
    npx --yes @embassys/ambassador@latest webhook-secret
    ```
 
-   Ambassador creates the secret, encrypts it in its own owner-only state, and
-   displays it. Repeating the command displays the same value; it does not
-   rotate it.
-
-2. Enable Hermes webhooks with `WEBHOOK_ENABLED=true` and your chosen
-   `WEBHOOK_PORT` in Hermes's owner-only `.hermes/.env`. Add this route to
-   `.hermes/webhook_subscriptions.json`, replacing both placeholders with the
-   displayed value and preserving any existing routes:
+3. Enable Hermes webhooks with `WEBHOOK_ENABLED=true` and your chosen
+   `WEBHOOK_PORT` in its owner-only `.hermes/.env`.
+4. Add this route to `.hermes/webhook_subscriptions.json`, preserving existing
+   routes and replacing both placeholders with the displayed secret:
 
    ```json
    {
@@ -78,26 +77,13 @@ route that uses the same value for Ambassador's bearer and HMAC V2 contract:
    }
    ```
 
-   Keep the file mode `0600`. An empty prompt passes the complete canonical
-   JSON to the model. The route uses Hermes's normal tool configuration, so
-   keep the Ambassador MCP server enabled there.
+5. Keep the file owner-only, restart `hermes gateway run`, and give the agent
+   the receiver URL when it retries registration. The usual local URL is
+   `http://127.0.0.1:8644/webhooks/embassys`; use the configured port.
 
-3. Start or restart `hermes gateway run`. The local receiver URL is normally:
+The registration tool sends only `delivery.url`, never the secret. A remote
+receiver must use HTTPS. For a clean local registration test, see
+[Reset local test state](development-reset.md).
 
-   ```text
-   http://127.0.0.1:8644/webhooks/embassys
-   ```
-
-   Use the actual configured port. A non-loopback receiver must use an HTTPS
-   URL.
-
-4. Retry `register_agent` with webhook selected and that URL. MCP carries only
-   `delivery.mode` and `delivery.url`; it never carries the secret or a secret
-   name.
-
-Hermes validates the bearer filter and HMAC V2 timestamp/signature before its
-model runs. A webhook `2xx` proves custody only. Keep both Hermes and
-Ambassador running until the model calls `respond_to_permission` or
-`submit_action_result` and the requester receives the correlated response.
-
-For local reruns, see [Reset local test state](development-reset.md).
+The MCP command follows Hermes Agent's current
+[official MCP guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/guides/use-mcp-with-hermes.md).

@@ -48,7 +48,9 @@ prompt.
 
 The process acquires its singleton lock before reading credentials, binding a
 listener, calling central, starting an agent, or sending a webhook. It binds
-`127.0.0.1:8787` and prints this line after the endpoint is ready:
+`127.0.0.1:8787` and prints the ready endpoint followed by fixed MCP setup
+commands for every supported agent. The output ends with the registration
+prompt and a reminder to keep Ambassador running. Its first line is:
 
 ```text
 MCP endpoint: http://127.0.0.1:8787/mcp
@@ -57,6 +59,12 @@ MCP endpoint: http://127.0.0.1:8787/mcp
 `SIGINT` and `SIGTERM` stop new work, cancel central polling, cancel or close
 the active delivery target within its deadline, close local state, and release
 the lock.
+
+Startup failures use bounded operator messages. They distinguish an occupied
+MCP port, invalid or unavailable local state, an unavailable agent or bundled
+adapter, ACP initialization failure, uncertain direct delivery, and a generic
+webhook or relay failure. They never print raw provider output, central bodies,
+credentials, or unbounded exception text.
 
 ## Local MCP
 
@@ -103,10 +111,11 @@ Before enrollment, expose exactly:
 - `verify_email`
 - `resend_verification`
 
-After a credential is durably stored, expose exactly these REST-backed tools:
+After a credential is durably stored, expose exactly these agent-facing tools:
 
 - `list_action_types`
 - `request_permission`
+- `list_pending_permission_requests`
 - `respond_to_permission`
 - `call_action`
 - `submit_action_result`
@@ -120,6 +129,13 @@ because central has no corresponding REST operation.
 Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
 catalog. `list_action_types` returns central action definitions as data; those
 definitions do not become additional local tools.
+
+`list_pending_permission_requests` is a local projection over the current
+`GET /api/get_my_permissions` response. It accepts no arguments and returns
+only entries whose status is `pending` and whose `grantor_email` is the
+enrolled identity, plus their count. It adds no central route, local queue, or
+message persistence. The user selects a returned permission ID and explicitly
+chooses `granted` or `denied`; `respond_to_permission` submits that decision.
 
 Reject any argument named `token`, `jwt`, `access_token`, `authorization`, `private_key`,
 `secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
@@ -147,7 +163,6 @@ client version does not gate resolution.
 Profile behavior is capability-driven:
 
 | Matched profile | Registration behavior |
-| --- | --- |
 | Complete direct-only | Select direct and continue without a delivery question |
 | Complete direct and webhook | Return `input_required`; direct is the default |
 | Unknown, ambiguous, disabled, or incomplete | Return `unsupported_agent`; write no state and make no central request |
@@ -467,13 +482,14 @@ directory is the canonical process directory captured during registration. A
 later start from a different directory fails closed instead of silently moving
 the agent's scope.
 
-On Windows, a reviewed Node-based direct profile also fixes its package name,
-bin name, and JavaScript entrypoint. Ambassador resolves only that package next
-to an absolute `PATH` entry, checks its identity and contained entrypoint,
-requires bounded version metadata without treating it as an allowlist, and
-launches it with the current Node executable. It does not execute the npm
-batch-file shim or invoke a shell. Native direct commands retain the fixed
-executable in the registry.
+For a package-owned Node adapter, the profile fixes its package name, bin name,
+and JavaScript entrypoint. Ambassador resolves that declared production
+dependency from its own installation, validates the package identity, bin
+mapping, bounded version metadata, and contained entrypoint, then launches it
+with the current Node executable. It never downloads an adapter at runtime or
+uses a `PATH` shadow. External native agent commands retain their fixed
+invocation. On Windows, the same no-shell validation also applies to a reviewed
+external Node package such as OpenClaw.
 
 The enabled profiles and fixed contracts are:
 
@@ -486,9 +502,11 @@ The enabled profiles and fixed contracts are:
 
 A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
-downloads at runtime are forbidden. Codex and Claude Code require their
-separately installed ACP adapters. Reported MCP client and ACP agent versions
-are not allowlists. Gemini CLI and Antigravity are unsupported client names.
+downloads at runtime are forbidden. Ambassador installs the exact Codex and
+Claude Code adapters as production dependencies; users do not install those
+adapters separately. OpenClaw and Hermes still provide their own agent
+commands. Reported MCP client and ACP agent versions are not allowlists. Gemini
+CLI and Antigravity are unsupported client names.
 
 The repository qualification probe runs each profile's fixed version command,
 records a bounded semantic version or `unavailable`, and continues to that
@@ -604,7 +622,12 @@ The cutover must prove at least:
 - unchanged central REST and DPoP behavior from ADR 0037;
 - bounded in-memory body custody and ID-only durable state;
 - exact target-authorized action-result submission and correlated response
-  delivery, with no general reply or local delivery-control tools;
+  delivery, the filtered pending-decision projection, and no general reply or
+  local delivery-control tools;
+- package-owned Codex and Claude Code adapters, validated internal entrypoint
+  launch, and bounded asynchronous child-process failures;
+- startup output with working MCP setup commands for all supported agents and
+  safe operator diagnostics for each startup or delivery failure class;
 - no separate connector process, user-selected webhook format, OpenClaw
   receiver plugin, old package alias, old CLI, compatibility reader, or
   migration path in the artifact; and

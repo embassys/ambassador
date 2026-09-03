@@ -100,6 +100,39 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     return;
   }
   const packed = (await import(pathToFileURL(cliPath).href)) as PackedCli;
+  const installedDist = dirname(cliPath);
+  const directDelivery = (await import(
+    pathToFileURL(join(installedDist, "direct-delivery.js")).href
+  )) as {
+    resolveBundledNodePackageEntrypoint(contract: {
+      packageName: string;
+      binName: string;
+      entrypoint: string;
+    }): Promise<string>;
+  };
+  const capabilities = (await import(
+    pathToFileURL(join(installedDist, "agent-capabilities.js")).href
+  )) as {
+    PRODUCTION_AGENT_CAPABILITIES: Array<{
+      kind: string;
+      direct?: {
+        bundledNodePackage?: {
+          packageName: string;
+          binName: string;
+          entrypoint: string;
+        };
+      };
+    }>;
+  };
+  for (const kind of ["codex", "claude"]) {
+    const contract = capabilities.PRODUCTION_AGENT_CAPABILITIES.find((item) => item.kind === kind)
+      ?.direct?.bundledNodePackage;
+    assert.ok(contract !== undefined);
+    assert.match(
+      await directDelivery.resolveBundledNodePackageEntrypoint(contract),
+      /[/\\]dist[/\\]index\.js$/u,
+    );
+  }
   const root = await mkdtemp(join(tmpdir(), "ambassador-current-packed-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const central = await startFakeCentral(t);
@@ -165,6 +198,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     [
       "list_action_types",
       "request_permission",
+      "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
       "submit_action_result",

@@ -3,6 +3,37 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.14 candidate
+
+On 2026-09-03, the byte-final 0.2.14 candidate added package-owned Codex and
+Claude Code ACP adapters, actionable startup and direct-delivery failures,
+agent-specific MCP setup guidance, intention-oriented tool descriptions, and
+the read-only `list_pending_permission_requests` projection. The central REST,
+DPoP, webhook, credential, and local-state formats are unchanged. The tarball
+SHA-256 was
+`7dada5440958b0f7fabb58c2cb4735f428a993af45043c3c82dc7ec5b10059d2`,
+and its SRI was
+`sha512-lE3GBkC9BSM+mTUceWo2I4NIBQou1aWTSSfW0LoN1y1vPbrVrM3WnuILOhe3Lps2LeBpALfV/LKUYOtAkxjABQ==`.
+
+The Node 26.7.0 repository check passed 191 tests: 185 passed and six
+platform-specific or opt-in cases skipped. Linting and type checking passed.
+A clean installation of the packed candidate installed both exact adapter
+dependencies, resolved their validated package-owned entrypoints, and passed
+the installed-CLI REST enrollment, pending-tool catalog, webhook delivery,
+acknowledgement, cleanup, restart, and artifact-scan test. The production
+vulnerability audit found no known issue. The source signature audit verified
+all 172 registry packages. The packed-install audit verified 140 registry
+packages; only the unpublished top-level 0.2.14 candidate lacked registry
+metadata.
+
+The embedded adapters do not remove the need for an installed and signed-in
+Codex or Claude Code provider. They remove the separate ACP-adapter install and
+the unhandled missing-adapter process failure. The new pending-request view is
+derived from the existing `get_my_permissions` response and introduces no
+second queue or central route. Because the central and delivery protocols are
+unchanged, the 0.2.12 live-central evidence and current real-agent evidence
+remain applicable.
+
 ## Ambassador 0.2.13 candidate
 
 On 2026-09-03, the byte-final 0.2.13 candidate removed the npm engine upper
