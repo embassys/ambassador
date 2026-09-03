@@ -208,6 +208,17 @@ expected missing registry metadata for the unpublished local 0.2.8 candidate.
 The full repository check passed 158 tests with no failures; two separate
 opt-in fixture lanes were skipped locally and remain required in CI.
 
+After the green pull-request gates and main-branch OIDC workflow, npm published
+0.2.8 and assigned `latest` to it. The downloaded registry artifact had npm SRI
+`sha512-iGUTyiZW1X3ufniNgD8HvTniD56zVOHIgPuyLlaelAblU5nhYEV9aCgKpEUOCTvh+VaY72BfxAinssgQpHtUYQ==`,
+registry SHA-1 `9188429b5933d7776cdf356578aad297bd3fc64b`, and tarball
+SHA-256 `d6caf9a6c7285642bbd7ccdcb40fc89109dfd97deb157513071c8c50d6604e7c`.
+Its extracted files were identical to the candidate despite the archive-level
+digest difference. A clean registry-artifact install passed the REST E2E through
+the installed CLI entry, the installed `ambassador` command rejected a forbidden
+option, the production audit found no known vulnerabilities, and the registry
+signature audit verified all 21 packages with no invalid or missing entries.
+
 The runners do not record prompts, replies, message bodies, payloads, identities,
 tokens, secrets, provider credentials, paths containing user data, or raw
 provider output.
