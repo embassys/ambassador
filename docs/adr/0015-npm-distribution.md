@@ -35,8 +35,8 @@ Normally publish from `main` only after Linux, macOS, and Windows checks,
 packed installation, the five-profile local qualification matrix, live central
 qualification, and artifact audits pass. ADR 0040 requires separate native
 evidence before documenting any agent profile and mode as supported on
-Windows. Published Ambassador 0.2.8 predates that evidence and has no Windows
-support claim.
+Windows. Published Ambassador 0.2.8 and 0.2.9 predate that evidence and have no
+Windows support claim.
 
 `@embassys/ambassador@0.2.6` was a one-release exception: on 2026-09-03 the user
 explicitly approved publication after the deterministic CI, package, fixture,
@@ -57,11 +57,13 @@ the four open profile/mode cases and the supported-Node Codex repeat as a
 disclosed qualification exception.
 
 ADR 0041 supersedes that production version-gating policy for the 0.2.9
-candidate. On 2026-09-03, the user requested another release and directed that
+release. On 2026-09-03, the user requested another release and directed that
 the pull request be merged once green. That authorizes the main-branch OIDC
 publication of 0.2.9 only after the local candidate checks and required Linux,
 macOS, package, and central-fixture pull-request gates pass. The disclosed
-four-case real-agent qualification gap remains unchanged.
+four-case real-agent qualification gap remains unchanged. Those gates passed,
+the release workflow published 0.2.9, and the downloaded registry artifact was
+verified independently.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
