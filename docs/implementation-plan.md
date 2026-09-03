@@ -7,15 +7,18 @@ automatic central acknowledgement, restart loss, bounded state, internal
 credential-key custody, and packed-package installation. Completed design and
 behavior live in the architecture, protocol, and ADRs rather than this plan.
 
-Published Ambassador 0.2.9 corrects the version policy under ADR 0041. The
-0.2.10 candidate adds internally generated encrypted webhook secrets, the
-`ambassador webhook-secret` command, and the shipped OpenClaw webhook receiver.
+Published Ambassador 0.2.9 corrected the version policy under ADR 0041.
+Published Ambassador 0.2.10 adds internally generated encrypted webhook
+secrets, the `ambassador webhook-secret` command, and the shipped OpenClaw
+webhook receiver.
 Exact known MCP client names still select fixed profiles, and exact ACP v1
 agent names still protect direct initialization, but reported client and agent
 versions do not gate either step. Ambassador tries the fixed contract and
 surfaces an actual startup, initialization, session, or delivery failure. The
-candidate's local checks and four-case Hermes/OpenClaw live-central matrix have
-passed. Publication and registry-artifact verification remain pending.
+0.2.10 passed its local checks, four-case Hermes/OpenClaw live-central matrix,
+pull-request gates, and main-branch release gates. The downloaded npm artifact
+was independently verified. Its digests and results are recorded in
+[Delivery qualification](qualification.md).
 
 ## Remaining qualification
 
