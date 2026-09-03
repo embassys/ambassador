@@ -217,23 +217,21 @@ jobs:
       - name: Launch installed Windows command shim
         if: runner.os == 'Windows'
         shell: pwsh
-        run: >-
-          node --input-type=module -e '
-            import { spawnSync } from "node:child_process";
-            const commandInterpreter = process.env.ComSpec;
-            if (commandInterpreter === undefined) throw new Error("Windows command interpreter is unavailable");
-            const shim = process.argv[1];
-            const result = spawnSync(commandInterpreter, ["/d", "/s", "/c", `""${shim}" invalid"`], {
-              encoding: "utf8",
-              windowsHide: true,
-            });
-            if (result.error !== undefined) throw result.error;
-            if (result.status !== 2) throw new Error("Installed Ambassador command returned an unexpected status");
-            if (result.stdout !== "" || result.stderr.replaceAll("\r\n", "\n") !== "Invalid command or arguments\n") {
-              throw new Error("Installed Ambassador command returned unexpected output");
+        run: |
+          $stdoutPath = Join-Path $env:RUNNER_TEMP "ambassador-shim.stdout"
+          $stderrPath = Join-Path $env:RUNNER_TEMP "ambassador-shim.stderr"
+          try {
+            & "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\ambassador.cmd" invalid 1> $stdoutPath 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+            $stdout = [IO.File]::ReadAllText($stdoutPath)
+            $stderr = [IO.File]::ReadAllText($stderrPath).Replace("`r`n", "`n")
+            if ($exitCode -ne 2) { throw "Installed Ambassador command returned an unexpected status" }
+            if ($stdout -ne "" -or $stderr -ne "Invalid command or arguments`n") {
+              throw "Installed Ambassador command returned unexpected output"
             }
-          '
-          "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\ambassador.cmd"
+          } finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
+          }
 
   publish:
     name: Publish npm package
