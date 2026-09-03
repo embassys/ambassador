@@ -23,7 +23,7 @@ test("real-agent runner loads the packed candidate without installing agents", a
   assert.match(combined, /hermes/u);
   assert.match(combined, /codex-acp/u);
   assert.match(combined, /claude-agent-acp/u);
-  assert.match(combined, /gemini/u);
+  assert.doesNotMatch(combined, /agy_acp_server|antigravity-client|gemini-cli-mcp-client/u);
   assert.match(source, /version_probe/u);
   assert.doesNotMatch(
     source,
@@ -58,7 +58,6 @@ test("real-agent runner refuses to act without the explicit confirmation", async
   assert.equal(stderr.includes("HERMES_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("CODEX_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("CLAUDE_WEBHOOK_SECRET"), false);
-  assert.equal(stderr.includes("GEMINI_WEBHOOK_SECRET"), false);
 });
 
 test("agent version probes report unavailable commands without failing", async () => {
@@ -89,7 +88,7 @@ test("agent version probes report unavailable commands without failing", async (
   };
   assert.deepEqual(
     report.probes,
-    ["openclaw", "hermes", "codex", "claude", "gemini"].map((kind) => ({
+    ["openclaw", "hermes", "codex", "claude"].map((kind) => ({
       kind,
       status: "unavailable",
       reported_version: null,

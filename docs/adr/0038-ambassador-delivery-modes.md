@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039, 0040, 0041, and 0042
+Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, and 0043
 
 Date: 2026-09-02
 
@@ -85,11 +85,11 @@ Direct is the default:
   `unsupported_agent`. Ambassador writes no registration state and makes no
   central request.
 
-The enabled dual-mode profiles are OpenClaw and Hermes. Codex, Claude Code,
-and Gemini CLI are direct-only and proceed without a delivery question. Their
-exact contracts appear below. Do not offer an arbitrary command or a generic
-webhook fallback for an unsupported client. Do not fall back from a failed
-direct launch to webhook.
+The enabled dual-mode profiles are OpenClaw and Hermes. Codex and Claude Code
+are direct-only and proceed without a delivery question. Their exact contracts
+appear below. Do not offer an arbitrary command or a generic webhook fallback
+for an unsupported client. Do not fall back from a failed direct launch to
+webhook.
 
 The direct working directory is Ambassador's canonical process directory at
 registration time. It persists in the profile. A later start from a different
@@ -160,7 +160,6 @@ The enabled direct profiles are:
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | ACP session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
 | Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | ACP session injection |
-| Gemini CLI | `gemini-cli-mcp-client` | `gemini --acp` | `gemini-cli` | ACP session injection |
 
 Codex uses the separately installed Apache-2.0 `codex-acp` adapter, which starts
 Codex App Server, translates ACP v1, and accepts HTTP MCP session
@@ -174,10 +173,9 @@ adapter. Ambassador passes only the reviewed Anthropic authentication variables
 and the common provider environment. It does not pass a Claude executable
 override.
 
-Gemini CLI supplies native ACP v1 through `gemini --acp`; Ambassador does not
-add an adapter. The profile permits Gemini API-key authentication and the
-reviewed Google Vertex selection variables. Qualification records the tested
-release, but reported versions do not change profile selection or acceptance.
+Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
+future profile requires a separately accepted fixed launch contract and live
+qualification.
 
 Ambassador initializes ACP, creates or safely resumes a gateway-owned session,
 and submits one prompt containing fixed untrusted-input instructions plus the
@@ -239,7 +237,7 @@ agent. The mocks cover the full delivery contract, failure boundaries,
 acknowledgement order, crash uncertainty, and content-free durability without
 network or paid agent accounts.
 
-An opt-in local suite runs every enabled mode in this seven-case matrix:
+An opt-in local suite runs every enabled mode in this six-case matrix:
 
 | Agent | Webhook | Direct |
 | --- | --- | --- |
@@ -247,7 +245,6 @@ An opt-in local suite runs every enabled mode in this seven-case matrix:
 | Hermes | required | required |
 | Codex | not supported | required |
 | Claude Code | not supported | required |
-| Gemini CLI | not supported | required |
 
 The local suite uses the central fixture by default. It records versions and
 safe pass/fail evidence, never prompts, messages, credentials, or provider
@@ -269,8 +266,8 @@ acknowledgement.
 
 - OpenClaw and Hermes users choose delivery in the same agent conversation used
   for enrollment, with direct as the default.
-- Codex, Claude Code, Gemini CLI, and later complete direct-only profiles enroll
-  without an unnecessary delivery question.
+- Codex, Claude Code, and later complete direct-only profiles enroll without an
+  unnecessary delivery question.
 - Unknown and incomplete clients fail before local or central registration
   state exists.
 - The command line no longer contains delivery configuration.
@@ -295,7 +292,8 @@ This record supersedes:
 - ADRs 0024 and 0028 through 0031's separate connector architecture, CLI,
   correlation database, execution contract, and package layout;
 - ADRs 0034 and 0035's provider-specific Codex and Claude transports; and
-- ADR 0036's rejected Gemini headless interface. Gemini now uses native ACP.
+- ADR 0036's rejected Gemini headless interface. ADR 0043 supersedes the later
+  native Gemini profile and defers Antigravity.
 
 ADR 0015 is amended for the new package and binary names. ADRs 0019 and 0037
 remain authoritative for central credential custody and the central REST
@@ -348,9 +346,9 @@ On 2026-09-03, the user approved adopting central's deployed
 `submit_action_result` route and requested a live result round trip between a
 controlled requester and real Codex.
 
-On 2026-09-03, the user corrected the delivery registry: only OpenClaw and
-Hermes support webhook. Codex, Claude Code, and Gemini CLI are direct-only and
-register without a delivery question.
+On 2026-09-03, the user corrected the delivery registry at that time: only
+OpenClaw and Hermes supported webhook. The then-enabled Codex, Claude Code, and
+Gemini CLI profiles were direct-only.
 
 On 2026-09-03, the user approved adding only exact Hermes ACP `agentInfo`
 version `0.20.5` after a controlled live-central pass with Hermes Agent 0.20.5.
@@ -359,7 +357,7 @@ artifact rejects `0.20.5` in direct mode; the new entry therefore requires a
 subsequent Ambassador release and does not amend what 0.2.7 supports.
 
 On 2026-09-03, the user approved an observational installed-version probe for
-all five agent profiles. The probe does not decide compatibility. Production
+every active agent profile. The probe does not decide compatibility. Production
 continues to reject unreviewed MCP client and ACP identities, and provider setup
 guidance continues to list the exact supported versions. The same day, the user
 separately approved selecting the latest Ambassador release in public install
@@ -377,3 +375,7 @@ receiver with OpenClaw's native `/hooks/agent` endpoint. Ambassador keeps the
 secret command, does not configure OpenClaw, and retains Hermes's existing
 bearer and HMAC V2 contract. The OpenClaw webhook format and `main` agent ID are
 fixed in the compiled-in profile.
+
+Later on 2026-09-03, the user withdrew Gemini CLI from the active registry and
+deferred Antigravity support. ADR 0043 supersedes the Gemini-specific profile,
+qualification, and setup portions of this record.

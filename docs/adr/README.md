@@ -1,9 +1,9 @@
 # Architecture decisions
 
 Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
-for zero-configuration local startup, ADR 0040 for Windows qualification, and
-ADR 0041 for agent-version handling, and ADR 0042 for webhook-secret ownership
-and the OpenClaw receiver.
+for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
+0041 for agent-version handling, ADR 0042 for webhook-secret ownership and the
+OpenClaw receiver, and ADR 0043 for the current four-profile registry.
 
 ## Current decisions
 
@@ -23,6 +23,7 @@ and the OpenClaw receiver.
 | [0040](0040-windows-qualification.md) | Windows implementation and qualification plan |
 | [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
 | [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and native OpenClaw hooks |
+| [0043](0043-remove-gemini-and-defer-antigravity.md) | Remove Gemini CLI and defer Antigravity support |
 
 ## Historical ledger
 
@@ -47,7 +48,7 @@ history retains older records that have already been deleted.
 | 0032 | Fixture-first work before server deployment | Completed live REST integration |
 | 0034 | Codex App Server connector | ACP profile under ADR 0038 |
 | 0035 | Claude Code headless connector | ACP profile under ADR 0038 |
-| 0036 | Gemini connector evaluation | Native Gemini ACP profile under ADR 0038 |
+| 0036 | Gemini connector evaluation | Gemini removal and Antigravity deferral under ADR 0043 |
 | 0033 | Initial Windows deferral | ADR 0040 Windows qualification plan |
 
 Add an ADR when changing a public CLI, dependency, trust boundary, credential

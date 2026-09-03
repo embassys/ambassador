@@ -117,8 +117,8 @@ containing those credential fields or stored token bytes.
 
 Before writing state or contacting central, Ambassador resolves the current MCP
 session's exact client name to one enabled capability profile. OpenClaw and
-Hermes support direct and webhook delivery. Codex, Claude Code, and Gemini CLI
-are direct-only. All use their fixed compiled-in contracts. The reported MCP
+Hermes support direct and webhook delivery. Codex and Claude Code are
+direct-only. All use their fixed compiled-in contracts. The reported MCP
 client version does not gate resolution.
 
 Profile behavior is capability-driven:
@@ -129,7 +129,7 @@ Profile behavior is capability-driven:
 | Complete direct and webhook | Return `input_required`; direct is the default |
 | Unknown, ambiguous, disabled, or incomplete | Return `unsupported_agent`; write no state and make no central request |
 
-Codex, Claude Code, and Gemini CLI follow the direct-only row. For a dual-mode
+Codex and Claude Code follow the direct-only row. For a dual-mode
 OpenClaw or Hermes profile, an initial call without `delivery` returns structured
 content equivalent to:
 
@@ -460,13 +460,12 @@ The enabled profiles and fixed contracts are:
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | session injection |
 | Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | session injection |
-| Gemini CLI | `gemini-cli-mcp-client` | `gemini --acp` | `gemini-cli` | session injection |
 
 A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
 downloads at runtime are forbidden. Codex and Claude Code require their
-separately installed ACP adapters. Gemini CLI provides native ACP. Reported
-MCP client and ACP agent versions are not allowlists.
+separately installed ACP adapters. Reported MCP client and ACP agent versions
+are not allowlists. Gemini CLI and Antigravity are unsupported client names.
 
 The repository qualification probe runs each profile's fixed version command,
 records a bounded semantic version or `unavailable`, and continues to that
@@ -577,7 +576,7 @@ The cutover must prove at least:
 - ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
   cancellation, crash, and uncertainty handling;
 - deterministic CI coverage with a mock webhook receiver and mock ACP agent;
-- opt-in local coverage for direct delivery on all five profiles and webhook
+- opt-in local coverage for direct delivery on all four profiles and webhook
   delivery on OpenClaw and Hermes;
 - unchanged central REST and DPoP behavior from ADR 0037;
 - bounded in-memory body custody and ID-only durable state;
