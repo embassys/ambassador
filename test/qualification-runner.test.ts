@@ -23,7 +23,7 @@ test("real-agent runner loads the packed candidate without installing agents", a
   assert.match(combined, /hermes/u);
   assert.match(combined, /codex-acp/u);
   assert.match(combined, /claude-agent-acp/u);
-  assert.match(combined, /gemini/u);
+  assert.doesNotMatch(combined, /agy_acp_server|antigravity-client|gemini-cli-mcp-client/u);
   assert.match(source, /version_probe/u);
   assert.doesNotMatch(
     source,
@@ -58,7 +58,6 @@ test("real-agent runner refuses to act without the explicit confirmation", async
   assert.equal(stderr.includes("HERMES_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("CODEX_WEBHOOK_SECRET"), false);
   assert.equal(stderr.includes("CLAUDE_WEBHOOK_SECRET"), false);
-  assert.equal(stderr.includes("GEMINI_WEBHOOK_SECRET"), false);
 });
 
 test("agent version probes report unavailable commands without failing", async () => {
@@ -89,7 +88,7 @@ test("agent version probes report unavailable commands without failing", async (
   };
   assert.deepEqual(
     report.probes,
-    ["openclaw", "hermes", "codex", "claude", "gemini"].map((kind) => ({
+    ["openclaw", "hermes", "codex", "claude"].map((kind) => ({
       kind,
       status: "unavailable",
       reported_version: null,
@@ -109,6 +108,28 @@ test("live runner has a fixed, separately confirmed real-Codex mode", async () =
   assert.match(source, /Controlled Embassys qualification policy/u);
   assert.match(source, /RESTART_POLL_DRAIN_MS/u);
   assert.match(source, /ack_message/u);
+  assert.equal(
+    /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
+    false,
+    "the live runner must not accept an arbitrary agent command",
+  );
+  assert.equal(/\b(?:npm|pnpm|npx|pip|brew)\b[^\n]*(?:install|add|update)/u.test(source), false);
+});
+
+test("live runner has a fixed, separately confirmed real-Claude mode", async () => {
+  const source = await readFile(join(process.cwd(), "scripts", "live-qualification.mjs"), "utf8");
+  assert.match(source, /run-live-qualification-with-real-claude/u);
+  assert.match(source, /AMBASSADOR_CLAUDE_QUALIFICATION_HOME/u);
+  assert.match(
+    source,
+    /const CLAUDE_CLIENT_INFO = \{ name: "claude-code", version: "qualification" \}/u,
+  );
+  assert.match(source, /claude-agent-acp/u);
+  assert.match(source, /\.claude\.json/u);
+  assert.match(source, /target_version_probe/u);
+  assert.match(source, /claude_permission_decision/u);
+  assert.match(source, /claude_action_result_mcp_call/u);
+  assert.match(source, /claude_action_result_call_count/u);
   assert.equal(
     /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
     false,
