@@ -8,6 +8,12 @@ credential-key custody, checked local cleanup, and packed-package installation.
 Completed design and behavior live in the architecture, protocol, and ADRs
 rather than this plan.
 
+Ambassador 0.2.13 is the current release candidate. It removes the public
+Node `<25` engine ceiling without changing runtime behavior. Before release,
+the repository and packed-package gates must pass at the Node 24.19.0 build
+floor, and the same packed candidate must pass a clean install and installed
+CLI run on Node 26.
+
 Published Ambassador 0.2.9 corrected the version policy under ADR 0041.
 Published Ambassador 0.2.11 removes the 0.2.10 OpenClaw receiver and sends
 OpenClaw's fixed webhook profile directly to its native `/hooks/agent`

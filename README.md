@@ -6,6 +6,8 @@ agent over ACP v1 or to an authenticated webhook.
 
 ## Start
 
+- Install Node.js 24.19.0 or newer.
+
 ```sh
 npx --yes @embassys/ambassador@latest start
 ```

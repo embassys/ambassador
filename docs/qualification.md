@@ -3,6 +3,29 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.13 candidate
+
+On 2026-09-03, the byte-final 0.2.13 candidate removed the npm engine upper
+bound. Its public range is `>=24.19.0`. Runtime source and dependencies are
+unchanged from 0.2.12. The tarball SHA-256 was
+`526ac63bb0743e20b430e350c3c0000aced4137b09b9688c9ccbda02dc8056f4`,
+and its SRI was
+`sha512-5zxbG8Hi8jtxPVL5FYt7mTz4yS3c6Bmtv7JpiVFnxp1MGAAWiQgmHB0S8tAgXujBObCvuqOZWjmg163qud8zmw==`.
+
+The Node 26.7.0 repository check passed 184 tests: 178 passed and six
+platform-specific or opt-in cases skipped. Linting and type checking passed.
+A clean npm installation of the packed candidate produced no engine warning
+and passed the installed-CLI REST enrollment, delivery, acknowledgement,
+cleanup, restart, bootstrap-catalog, and artifact-scan test. The installed
+command also completed `clean`, bound its MCP endpoint, and shut down under
+Node 26.7.0. The same command completed `clean` and bound the endpoint under
+the reported Node 26.6.0 runtime.
+
+The production vulnerability audit found no known issue. The signature audit
+verified all 53 registry packages. Because no runtime source, dependency,
+central contract, delivery profile, or state format changed, the 0.2.12
+live-central evidence and current real-agent evidence remain applicable.
+
 ## Ambassador 0.2.12
 
 On 2026-09-03, the byte-final 0.2.12 candidate added the local-only
