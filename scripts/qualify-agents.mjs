@@ -201,8 +201,14 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
             try {
               const url = process.env[`${prefix}_URL`];
               const secret = process.env[`${prefix}_SECRET`];
-              if (url === undefined || secret === undefined) throw new Error("webhook unavailable");
-              const target = new WebhookDeliveryTarget({ url, secret });
+              if (url === undefined || secret === undefined || profile.webhook === undefined) {
+                throw new Error("webhook unavailable");
+              }
+              const target = new WebhookDeliveryTarget({
+                url,
+                secret,
+                contract: profile.webhook,
+              });
               await target.deliver(
                 {
                   id: `qualification-${profile.kind}-webhook`,

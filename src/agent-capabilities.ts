@@ -23,12 +23,22 @@ export interface DirectAgentCapability {
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
 }
 
+export type WebhookAgentCapability =
+  | {
+      readonly format: "ambassador-hmac-v2";
+    }
+  | {
+      readonly format: "openclaw-agent";
+      readonly agentId: string;
+    };
+
 export interface AgentCapability {
   readonly kind: string;
   readonly displayName: string;
   readonly enabled: boolean;
   readonly aliases: readonly string[];
   readonly modes: readonly DeliveryMode[];
+  readonly webhook?: WebhookAgentCapability;
   readonly direct?: DirectAgentCapability;
   readonly qualificationCases: readonly string[];
 }
@@ -48,6 +58,10 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     enabled: true,
     aliases: ["openclaw-bundle-mcp"],
     modes: ["direct", "webhook"],
+    webhook: {
+      format: "openclaw-agent",
+      agentId: "main",
+    },
     direct: {
       command: "openclaw",
       args: ["acp"],
@@ -87,6 +101,9 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     enabled: true,
     aliases: ["mcp"],
     modes: ["direct", "webhook"],
+    webhook: {
+      format: "ambassador-hmac-v2",
+    },
     direct: {
       command: "hermes-acp",
       args: [],
@@ -274,6 +291,13 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
   );
 }
 
+function completeWebhook(value: WebhookAgentCapability | undefined): boolean {
+  if (value?.format === "ambassador-hmac-v2") return true;
+  return (
+    value?.format === "openclaw-agent" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value.agentId)
+  );
+}
+
 export function isCompleteAgentCapability(value: AgentCapability): boolean {
   if (
     !KIND.test(value.kind) ||
@@ -294,7 +318,13 @@ export function isCompleteAgentCapability(value: AgentCapability): boolean {
     return false;
   }
   if (value.modes.some((mode) => mode !== "direct" && mode !== "webhook")) return false;
-  return value.modes.includes("direct") ? completeDirect(value.direct) : value.direct === undefined;
+  const directComplete = value.modes.includes("direct")
+    ? completeDirect(value.direct)
+    : value.direct === undefined;
+  const webhookComplete = value.modes.includes("webhook")
+    ? completeWebhook(value.webhook)
+    : value.webhook === undefined;
+  return directComplete && webhookComplete;
 }
 
 function boundedClientInfo(value: AgentClientInfo | undefined): value is AgentClientInfo {

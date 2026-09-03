@@ -80,6 +80,14 @@ passed, the OIDC job published 0.2.10 with the npm `latest` tag, and the
 registry artifact was independently downloaded and verified. Digests and
 artifact checks are recorded in the qualification document.
 
+Later on 2026-09-03, the user approved another release that removes the
+Ambassador-specific OpenClaw plugin and sends the fixed OpenClaw profile to its
+native `/hooks/agent` endpoint. Version 0.2.11 may publish only after repository
+and package checks pass and the byte-final candidate completes the live-central
+correlated-result webhook flow with both OpenClaw and Hermes. The user directed
+that the pull request merge when green. Main-branch OIDC publication and
+post-publication registry-artifact verification still apply.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -118,7 +126,8 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional 0.2.9
 release described above, followed by the conditional 0.2.10 release described
-above. Later publications still require explicit approval after qualification.
+above and the conditional 0.2.11 release described above. Later publications
+still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the

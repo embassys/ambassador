@@ -140,10 +140,11 @@ pnpm run qualify:live
 
 The runner rejects the ordinary OpenClaw home. It configures Ambassador MCP
 only in the copy. Direct mode launches the fixed `openclaw acp` profile and
-requires ACP v1 plus exact agent name `openclaw-acp`. Webhook mode installs the
-package-shipped receiver into the copy, creates the secret through the packed
-Ambassador CLI, stores it through OpenClaw's secret store, and runs the real
-OpenClaw gateway. Delete the isolated home after every attempt.
+requires ACP v1 plus exact agent name `openclaw-acp`. Webhook mode creates the
+secret through the packed Ambassador CLI, writes it to the copied
+OpenClaw configuration through `openclaw config patch --stdin`, enables the
+native `/hooks/agent` route for `main`, and runs the real OpenClaw gateway. It
+does not install a plugin. Delete the isolated home after every attempt.
 
 ## Required report
 

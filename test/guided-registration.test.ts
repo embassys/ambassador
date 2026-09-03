@@ -91,6 +91,26 @@ test("webhook selection explains secret setup before creating local or central s
   assert.deepEqual(calls, []);
 });
 
+test("OpenClaw webhook selection points to its native hook without a plugin", async (t) => {
+  const { calls, registration } = await fixture(t, PRODUCTION_AGENT_CAPABILITIES, undefined);
+  const result = await registration.register(
+    {
+      email: "webhook@example.test",
+      delivery: { mode: "webhook" },
+    },
+    { name: "openclaw-bundle-mcp", version: "qualification" },
+    new AbortController().signal,
+  );
+  assert.deepEqual(result, {
+    status: "input_required",
+    prompt:
+      "Run `ambassador webhook-secret`, set the displayed value as OpenClaw `hooks.token`, enable hooks for agent `main`, restart OpenClaw, then retry with its `/hooks/agent` URL.",
+    required: ["delivery.url"],
+    command: "ambassador webhook-secret",
+  });
+  assert.deepEqual(calls, []);
+});
+
 test("Codex, Claude Code, and Gemini CLI register directly without a delivery question", async (t) => {
   for (const clientInfo of [
     { name: "codex-mcp-client", version: "qualification" },
@@ -187,8 +207,9 @@ test("persists the derived direct or webhook profile before central registration
 test("a direct-only profile registers without asking a delivery question", async (t) => {
   const base = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(base);
+  const { webhook: _webhook, ...baseWithoutWebhook } = base;
   const profile: AgentCapability = {
-    ...base,
+    ...baseWithoutWebhook,
     kind: "fixture-direct",
     displayName: "Fixture direct",
     aliases: ["fixture-direct"],

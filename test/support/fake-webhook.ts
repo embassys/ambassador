@@ -10,6 +10,7 @@ export interface WebhookWake {
   headers: IncomingHttpHeaders;
   rawBody: Buffer;
   body: Record<string, unknown>;
+  ambassadorMessage: Record<string, unknown>;
 }
 
 interface WakeWaiter {
@@ -19,7 +20,12 @@ interface WakeWaiter {
 
 export async function startFakeWebhook(
   t: TestContext | undefined,
-  options: { statuses?: number[]; secret?: string; nowSeconds?: number } = {},
+  options: {
+    statuses?: number[];
+    secret?: string;
+    nowSeconds?: number;
+    contract?: "ambassador-hmac-v2" | "openclaw-agent";
+  } = {},
 ): Promise<{
   url: string;
   waitForWake: () => Promise<WebhookWake>;
@@ -63,11 +69,44 @@ export async function startFakeWebhook(
         return;
       }
 
-      if (options.secret !== undefined) {
-        const body = parsed as Record<string, unknown>;
+      const body = parsed as Record<string, unknown>;
+      let ambassadorMessage = body;
+      if (options.contract === "openclaw-agent") {
+        const prompt = body.message;
+        const marker = "\nEmbassys message JSON:\n";
+        const markerIndex = typeof prompt === "string" ? prompt.lastIndexOf(marker) : -1;
+        try {
+          ambassadorMessage =
+            markerIndex >= 0
+              ? (JSON.parse((prompt as string).slice(markerIndex + marker.length)) as Record<
+                  string,
+                  unknown
+                >)
+              : {};
+        } catch {
+          ambassadorMessage = {};
+        }
+        if (
+          Object.keys(body).sort().join(",") !== "agentId,deliver,message,name,sessionMode" ||
+          body.name !== "Embassys Ambassador" ||
+          body.agentId !== "main" ||
+          body.sessionMode !== "isolated" ||
+          body.deliver !== false ||
+          request.headers.authorization !== `Bearer ${options.secret}` ||
+          typeof ambassadorMessage.id !== "string" ||
+          request.headers["idempotency-key"] !== ambassadorMessage.id ||
+          request.headers["x-request-id"] !== undefined ||
+          request.headers["x-webhook-timestamp"] !== undefined ||
+          request.headers["x-webhook-signature-v2"] !== undefined
+        ) {
+          response.writeHead(401, { "content-type": "application/json" });
+          response.end('{"ok":false}');
+          return;
+        }
+      } else if (options.secret !== undefined) {
         const timestamp = request.headers["x-webhook-timestamp"];
         const signature = request.headers["x-webhook-signature-v2"];
-        const messageId = body.id;
+        const messageId = ambassadorMessage.id;
         const nowSeconds = options.nowSeconds ?? Math.floor(Date.now() / 1_000);
         const expectedSignature =
           typeof timestamp === "string"
@@ -103,7 +142,8 @@ export async function startFakeWebhook(
         contentType: request.headers["content-type"],
         headers: request.headers,
         rawBody,
-        body: parsed as Record<string, unknown>,
+        body,
+        ambassadorMessage,
       };
       const waiter = waiters.shift();
       if (waiter === undefined) {
@@ -114,7 +154,13 @@ export async function startFakeWebhook(
       }
       const responseStatus = options.statuses?.shift() ?? 200;
       response.writeHead(responseStatus, { "content-type": "application/json" });
-      response.end(responseStatus >= 200 && responseStatus < 300 ? '{"ok":true}' : '{"ok":false}');
+      response.end(
+        responseStatus >= 200 && responseStatus < 300
+          ? options.contract === "openclaw-agent"
+            ? '{"ok":true,"runId":"fixture-run"}'
+            : '{"ok":true}'
+          : '{"ok":false}',
+      );
     });
   });
 

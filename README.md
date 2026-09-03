@@ -18,7 +18,8 @@ npx --yes @embassys/ambassador@latest start
   Codex, Claude Code, and Gemini CLI proceed directly without a delivery
   question.
 - Webhook users run `ambassador webhook-secret`, copy the displayed value into
-  Hermes or OpenClaw's owner-only secret store, and give the agent only the
+  Hermes's owner-only receiver configuration or OpenClaw's owner-only hooks
+  configuration, and give the agent only the
   receiver URL during registration.
 
 Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
