@@ -3,7 +3,7 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## Ambassador 0.2.10 candidate
+## Ambassador 0.2.10
 
 On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central
 matrix for the locally installed, authenticated Hermes and OpenClaw agents on
@@ -82,6 +82,30 @@ production vulnerability audit found no known vulnerabilities; the signature
 audit verified 20 registry packages and 13 attestations with no invalid or
 missing entries. Docker was unavailable in the local environment, so the
 containerized central-fixture lane remains a required pull-request check.
+
+PR 21 passed all seven required checks and merged as
+`cf5c5c4f889439d4dc08fb77839ce70891882632`. The main-branch run repeated the
+Linux, macOS, Windows, package-install, audit, and Docker central-fixture gates,
+then published `@embassys/ambassador@0.2.10` through npm OIDC. The npm `latest`
+tag resolves to 0.2.10.
+
+The artifact downloaded from npm's published `dist.tarball` URL had registry
+SRI
+`sha512-QPSP6/qDLX7U9sZZ69Ztmo1cEMKnircXlMSUEpPXbsx/H/2Cr4aU7S35zJ7neNVH4ETamL/JbG8hL0HGeTlO5Q==`,
+registry SHA-1 `e2193d64d27d8726aff241906412ff7484caaaa3`, and tarball
+SHA-256 `eb25c9d699ec580cf9b5fab0fbd4c8921c1607c2e7c407e59edbb9cecd87ee9d`.
+Its extracted file tree was identical to the byte-final candidate used by the
+four live runs; npm's archive encoding accounts for the archive-level digest
+difference.
+
+A clean Node 24.19.0 install of that registry artifact passed the installed
+CLI REST E2E. The installed `ambassador webhook-secret` command created and
+returned one stable value, and a forbidden option failed closed. The installed
+capability registry matched all five known MCP client names with a deliberately
+non-release version string. Installed direct delivery completed ACP v1 when a
+mock returned the exact agent name and a different reported agent version. The
+registry-artifact audit found zero vulnerabilities, 20 verified registry
+signatures, 13 verified attestations, and no invalid or missing signatures.
 
 ## CI delivery suite
 
