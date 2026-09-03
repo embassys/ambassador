@@ -220,7 +220,10 @@ jobs:
         run: |
           $output = & "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\ambassador.cmd" invalid 2>&1
           if ($LASTEXITCODE -ne 2) { throw "Installed Ambassador command returned an unexpected status" }
-          if ($output -ne "Invalid command or arguments") { throw "Installed Ambassador command returned unexpected output" }
+          $rendered = @($output | ForEach-Object { $_.ToString().TrimEnd() } | Where-Object { $_ -ne "" })
+          if ($rendered.Count -ne 1 -or $rendered[0] -ne "Invalid command or arguments") {
+            throw "Installed Ambassador command returned unexpected output"
+          }
 
   publish:
     name: Publish npm package
