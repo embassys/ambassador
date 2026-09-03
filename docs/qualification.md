@@ -132,8 +132,10 @@ injected Ambassador MCP server, and the requester received the correlated
 narrow isolated policy representing the user's prior approval; it did not test
 an interactive user prompt. Captured mail and temporary state were deleted.
 The isolated credential copy was also removed. The installed Node was 24.14.0,
-below the supported 24.19.0 floor, so repeat this case on a supported runtime
-before publication. The other nine cases remain open.
+below the supported 24.19.0 floor, so repeat this case on a supported runtime.
+The other nine cases remain open. The user approved 0.2.6 as a one-release
+exception before this evidence was complete; these cases remain required to
+complete the qualification record.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation

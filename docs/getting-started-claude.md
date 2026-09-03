@@ -1,9 +1,10 @@
 # Get started with Claude Code
 
-Status: implementation candidate; source-reviewed against Claude Code 2.1.257
-and 2.1.258 plus `@agentclientprotocol/claude-agent-acp` 0.73.0, with the exact
-ACP initialization contract probed and real-agent qualification still required
-before publication
+Release target: `@embassys/ambassador@0.2.6`. The profile is source-reviewed
+against Claude Code 2.1.257 and 2.1.258 plus
+`@agentclientprotocol/claude-agent-acp` 0.73.0, and its exact ACP initialization
+contract passed. Real-agent direct and webhook qualification remain open under
+the one-release qualification exception in ADR 0015.
 
 Ambassador enables Claude Code only for this exact contract:
 
@@ -35,30 +36,57 @@ versions fail closed until the registry is reviewed and updated.
 
 ## Setup
 
-1. Install `@agentclientprotocol/claude-agent-acp` 0.73.0 through its normal
-   package installation process. Ambassador never installs or updates it.
+1. Install Node.js `>=24.19.0 <25` and
+   `@agentclientprotocol/claude-agent-acp` 0.73.0 through its normal package
+   installation process. Ambassador never installs or updates the adapter.
 2. Authenticate Claude through normal Claude Code setup, or set one approved
    adapter authentication variable outside chat: `ANTHROPIC_API_KEY`,
    `ANTHROPIC_AUTH_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`.
-3. Generate a 48-character lowercase hexadecimal local token and export it,
-   for example as `AMBASSADOR_LOCAL_TOKEN`.
-4. Start Ambassador from the directory the direct agent may access:
+3. Generate the local MCP token without putting its value in chat or a command
+   argument:
 
    ```sh
-   ambassador start --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   export AMBASSADOR_LOCAL_TOKEN="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
    ```
 
-5. Configure Claude Code MCP to call the printed loopback endpoint with
-   `Authorization: Bearer <local-token>`.
-6. Ask Claude Code to call `register_agent`. Ambassador asks direct versus
-   webhook and advertises direct as the default.
-7. For direct mode, make the follow-up with `delivery.mode` set to `direct`.
-   Ambassador starts `claude-agent-acp` and injects its authenticated HTTP MCP
-   server into the new ACP session.
-8. For webhook mode, configure an authenticated receiver for the canonical
-   Ambassador message and supply only its URL and webhook-secret environment
-   variable name.
-9. Complete email verification through MCP.
+4. If you may choose webhook delivery, create its secret in the same shell
+   before starting Ambassador:
+
+   ```sh
+   export AMBASSADOR_WEBHOOK_SECRET="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
+   ```
+
+5. From the directory the direct agent may access, start the exact release and
+   keep it running in the foreground:
+
+   ```sh
+   npx --yes @embassys/ambassador@0.2.6 start \
+     --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   ```
+
+6. Configure Claude Code's MCP client to use the loopback endpoint printed by
+   Ambassador, with a bearer token read from `AMBASSADOR_LOCAL_TOKEN`. Use the
+   provider's normal MCP configuration mechanism; do not copy the token value
+   into chat.
+7. Ask Claude Code to register with your email and optional display name. The
+   first `register_agent` call contains `email` and, if wanted, `display_name`.
+   Ambassador recognizes the Claude Code profile and asks direct versus
+   webhook, with direct as the default.
+8. For direct mode, choose direct. The follow-up repeats the same `email` and
+   optional `display_name` and adds `delivery: {"mode":"direct"}`. Ambassador
+   starts `claude-agent-acp` and injects its authenticated HTTP MCP server into
+   the new ACP session.
+9. For webhook mode, choose webhook and provide the HTTPS receiver URL plus
+   the environment-variable name `AMBASSADOR_WEBHOOK_SECRET`. The follow-up
+   repeats the registration fields and adds `delivery.mode`, `delivery.url`,
+   and `delivery.secret_env`; it never sends the secret value.
+10. Enter the email verification code when Claude Code asks for it. Claude
+    Code calls `verify_email` with that `email` and six-digit `code`; the
+    central token and DPoP key stay inside Ambassador.
 
 Ambassador does not pass `CLAUDE_CODE_EXECUTABLE` or another executable
 override. It never receives Claude account credentials, the central token, or
