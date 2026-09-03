@@ -7,15 +7,14 @@ automatic central acknowledgement, restart loss, bounded state, internal
 credential-key custody, and packed-package installation. Completed design and
 behavior live in the architecture, protocol, and ADRs rather than this plan.
 
-The 0.2.9 candidate corrects the version policy under ADR 0041. Exact known MCP
-client names still select fixed profiles, and exact ACP v1 agent names still
-protect direct initialization, but reported client and agent versions no longer
-gate either step. Ambassador now tries the fixed contract and surfaces an
-actual startup, initialization, session, or delivery failure. Publication is
-authorized once the required pull-request checks are green. The Node 24.19.0
-repository and clean-installed package checks are green; the candidate digest
-and audit evidence are recorded in
-[Delivery qualification](qualification.md).
+Published Ambassador 0.2.9 corrects the version policy under ADR 0041. Exact
+known MCP client names still select fixed profiles, and exact ACP v1 agent
+names still protect direct initialization, but reported client and agent
+versions no longer gate either step. Ambassador now tries the fixed contract
+and surfaces an actual startup, initialization, session, or delivery failure.
+The required pull-request and main-branch checks passed, and the downloaded npm
+artifact was independently verified. Its digest and audit evidence are
+recorded in [Delivery qualification](qualification.md).
 
 ## Post-release qualification
 

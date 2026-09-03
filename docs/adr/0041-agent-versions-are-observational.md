@@ -68,8 +68,8 @@ message bodies, identities, credentials, tokens, or secrets.
 - Qualification records remain version-specific observations, not production
   allowlists or promises that every release works.
 - Unknown or decorated client and ACP agent names still fail closed.
-- Ambassador 0.2.8 remains version-gated. This change requires a later release
-  and does not retroactively change the published artifact.
+- Ambassador 0.2.8 remains version-gated. Ambassador 0.2.9 implements this
+  change; it does not retroactively change the earlier published artifact.
 
 ## Superseded clauses
 
