@@ -25,10 +25,14 @@ pull-request gates, and main-branch release gates. The downloaded npm artifact
 was independently verified. Its digests and results are recorded in
 [Delivery qualification](qualification.md).
 
-The 0.2.12 release candidate adds the checked local-only `ambassador clean`
-reset under ADR 0044. Published 0.2.11 does not contain that command. The
-0.2.12 publication is approved after its repository, packed-package,
-live-qualification, and artifact-audit gates pass.
+Published Ambassador 0.2.12 adds the checked local-only `ambassador clean`
+reset under ADR 0044. Its Node 24.19.0 repository, packed-package,
+live-central, pull-request, and main-branch gates passed. The npm OIDC job
+published the package with the `latest` tag, and the independently downloaded
+registry artifact passed integrity, file-tree, installed-CLI cleanup,
+vulnerability, and signature checks. Published 0.2.11 and earlier artifacts do
+not gain the command retroactively. The recorded digests and results are in
+[Delivery qualification](qualification.md).
 
 ## Remaining qualification
 

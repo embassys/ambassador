@@ -3,7 +3,7 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## Ambassador 0.2.12 release candidate
+## Ambassador 0.2.12
 
 On 2026-09-03, the byte-final 0.2.12 candidate added the local-only
 `ambassador clean` command without changing central REST or agent delivery.
@@ -36,6 +36,24 @@ Hermes and OpenClaw four-mode matrix, the earlier Codex direct pass, and the
 published 0.2.11 Claude Code direct pass recorded below. Windows release lanes
 cover the clean command and installed package, but individual real-agent
 Windows claims still require their own qualification.
+
+PR 26 passed all seven required checks and merged as
+`5ee0ea03dacf88ad9fbc260587d5c9daf273212b`. Main-branch run `33782469108`
+repeated the Linux, macOS, Windows, package-install, audit, and Docker
+central-fixture gates. Its OIDC job published
+`@embassys/ambassador@0.2.12`, and the npm `latest` tag resolves to 0.2.12.
+
+The artifact downloaded from npm's published tarball URL had registry SRI
+`sha512-0DyBFNwTntRvk1YdlNSppqrtzvWy+T07uQL0VueLA9S249XeEYpOgoOXKOjkmt9bBG70dVmVWkM1bOnynkcnTw==`,
+registry SHA-1 `ec23fb8c6f5859604e7131672ed1730cd404ec32`, and tarball
+SHA-256 `089a0555c9a70e2dd954137756d621548020a593705cc45edeac91ffa8b71a45`.
+Its extracted file tree was identical to the qualified candidate. A clean Node
+24.19.0 registry install exempted only the newly published top-level 0.2.12
+package from the 24-hour maturity window. The transitive dependency policy
+remained strict. The production vulnerability audit found no known issues, and
+the signature audit verified all 21 packages with no invalid or missing entry.
+The installed registry CLI passed the enrollment, cleanup, restart, and
+bootstrap-catalog E2E.
 
 ## Ambassador 0.2.11
 
@@ -109,8 +127,8 @@ were not changed.
 PR 23 passed all seven required checks and merged as
 `227538f5a81977467ad59482bae1fda571d6480a`. The main-branch run repeated the
 Linux, macOS, Windows, package-install, audit, and Docker central-fixture gates,
-then published `@embassys/ambassador@0.2.11` through npm OIDC. The npm `latest`
-tag resolves to 0.2.11.
+then published `@embassys/ambassador@0.2.11` through npm OIDC. At publication,
+the npm `latest` tag resolved to 0.2.11.
 
 The artifact downloaded from npm's published `dist.tarball` URL had registry
 SRI
@@ -280,8 +298,8 @@ containerized central-fixture lane remains a required pull-request check.
 PR 21 passed all seven required checks and merged as
 `cf5c5c4f889439d4dc08fb77839ce70891882632`. The main-branch run repeated the
 Linux, macOS, Windows, package-install, audit, and Docker central-fixture gates,
-then published `@embassys/ambassador@0.2.10` through npm OIDC. The npm `latest`
-tag resolves to 0.2.10.
+then published `@embassys/ambassador@0.2.10` through npm OIDC. At publication,
+the npm `latest` tag resolved to 0.2.10.
 
 The artifact downloaded from npm's published `dist.tarball` URL had registry
 SRI

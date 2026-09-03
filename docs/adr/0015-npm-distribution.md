@@ -98,9 +98,9 @@ Antigravity. Historical release evidence above continues to describe the
 artifacts that were published at the time. A future publication from the
 current source uses the four-profile release matrix.
 
-ADR 0044 adds the option-free `ambassador clean` command to the current source.
-It does not change the package name, binary, dependency set, or release gate.
-Published 0.2.11 does not gain the command retroactively.
+ADR 0044 added the option-free `ambassador clean` command. It does not change
+the package name, binary, dependency set, or release gate. Published 0.2.11
+does not gain the command retroactively; published 0.2.12 contains it.
 
 On 2026-09-03, the user approved version 0.2.12 to publish the local clean
 command and its documentation. The release may publish only after the
@@ -108,6 +108,13 @@ byte-final candidate passes the repository suite, cross-platform package
 installation, installed-CLI cleanup E2E, live qualification, and artifact
 audits. Pull-request and main-branch gates must pass before and after merge.
 The downloaded npm artifact must then be checked independently and recorded.
+
+Those conditions passed. PR 26 merged on 2026-09-03, all main-branch gates
+passed, and the OIDC job published 0.2.12 with the npm `latest` tag. The
+independently downloaded registry artifact matched npm's integrity metadata and
+the candidate file tree, then passed clean-install, cleanup E2E, vulnerability,
+and signature checks. Its digests and results are recorded in the qualification
+document.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
