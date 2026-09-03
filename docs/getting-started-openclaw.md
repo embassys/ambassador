@@ -43,9 +43,12 @@ openclaw mcp doctor ambassador --probe
   webhook**.
 - Give OpenClaw the six-digit code sent to your email.
 
-To review unanswered requests later, say: **Which Embassys permission requests
-are waiting for my response?** After OpenClaw lists them, tell it which request
-to grant or deny.
+Later, you can ask:
+
+- **Which Embassys permission requests are waiting for my approval?** Then tell
+  OpenClaw which one to grant or deny.
+- **Which Embassys actions are waiting for my answer?** Then give OpenClaw the
+  requested value so it can submit the result.
 
 ## Direct delivery
 

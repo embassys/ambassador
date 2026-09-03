@@ -54,6 +54,8 @@ cross-platform checks cover the adapters.
 The permission inbox is a filtered current view, not a notification guarantee.
 It remains available after an incoming notification was acknowledged because
 central permission state is authoritative until the user decides it.
+It does not list action calls that need a result; ADR 0046 defines that separate
+encrypted local inbox.
 
 ## Approval
 

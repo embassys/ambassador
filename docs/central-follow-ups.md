@@ -26,7 +26,8 @@ branches.
 
 The consuming poll can lose a delivered message when the gateway crashes
 before acknowledgement. Server-side retrieval or redelivery would solve the
-problem without storing message bodies in the gateway.
+problem without storing other message bodies in the gateway or turning the
+pending-action inbox into a delivery replay mechanism.
 
 Investigate live delivery liveness after accepted permission writes. In two
 controlled runs on 2026-09-02, central accepted the permission operation but
@@ -74,6 +75,12 @@ because a later submission returns `409`.
 Define result size and nesting limits. Serialize competing submissions so two
 requests cannot both observe `pending`, and add an idempotent recovery contract
 before Ambassador retries an uncertain result submission.
+
+This also enables clean reconciliation of Ambassador's encrypted pending-action
+inbox. Today, if central accepts a result but the response is lost or the local
+delete fails, Ambassador cannot prove completion and may continue to show a
+stale local row. An idempotent submission response or authorized outcome lookup
+should let it remove that row without guessing.
 
 ## Credential lifecycle
 

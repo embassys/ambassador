@@ -43,6 +43,8 @@ Central permissions, actions, and messages
   v
 Bounded in-memory delivery queue and ID-only journal
   |
+  +--> validated action call: encrypted pending-action inbox until result
+  |
   +--> webhook mode: complete message to an authenticated endpoint
   |
   `--> direct mode: complete message to a gateway-managed ACP v1 agent
@@ -155,7 +157,7 @@ does not probe alternate contracts or keep an old client as fallback.
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
-| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
+| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal, encrypted unanswered action calls | Provider account credentials or durable copies of other message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
@@ -168,7 +170,9 @@ Local MCP trusts other processes running as the owner; strict loopback, Host,
 and Origin checks protect the browser and network boundary. The delivery
 profile may persist the mode, recognized agent kind, webhook URL, canonical
 direct working directory, and minimum ACP session metadata. It never contains
-a secret or message body. SQLite remains ID-only.
+a secret or message body. The notification journal remains ID-only. A separate
+SQLite inbox stores only encrypted, validated unanswered action calls, keyed to
+the enrolled DPoP identity.
 
 ## Main flows
 
@@ -177,7 +181,8 @@ a secret or message body. SQLite remains ID-only.
 1. Acquire the singleton lock.
 2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
 3. Reject supplied local Authorization credentials.
-4. Load the delivery profile and encrypted central credential if present.
+4. Load the delivery profile, encrypted central credential, and encrypted
+   pending-action inbox if present.
 5. For webhook mode, load the separately encrypted webhook secret.
 6. Prepare the configured delivery target.
 7. Start REST polling only when the required stored records are valid.
@@ -191,7 +196,8 @@ a secret or message body. SQLite remains ID-only.
    changing state if another process owns the lock or if the lock cannot be
    validated.
 3. It removes the credential pair, webhook-secret pair, delivery profile,
-   notification journal, and any interrupted state writes.
+   encrypted pending-action inbox, notification journal, and any interrupted
+   state writes.
 4. It retains the empty owner-only state directory and process lock for safe
    coordination.
 5. The next `ambassador start` exposes the bootstrap enrollment tools.
@@ -227,13 +233,21 @@ unanswered inbox from `get_my_permissions`: pending rows where the enrolled
 identity is the grantor. It stores no second queue and requires an explicit
 grant or deny through `respond_to_permission`.
 
+`list_pending_action_calls` is different: it lists action calls already
+delivered to this identity that still need a result. Ambassador encrypts the
+validated call ID, sender ID, action type, payload, and creation time locally
+before local delivery and central acknowledgement. A successful
+`submit_action_result` removes that call. No new central route is required.
+
 ### Incoming message
 
 1. Ambassador long-polls central.
 2. Central marks selected messages delivered before returning them.
-3. Ambassador validates a bounded batch, keeps bodies in memory, and journals
-   only message IDs and delivery state.
-4. The selected delivery target receives the complete message.
+3. Ambassador validates a bounded batch and journals only message IDs and
+   delivery state. For an action call only, it first writes the validated call
+   fields to the encrypted pending-action inbox.
+4. The selected delivery target receives the complete message. If it needs
+   unavailable user input, it leaves the action call pending.
 5. A webhook `2xx` or successful direct ACP completion transfers or completes
    local responsibility.
 6. Ambassador acknowledges the message to central and removes its local state.
@@ -252,14 +266,17 @@ retrieval or redelivery is the proper future fix.
 - Passing raw secrets through the model.
 - Inventing general reply, conversation, lease, outcome-lookup, activation, or
   token-reissue APIs that central does not expose.
-- Persisting message bodies locally.
+- Persisting central message bodies locally except for the encrypted,
+  validated unanswered-action records defined by ADR 0046.
 - Native service management or a GUI.
 
 ## Current limitations
 
 - Central has no message retrieval or redelivery after a consuming poll.
 - Action results have no per-action output schema or outcome lookup. A
-  completed submission cannot be repeated to recover its response.
+  completed submission cannot be repeated to recover its response. A rare
+  local deletion failure after central success can therefore leave a stale
+  pending-action row that Ambassador cannot reconcile automatically.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.

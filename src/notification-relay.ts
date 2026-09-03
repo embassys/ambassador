@@ -42,6 +42,7 @@ export interface NotificationRelayOptions {
   readonly journal: NotificationJournal;
   readonly deliveryTarget: DeliveryTarget;
   readonly receiveMessages: (signal: AbortSignal) => Promise<readonly CentralMessage[]>;
+  readonly captureMessage?: (message: CentralMessage) => void | Promise<void>;
   readonly acknowledgeMessage: (messageId: string, signal: AbortSignal) => Promise<void>;
   readonly retryDelayMs?: number;
 }
@@ -78,6 +79,7 @@ export class NotificationRelay {
   readonly #journal: NotificationJournal;
   readonly #deliveryTarget: DeliveryTarget;
   readonly #receiveMessages: NotificationRelayOptions["receiveMessages"];
+  readonly #captureMessage: NonNullable<NotificationRelayOptions["captureMessage"]>;
   readonly #acknowledgeMessage: NotificationRelayOptions["acknowledgeMessage"];
   readonly #retryDelayMs: number;
   #controller: AbortController | undefined;
@@ -89,6 +91,7 @@ export class NotificationRelay {
     this.#journal = options.journal;
     this.#deliveryTarget = options.deliveryTarget;
     this.#receiveMessages = options.receiveMessages;
+    this.#captureMessage = options.captureMessage ?? (() => undefined);
     this.#acknowledgeMessage = options.acknowledgeMessage;
     this.#retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     if (!Number.isSafeInteger(this.#retryDelayMs) || this.#retryDelayMs < 1) {
@@ -197,6 +200,9 @@ export class NotificationRelay {
         await this.#acknowledge(id, signal);
         return;
       }
+    }
+    await this.#captureMessage(message);
+    if (id !== undefined) {
       try {
         this.#journal.beginDelivery(id);
       } catch {

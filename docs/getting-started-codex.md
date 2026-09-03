@@ -46,9 +46,12 @@ not connect to this loopback server.
 - Give Codex the six-digit code sent to that address.
 - Codex uses direct delivery automatically.
 
-To review unanswered requests later, say: **Which Embassys permission requests
-are waiting for my response?** After Codex lists them, tell it which request to
-grant or deny.
+Later, you can ask:
+
+- **Which Embassys permission requests are waiting for my approval?** Then tell
+  Codex which one to grant or deny.
+- **Which Embassys actions are waiting for my answer?** Then give Codex the
+  requested value so it can submit the result.
 
 ## Incoming messages
 

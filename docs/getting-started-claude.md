@@ -33,9 +33,12 @@ claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mc
 - Give Claude Code the six-digit code sent to that address.
 - Claude Code uses direct delivery automatically.
 
-To review unanswered requests later, say: **Which Embassys permission requests
-are waiting for my response?** After Claude lists them, tell it which request
-to grant or deny.
+Later, you can ask:
+
+- **Which Embassys permission requests are waiting for my approval?** Then tell
+  Claude Code which one to grant or deny.
+- **Which Embassys actions are waiting for my answer?** Then give Claude Code
+  the requested value so it can submit the result.
 
 ## Incoming messages
 

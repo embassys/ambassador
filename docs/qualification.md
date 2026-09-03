@@ -3,6 +3,23 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Pending-action inbox source qualification
+
+On 2026-09-03, the current source added the encrypted local
+`list_pending_action_calls` view without adding a central route. The fixture
+round trip proved capture before delivery and acknowledgement, listing after an
+Ambassador restart, correlated result submission, and removal only after a
+valid central success. Unit cases proved authenticated encryption, identity
+binding, tamper and link rejection, exact duplicate handling, record and byte
+bounds, and absence of plaintext call IDs and payload markers in SQLite.
+
+The repository check passed 196 tests: 190 passed and six platform-specific or
+opt-in cases skipped. Linting and type checking passed. A clean installation of
+the packed source artifact also passed the installed-CLI REST enrollment,
+authenticated tool catalog, webhook delivery, acknowledgement, cleanup,
+restart, and artifact scan. This is source evidence, not a published-release or
+real-agent qualification record.
+
 ## Ambassador 0.2.14 candidate
 
 On 2026-09-03, the byte-final 0.2.14 candidate added package-owned Codex and
