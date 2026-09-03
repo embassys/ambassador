@@ -10,6 +10,7 @@ test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", as
   assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
   assert.match(workflow, /name: Qualify native Windows state ACLs/u);
   assert.match(workflow, /name: Launch installed Windows command shim/u);
+  assert.match(workflow, /\$PSNativeCommandUseErrorActionPreference = \$false/u);
   assert.match(workflow, /\[IO\.File\]::ReadAllText\(\$stderrPath\)/u);
   assert.match(workflow, /Remove-Item -Force -ErrorAction SilentlyContinue/u);
   assert.match(
