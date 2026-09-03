@@ -75,6 +75,27 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
   }
 });
 
+test("central message polls reserve ten seconds beyond the requested server hold", async (t) => {
+  const central = await startFakeCentral(t);
+  const credential = await enroll(central, "poll-deadline@fixture.test");
+  const deadlines: number[] = [];
+  const client = new CentralRestClient({
+    centralOrigin: central.apiUrl,
+    transport: new CentralProtectedTransport({
+      credential: () => credential,
+      nonceCache: new DpopNonceCache(),
+      now: () => NOW_SECONDS,
+      deadlineSignal: (milliseconds) => {
+        deadlines.push(milliseconds);
+        return new AbortController().signal;
+      },
+    }),
+  });
+
+  await client.pollRemoteMessages(30);
+  assert.deepEqual(deadlines, [40_000]);
+});
+
 test("I02-R02 REST client projects the fixed action and permission routes", async (t) => {
   const central = await startFakeCentral(t);
   const requesterCredential = await enroll(central, "rest-requester@fixture.test");

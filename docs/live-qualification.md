@@ -83,13 +83,10 @@ abandoned server-side polls expire after the restart check before it enqueues a
 message. Delete the isolated home after the run.
 
 For the real Claude Code mode, prepare an owner-only temporary home containing
-an owner-only copy of `.claude.json` and a minimal
-`.claude/settings.json`. The settings copy may pre-authorize only
-`mcp__ambassador__respond_to_permission` and
-`mcp__ambassador__submit_action_result` for this controlled synthetic run.
-Provide the copy with the existing Claude authentication needed for the run
-without printing it or saving it in the repository. Use the candidate's
-package-owned `claude-agent-acp` dependency, then set:
+an owner-only copy of `.claude.json` and a minimal `.claude/settings.json`.
+Provide the copy with the existing ordinary `claude.ai` authentication needed
+for the run without printing it or saving it in the repository. Use the
+candidate's built-in Claude CLI bridge, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude
@@ -100,10 +97,13 @@ pnpm run qualify:live
 
 The runner rejects the ordinary user home, non-owner-only configuration files,
 and command overrides. It registers with exact MCP client name `claude-code`
-and a deliberately non-release diagnostic version, launches only the
-compiled-in `claude-agent-acp` command, requires ACP v1 and exact agent name
-`@agentclientprotocol/claude-agent-acp`, and injects Ambassador MCP into the
-ACP session. Delete the isolated home after every attempt.
+and a deliberately non-release diagnostic version. Ambassador launches its
+compiled-in bridge, the bridge validates `claude auth status`, and only the
+fixed `claude` command is started. ACP requires exact agent name
+`@embassys/claude-cli-acp`, and Ambassador MCP is injected into the ACP
+session. The background turn leaves the permission and action pending; the
+runner exercises the same later MCP decision and response path a user would.
+No Anthropic API key is supplied. Delete the isolated home after every attempt.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and

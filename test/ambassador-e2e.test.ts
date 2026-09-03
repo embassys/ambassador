@@ -99,6 +99,9 @@ test("registers by client capability, delivers the full webhook, then acknowledg
   assert.deepEqual(
     (await client.listTools()).map((tool) => tool.name),
     [
+      "register_agent",
+      "verify_email",
+      "resend_verification",
       "list_action_types",
       "request_permission",
       "list_pending_permission_requests",

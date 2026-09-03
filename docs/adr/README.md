@@ -6,7 +6,9 @@ for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
 OpenClaw receiver, ADR 0043 for the current four-profile registry, and ADR 0044
 for local cleanup. ADR 0045 records self-contained Codex and Claude adapters,
 startup guidance and diagnostics, and the pending permission inbox.
-ADR 0046 records the encrypted local inbox for unanswered action calls.
+ADR 0046 records the encrypted local inbox for unanswered action calls. ADR
+0047 replaces the Claude adapter and records the stable tool catalog and
+resilient local-delivery behavior.
 
 ## Current decisions
 
@@ -30,6 +32,7 @@ ADR 0046 records the encrypted local inbox for unanswered action calls.
 | [0044](0044-local-clean-command.md) | Local state cleanup command |
 | [0045](0045-self-contained-adapters-and-permission-inbox.md) | Self-contained adapters, startup guidance, and pending permission inbox |
 | [0046](0046-encrypted-pending-action-inbox.md) | Encrypted local inbox for unanswered action calls |
+| [0047](0047-claude-cli-bridge-and-resilient-delivery.md) | Claude CLI bridge, stable tools, and resilient local delivery |
 
 ## Historical ledger
 

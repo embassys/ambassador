@@ -1,6 +1,7 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, and 0046
+Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
+and 0047
 
 Date: 2026-09-02
 
@@ -159,7 +160,7 @@ The enabled direct profiles are:
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | ACP session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
-| Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | ACP session injection |
+| Claude Code | `claude-code` | Ambassador's built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | ACP session injection |
 
 Under ADR 0045, Ambassador installs the Apache-2.0 `codex-acp` adapter as an
 exact production dependency. It starts Codex App Server, translates ACP v1,
@@ -171,11 +172,12 @@ environment. It may pass the reviewed Codex and OpenAI API-key variables,
 along with the common provider environment, so the agent can use its own
 authentication.
 
-Under ADR 0045, Ambassador likewise installs the Apache-2.0
-`claude-agent-acp` adapter as an exact production dependency and validates its
-fixed entrypoint before launch. Ambassador passes only the reviewed Anthropic
-authentication variables and the common provider environment. It does not
-pass a Claude executable override.
+ADR 0047 replaces the Claude dependency selected in ADR 0045. Ambassador
+launches its own bounded ACP v1 bridge, which in turn launches the fixed
+official `claude` command in headless, non-persistent mode with the injected
+Ambassador MCP endpoint. The bridge requires the user's normal `claude.ai`
+login and neither accepts nor forwards Anthropic API-key or token environment
+variables.
 
 Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
 future profile requires a separately accepted fixed launch contract and live

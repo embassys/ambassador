@@ -138,15 +138,12 @@ test("records all reviewed production agent contracts exactly", () => {
       aliases: ["claude-code"],
       modes: ["direct"],
       direct: {
-        command: "claude-agent-acp",
+        command: "claude",
         args: [],
-        agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
+        agentInfo: { name: "@embassys/claude-cli-acp" },
         mcp: "session",
         environment: [
           "APPDATA",
-          "ANTHROPIC_API_KEY",
-          "ANTHROPIC_AUTH_TOKEN",
-          "CLAUDE_CODE_OAUTH_TOKEN",
           "HOME",
           "LANG",
           "LC_ALL",
@@ -159,17 +156,15 @@ test("records all reviewed production agent contracts exactly", () => {
           "TEMP",
           "TMP",
           "TMPDIR",
+          "USER",
+          "USERNAME",
           "USERPROFILE",
           "WINDIR",
           "XDG_CONFIG_HOME",
           "XDG_DATA_HOME",
           "XDG_STATE_HOME",
         ],
-        bundledNodePackage: {
-          packageName: "@agentclientprotocol/claude-agent-acp",
-          binName: "claude-agent-acp",
-          entrypoint: "dist/index.js",
-        },
+        builtInAdapter: "claude-cli",
       },
       qualificationCases: ["claude-direct"],
     },
@@ -179,6 +174,18 @@ test("records all reviewed production agent contracts exactly", () => {
 test("Hermes ACP support fixes the agent name without pinning a version", () => {
   const hermes = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "hermes");
   assert.deepEqual(hermes?.direct?.agentInfo, { name: "hermes-agent" });
+});
+
+test("Claude direct delivery uses its installed CLI login without accepting credential variables", () => {
+  const claude = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "claude");
+  assert.equal(claude?.direct?.command, "claude");
+  assert.equal(claude?.direct?.builtInAdapter, "claude-cli");
+  assert.deepEqual(claude?.direct?.agentInfo, { name: "@embassys/claude-cli-acp" });
+  assert.equal(claude?.direct?.environment.includes("ANTHROPIC_API_KEY"), false);
+  assert.equal(claude?.direct?.environment.includes("ANTHROPIC_AUTH_TOKEN"), false);
+  assert.equal(claude?.direct?.environment.includes("CLAUDE_CODE_OAUTH_TOKEN"), false);
+  assert.equal(claude?.direct?.environment.includes("USER"), true);
+  assert.equal(claude?.direct?.environment.includes("USERNAME"), true);
 });
 
 test("matches exact client names and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {

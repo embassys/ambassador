@@ -1,10 +1,9 @@
 # Current work
 
-There is no active implementation item. The accepted Ambassador delivery
-architecture, including the setup, diagnostics, package-owned adapters, tool
-descriptions, pending-permission view, and encrypted unanswered-action inbox,
-is implemented and recorded in the architecture, protocol, ADRs 0045 and 0046,
-and qualification record.
+There is no open product implementation item. The ADR 0047 reliability
+cutover, stable MCP catalog, encrypted unanswered-action inbox, and built-in
+Claude CLI bridge are implemented and qualified. Release evidence belongs in
+[Delivery qualification](qualification.md), not in this plan.
 
 ## Later qualification
 

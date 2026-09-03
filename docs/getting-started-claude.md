@@ -42,13 +42,14 @@ Later, you can ask:
 
 ## Incoming messages
 
-Ambassador includes the approved Claude Agent ACP adapter and launches it when
-a central message arrives. You do not install `claude-agent-acp` separately.
-The incoming message runs in a new Ambassador-managed session, not the
-registration chat.
+Ambassador includes its Claude bridge and launches your installed `claude`
+command when a central message arrives. You do not install an ACP adapter or
+set an Anthropic API key. The incoming message runs in a new
+Ambassador-managed session, not the registration chat.
 
-If startup or ACP initialization fails, Ambassador prints a bounded reason.
-Confirm Claude Code is signed in, update Ambassador, and restart it. For a
+If startup or ACP initialization fails, Ambassador leaves MCP available and
+prints a bounded reason while incoming delivery is paused. Confirm `claude auth
+status` reports a `claude.ai` login, update Ambassador, and restart it. For a
 clean local registration test, see
 [Reset local test state](development-reset.md).
 

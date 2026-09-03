@@ -109,6 +109,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       binName: string;
       entrypoint: string;
     }): Promise<string>;
+    resolveBuiltInAgentEntrypoint(adapter: "claude-cli"): Promise<string>;
   };
   const capabilities = (await import(
     pathToFileURL(join(installedDist, "agent-capabilities.js")).href
@@ -116,6 +117,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     PRODUCTION_AGENT_CAPABILITIES: Array<{
       kind: string;
       direct?: {
+        builtInAdapter?: "claude-cli";
         bundledNodePackage?: {
           packageName: string;
           binName: string;
@@ -124,15 +126,22 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       };
     }>;
   };
-  for (const kind of ["codex", "claude"]) {
-    const contract = capabilities.PRODUCTION_AGENT_CAPABILITIES.find((item) => item.kind === kind)
-      ?.direct?.bundledNodePackage;
-    assert.ok(contract !== undefined);
-    assert.match(
-      await directDelivery.resolveBundledNodePackageEntrypoint(contract),
-      /[/\\]dist[/\\]index\.js$/u,
-    );
-  }
+  const codexContract = capabilities.PRODUCTION_AGENT_CAPABILITIES.find(
+    (item) => item.kind === "codex",
+  )?.direct?.bundledNodePackage;
+  assert.ok(codexContract !== undefined);
+  assert.match(
+    await directDelivery.resolveBundledNodePackageEntrypoint(codexContract),
+    /[/\\]dist[/\\]index\.js$/u,
+  );
+  const claudeAdapter = capabilities.PRODUCTION_AGENT_CAPABILITIES.find(
+    (item) => item.kind === "claude",
+  )?.direct?.builtInAdapter;
+  assert.equal(claudeAdapter, "claude-cli");
+  assert.match(
+    await directDelivery.resolveBuiltInAgentEntrypoint(claudeAdapter),
+    /[/\\]dist[/\\]claude-cli-acp\.js$/u,
+  );
   const root = await mkdtemp(join(tmpdir(), "ambassador-current-packed-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const central = await startFakeCentral(t);
@@ -175,9 +184,22 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   const endpoint = await waitForEndpoint(() => stdout);
   const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
+  const stableToolCatalog = [
+    "register_agent",
+    "verify_email",
+    "resend_verification",
+    "list_action_types",
+    "request_permission",
+    "list_pending_permission_requests",
+    "respond_to_permission",
+    "call_action",
+    "list_pending_action_calls",
+    "submit_action_result",
+    "get_my_permissions",
+  ];
   assert.deepEqual(
     (await client.listTools()).map(({ name }) => name),
-    ["register_agent", "verify_email", "resend_verification"],
+    stableToolCatalog,
   );
 
   const email = "clean-installed@fixture.test";
@@ -195,16 +217,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   assert.equal(JSON.stringify(verified).includes("token"), false);
   assert.deepEqual(
     (await client.listTools()).map(({ name }) => name),
-    [
-      "list_action_types",
-      "request_permission",
-      "list_pending_permission_requests",
-      "respond_to_permission",
-      "call_action",
-      "list_pending_action_calls",
-      "submit_action_result",
-      "get_my_permissions",
-    ],
+    stableToolCatalog,
   );
   assert.equal(Array.isArray((await client.callTool("list_action_types", {})).action_types), true);
 
@@ -320,7 +333,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   await restartClient.initialize({ name: "openclaw-bundle-mcp", version: "clean-check" });
   assert.deepEqual(
     (await restartClient.listTools()).map(({ name }) => name),
-    ["register_agent", "verify_email", "resend_verification"],
+    stableToolCatalog,
   );
   restartController.abort();
   assert.equal(await restarted, 0);
