@@ -142,7 +142,7 @@ The enabled direct profiles are:
 | Profile | Exact MCP `clientInfo` aliases | Fixed direct invocation | Required ACP `agentInfo` | Ambassador MCP setup |
 | --- | --- | --- | --- | --- |
 | OpenClaw | `openclaw-bundle-mcp` / `0.0.0` | `openclaw acp` | `openclaw-acp` / `2026.8.1` | provider configuration |
-| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.21.0` | ACP session injection |
+| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.20.5` or `0.21.0` | ACP session injection |
 | Codex | `codex-mcp-client` / `0.149.0` or `0.152.1` | `codex-acp` from `@agentclientprotocol/codex-acp` 1.8.0 | `@agentclientprotocol/codex-acp` / `1.8.0` | ACP session injection |
 | Claude Code | `claude-code` / `2.1.257` or `2.1.258` | `claude-agent-acp` from `@agentclientprotocol/claude-agent-acp` 0.73.0 | `@agentclientprotocol/claude-agent-acp` / `0.73.0` | ACP session injection |
 | Gemini CLI | `gemini-cli-mcp-client` / `0.58.0` | `gemini --acp` | `gemini-cli` / `0.58.0` | ACP session injection |
@@ -241,6 +241,12 @@ safe pass/fail evidence, never prompts, messages, credentials, or provider
 output. A source or container contract probe does not replace a real
 authenticated prompt and MCP call.
 
+The installed-command version probe is observational. It records a bounded
+semantic version or `unavailable` for every fixed profile and never skips a
+delivery case because of that observation. Production ACP initialization still
+requires an exact compiled-in `agentInfo` name and version. Exact MCP
+`clientInfo` aliases also remain unchanged.
+
 Live central qualification remains a separate controlled test for email,
 DPoP, REST schemas, permissions, action results, consuming polls, and
 acknowledgement.
@@ -330,3 +336,16 @@ controlled requester and real Codex.
 On 2026-09-03, the user corrected the delivery registry: only OpenClaw and
 Hermes support webhook. Codex, Claude Code, and Gemini CLI are direct-only and
 register without a delivery question.
+
+On 2026-09-03, the user approved adding only exact Hermes ACP `agentInfo`
+version `0.20.5` after a controlled live-central pass with Hermes Agent 0.20.5.
+The existing exact `0.21.0` entry remains. The published Ambassador 0.2.7
+artifact rejects `0.20.5` in direct mode; the new entry therefore requires a
+subsequent Ambassador release and does not amend what 0.2.7 supports.
+
+On 2026-09-03, the user approved an observational installed-version probe for
+all five agent profiles. The probe does not decide compatibility. Production
+continues to reject unreviewed MCP client and ACP identities, and provider setup
+guidance continues to list the exact supported versions. The same day, the user
+separately approved selecting the latest Ambassador release in public install
+commands.

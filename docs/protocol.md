@@ -394,7 +394,7 @@ The enabled profiles and exact contracts are:
 | Profile | MCP `clientInfo` aliases | Direct invocation | ACP `agentInfo` | MCP setup |
 | --- | --- | --- | --- | --- |
 | OpenClaw | `openclaw-bundle-mcp` / `0.0.0` | `openclaw acp` | `openclaw-acp` / `2026.8.1` | provider configuration |
-| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.21.0` | session injection |
+| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.20.5` or `0.21.0` | session injection |
 | Codex | `codex-mcp-client` / `0.149.0` or `0.152.1` | `codex-acp` | `@agentclientprotocol/codex-acp` / `1.8.0` | session injection |
 | Claude Code | `claude-code` / `2.1.257` or `2.1.258` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` / `0.73.0` | session injection |
 | Gemini CLI | `gemini-cli-mcp-client` / `0.58.0` | `gemini --acp` | `gemini-cli` / `0.58.0` | session injection |
@@ -407,6 +407,13 @@ translates ACP to Codex App Server. Claude Code requires the separately
 installed `@agentclientprotocol/claude-agent-acp` 0.73.0 adapter and its exact
 Claude Agent SDK 0.3.257 dependency. Gemini CLI provides native ACP. Versions
 outside the table remain unsupported.
+
+The repository qualification probe is separate from production enforcement.
+It runs each profile's fixed version command, records a bounded semantic
+version or `unavailable`, and continues to that profile's delivery cases. It
+does not compare the command's version text with the ACP allowlist. Production
+still checks the exact `agentInfo` returned during ACP initialization and
+rejects identities outside the table.
 
 Ambassador initializes the agent and opens a gateway-managed session. It
 provides its loopback MCP endpoint in ACP session configuration where the

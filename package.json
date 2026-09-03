@@ -1,6 +1,6 @@
 {
   "name": "@embassys/ambassador",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Local Ambassador for the Embassys agent network",
   "license": "MIT",
   "repository": {
@@ -34,6 +34,7 @@
     "format": "biome check --write .",
     "lint": "biome check .",
     "prepack": "node scripts/clean.mjs dist && pnpm run build",
+    "probe:agents": "node scripts/probe-agent-versions.mjs",
     "qualify:agents": "node scripts/qualify-agents.mjs",
     "qualify:live": "node scripts/live-qualification.mjs",
     "test": "pnpm run test:build && node scripts/run-tests.mjs",

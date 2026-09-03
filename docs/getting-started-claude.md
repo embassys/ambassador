@@ -14,7 +14,7 @@
 1. From the directory Claude Code may access, keep Ambassador running:
 
    ```sh
-   npx --yes @embassys/ambassador@0.2.7 start
+   npx --yes @embassys/ambassador@latest start
    ```
 
 2. Add `http://127.0.0.1:8787/mcp` as a Streamable HTTP MCP server in Claude
@@ -28,6 +28,7 @@
 Ambassador will launch `claude-agent-acp` when a central message arrives. That
 is a new gateway-managed session, not the chat used for registration.
 
-Only the exact versions above are enabled. Other versions fail closed until
-their capability profile is reviewed. See [Qualification](qualification.md)
-for compatibility evidence.
+The qualification probe records the installed version without rejecting it.
+Production still checks the exact MCP client and ACP identities in the compiled
+profile, so a new incompatible release fails closed. See
+[Qualification](qualification.md) for compatibility evidence.

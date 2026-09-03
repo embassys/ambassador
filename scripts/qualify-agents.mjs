@@ -7,17 +7,11 @@ import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { observeAgentVersion } from "./agent-version-probes.mjs";
+
 const CONFIRMATION = "run-installed-supported-agents";
 const FIXTURE_ORIGIN = process.env.AMBASSADOR_QUALIFICATION_CENTRAL ?? "http://127.0.0.1:8000";
 const TARBALL = process.env.AMBASSADOR_CANDIDATE_TARBALL;
-const VERSION = /(?:^|\D)(\d+\.\d+\.\d+)(?:$|\D)/u;
-const VERSION_PROBES = new Map([
-  ["openclaw", { command: "openclaw", args: ["--version"] }],
-  ["hermes", { command: "hermes", args: ["--version"] }],
-  ["codex", { command: "codex-acp", args: ["--version"] }],
-  ["claude", { command: "claude-agent-acp", args: ["--version"] }],
-  ["gemini", { command: "gemini", args: ["--version"] }],
-]);
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -102,39 +96,6 @@ async function loadCandidate(candidatePath) {
   }
 }
 
-async function commandVersion(command, args) {
-  const child = spawn(command, args, {
-    env: {
-      ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
-      ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
-      ...(process.env.USERPROFILE === undefined ? {} : { USERPROFILE: process.env.USERPROFILE }),
-    },
-    shell: false,
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  const chunks = [];
-  let size = 0;
-  let expired = false;
-  const timeout = setTimeout(() => {
-    expired = true;
-    child.kill("SIGKILL");
-  }, 5_000);
-  timeout.unref();
-  child.stdout.on("data", (chunk) => {
-    size += chunk.byteLength;
-    if (size <= 4_096) chunks.push(chunk);
-    else child.kill("SIGKILL");
-  });
-  const code = await new Promise((resolveExit, reject) => {
-    child.once("error", reject);
-    child.once("exit", resolveExit);
-  }).finally(() => clearTimeout(timeout));
-  if (expired || code !== 0 || size > 4_096) throw new Error("version check failed");
-  const match = VERSION.exec(Buffer.concat(chunks).toString("utf8"));
-  if (match?.[1] === undefined) throw new Error("version unavailable");
-  return match[1];
-}
-
 async function fixtureReady() {
   const url = new URL("/readyz", FIXTURE_ORIGIN);
   if (url.protocol !== "http:" || !["127.0.0.1", "::1", "localhost"].includes(url.hostname)) {
@@ -175,7 +136,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
       const { LocalMcpServer } = candidate.localMcp;
       const { WebhookDeliveryTarget } = candidate.webhook;
       const report = {
-        schema: 1,
+        schema: 2,
         platform: platform(),
         architecture: arch(),
         candidate_sha256: createHash("sha256").update(candidateBytes).digest("hex"),
@@ -226,28 +187,14 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
         for (const profile of PRODUCTION_AGENT_CAPABILITIES) {
           const workingDirectory = join(qualificationRoot, profile.kind);
           await mkdir(workingDirectory, { mode: 0o700 });
-          let installedVersion;
-          try {
-            const probe = VERSION_PROBES.get(profile.kind);
-            if (probe === undefined) throw new Error("version probe unavailable");
-            installedVersion = await commandVersion(probe.command, probe.args);
-          } catch {
-            installedVersion = "unavailable";
-          }
+          const versionProbe = await observeAgentVersion(profile.kind);
           report.profiles.push({
             kind: profile.kind,
-            installed_version: installedVersion,
+            version_probe: versionProbe,
             supported_acp_versions: profile.direct?.agentInfo.versions ?? [],
             acp_command: [profile.direct?.command ?? "", ...(profile.direct?.args ?? [])],
             mcp: profile.direct?.mcp ?? "unavailable",
           });
-
-          if (!profile.direct?.agentInfo.versions.includes(installedVersion)) {
-            for (const name of profile.qualificationCases) {
-              report.cases.push({ name, status: "failed" });
-            }
-            continue;
-          }
 
           if (profile.modes.includes("webhook")) {
             const prefix = `AMBASSADOR_${profile.kind.toUpperCase()}_WEBHOOK`;

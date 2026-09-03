@@ -46,7 +46,7 @@ test("records all reviewed production agent contracts exactly", () => {
       direct: {
         command: "hermes-acp",
         args: [],
-        agentInfo: { name: "hermes-agent", versions: ["0.21.0"] },
+        agentInfo: { name: "hermes-agent", versions: ["0.20.5", "0.21.0"] },
         mcp: "session",
         environment: [
           "HOME",
@@ -167,6 +167,17 @@ test("records all reviewed production agent contracts exactly", () => {
       qualificationCases: ["gemini-direct"],
     },
   ]);
+});
+
+test("Hermes ACP support is limited to the two reviewed exact versions", () => {
+  const hermes = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "hermes");
+  assert.deepEqual(hermes?.direct?.agentInfo, {
+    name: "hermes-agent",
+    versions: ["0.20.5", "0.21.0"],
+  });
+  for (const unreviewed of ["0.20.4", "0.20.6", "0.21.1", "0.20.x", ">=0.20.5"]) {
+    assert.equal(hermes?.direct?.agentInfo.versions.includes(unreviewed), false);
+  }
 });
 
 test("matches exact aliases and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {

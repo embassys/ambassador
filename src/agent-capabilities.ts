@@ -73,7 +73,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     direct: {
       command: "hermes-acp",
       args: [],
-      agentInfo: { name: "hermes-agent", versions: ["0.21.0"] },
+      agentInfo: { name: "hermes-agent", versions: ["0.20.5", "0.21.0"] },
       mcp: "session",
       environment: [
         "HOME",
