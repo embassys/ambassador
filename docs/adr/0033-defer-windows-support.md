@@ -1,6 +1,6 @@
 # 0033 Defer Windows support for the initial release
 
-Status: accepted; product scope amended by ADR 0038
+Status: superseded by ADR 0040
 
 Date: 2026-08-30
 

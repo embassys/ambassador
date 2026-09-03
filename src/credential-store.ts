@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes, scrypt } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
 import { type FileHandle, link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
@@ -6,6 +5,11 @@ import { dirname, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
 import { parseCentralCredential } from "./central-credential.js";
+import {
+  secureWindowsArtifact,
+  type WindowsAccessControl,
+  type WindowsArtifactKind,
+} from "./windows-access-control.js";
 
 const FILE_FORMAT = 1;
 const SCRYPT_N = 131_072;
@@ -19,7 +23,6 @@ const TAG_BYTES = 16;
 const MAX_PLAINTEXT_BYTES = 8_192;
 const MAX_FILE_BYTES = 16_384;
 const STATE_KEY_BYTES = 24;
-const SYSTEM_SID = "S-1-5-18";
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ENVELOPE_KEYS = [
   "cipher",
@@ -60,11 +63,9 @@ export interface CredentialStore {
   save(credential: string): Promise<void>;
 }
 
-export type CredentialArtifactKind = "directory" | "file";
+export type CredentialArtifactKind = WindowsArtifactKind;
 
-export interface WindowsCredentialAccessControl {
-  secure(path: string, kind: CredentialArtifactKind): Promise<void>;
-}
+export type WindowsCredentialAccessControl = WindowsAccessControl;
 
 export interface EncryptedFileCredentialStoreOptions {
   readonly platform?: NodeJS.Platform;
@@ -156,110 +157,9 @@ function deriveKey(stateKey: Buffer, salt: Buffer): Promise<Buffer> {
   });
 }
 
-function assertSid(value: string): string {
-  if (!/^S-1-(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*)){1,15}$/u.test(value)) {
-    throw new Error("Current Windows identity is unavailable");
-  }
-  const components = value.split("-").slice(2);
-  const authority = components.shift();
-  if (authority === undefined || BigInt(authority) > 281_474_976_710_655n) {
-    throw new Error("Current Windows identity is unavailable");
-  }
-  if (components.some((component) => BigInt(component) > 4_294_967_295n)) {
-    throw new Error("Current Windows identity is unavailable");
-  }
-  return value;
-}
-
-function runExecutable(file: string, arguments_: string[]): Promise<string> {
-  return new Promise((resolveOutput, reject) => {
-    execFile(
-      file,
-      arguments_,
-      { encoding: "utf8", maxBuffer: 32 * 1024, windowsHide: true },
-      (error, stdout, stderr) => {
-        if (error !== null || stderr.length !== 0) {
-          reject(new Error("Windows credential access control failed"));
-          return;
-        }
-        resolveOutput(stdout);
-      },
-    );
-  });
-}
-
-const WINDOWS_ACL_SCRIPT = `
-$ErrorActionPreference = 'Stop'
-if ($args.Count -ne 3) { exit 41 }
-$target = $args[0]
-$userSid = $args[1]
-$kind = $args[2]
-$item = Get-Item -LiteralPath $target -Force
-if (($kind -eq 'directory') -ne $item.PSIsContainer) { exit 42 }
-if ($kind -ne 'directory' -and $kind -ne 'file') { exit 43 }
-$security = if ($kind -eq 'directory') {
-  New-Object System.Security.AccessControl.DirectorySecurity
-} else {
-  New-Object System.Security.AccessControl.FileSecurity
-}
-$security.SetAccessRuleProtection($true, $false)
-$inheritance = if ($kind -eq 'directory') {
-  [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
-} else {
-  [System.Security.AccessControl.InheritanceFlags]::None
-}
-$expected = @($userSid, '${SYSTEM_SID}') | Select-Object -Unique
-foreach ($sid in $expected) {
-  $identity = New-Object System.Security.Principal.SecurityIdentifier($sid)
-  $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    $identity,
-    [System.Security.AccessControl.FileSystemRights]::FullControl,
-    $inheritance,
-    [System.Security.AccessControl.PropagationFlags]::None,
-    [System.Security.AccessControl.AccessControlType]::Allow
-  )
-  [void]$security.AddAccessRule($rule)
-}
-Set-Acl -LiteralPath $target -AclObject $security
-$actual = Get-Acl -LiteralPath $target
-if (-not $actual.AreAccessRulesProtected) { exit 44 }
-$rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-if ($rules.Count -ne $expected.Count) { exit 45 }
-foreach ($rule in $rules) {
-  if ($expected -notcontains $rule.IdentityReference.Value) { exit 46 }
-  if ($rule.IsInherited) { exit 47 }
-  if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { exit 48 }
-  if ([int]$rule.FileSystemRights -ne [int][System.Security.AccessControl.FileSystemRights]::FullControl) { exit 49 }
-  if ($rule.InheritanceFlags -ne $inheritance) { exit 50 }
-  if ($rule.PropagationFlags -ne [System.Security.AccessControl.PropagationFlags]::None) { exit 51 }
-}
-[Console]::Out.Write('A2A_ACL_OK')
-`;
-
 class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessControl {
-  #userSid?: Promise<string>;
-
   async secure(path: string, kind: CredentialArtifactKind): Promise<void> {
-    this.#userSid ??= this.#readUserSid();
-    const sid = await this.#userSid;
-    const output = await runExecutable("powershell.exe", [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-Command",
-      WINDOWS_ACL_SCRIPT,
-      path,
-      sid,
-      kind,
-    ]);
-    if (output !== "A2A_ACL_OK") throw new Error("Windows credential access control failed");
-  }
-
-  async #readUserSid(): Promise<string> {
-    const output = await runExecutable("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
-    const match = /^(?:"(?:[^"]|"")*"),"([^"]+)"\r?\n?$/u.exec(output);
-    if (match?.[1] === undefined) throw new Error("Current Windows identity is unavailable");
-    return assertSid(match[1]);
+    await secureWindowsArtifact(path, kind);
   }
 }
 

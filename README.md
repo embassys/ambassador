@@ -40,6 +40,11 @@ exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 
+The released 0.2.8 package is qualified on macOS and Linux. Windows support is
+being qualified under [ADR 0040](docs/adr/0040-windows-qualification.md); the
+Windows direct-agent claim remains blocked on native process-tree cleanup and
+real-agent evidence.
+
 ## Development
 
 Use Node.js 24 and the pnpm version recorded in `package.json`.

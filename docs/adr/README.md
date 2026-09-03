@@ -15,10 +15,10 @@ Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
 | [0018](0018-mcp-sdk.md) | MCP SDK for local MCP |
 | [0019](0019-central-credential-storage.md) | Encrypted central credential |
 | [0020](0020-in-memory-central-test-service.md) | Independent central test fixtures |
-| [0033](0033-defer-windows-support.md) | Windows deferral |
 | [0037](0037-live-central-rest-contract.md) | Current Embassys REST integration |
 | [0038](0038-ambassador-delivery-modes.md) | Guided webhook and direct ACP delivery |
 | [0039](0039-zero-configuration-local-start.md) | Zero-configuration start and local-machine trust boundary |
+| [0040](0040-windows-qualification.md) | Windows implementation and qualification plan |
 
 ## Historical ledger
 
@@ -44,6 +44,7 @@ history retains older records that have already been deleted.
 | 0034 | Codex App Server connector | ACP profile under ADR 0038 |
 | 0035 | Claude Code headless connector | ACP profile under ADR 0038 |
 | 0036 | Gemini connector evaluation | Native Gemini ACP profile under ADR 0038 |
+| 0033 | Initial Windows deferral | ADR 0040 Windows qualification plan |
 
 Add an ADR when changing a public CLI, dependency, trust boundary, credential
 location, content-persistence rule, central transport, or agent-execution

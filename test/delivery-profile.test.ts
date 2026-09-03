@@ -11,6 +11,7 @@ import {
   DeliveryProfileStore,
   validateStoredDeliveryProfile,
 } from "../src/delivery-profile.js";
+import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
 const SECRET = "webhook-secret-with-at-least-32-bytes";
 
@@ -147,4 +148,47 @@ test("concurrent writers cannot replace the first committed profile", async (t) 
       JSON.stringify(stored) === JSON.stringify(webhook),
     true,
   );
+});
+
+test("enforces native Windows DACLs on the profile and state directory", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-profile-native-windows-;[]$()-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "state", "delivery-profile.json");
+  const capability = PRODUCTION_AGENT_CAPABILITIES[0];
+  assert.ok(capability);
+  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const store = new DeliveryProfileStore(path);
+
+  await store.save(profile);
+  assert.deepEqual(await store.load(), profile);
+  await assertNativeWindowsAcl(join(root, "state"), "directory");
+  await assertNativeWindowsAcl(path, "file");
+});
+
+test("fails closed when Windows profile DACL enforcement fails", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-profile-windows-failure-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "state", "delivery-profile.json");
+  const capability = PRODUCTION_AGENT_CAPABILITIES[0];
+  assert.ok(capability);
+  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const store = new DeliveryProfileStore(path, {
+    platform: "win32",
+    windowsAccessControl: {
+      async secure() {
+        throw new Error("injected Windows ACL failure");
+      },
+    },
+  });
+
+  await assert.rejects(
+    store.save(profile),
+    (error: unknown) =>
+      error instanceof DeliveryProfileError && error.code === "profile_store_failed",
+  );
+  await assert.rejects(readFile(path), {
+    code: "ENOENT",
+  });
 });

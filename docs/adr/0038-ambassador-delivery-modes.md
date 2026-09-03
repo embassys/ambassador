@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; local startup and MCP authentication amended by ADR 0039
+Status: accepted; amended by ADRs 0039 and 0040
 
 Date: 2026-09-02
 
@@ -131,6 +131,13 @@ For a selected profile, Ambassador launches one fixed executable and argument
 set without a shell. Agent input and remote messages cannot select process
 details. The child receives a minimal, reviewed environment and bounded
 working directory.
+
+On Windows, ADR 0040 keeps the no-shell rule. For a reviewed Node agent,
+Ambassador validates the exact package name, version, bin mapping, and
+JavaScript entrypoint fixed in the capability registry, then launches that
+entrypoint with its current Node executable. Native executables retain their
+fixed command. Windows direct support remains gated on native process-tree
+cleanup evidence.
 
 An agent profile is enabled only after its exact aliases, invocation, version
 policy, MCP behavior, and tests are committed. Ambassador never downloads an
