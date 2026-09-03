@@ -74,7 +74,7 @@ Antigravity are not active profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-
 records that decision.
 
 Published Ambassador releases through 0.2.9 have no Windows support claim.
-The 0.2.12 candidate is qualified under
+Published Ambassador 0.2.12 is qualified under
 [ADR 0040](docs/adr/0040-windows-qualification.md). Its native state,
 packed-package, local-cleanup, and mock delivery lanes pass on Windows.
 Individual agent and mode claims still require exact real-agent Windows

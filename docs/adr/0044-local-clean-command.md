@@ -82,3 +82,5 @@ already clarified that no server-side cleanup is needed.
 
 Later that day, the user approved publishing the command in a new Ambassador
 release after the release checks and documentation update pass.
+
+Version 0.2.12 passed those checks and published the command through npm.
