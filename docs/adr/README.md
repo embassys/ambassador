@@ -11,7 +11,7 @@ Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
 | [0007](0007-sqlite.md) | SQLite for the ID-only journal |
 | [0012](0012-http-deadlines.md) | HTTP and delivery deadlines |
 | [0014](0014-lock-handoff-timeout.md) | Process lock handoff |
-| [0015](0015-npm-distribution.md) | Ambassador npm distribution; 0.2.6 and corrective 0.2.7 qualification exception |
+| [0015](0015-npm-distribution.md) | Ambassador npm distribution; 0.2.6 through 0.2.8 qualification exceptions |
 | [0018](0018-mcp-sdk.md) | MCP SDK for local MCP |
 | [0019](0019-central-credential-storage.md) | Encrypted central credential |
 | [0020](0020-in-memory-central-test-service.md) | Independent central test fixtures |

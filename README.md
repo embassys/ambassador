@@ -7,7 +7,7 @@ agent over ACP v1 or to an authenticated webhook.
 ## Start
 
 ```sh
-npx --yes @embassys/ambassador@0.2.7 start
+npx --yes @embassys/ambassador@latest start
 ```
 
 - No Ambassador token or environment variable is needed for direct delivery.
@@ -33,8 +33,10 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 ## Implementation status
 
 The REST, DPoP, delivery, and zero-configuration startup paths are implemented.
-The live-central qualification with real Codex passed. The remaining
-real-agent matrix is still open under the disclosed release exception in
+Live-central qualification has passed with real Codex and with Hermes Agent
+0.20.5 in both delivery modes. Ambassador 0.2.8 includes that Hermes direct
+profile. Four other profile/mode cases remain open under the disclosed release
+exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 

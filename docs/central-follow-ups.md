@@ -37,6 +37,27 @@ request before exhibiting the response failure. Keep this as a central
 investigation; Ambassador must not infer success or add a speculative polling
 or route fallback.
 
+The Hermes 0.20.5 run on 2026-09-03 narrowed this problem. Central accepted one
+correlated action result, but the requester did not receive its queued
+`action_response` before the qualification deadline. The same target accepted
+both incoming messages, made both required MCP calls, and received both
+acknowledgements. A clean rerun passed.
+
+At reviewed server revision
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`, `poll_messages` changes matching
+rows from `queued` to `delivered` before it returns the HTTP response. An
+aborted or lost response therefore strands the row without a lease or
+redelivery path. The service runs four workers and keeps long-poll waiters in
+process-local maps with one event per agent. Overlapping or abandoned polls can
+race for the same row. This code path fits the transient failure, although the
+content-free qualification record cannot prove which response or worker won.
+
+Fix this in central with a database-backed delivery lease, stable message IDs,
+lease expiry, and idempotent acknowledgement. Add server tests for a client
+disconnect after claim, concurrent polls for one identity, worker handoff, and
+lease expiry. LISTEN/NOTIFY may remain a wake-up optimization, but it cannot be
+the custody boundary.
+
 Any change should define duplicate handling and idempotent acknowledgement.
 Update server tests, the gateway protocol, fixtures, client, and live
 qualification together.

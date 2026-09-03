@@ -13,7 +13,7 @@
 1. From the directory Codex may access, keep Ambassador running:
 
    ```sh
-   npx --yes @embassys/ambassador@0.2.7 start
+   npx --yes @embassys/ambassador@latest start
    ```
 
 2. In another terminal, add its token-free local MCP endpoint:
@@ -31,6 +31,7 @@
 Ambassador will launch `codex-acp` when a central message arrives. That is a
 new gateway-managed session, not the chat used for registration.
 
-Only the exact versions above are enabled. Other versions fail closed until
-their capability profile is reviewed. See [Qualification](qualification.md)
-for compatibility evidence.
+The qualification probe records the installed version without rejecting it.
+Production still checks the exact MCP client and ACP identities in the compiled
+profile, so a new incompatible release fails closed. See
+[Qualification](qualification.md) for compatibility evidence.

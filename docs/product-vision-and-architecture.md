@@ -217,7 +217,11 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
-- Codex direct delivery has passed with the live central service. The other
-  six cases in the seven-case real-agent matrix remain open.
+- Codex direct delivery and both Hermes Agent 0.20.5 delivery modes have passed
+  with the live central service. Ambassador 0.2.8 includes the qualified Hermes
+  ACP 0.20.5 identity. Four profile/mode cases in the seven-case real-agent
+  matrix remain open.
+  Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
+  full real-model round trip.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).
