@@ -4,7 +4,7 @@ Status: accepted for packaging; package and CLI amended by ADR 0038
 
 Date: 2026-08-24
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Problem
 
@@ -17,23 +17,30 @@ also needs the Embassys product name rather than the development namespace.
 Publish one public package as `@embassys/ambassador` with the `ambassador`
 binary. The package requires Node.js 24.
 
-Users run the foreground process directly from a qualified npm release:
+Users run the foreground process directly from an approved npm release:
 
 ```text
-npx --yes @embassys/ambassador@<qualified-version> start --local-token-env=<environment-variable>
+npx --yes @embassys/ambassador@<approved-version> start --local-token-env=<environment-variable>
 ```
 
 Do not publish separate connector packages. Direct ACP support and its fixed
 agent profiles belong in the Ambassador package. Do not retain
 `@a2adev/gateway`, `a2a-gateway`, or provider connector binaries as aliases.
 
-User-facing guides pin a qualified version. They do not require a global
-install or pnpm. The repository, CI, packing, and release qualification use
-pnpm under ADR 0006.
+User-facing guides pin an approved version and disclose any open qualification
+work. They do not require a global install or pnpm. The repository, CI,
+packing, and release qualification use pnpm under ADR 0006.
 
-Publish from `main` only after Linux and macOS checks, packed installation,
-the five-profile local qualification matrix, live central qualification, and
-artifact audits pass. ADR 0033 keeps Windows unsupported.
+Normally publish from `main` only after Linux and macOS checks, packed
+installation, the five-profile local qualification matrix, live central
+qualification, and artifact audits pass. ADR 0033 keeps Windows unsupported.
+
+`@embassys/ambassador@0.2.6` is a one-release exception: on 2026-09-03 the user
+explicitly approved publication after the deterministic CI, package, fixture,
+and live Codex evidence, but before the remaining nine real-agent cases and the
+supported-Node repeat of the Codex case. Keep those gaps visible as
+post-release qualification work. This exception does not relax the gate for a
+later version.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
@@ -67,5 +74,7 @@ the exact ACP SDK approved in ADR 0038.
 ## Approval
 
 The user approved npm distribution, MIT licensing, Node-based execution,
-trusted publishing, and the new package name on 2026-09-02. Each publication
-still requires explicit approval after qualification.
+trusted publishing, and the new package name on 2026-09-02. On 2026-09-03 the
+user separately approved publication of version 0.2.6 with the qualification
+exception described above. Later publications still require explicit approval
+after qualification.

@@ -1,14 +1,11 @@
 # Get started with Codex
 
-Status: implementation candidate; source-reviewed against Codex 0.149.0 and
-0.152.1 plus `@agentclientprotocol/codex-acp` 1.8.0, with the exact ACP
-initialization contract probed and the direct real-agent case passed. Webhook
-qualification is still required before publication. The direct pass included
-the live central REST service, a controlled peer, polling, ACP delivery, an
-Ambassador permission decision and correlated action-result call, delivery of
-the `action_response` to the peer, and central acknowledgement. It used an
-isolated preapproval policy rather than an interactive user prompt and must be
-repeated on a supported Node release before publication.
+Release target: `@embassys/ambassador@0.2.6`. The profile is source-reviewed
+against Codex 0.149.0 and 0.152.1 plus
+`@agentclientprotocol/codex-acp` 1.8.0. The exact ACP initialization contract
+and direct live-central flow passed. Webhook qualification and a repeat of the
+direct case on supported Node remain open under the one-release qualification
+exception in ADR 0015.
 
 Ambassador enables Codex only for this exact contract:
 
@@ -43,30 +40,62 @@ updated.
 
 ## Setup
 
-1. Install `@agentclientprotocol/codex-acp` 1.8.0 through its normal package
-   installation process. Ambassador never installs or updates it.
-2. Authenticate Codex through the adapter's normal ChatGPT login or set
+1. Install Node.js `>=24.19.0 <25` and
+   `@agentclientprotocol/codex-acp` 1.8.0 through its normal package
+   installation process. Ambassador never installs or updates the adapter.
+2. Authenticate Codex through the adapter's normal ChatGPT login, or set
    `CODEX_API_KEY` or `OPENAI_API_KEY` outside chat. The adapter owns provider
    authentication.
-3. Generate a 48-character lowercase hexadecimal local token and export it,
-   for example as `AMBASSADOR_LOCAL_TOKEN`.
-4. Start Ambassador from the directory the direct agent may access:
+3. Generate the local MCP token without putting its value in chat or a command
+   argument:
 
    ```sh
-   ambassador start --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   export AMBASSADOR_LOCAL_TOKEN="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
    ```
 
-5. Configure Codex MCP to call the printed loopback endpoint with
-   `Authorization: Bearer <local-token>`.
-6. Ask Codex to call `register_agent`. Ambassador asks direct versus webhook
-   and advertises direct as the default.
-7. For direct mode, make the follow-up with `delivery.mode` set to `direct`.
-   Ambassador starts `codex-acp` and injects its authenticated HTTP MCP server
-   into the new ACP session.
-8. For webhook mode, configure an authenticated receiver for the canonical
-   Ambassador message and supply only its URL and webhook-secret environment
-   variable name.
-9. Complete email verification through MCP.
+4. If you may choose webhook delivery, create its secret in the same shell
+   before starting Ambassador:
+
+   ```sh
+   export AMBASSADOR_WEBHOOK_SECRET="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
+   ```
+
+5. From the directory the direct agent may access, start the exact release and
+   keep it running in the foreground:
+
+   ```sh
+   npx --yes @embassys/ambassador@0.2.6 start \
+     --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   ```
+
+6. In a shell where `AMBASSADOR_LOCAL_TOKEN` is available, configure Codex to
+   use the endpoint printed by Ambassador:
+
+   ```sh
+   codex mcp add ambassador \
+     --url http://127.0.0.1:8787/mcp \
+     --bearer-token-env-var AMBASSADOR_LOCAL_TOKEN
+   ```
+
+7. Ask Codex to register with your email and optional display name. The first
+   `register_agent` call contains `email` and, if wanted, `display_name`.
+   Ambassador recognizes the Codex MCP profile and asks direct versus webhook,
+   with direct as the default.
+8. For direct mode, choose direct. The follow-up repeats the same `email` and
+   optional `display_name` and adds `delivery: {"mode":"direct"}`. Ambassador
+   starts `codex-acp` and injects its authenticated HTTP MCP server into the new
+   ACP session.
+9. For webhook mode, choose webhook and provide the HTTPS receiver URL plus
+   the environment-variable name `AMBASSADOR_WEBHOOK_SECRET`. The follow-up
+   repeats the registration fields and adds `delivery.mode`, `delivery.url`,
+   and `delivery.secret_env`; it never sends the secret value.
+10. Enter the email verification code when Codex asks for it. Codex calls
+    `verify_email` with that `email` and six-digit `code`; the central token and
+    DPoP key stay inside Ambassador.
 
 Ambassador does not pass `CODEX_PATH`, `CODEX_CONFIG`, or another executable or
 session override. It never receives Codex account credentials, the central

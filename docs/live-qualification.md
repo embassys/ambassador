@@ -144,8 +144,9 @@ not a failure of the result endpoint.
 
 The live process used installed Node 24.14.0, below the package's declared
 24.19.0 floor, because no in-range Node runtime was installed. Functional live
-behavior passed, but publication qualification still requires repeating on a
-supported Node release.
+behavior passed. The supported-Node repeat remains part of the qualification
+record even though the user approved 0.2.6 as a one-release exception before
+that repeat.
 
 ## Earlier direct observation
 
