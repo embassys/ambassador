@@ -167,11 +167,13 @@ test("cleans all local registration and delivery residue and leaves provider fil
 
 test("clean refuses to touch state while Ambassador owns the process lock", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-clean-running-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const residuePath = join(root, "delivery-profile.json");
   await writeFile(residuePath, "keep while running");
   const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
-  t.after(() => lock.release());
+  t.after(async () => {
+    await lock.release();
+    await rm(root, { recursive: true, force: true });
+  });
   const output = captureIo();
 
   assert.equal(
