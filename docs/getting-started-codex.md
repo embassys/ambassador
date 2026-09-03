@@ -3,8 +3,8 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Use Codex `0.149.0` or `0.152.1`.
-- For direct delivery, install `@agentclientprotocol/codex-acp` `1.8.0` so
+- Install and authenticate the latest Codex release.
+- For direct delivery, install the latest `@agentclientprotocol/codex-acp` so
   `codex-acp` is on `PATH`.
 - Sign in to Codex normally. Ambassador never receives your Codex credential.
 
@@ -31,7 +31,8 @@
 Ambassador will launch `codex-acp` when a central message arrives. That is a
 new gateway-managed session, not the chat used for registration.
 
-The qualification probe records the installed version without rejecting it.
-Production still checks the exact MCP client and ACP identities in the compiled
-profile, so a new incompatible release fails closed. See
+Ambassador selects this profile by the exact known MCP client name, then tries
+the fixed `codex-acp` ACP v1 contract. Reported client and adapter versions are
+diagnostic only. An incompatible release fails at startup, ACP initialization,
+session creation, or delivery instead of being rejected by a version list. See
 [Qualification](qualification.md) for compatibility evidence.

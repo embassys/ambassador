@@ -13,12 +13,12 @@ test("records all reviewed production agent contracts exactly", () => {
       kind: "openclaw",
       displayName: "OpenClaw",
       enabled: true,
-      aliases: [{ name: "openclaw-bundle-mcp", version: "0.0.0" }],
+      aliases: ["openclaw-bundle-mcp"],
       modes: ["direct", "webhook"],
       direct: {
         command: "openclaw",
         args: ["acp"],
-        agentInfo: { name: "openclaw-acp", versions: ["2026.8.1"] },
+        agentInfo: { name: "openclaw-acp" },
         mcp: "provider_config",
         environment: [
           "HOME",
@@ -41,12 +41,12 @@ test("records all reviewed production agent contracts exactly", () => {
       kind: "hermes",
       displayName: "Hermes",
       enabled: true,
-      aliases: [{ name: "mcp", version: "0.1.0" }],
+      aliases: ["mcp"],
       modes: ["direct", "webhook"],
       direct: {
         command: "hermes-acp",
         args: [],
-        agentInfo: { name: "hermes-agent", versions: ["0.20.5", "0.21.0"] },
+        agentInfo: { name: "hermes-agent" },
         mcp: "session",
         environment: [
           "HOME",
@@ -69,15 +69,12 @@ test("records all reviewed production agent contracts exactly", () => {
       kind: "codex",
       displayName: "Codex",
       enabled: true,
-      aliases: [
-        { name: "codex-mcp-client", version: "0.149.0" },
-        { name: "codex-mcp-client", version: "0.152.1" },
-      ],
+      aliases: ["codex-mcp-client"],
       modes: ["direct"],
       direct: {
         command: "codex-acp",
         args: [],
-        agentInfo: { name: "@agentclientprotocol/codex-acp", versions: ["1.8.0"] },
+        agentInfo: { name: "@agentclientprotocol/codex-acp" },
         mcp: "session",
         environment: [
           "CODEX_API_KEY",
@@ -103,15 +100,12 @@ test("records all reviewed production agent contracts exactly", () => {
       kind: "claude",
       displayName: "Claude Code",
       enabled: true,
-      aliases: [
-        { name: "claude-code", version: "2.1.257" },
-        { name: "claude-code", version: "2.1.258" },
-      ],
+      aliases: ["claude-code"],
       modes: ["direct"],
       direct: {
         command: "claude-agent-acp",
         args: [],
-        agentInfo: { name: "@agentclientprotocol/claude-agent-acp", versions: ["0.73.0"] },
+        agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
         mcp: "session",
         environment: [
           "ANTHROPIC_API_KEY",
@@ -137,12 +131,12 @@ test("records all reviewed production agent contracts exactly", () => {
       kind: "gemini",
       displayName: "Gemini CLI",
       enabled: true,
-      aliases: [{ name: "gemini-cli-mcp-client", version: "0.58.0" }],
+      aliases: ["gemini-cli-mcp-client"],
       modes: ["direct"],
       direct: {
         command: "gemini",
         args: ["--acp"],
-        agentInfo: { name: "gemini-cli", versions: ["0.58.0"] },
+        agentInfo: { name: "gemini-cli" },
         mcp: "session",
         environment: [
           "GEMINI_API_KEY",
@@ -169,27 +163,17 @@ test("records all reviewed production agent contracts exactly", () => {
   ]);
 });
 
-test("Hermes ACP support is limited to the two reviewed exact versions", () => {
+test("Hermes ACP support fixes the agent name without pinning a version", () => {
   const hermes = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "hermes");
-  assert.deepEqual(hermes?.direct?.agentInfo, {
-    name: "hermes-agent",
-    versions: ["0.20.5", "0.21.0"],
-  });
-  for (const unreviewed of ["0.20.4", "0.20.6", "0.21.1", "0.20.x", ">=0.20.5"]) {
-    assert.equal(hermes?.direct?.agentInfo.versions.includes(unreviewed), false);
-  }
+  assert.deepEqual(hermes?.direct?.agentInfo, { name: "hermes-agent" });
 });
 
-test("matches exact aliases and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {
+test("matches exact client names and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {
   const matched = resolveAgentCapability({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   assert.equal(matched.status, "matched");
   assert.equal(matched.status === "matched" ? matched.profile.kind : undefined, "openclaw");
   assert.equal(
     resolveAgentCapability({ name: "OpenClaw-bundle-mcp", version: "0.0.0" }).status,
-    "unsupported",
-  );
-  assert.equal(
-    resolveAgentCapability({ name: "openclaw-bundle-mcp", version: "0.0.1" }).status,
     "unsupported",
   );
   assert.equal(resolveAgentCapability({ name: "codex", version: "1" }).status, "unsupported");
@@ -204,26 +188,13 @@ test("matches exact aliases and rejects unknown, ambiguous, disabled, and incomp
     assert.equal(result.status, "matched");
     assert.equal(result.status === "matched" ? result.profile.kind : undefined, kind);
   }
-  assert.equal(
-    resolveAgentCapability({ name: "codex-mcp-client", version: "0.152.2" }).status,
-    "unsupported",
-  );
-  assert.equal(
-    resolveAgentCapability({ name: "claude-code", version: "2.1.256" }).status,
-    "unsupported",
-  );
-  assert.equal(
-    resolveAgentCapability({ name: "gemini-cli-mcp-client", version: "0.58.1" }).status,
-    "unsupported",
-  );
-
   const base = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(base);
   const directOnly: AgentCapability = {
     ...base,
     kind: "fixture-direct",
     displayName: "Fixture Direct",
-    aliases: [{ name: "fixture-direct", version: "1" }],
+    aliases: ["fixture-direct"],
     modes: ["direct"],
     qualificationCases: ["fixture-direct"],
   };
@@ -250,6 +221,22 @@ test("matches exact aliases and rejects unknown, ambiguous, disabled, and incomp
     ]).status,
     "unsupported",
   );
+});
+
+test("matches every known MCP client name without using its reported version as a gate", () => {
+  for (const [name, kind] of [
+    ["openclaw-bundle-mcp", "openclaw"],
+    ["mcp", "hermes"],
+    ["codex-mcp-client", "codex"],
+    ["claude-code", "claude"],
+    ["gemini-cli-mcp-client", "gemini"],
+  ] as const) {
+    for (const version of ["0.0.1", "999.999.999", "future-release"]) {
+      const result = resolveAgentCapability({ name, version });
+      assert.equal(result.status, "matched", `${name} ${version}`);
+      assert.equal(result.status === "matched" ? result.profile.kind : undefined, kind);
+    }
+  }
 });
 
 test("rejects oversized or decorated client metadata without fuzzy matching", () => {
