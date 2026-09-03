@@ -18,8 +18,8 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const MAX_PLAINTEXT_BYTES = 8_192;
 const MAX_FILE_BYTES = 16_384;
+const STATE_KEY_BYTES = 24;
 const SYSTEM_SID = "S-1-5-18";
-const LOCAL_TOKEN = /^[0-9a-f]{48}$/u;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const ENVELOPE_KEYS = [
   "cipher",
@@ -144,10 +144,10 @@ function parseEnvelope(bytes: Buffer): {
   };
 }
 
-function deriveKey(localToken: Buffer, salt: Buffer): Promise<Buffer> {
+function deriveKey(stateKey: Buffer, salt: Buffer): Promise<Buffer> {
   return new Promise((resolveKey, reject) => {
     scrypt(
-      localToken,
+      stateKey,
       salt,
       KEY_BYTES,
       { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM },
@@ -265,25 +265,27 @@ class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessCo
 
 export class EncryptedFileCredentialStore implements CredentialStore {
   readonly #path: string;
+  readonly #keyPath: string;
   readonly #directoryPath: string;
-  readonly #localToken: Buffer;
   readonly #credentialScope: string;
   readonly #platform: NodeJS.Platform;
   readonly #windowsAccessControl?: WindowsCredentialAccessControl;
 
   constructor(
     path: string,
-    localToken: string,
+    keyPath: string,
     credentialScope: string,
     options: EncryptedFileCredentialStoreOptions = {},
   ) {
-    if (!LOCAL_TOKEN.test(localToken)) throw new Error("The local token format is invalid");
     if (typeof credentialScope !== "string" || credentialScope.length < 1) {
       throw new Error("The credential scope is invalid");
     }
     this.#path = resolve(path);
+    this.#keyPath = resolve(keyPath);
     this.#directoryPath = dirname(this.#path);
-    this.#localToken = Buffer.from(localToken, "hex");
+    if (this.#keyPath === this.#path || dirname(this.#keyPath) !== this.#directoryPath) {
+      throw new Error("The credential key path is invalid");
+    }
     this.#credentialScope = credentialScope;
     this.#platform = options.platform ?? process.platform;
     if (this.#platform === "win32") {
@@ -333,19 +335,21 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       directory = await this.#openDirectory(true);
       if (directory === undefined) throw invalidCredential();
       await this.#assertCredentialAbsent();
+      const stateKey = await this.#loadOrCreateStateKey(directory);
       const salt = randomBytes(SALT_BYTES);
       const iv = randomBytes(IV_BYTES);
       let key: Buffer | undefined;
       let ciphertext: Buffer;
       let tag: Buffer;
       try {
-        key = await deriveKey(this.#localToken, salt);
+        key = await deriveKey(stateKey, salt);
         const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
         cipher.setAAD(this.#additionalData());
         ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
         tag = cipher.getAuthTag();
       } finally {
         key?.fill(0);
+        stateKey.fill(0);
       }
       const envelope: CredentialEnvelope = {
         version: FILE_FORMAT,
@@ -436,10 +440,16 @@ export class EncryptedFileCredentialStore implements CredentialStore {
         throw invalidCredential();
       }
       const envelope = parseEnvelope(bytes);
+      let stateKey: Buffer;
+      try {
+        stateKey = await this.#readStateKeyPath(this.#keyPath);
+      } catch {
+        throw invalidCredential();
+      }
       let key: Buffer | undefined;
       let decoded: Buffer | undefined;
       try {
-        key = await deriveKey(this.#localToken, envelope.salt);
+        key = await deriveKey(stateKey, envelope.salt);
         const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
           authTagLength: TAG_BYTES,
         });
@@ -453,10 +463,94 @@ export class EncryptedFileCredentialStore implements CredentialStore {
         throw invalidCredential();
       } finally {
         key?.fill(0);
+        stateKey.fill(0);
         decoded?.fill(0);
       }
     } finally {
       await file.close();
+    }
+  }
+
+  async #readStateKeyPath(path: string): Promise<Buffer> {
+    const file = await this.#openExistingFile(path, false);
+    try {
+      const stats = await file.stat({ bigint: true });
+      if (stats.size !== BigInt(STATE_KEY_BYTES)) throw invalidCredential();
+      const bytes = await file.readFile();
+      const currentStats = await file.stat({ bigint: true });
+      if (bytes.length !== STATE_KEY_BYTES || !sameArtifact(stats, currentStats)) {
+        throw invalidCredential();
+      }
+      return bytes;
+    } finally {
+      await file.close();
+    }
+  }
+
+  async #loadOrCreateStateKey(directory: SecuredDirectory): Promise<Buffer> {
+    try {
+      return await this.#readStateKeyPath(this.#keyPath);
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
+
+    const stateKey = randomBytes(STATE_KEY_BYTES);
+    const temporaryPath = `${this.#keyPath}.tmp-${process.pid}-${randomBytes(16).toString("hex")}`;
+    let temporaryFile: FileHandle | undefined;
+    let temporaryCreated = false;
+    let finalCreated = false;
+    let committed = false;
+    try {
+      await this.#verifyDirectory(directory);
+      await this.#assertPathAbsent(this.#keyPath);
+      const noFollow = this.#platform === "win32" ? 0 : constants.O_NOFOLLOW;
+      temporaryFile = await open(
+        temporaryPath,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
+        0o600,
+      );
+      temporaryCreated = true;
+      await this.#verifyOpenFile(temporaryPath, temporaryFile, undefined, false);
+      if (this.#platform === "win32") {
+        await this.#windowsAccessControl?.secure(temporaryPath, "file");
+      } else {
+        await temporaryFile.chmod(0o600);
+      }
+      await this.#verifyOpenFile(temporaryPath, temporaryFile);
+      await temporaryFile.writeFile(stateKey);
+      await temporaryFile.sync();
+      await temporaryFile.close();
+      temporaryFile = undefined;
+      const verified = await this.#readStateKeyPath(temporaryPath);
+      verified.fill(0);
+      await this.#verifyDirectory(directory);
+      await this.#assertPathAbsent(this.#keyPath);
+      if (this.#platform === "win32") {
+        await rename(temporaryPath, this.#keyPath);
+        temporaryCreated = false;
+        finalCreated = true;
+      } else {
+        await link(temporaryPath, this.#keyPath);
+        finalCreated = true;
+        await unlink(temporaryPath);
+        temporaryCreated = false;
+      }
+      const finalFile = await this.#openExistingFile(this.#keyPath, true);
+      try {
+        await finalFile.sync();
+      } finally {
+        await finalFile.close();
+      }
+      await this.#verifyDirectory(directory);
+      await directory.handle?.sync();
+      const result = await this.#readStateKeyPath(this.#keyPath);
+      committed = true;
+      return result;
+    } finally {
+      stateKey.fill(0);
+      await temporaryFile?.close().catch(() => undefined);
+      if (!committed && finalCreated) await unlink(this.#keyPath).catch(() => undefined);
+      if (!committed && temporaryCreated) await unlink(temporaryPath).catch(() => undefined);
     }
   }
 
@@ -529,13 +623,17 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   }
 
   async #assertCredentialAbsent(): Promise<void> {
+    await this.#assertPathAbsent(this.#path, credentialExists());
+  }
+
+  async #assertPathAbsent(path: string, existsError = invalidCredential()): Promise<void> {
     try {
-      await lstat(this.#path, { bigint: true });
+      await lstat(path, { bigint: true });
     } catch (error) {
       if (errorCode(error) === "ENOENT") return;
       throw error;
     }
-    throw credentialExists();
+    throw existsError;
   }
 
   async #openExistingFile(path: string, writable: boolean): Promise<FileHandle> {

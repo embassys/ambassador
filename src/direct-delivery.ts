@@ -41,7 +41,6 @@ export interface DirectDeliveryTargetOptions {
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly mcpEndpoint: string;
-  readonly localToken: string;
   readonly initializationDeadlineMs?: number;
   readonly sessionDeadlineMs?: number;
   readonly promptDeadlineMs?: number;
@@ -146,7 +145,6 @@ export class DirectDeliveryTarget {
   readonly #workingDirectory: string;
   readonly #environment: Record<string, string>;
   readonly #mcpEndpoint: string;
-  readonly #localToken: string;
   readonly #initializationDeadlineMs: number;
   readonly #sessionDeadlineMs: number;
   readonly #promptDeadlineMs: number;
@@ -164,7 +162,6 @@ export class DirectDeliveryTarget {
     this.#capability = options.capability;
     this.#workingDirectory = options.workingDirectory;
     this.#mcpEndpoint = options.mcpEndpoint;
-    this.#localToken = options.localToken;
     this.#initializationDeadlineMs =
       options.initializationDeadlineMs ?? DEFAULT_INITIALIZATION_DEADLINE_MS;
     this.#sessionDeadlineMs = options.sessionDeadlineMs ?? DEFAULT_SESSION_DEADLINE_MS;
@@ -182,7 +179,6 @@ export class DirectDeliveryTarget {
       this.#capability.command.length === 0 ||
       this.#capability.args.length > 16 ||
       this.#capability.agentInfo.versions.length === 0 ||
-      !/^[0-9a-f]{48}$/u.test(this.#localToken) ||
       !this.#mcpEndpoint.startsWith("http://127.0.0.1:") ||
       ![
         this.#initializationDeadlineMs,
@@ -298,7 +294,7 @@ export class DirectDeliveryTarget {
                 type: "http",
                 name: "ambassador",
                 url: this.#mcpEndpoint,
-                headers: [{ name: "Authorization", value: `Bearer ${this.#localToken}` }],
+                headers: [],
               },
             ]
           : [];

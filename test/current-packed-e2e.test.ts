@@ -17,7 +17,6 @@ interface ArtifactScanner {
   }): Promise<unknown>;
 }
 
-const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 
@@ -73,7 +72,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(["start", "--local-token-env=AMBASSADOR_LOCAL_TOKEN"], {
+  const running = packed.runCli(["start"], {
     io: {
       stdout: {
         write(chunk: string | Uint8Array) {
@@ -89,7 +88,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       },
     },
     env: {
-      AMBASSADOR_LOCAL_TOKEN: LOCAL_TOKEN,
       EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
     cwd: root,
@@ -104,7 +102,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   t.after(() => controller.abort());
 
   const endpoint = await waitForEndpoint(() => stdout);
-  const client = new TestMcpClient(endpoint, LOCAL_TOKEN);
+  const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   assert.deepEqual(
     (await client.listTools()).map(({ name }) => name),
@@ -170,7 +168,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       { name: "ambassador-stderr", value: stderr, truncated: false },
     ],
     markers: [
-      { name: "local-token", encoding: "utf8", value: LOCAL_TOKEN },
       { name: "webhook-secret", encoding: "utf8", value: WEBHOOK_SECRET },
       { name: "registration-email", encoding: "utf8", value: email },
       { name: "verification-code", encoding: "utf8", value: verificationCode },

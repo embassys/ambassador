@@ -84,7 +84,7 @@ The required matrix is:
 For each row:
 
 1. Create an isolated provider profile and bounded working directory.
-2. Start the packed Ambassador candidate with a fresh local token.
+2. Start the packed Ambassador candidate with no CLI options.
 3. Configure Ambassador MCP through the provider's supported mechanism.
 4. Register a synthetic fixture identity and prove the real MCP client's exact
    alias selects the expected fixed profile. Choose the requested mode when the
@@ -160,7 +160,6 @@ webhook receivers. Then run:
 ```sh
 export AMBASSADOR_CANDIDATE_TARBALL=/absolute/path/to/ambassador.tgz
 export AMBASSADOR_QUALIFY_CONFIRM=run-installed-supported-agents
-export AMBASSADOR_QUALIFICATION_LOCAL_TOKEN='<48-lowercase-hex-token>'
 export AMBASSADOR_OPENCLAW_WEBHOOK_URL=https://receiver.example/openclaw
 export AMBASSADOR_OPENCLAW_WEBHOOK_SECRET='<secret>'
 export AMBASSADOR_HERMES_WEBHOOK_URL=https://receiver.example/hermes
@@ -179,8 +178,8 @@ Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, verifies the
 installed provider versions, loads the code from the exact candidate archive,
 runs all ten delivery cases, and prints one safe JSON report. Configure the
-OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` with the local
-token above before starting the runner. The other four profiles receive the
+OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
+authentication before starting the runner. The other four profiles receive the
 same endpoint by ACP session injection. Each direct case must call the
 qualification `get_my_permissions` tool, which proves the real MCP client's
 exact `clientInfo` match. Missing, mismatched, unauthenticated, or failing

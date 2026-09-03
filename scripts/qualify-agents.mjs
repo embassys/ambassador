@@ -10,7 +10,6 @@ import { pathToFileURL } from "node:url";
 const CONFIRMATION = "run-installed-supported-agents";
 const FIXTURE_ORIGIN = process.env.AMBASSADOR_QUALIFICATION_CENTRAL ?? "http://127.0.0.1:8000";
 const TARBALL = process.env.AMBASSADOR_CANDIDATE_TARBALL;
-const LOCAL_TOKEN = process.env.AMBASSADOR_QUALIFICATION_LOCAL_TOKEN;
 const VERSION = /(?:^|\D)(\d+\.\d+\.\d+)(?:$|\D)/u;
 const VERSION_PROBES = new Map([
   ["openclaw", { command: "openclaw", args: ["--version"] }],
@@ -160,8 +159,6 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
   fail(`Set AMBASSADOR_QUALIFY_CONFIRM=${CONFIRMATION} to run paid real-agent qualification.`);
 } else if (TARBALL === undefined) {
   fail("Set AMBASSADOR_CANDIDATE_TARBALL to the packed candidate.");
-} else if (LOCAL_TOKEN === undefined || !/^[0-9a-f]{48}$/u.test(LOCAL_TOKEN)) {
-  fail("Set AMBASSADOR_QUALIFICATION_LOCAL_TOKEN to a generated local token.");
 } else {
   const candidatePath = resolve(TARBALL);
   const candidateBytes = await readFile(candidatePath).catch(() => undefined);
@@ -197,7 +194,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
 
       const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-agent-qualification-"));
       const observedMcpProfiles = new Set();
-      const mcp = new LocalMcpServer(LOCAL_TOKEN, {
+      const mcp = new LocalMcpServer({
         async listTools() {
           return [
             {
@@ -280,7 +277,6 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               workingDirectory,
               environment: process.env,
               mcpEndpoint: mcp.endpoint,
-              localToken: LOCAL_TOKEN,
             });
             await target.deliver(
               {

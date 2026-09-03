@@ -9,7 +9,8 @@ Before starting any task, read these files in order:
 3. `docs/protocol.md`
 4. `docs/implementation-plan.md`
 5. Relevant accepted records under `docs/adr/`, especially ADR 0037 for the
-   central REST contract and ADR 0038 for local delivery
+   central REST contract, ADR 0038 for local delivery, and ADR 0039 for local
+   startup and trust
 
 The architecture and protocol describe the accepted target. The implementation
 plan says which parts are not built yet. During the delivery cutover, replace
@@ -24,8 +25,8 @@ scope on your own.
   binary is `ambassador`. Do not keep the old package or binary as aliases.
 - One foreground Ambassador process owns one enrolled central identity and one
   local delivery profile.
-- `start` accepts only `--local-token-env=<name>`. Do not add delivery-mode,
-  agent, webhook URL, central URL, configuration path, or secret-value flags.
+- `start` accepts no options. Do not add delivery-mode, agent, webhook URL,
+  central URL, configuration path, token, or secret-value flags.
 - Resolve delivery during MCP registration through a fixed capability
   registry. The two modes are `webhook` and `direct`. Do not add a third
   connector or polling mode.
@@ -86,8 +87,13 @@ scope on your own.
   routes, credential migration, activation, token reissue, leases, general
   conversations or replies, or outcome lookup unless the current server adds
   the behavior and the user accepts the client change.
-- The local MCP listener always binds to `127.0.0.1`, validates `Host` and
-  `Origin`, and authenticates before parsing a request.
+- The local MCP listener always binds to `127.0.0.1` and validates `Host` and
+  `Origin` before parsing a request. It trusts the owner's local-machine
+  boundary, does not use bearer authentication, and rejects supplied
+  `Authorization` headers.
+- Generate the central credential's encryption material internally and keep it
+  in a separate owner-only state file. Never send it to an agent or accept it
+  through CLI, MCP, or the environment.
 - Write or update tests and CI expectations before production implementation.
   CI delivery tests use a mock webhook receiver and a mock ACP v1 agent. Real
   OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI tests are explicit local

@@ -6,7 +6,6 @@ import { type LocalMcpRouter, LocalMcpServer } from "../src/local-mcp.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
 
-const TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const MAX_TOOL_RESULT_BYTES = 512 * 1024;
 
 function router(): LocalMcpRouter & { calls: Array<Record<string, unknown>> } {
@@ -34,13 +33,13 @@ function router(): LocalMcpRouter & { calls: Array<Record<string, unknown>> } {
   };
 }
 
-test("serves an authenticated stateful MCP tool through the official transport", async (t) => {
+test("serves a loopback-only stateful MCP tool without bearer setup", async (t) => {
   const backend = router();
-  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  const server = new LocalMcpServer(backend, { port: 0 });
   await server.listen();
   t.after(() => server.close());
 
-  const client = new TestMcpClient(server.endpoint, TOKEN);
+  const client = new TestMcpClient(server.endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   assert.deepEqual(client.serverCapabilities.tools, { listChanged: true });
   assert.deepEqual(
@@ -58,7 +57,7 @@ test("serves an authenticated stateful MCP tool through the official transport",
     },
   ]);
 
-  const secondClient = new TestMcpClient(server.endpoint, TOKEN);
+  const secondClient = new TestMcpClient(server.endpoint);
   await secondClient.initialize();
   assert.deepEqual(
     (await secondClient.listTools()).map((tool) => tool.name),
@@ -71,26 +70,25 @@ test("serves an authenticated stateful MCP tool through the official transport",
   await listChanged;
 });
 
-test("rejects host, origin, bearer, and body violations before dispatch", async (t) => {
+test("rejects host, origin, authorization, and body violations before dispatch", async (t) => {
   const backend = router();
-  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  const server = new LocalMcpServer(backend, { port: 0 });
   await server.listen();
   t.after(() => server.close());
   const port = new URL(server.endpoint).port;
   const marker = "body-marker-must-not-be-reflected";
 
-  const unauthenticated = await fetch(server.endpoint, {
+  const suppliedAuthorization = await fetch(server.endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { authorization: "Bearer should-not-be-needed", "content-type": "application/json" },
     body: marker,
   });
-  assert.equal(unauthenticated.status, 401);
-  assert.ok(!(await unauthenticated.text()).includes(marker));
+  assert.equal(suppliedAuthorization.status, 400);
+  assert.ok(!(await suppliedAuthorization.text()).includes(marker));
 
   const wrongOrigin = await fetch(server.endpoint, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${TOKEN}`,
       "content-type": "application/json",
       origin: "https://attacker.example",
     },
@@ -101,7 +99,6 @@ test("rejects host, origin, bearer, and body violations before dispatch", async 
   const wrongHost = await rawPost(
     server.endpoint,
     {
-      authorization: `Bearer ${TOKEN}`,
       "content-type": "application/json",
       host: `localhost:${port}`,
     },
@@ -112,7 +109,6 @@ test("rejects host, origin, bearer, and body violations before dispatch", async 
   const oversized = await rawPost(
     server.endpoint,
     {
-      authorization: `Bearer ${TOKEN}`,
       "content-type": "application/json",
       host: `127.0.0.1:${port}`,
     },
@@ -125,10 +121,10 @@ test("rejects host, origin, bearer, and body violations before dispatch", async 
 
 test("returns a 512 KiB tool result and rejects one byte above it before transport", async (t) => {
   const backend = router();
-  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  const server = new LocalMcpServer(backend, { port: 0 });
   await server.listen();
   t.after(() => server.close());
-  const client = new TestMcpClient(server.endpoint, TOKEN);
+  const client = new TestMcpClient(server.endpoint);
   await client.initialize();
 
   const emptyResultBytes = Buffer.byteLength(JSON.stringify({ echoed: "" }));
@@ -144,10 +140,10 @@ test("returns a 512 KiB tool result and rejects one byte above it before transpo
 
 test("rejects JSON-RPC batches before dispatching any tool call", async (t) => {
   const backend = router();
-  const server = new LocalMcpServer(TOKEN, backend, { port: 0 });
+  const server = new LocalMcpServer(backend, { port: 0 });
   await server.listen();
   t.after(() => server.close());
-  const client = new TestMcpClient(server.endpoint, TOKEN);
+  const client = new TestMcpClient(server.endpoint);
   await client.initialize();
 
   const response = await client.postBatch([

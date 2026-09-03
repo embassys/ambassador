@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
-const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const FIXTURE_NOW_SECONDS = 1_788_220_800;
 
@@ -59,7 +58,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(["start", "--local-token-env=AMBASSADOR_LOCAL_TOKEN"], {
+  const running = packed.runCli(["start"], {
     io: {
       stdout: {
         write(chunk: string | Uint8Array) {
@@ -75,7 +74,6 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
       },
     },
     env: {
-      AMBASSADOR_LOCAL_TOKEN: LOCAL_TOKEN,
       EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
     },
     cwd: root,
@@ -90,7 +88,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   t.after(() => controller.abort());
 
   const endpoint = await waitForEndpoint(() => stdout);
-  const client = new TestMcpClient(endpoint, LOCAL_TOKEN);
+  const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   const email = "packed-current@fixture.test";
   assert.equal((await client.callTool("register_agent", { email })).status, "input_required");

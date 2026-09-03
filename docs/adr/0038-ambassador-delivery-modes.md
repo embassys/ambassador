@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted
+Status: accepted; local startup and MCP authentication amended by ADR 0039
 
 Date: 2026-09-02
 
@@ -48,15 +48,15 @@ There is no third polling or connector mode.
 Rename the public npm package to "@embassys/ambassador" and its binary to
 "ambassador". Do not retain old aliases or migration behavior.
 
-The startup command is:
+The original startup command in this decision required a local-token option.
+ADR 0039 removes that option; the current command is:
 
 ```text
-ambassador start --local-token-env=<environment-variable>
+ambassador start
 ```
 
-The local token continues to authenticate loopback MCP and derive the encrypted
-central-credential key. Startup has no agent, delivery-mode, webhook URL,
-webhook secret, central URL, or configuration-path option.
+Startup has no token, agent, delivery-mode, webhook URL, webhook secret,
+central URL, or configuration-path option.
 
 ### Delivery selection during registration
 
@@ -175,7 +175,7 @@ not auto-approve ACP permission requests. The selected agent must rely on its
 preconfigured policy and Ambassador MCP tools; any remaining permission request
 is denied.
 
-Ambassador supplies its authenticated MCP endpoint in ACP session configuration
+Ambassador supplies its loopback MCP endpoint in ACP session configuration
 where the agent supports it. If an agent rejects session MCP configuration, its
 normal local setup must configure Ambassador MCP before direct mode is used.
 
