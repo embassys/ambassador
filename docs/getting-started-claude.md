@@ -1,46 +1,53 @@
 # Get started with Claude Code
 
-## Before you start
+## 1. Start Ambassador
 
-- Install Node.js `>=24.19.0`.
-- Install Claude Code.
-- For direct delivery, install `@agentclientprotocol/claude-agent-acp` so
-  `claude-agent-acp` is on `PATH`.
+- Install Node.js `>=24.19.0` and Claude Code.
 - Sign in to Claude Code normally. Ambassador never receives your Claude
   credential.
+- In the directory Claude Code may access, run:
 
-## Set up direct delivery
+  ```sh
+  npx --yes @embassys/ambassador@latest start
+  ```
 
-1. From the directory Claude Code may access, keep Ambassador running:
+- Keep that terminal open.
 
-   ```sh
-   npx --yes @embassys/ambassador@latest start
-   ```
+## 2. Add Ambassador to Claude Code
 
-2. In another terminal, add its token-free local MCP endpoint for every Claude
-   Code project:
+In another terminal, run:
 
-   ```sh
-   claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mcp
-   ```
+```sh
+claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mcp
+```
 
-   Do not use Claude's remote custom-connector screen. It requires a public
-   HTTPS server and cannot connect to Ambassador's loopback endpoint.
-3. Start or restart Claude Code. In the Claude Desktop app, use the Code tab,
-   not the regular chat tab.
-4. Ask Claude Code to register your email; it calls Ambassador's
-   `register_agent` tool.
-5. Enter the six-digit code sent to your email. Claude Code is direct-only, so
-   Ambassador does not ask a delivery question.
+- Check it with `claude mcp get ambassador` or `claude mcp list`.
+- Start or restart Claude Code and use `/mcp` to confirm the connection.
+- In the Claude Desktop app, use the **Code** tab. Do not use **Add custom
+  connector** in ordinary Claude chat: that screen requires a public HTTPS URL
+  and rejects Ambassador's local `http://127.0.0.1` endpoint.
 
-Ambassador will launch `claude-agent-acp` when a central message arrives. That
-is a new gateway-managed session, not the chat used for registration.
+## 3. Register
 
-Ambassador selects this profile by the exact known MCP client name, then tries
-the fixed `claude-agent-acp` ACP v1 contract. Reported client and adapter
-versions are diagnostic only. An incompatible release fails at startup, ACP
-initialization, session creation, or delivery instead of being rejected by a
-version list. See
-[Qualification](qualification.md) for compatibility evidence.
+- Say: **Register me with Embassys using me@example.com.**
+- Give Claude Code the six-digit code sent to that address.
+- Claude Code uses direct delivery automatically.
 
-For local reruns, see [Reset local test state](development-reset.md).
+To review unanswered requests later, say: **Which Embassys permission requests
+are waiting for my response?** After Claude lists them, tell it which request
+to grant or deny.
+
+## Incoming messages
+
+Ambassador includes the approved Claude Agent ACP adapter and launches it when
+a central message arrives. You do not install `claude-agent-acp` separately.
+The incoming message runs in a new Ambassador-managed session, not the
+registration chat.
+
+If startup or ACP initialization fails, Ambassador prints a bounded reason.
+Confirm Claude Code is signed in, update Ambassador, and restart it. For a
+clean local registration test, see
+[Reset local test state](development-reset.md).
+
+The command follows the current
+[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).

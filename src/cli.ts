@@ -68,6 +68,23 @@ async function waitForAbort(signal: AbortSignal): Promise<void> {
   );
 }
 
+export function startupGuide(endpoint: string): string {
+  const openClaw = JSON.stringify({ url: endpoint, transport: "streamable-http", enabled: true });
+  return [
+    `MCP endpoint: ${endpoint}`,
+    "",
+    "Connect an agent in another terminal:",
+    `  Codex:      codex mcp add ambassador --url ${endpoint}`,
+    `  Claude Code: claude mcp add --transport http --scope user ambassador ${endpoint}`,
+    `  Hermes:     hermes mcp add ambassador --url ${endpoint}`,
+    `  OpenClaw:   openclaw mcp set ambassador '${openClaw}'`,
+    "",
+    "Then restart or reload the agent and say: Register me with Embassys using my email.",
+    "Keep this Ambassador process running.",
+    "",
+  ].join("\n");
+}
+
 function homeDirectory(environment: NodeJS.ProcessEnv): string {
   return environment.HOME || environment.USERPROFILE || homedir();
 }
@@ -160,7 +177,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
               : { nowSeconds: context.testOverrides.nowSeconds }),
           }),
     });
-    context.io.stdout.write(`MCP endpoint: ${application.endpoint}\n`);
+    context.io.stdout.write(startupGuide(application.endpoint));
     const failure = await Promise.race([
       waitForAbort(signal).then(() => undefined),
       application.failure,
@@ -177,7 +194,9 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       context.io.stderr.write(`${error.message}\n`);
       return error.exitCode;
     }
-    context.io.stderr.write("Ambassador local state failed\n");
+    context.io.stderr.write(
+      "Ambassador could not start. Check that its state directory is writable and that this Node platform is supported\n",
+    );
     return 7;
   } finally {
     await application?.close().catch(() => undefined);

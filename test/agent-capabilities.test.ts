@@ -123,7 +123,7 @@ test("records all reviewed production agent contracts exactly", () => {
           "XDG_RUNTIME_DIR",
           "XDG_STATE_HOME",
         ],
-        windowsNodePackage: {
+        bundledNodePackage: {
           packageName: "@agentclientprotocol/codex-acp",
           binName: "codex-acp",
           entrypoint: "dist/index.js",
@@ -165,7 +165,7 @@ test("records all reviewed production agent contracts exactly", () => {
           "XDG_DATA_HOME",
           "XDG_STATE_HOME",
         ],
-        windowsNodePackage: {
+        bundledNodePackage: {
           packageName: "@agentclientprotocol/claude-agent-acp",
           binName: "claude-agent-acp",
           entrypoint: "dist/index.js",

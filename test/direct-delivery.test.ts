@@ -167,6 +167,31 @@ test("fails before prompting on an unsupported ACP protocol or agent name", asyn
   }
 });
 
+test("turns an asynchronous missing-command spawn error into a bounded failure", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-acp-missing-command-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const delivery = new DirectDeliveryTarget({
+    capability: {
+      command: "ambassador-command-that-does-not-exist",
+      args: [],
+      agentInfo: { name: "missing-agent" },
+      mcp: "session",
+      environment: ["PATH"],
+    },
+    workingDirectory: root,
+    environment: process.env,
+    mcpEndpoint: "http://127.0.0.1:8787/mcp",
+    initializationDeadlineMs: 500,
+    maximumStartupAttempts: 1,
+  });
+  t.after(() => delivery.close());
+
+  await assert.rejects(
+    delivery.deliver(MESSAGE, new AbortController().signal),
+    (error: unknown) => error instanceof DirectDeliveryError && error.code === "agent_unavailable",
+  );
+});
+
 test("does not replay after timeout, malformed output, child exit, or output overflow", async (t) => {
   for (const item of [
     { scenario: "hang-session-mcp", promptDeadlineMs: 30 },

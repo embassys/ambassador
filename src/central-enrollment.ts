@@ -62,7 +62,8 @@ function schema(
 export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "register_agent",
-    description: "Register an email identity with the central service.",
+    description:
+      "Use this Embassys Ambassador tool when the user says 'register me', 'sign me up', or asks to connect this agent to Embassys. Register the user's email identity and begin guided delivery setup.",
     inputSchema: schema(
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
@@ -92,7 +93,8 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   },
   {
     name: "verify_email",
-    description: "Verify the six-digit code sent to the registered email.",
+    description:
+      "Use this Embassys Ambassador tool when the user provides the six-digit email code after registration. Verify the code and finish enrollment without exposing the returned credential.",
     inputSchema: schema(
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
@@ -103,7 +105,8 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   },
   {
     name: "resend_verification",
-    description: "Send a new verification code to an unverified email identity.",
+    description:
+      "Use this Embassys Ambassador tool when the user asks Embassys to resend or send another verification code. Send a new code to the unverified email identity.",
     inputSchema: schema({ email: { type: "string", minLength: 3, maxLength: 254 } }, ["email"]),
   },
 ] as const;
