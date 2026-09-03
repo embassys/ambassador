@@ -17,19 +17,19 @@ also needs the Embassys product name rather than the development namespace.
 Publish one public package as `@embassys/ambassador` with the `ambassador`
 binary. The package requires Node.js 24.
 
-Users run the foreground process directly from an approved npm release:
+Users run the foreground process directly from npm's current `latest` release:
 
 ```text
-npx --yes @embassys/ambassador@<approved-version> start
+npx --yes @embassys/ambassador@latest start
 ```
 
 Do not publish separate connector packages. Direct ACP support and its fixed
 agent profiles belong in the Ambassador package. Do not retain
 `@a2adev/gateway`, `a2a-gateway`, or provider connector binaries as aliases.
 
-User-facing guides pin an approved version and disclose any open qualification
-work. They do not require a global install or pnpm. The repository, CI,
-packing, and release qualification use pnpm under ADR 0006.
+User-facing guides select `latest` and disclose any open qualification work.
+They do not require a global install or pnpm. The repository, CI, packing, and
+release qualification use pnpm under ADR 0006.
 
 Normally publish from `main` only after Linux and macOS checks, packed
 installation, the five-profile local qualification matrix, live central
@@ -44,6 +44,14 @@ post-release qualification work. This exception does not relax the gate for a
 later version. The user separately approved 0.2.7 on 2026-09-03 to remove the
 local token and correct the installation path. It inherits the same disclosed
 qualification gap; it does not count as completing the matrix.
+
+The user separately approved 0.2.8 on 2026-09-03 after Hermes Agent 0.20.5
+passed both live delivery modes and the supported-Node repository checks
+passed. Version 0.2.8 adds the exact qualified Hermes ACP identity and changes
+the local agent-version command to an observational probe. It does not weaken
+the production `clientInfo` or ACP `agentInfo` allowlists. This release retains
+the four open profile/mode cases and the supported-Node Codex repeat as a
+disclosed qualification exception.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
@@ -80,5 +88,11 @@ The user approved npm distribution, MIT licensing, Node-based execution,
 trusted publishing, and the new package name on 2026-09-02. On 2026-09-03 the
 user separately approved publication of version 0.2.6 with the qualification
 exception described above, then approved 0.2.7 for the zero-configuration
-startup correction. Later publications still require explicit approval after
-qualification.
+startup correction. The user then approved 0.2.8 with the qualification gaps
+and probe behavior recorded above. Later publications still require explicit
+approval after qualification.
+
+The user also approved changing public installation guidance from a pinned
+Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the
+user-facing selection command; every publication still follows the release
+approval and qualification gates above.

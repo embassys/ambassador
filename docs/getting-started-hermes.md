@@ -3,16 +3,20 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate Hermes Agent `0.21.0`.
+- Install and authenticate Hermes Agent `0.20.5` or `0.21.0`.
 - Make sure `hermes-acp` is on `PATH` for direct delivery.
 - Ambassador never receives your provider credential.
+
+Hermes Agent `0.20.5` passed both live delivery modes and is included in
+Ambassador 0.2.8's direct profile. The qualification probe records the installed
+version without treating the observation itself as a failure.
 
 ## Set up direct delivery
 
 1. From the directory Hermes may access, keep Ambassador running:
 
    ```sh
-   npx --yes @embassys/ambassador@0.2.7 start
+   npx --yes @embassys/ambassador@latest start
    ```
 
 2. Add `http://127.0.0.1:8787/mcp` as a Streamable HTTP MCP server in Hermes's
@@ -42,6 +46,7 @@ new gateway-managed session, not the chat used for registration.
 - Hermes supplies `delivery.url` and `delivery.secret_env`; it never receives
   the secret value.
 
-Only the exact version above is enabled. Other versions fail closed until
-their capability profile is reviewed. See [Qualification](qualification.md)
-for compatibility evidence.
+Production still checks the exact MCP client and ACP identities in the compiled
+profile, so a new incompatible release fails closed. See
+[Qualification](qualification.md) for the artifact-specific compatibility
+evidence.

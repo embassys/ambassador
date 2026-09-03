@@ -10,8 +10,11 @@ general reply operations. It does test the deployed, action-specific
 
 The runner covers the current package name, guided registration, one
 full-message webhook target, and one direct target. The default direct target
-is the deterministic mock ACP agent. A separately confirmed mode uses the
-fixed Codex profile and `codex-acp` 1.8.0 with an isolated Codex login.
+is the deterministic mock ACP agent. Separately confirmed modes use the fixed
+Codex or Hermes profiles and their supported exact agent and adapter versions.
+Real-provider modes use isolated provider configuration copies. Their
+installed-version probes are observational; the compiled-in production profile
+still decides ACP compatibility by exact identity matching.
 
 ## Safety
 
@@ -70,11 +73,43 @@ export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-co
 pnpm run qualify:live
 ```
 
-The runner rejects an ordinary user home, checks the adapter version before it
-contacts central, uses the compiled-in Codex command and profile, and never
-accepts a command override. It also lets abandoned server-side polls expire
-after the restart check before it enqueues a message. Delete the isolated home
-after the run.
+The runner rejects an ordinary user home, records the installed version when
+one can be observed, uses the compiled-in Codex command and profile, and never
+accepts a command override. The observation does not establish compatibility;
+the exact ACP identity check remains authoritative. The runner also lets
+abandoned server-side polls expire after the restart check before it enqueues a
+message. Delete the isolated home after the run.
+
+For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
+`.hermes/auth.json`, `.hermes/config.yaml`, and
+`.hermes/shared/nous_auth.json` copied from the authenticated installation.
+Remove unrelated MCP entries only from that copy. Put Hermes Agent 0.20.5 or
+0.21.0 and `hermes-acp` on `PATH`, then choose one fixed mode:
+
+```sh
+export AMBASSADOR_HERMES_QUALIFICATION_HOME=/absolute/path/to/isolated/home
+export AMBASSADOR_LIVE_DIRECT_AGENT=hermes-direct
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+or:
+
+```sh
+export AMBASSADOR_HERMES_QUALIFICATION_HOME=/absolute/path/to/isolated/home
+export AMBASSADOR_LIVE_DIRECT_AGENT=hermes-webhook
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-hermes-webhook-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+The runner rejects the ordinary Hermes home and non-owner-only copies. It uses
+exact MCP `clientInfo` `mcp` / `0.1.0`, launches only compiled-in
+`hermes-acp` for direct mode, and configures Ambassador MCP only in the isolated
+copy. The runner records the installed Hermes version when it can, but does not
+use that observation as a compatibility gate; direct ACP identity matching
+remains exact. Webhook mode starts Hermes's authenticated generic route,
+requires its bearer filter and native HMAC V2 validation, and suppresses
+provider output. Delete the isolated home after every attempt.
 
 ## Required report
 
@@ -147,6 +182,85 @@ The live process used installed Node 24.14.0, below the package's declared
 behavior passed. The supported-Node repeat remains part of the qualification
 record even though the user approved 0.2.6 as a one-release exception before
 that repeat.
+
+## Hermes 0.20.5 observations
+
+On 2026-09-03, Hermes Agent 0.20.5 ran on macOS 26.5.2 arm64 with Node
+24.19.0. Both live cases reviewed central source revision
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`; the live deployment did not
+expose its revision. The actual npm artifact was downloaded from the registry,
+clean-installed, and used through its installed `ambassador` CLI. Its npm
+integrity was
+`sha512-qaL4IHTrMwpyrY1OisPXMexytmnNfO7Bjc5tXgLCF3LolXQW2R8GrzErqJkMIlM+Zh8Cce9ijN+zfYb3xiNHSQ==`,
+its registry SHA-1 was `c0179df957bc05de921da578344fab6c1ba4a713`,
+and its tarball SHA-256 was
+`312b514ce2dd43de81502debd63004ea9a84da79099d4730c301b52e593c97c8`.
+The installed CLI started without options, rejected a forbidden option, and
+passed the packed-runtime scan.
+
+The artifact-specific outcomes were:
+
+| Delivery case | Ambassador artifact | Outcome |
+| --- | --- | --- |
+| Webhook | Published `@embassys/ambassador@0.2.7` | Passed the complete live round trip |
+| Direct eligibility probe | Published `@embassys/ambassador@0.2.7` | Ambassador capability-registry rejection at `startup_failed`, as required by its exact 0.21.0 profile |
+| Direct | Source candidate adding exact Hermes ACP 0.20.5 | Passed the complete live round trip |
+
+The source-built direct candidate was not substituted for the published
+artifact checks. Its tarball SHA-256 was
+`1d434e8a5dbf027a42326a7e6b42a58094fe17cfdbf8cf96a4e7d314a24835be`,
+and the direct qualification runner SHA-256 was
+`7b6a680bba64abe8d86c9f2328a7562360b15def1eea1d7cf11f21d8f7dea24f`.
+The final strict webhook pass used runner SHA-256
+`e2506c09012f5e7bb3630acb70b5844be3a1769b5baaef3fc76dda07ed27c8c0`.
+No later source change altered the direct profile or delivery implementation
+used by that candidate.
+
+Each pass registered and email-verified a controlled requester and the real
+Hermes target through separate local Ambassador MCP endpoints, then restarted
+both gateways and reloaded the encrypted credentials and delivery profiles.
+The requester obtained `get_phone_number` permission, Hermes called
+`respond_to_permission` with a grant, the requester called `call_action` with
+approved synthetic data, and Hermes received the complete correlated
+`action_call`. The real model called `submit_action_result` exactly once with
+the supplied call ID, success status, and approved synthetic phone object.
+The requester received the matching `action_response`. Local webhook custody
+or ACP completion was observed before each corresponding central
+acknowledgement.
+
+Both modes passed Bearer plus DPoP behavior, the negative DPoP matrix, the
+deployed six-action catalog, zero central MCP requests, artifact scanning, and
+Mailosaur and temporary-state cleanup. Direct mode proved ACP v1 initialization
+and injected Ambassador MCP. Webhook mode proved the Hermes receiver's bearer
+filter, HMAC V2 authentication, and custody before acknowledgement. The normal
+Hermes home was not changed; owner-only credential copies were removed after
+the runs.
+
+The live DPoP positive case needed no nonce. The deployed catalog names and
+input-schema SHA-256 digests were:
+
+| Action | Input schema SHA-256 |
+| --- | --- |
+| `create_calendar_event` | `4b9c97f146bfbb4c2cc1ec0812ada60406ce563d59c5abc807fcb6ba2dc0270c` |
+| `get_email` | `032af9a4835a30e280f7c122f8971565b4e2527b25d9fcb0ad2f778f654aecbd` |
+| `get_free_busy_permission` | `7775afae503f343ae09ed3510c66410cb361ea4125b28047d15321e7430f4f96` |
+| `get_phone_number` | `6c7954b7f42f818db7f93433bd07dc2aac273bd4599a637d2233529c6149bc48` |
+| `read_calendar_event_by_title` | `92ddb62ec62f187cdd1cfe0995d01afd06f283f2c174f6f24173083b1aab0d2f` |
+| `read_calendar_permission` | `27deb9a2fbadef8582fa9036fa9bc4a173eeaa92034d0fab8f4e12b1dfdf0662` |
+
+One earlier strict webhook attempt failed at
+`action_response_webhook_timeout_failed` after the real target had granted the
+permission, submitted one successful correlated result, accepted both target
+messages, and received both target acknowledgements. Ambassador reported no
+stderr. The safe evidence cannot distinguish central response queueing from a
+consuming-poll delivery loss, so this is classified in the central REST
+action-response delivery phase, not as Ambassador target delivery, Hermes
+webhook custody, model execution, or MCP invocation. A fresh isolated rerun of
+the same strict case passed. No compatibility fallback or replay was added.
+
+These observations approve the source registry's exact Hermes ACP 0.20.5
+entry. They do not show that published Ambassador 0.2.7 supports Hermes 0.20.5
+direct mode. Ambassador 0.2.8 contains the candidate change.
 
 ## Earlier direct observation
 
