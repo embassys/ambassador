@@ -13,6 +13,7 @@ test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", as
   assert.match(workflow, /\$PSNativeCommandUseErrorActionPreference = \$false/u);
   assert.match(workflow, /\[IO\.File\]::ReadAllText\(\$stderrPath\)/u);
   assert.match(workflow, /Remove-Item -Force -ErrorAction SilentlyContinue/u);
+  assert.match(workflow, /\n {10}exit 0\n/u);
   assert.match(
     workflow,
     /publish:\n {4}name: Publish npm package\n {4}if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/u,

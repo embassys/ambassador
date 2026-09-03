@@ -235,6 +235,7 @@ jobs:
             $PSNativeCommandUseErrorActionPreference = $nativeErrorPreference
             Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
           }
+          exit 0
 
   publish:
     name: Publish npm package
