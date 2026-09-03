@@ -6,6 +6,12 @@ export interface AgentClientInfo {
   readonly version: string;
 }
 
+export interface WindowsNodePackageEntrypoint {
+  readonly packageName: string;
+  readonly binName: string;
+  readonly entrypoint: string;
+}
+
 export interface DirectAgentCapability {
   readonly command: string;
   readonly args: readonly string[];
@@ -14,6 +20,7 @@ export interface DirectAgentCapability {
   };
   readonly mcp: McpConfigurationBehavior;
   readonly environment: readonly string[];
+  readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
 }
 
 export interface AgentCapability {
@@ -47,19 +54,30 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       agentInfo: { name: "openclaw-acp" },
       mcp: "provider_config",
       environment: [
+        "APPDATA",
         "HOME",
         "LANG",
         "LC_ALL",
+        "LOCALAPPDATA",
         "NODE_EXTRA_CA_CERTS",
         "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
         "TMPDIR",
         "USERPROFILE",
+        "WINDIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
       ],
+      windowsNodePackage: {
+        packageName: "openclaw",
+        binName: "openclaw",
+        entrypoint: "openclaw.mjs",
+      },
     },
     qualificationCases: ["openclaw-webhook", "openclaw-direct"],
   },
@@ -75,14 +93,20 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       agentInfo: { name: "hermes-agent" },
       mcp: "session",
       environment: [
+        "APPDATA",
         "HOME",
         "LANG",
         "LC_ALL",
+        "LOCALAPPDATA",
         "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
         "TMPDIR",
         "USERPROFILE",
+        "WINDIR",
         "XDG_CACHE_HOME",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
@@ -103,22 +127,33 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       agentInfo: { name: "@agentclientprotocol/codex-acp" },
       mcp: "session",
       environment: [
+        "APPDATA",
         "CODEX_API_KEY",
         "HOME",
         "LANG",
         "LC_ALL",
+        "LOCALAPPDATA",
         "NODE_EXTRA_CA_CERTS",
         "OPENAI_API_KEY",
         "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
         "TMPDIR",
         "USERPROFILE",
+        "WINDIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_RUNTIME_DIR",
         "XDG_STATE_HOME",
       ],
+      windowsNodePackage: {
+        packageName: "@agentclientprotocol/codex-acp",
+        binName: "codex-acp",
+        entrypoint: "dist/index.js",
+      },
     },
     qualificationCases: ["codex-direct"],
   },
@@ -134,22 +169,33 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
       mcp: "session",
       environment: [
+        "APPDATA",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN",
         "HOME",
         "LANG",
         "LC_ALL",
+        "LOCALAPPDATA",
         "NODE_EXTRA_CA_CERTS",
         "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
         "TMPDIR",
         "USERPROFILE",
+        "WINDIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
       ],
+      windowsNodePackage: {
+        packageName: "@agentclientprotocol/claude-agent-acp",
+        binName: "claude-agent-acp",
+        entrypoint: "dist/index.js",
+      },
     },
     qualificationCases: ["claude-direct"],
   },
@@ -165,6 +211,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       agentInfo: { name: "gemini-cli" },
       mcp: "session",
       environment: [
+        "APPDATA",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
         "GOOGLE_CLOUD_LOCATION",
@@ -173,16 +220,26 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
         "HOME",
         "LANG",
         "LC_ALL",
+        "LOCALAPPDATA",
         "NODE_EXTRA_CA_CERTS",
         "PATH",
         "SSL_CERT_DIR",
         "SSL_CERT_FILE",
+        "SystemRoot",
+        "TEMP",
+        "TMP",
         "TMPDIR",
         "USERPROFILE",
+        "WINDIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
       ],
+      windowsNodePackage: {
+        packageName: "@google/gemini-cli",
+        binName: "gemini",
+        entrypoint: "bundle/gemini.js",
+      },
     },
     qualificationCases: ["gemini-direct"],
   },
@@ -193,6 +250,16 @@ function unique(values: readonly string[]): boolean {
 }
 
 function completeDirect(value: DirectAgentCapability | undefined): boolean {
+  const windowsNodePackage = value?.windowsNodePackage;
+  const completeWindowsNodePackage =
+    windowsNodePackage === undefined ||
+    (BOUNDED_METADATA.test(windowsNodePackage.packageName) &&
+      windowsNodePackage.binName === value?.command &&
+      BOUNDED_METADATA.test(windowsNodePackage.entrypoint) &&
+      !windowsNodePackage.entrypoint.includes("\\") &&
+      windowsNodePackage.entrypoint
+        .split("/")
+        .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."));
   return (
     value !== undefined &&
     BOUNDED_METADATA.test(value.command) &&
@@ -202,7 +269,8 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     (value.mcp === "provider_config" || value.mcp === "session") &&
     value.environment.length <= 32 &&
     value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
-    unique(value.environment)
+    unique(value.environment) &&
+    completeWindowsNodePackage
   );
 }
 

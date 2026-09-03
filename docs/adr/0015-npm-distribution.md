@@ -31,9 +31,12 @@ User-facing guides select `latest` and disclose any open qualification work.
 They do not require a global install or pnpm. The repository, CI, packing, and
 release qualification use pnpm under ADR 0006.
 
-Normally publish from `main` only after Linux and macOS checks, packed
-installation, the five-profile local qualification matrix, live central
-qualification, and artifact audits pass. ADR 0033 keeps Windows unsupported.
+Normally publish from `main` only after Linux, macOS, and Windows checks,
+packed installation, the five-profile local qualification matrix, live central
+qualification, and artifact audits pass. ADR 0040 requires separate native
+evidence before documenting any agent profile and mode as supported on
+Windows. Published Ambassador 0.2.8 and 0.2.9 predate that evidence and have no
+Windows support claim.
 
 `@embassys/ambassador@0.2.6` was a one-release exception: on 2026-09-03 the user
 explicitly approved publication after the deterministic CI, package, fixture,

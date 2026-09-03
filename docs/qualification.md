@@ -62,8 +62,9 @@ Registration cases also prove:
 - agent kind and process configuration are rejected as tool input; and
 - a failed direct launch never falls back to webhook.
 
-These tests are mandatory on Linux and macOS for every pull request that
-changes delivery.
+These tests are mandatory on Linux, macOS, and Windows for every pull request
+that changes delivery. Windows also runs native DACL checks and installs the
+packed tarball before it can supply platform evidence under ADR 0040.
 
 ## Local real-agent suite
 

@@ -21,11 +21,17 @@ const JSON_HEADERS = { "content-type": "application/json" };
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-e2e-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const central = await startFakeCentral(t);
-  const webhook = await startFakeWebhook(t, {
+  const gateways = new Set<Awaited<ReturnType<typeof openGatewayApplication>>>();
+  const central = await startFakeCentral();
+  const webhook = await startFakeWebhook(undefined, {
     secret: WEBHOOK_SECRET,
     nowSeconds: NOW_SECONDS,
+  });
+  t.after(async () => {
+    for (const gateway of gateways) await gateway.close();
+    await webhook.close();
+    await central.close();
+    await rm(root, { recursive: true, force: true });
   });
   const options: GatewayApplicationOptions = {
     journalPath: join(root, "notifications.sqlite3"),
@@ -38,7 +44,16 @@ async function fixture(t: TestContext) {
     localMcpPort: 0,
     nowSeconds: () => NOW_SECONDS,
   };
-  return { root, central, webhook, options };
+  return {
+    root,
+    central,
+    webhook,
+    options,
+    trackGateway(gateway: Awaited<ReturnType<typeof openGatewayApplication>>) {
+      gateways.add(gateway);
+      return gateway;
+    },
+  };
 }
 
 async function enrollWebhook(
@@ -64,8 +79,7 @@ async function enrollWebhook(
 
 test("registers by client capability, delivers the full webhook, then acknowledges centrally", async (t) => {
   const value = await fixture(t);
-  const gateway = await openGatewayApplication(value.options);
-  t.after(() => gateway.close());
+  const gateway = value.trackGateway(await openGatewayApplication(value.options));
   const client = await enrollWebhook(
     gateway,
     value.central,
@@ -118,8 +132,7 @@ test("registers by client capability, delivers the full webhook, then acknowledg
 
 test("returns a correlated action result from the target MCP tool to the requester", async (t) => {
   const value = await fixture(t);
-  const gateway = await openGatewayApplication(value.options);
-  t.after(() => gateway.close());
+  const gateway = value.trackGateway(await openGatewayApplication(value.options));
   const targetEmail = "ambassador-result-target@fixture.test";
   const target = await enrollWebhook(gateway, value.central, value.webhook.url, targetEmail);
   const requester = value.central.seedClient("ambassador-result-requester@fixture.test");
@@ -195,10 +208,12 @@ test("honestly loses a consumed pre-delivery body across restart", async (t) => 
     },
     async close() {},
   };
-  const first = await openGatewayApplication({
-    ...value.options,
-    deliveryTargetFactory: () => blocking,
-  });
+  const first = value.trackGateway(
+    await openGatewayApplication({
+      ...value.options,
+      deliveryTargetFactory: () => blocking,
+    }),
+  );
   await enrollWebhook(first, value.central, value.webhook.url, "ambassador-restart@fixture.test");
   const lostId = value.central.queueMessage("ambassador-restart@fixture.test", {
     value: "restart-loss-marker",
@@ -211,17 +226,18 @@ test("honestly loses a consumed pre-delivery body across restart", async (t) => 
   await first.close();
 
   let secondDeliveries = 0;
-  const second = await openGatewayApplication({
-    ...value.options,
-    deliveryTargetFactory: () => ({
-      async deliver() {
-        secondDeliveries += 1;
-        return { status: "accepted" };
-      },
-      async close() {},
+  value.trackGateway(
+    await openGatewayApplication({
+      ...value.options,
+      deliveryTargetFactory: () => ({
+        async deliver() {
+          secondDeliveries += 1;
+          return { status: "accepted" };
+        },
+        async close() {},
+      }),
     }),
-  });
-  t.after(() => second.close());
+  );
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(secondDeliveries, 0);
   assert.equal(value.central.messageState(lostId), "delivered");
