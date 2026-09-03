@@ -11,7 +11,6 @@ export interface DirectAgentCapability {
   readonly args: readonly string[];
   readonly agentInfo: {
     readonly name: string;
-    readonly versions: readonly string[];
   };
   readonly mcp: McpConfigurationBehavior;
   readonly environment: readonly string[];
@@ -21,7 +20,7 @@ export interface AgentCapability {
   readonly kind: string;
   readonly displayName: string;
   readonly enabled: boolean;
-  readonly aliases: readonly AgentClientInfo[];
+  readonly aliases: readonly string[];
   readonly modes: readonly DeliveryMode[];
   readonly direct?: DirectAgentCapability;
   readonly qualificationCases: readonly string[];
@@ -40,12 +39,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     kind: "openclaw",
     displayName: "OpenClaw",
     enabled: true,
-    aliases: [{ name: "openclaw-bundle-mcp", version: "0.0.0" }],
+    aliases: ["openclaw-bundle-mcp"],
     modes: ["direct", "webhook"],
     direct: {
       command: "openclaw",
       args: ["acp"],
-      agentInfo: { name: "openclaw-acp", versions: ["2026.8.1"] },
+      agentInfo: { name: "openclaw-acp" },
       mcp: "provider_config",
       environment: [
         "HOME",
@@ -68,12 +67,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     kind: "hermes",
     displayName: "Hermes",
     enabled: true,
-    aliases: [{ name: "mcp", version: "0.1.0" }],
+    aliases: ["mcp"],
     modes: ["direct", "webhook"],
     direct: {
       command: "hermes-acp",
       args: [],
-      agentInfo: { name: "hermes-agent", versions: ["0.20.5", "0.21.0"] },
+      agentInfo: { name: "hermes-agent" },
       mcp: "session",
       environment: [
         "HOME",
@@ -96,15 +95,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     kind: "codex",
     displayName: "Codex",
     enabled: true,
-    aliases: [
-      { name: "codex-mcp-client", version: "0.149.0" },
-      { name: "codex-mcp-client", version: "0.152.1" },
-    ],
+    aliases: ["codex-mcp-client"],
     modes: ["direct"],
     direct: {
       command: "codex-acp",
       args: [],
-      agentInfo: { name: "@agentclientprotocol/codex-acp", versions: ["1.8.0"] },
+      agentInfo: { name: "@agentclientprotocol/codex-acp" },
       mcp: "session",
       environment: [
         "CODEX_API_KEY",
@@ -130,15 +126,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     kind: "claude",
     displayName: "Claude Code",
     enabled: true,
-    aliases: [
-      { name: "claude-code", version: "2.1.257" },
-      { name: "claude-code", version: "2.1.258" },
-    ],
+    aliases: ["claude-code"],
     modes: ["direct"],
     direct: {
       command: "claude-agent-acp",
       args: [],
-      agentInfo: { name: "@agentclientprotocol/claude-agent-acp", versions: ["0.73.0"] },
+      agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
       mcp: "session",
       environment: [
         "ANTHROPIC_API_KEY",
@@ -164,12 +157,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     kind: "gemini",
     displayName: "Gemini CLI",
     enabled: true,
-    aliases: [{ name: "gemini-cli-mcp-client", version: "0.58.0" }],
+    aliases: ["gemini-cli-mcp-client"],
     modes: ["direct"],
     direct: {
       command: "gemini",
       args: ["--acp"],
-      agentInfo: { name: "gemini-cli", versions: ["0.58.0"] },
+      agentInfo: { name: "gemini-cli" },
       mcp: "session",
       environment: [
         "GEMINI_API_KEY",
@@ -206,10 +199,6 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     value.args.length <= 16 &&
     value.args.every((argument) => BOUNDED_METADATA.test(argument)) &&
     BOUNDED_METADATA.test(value.agentInfo.name) &&
-    value.agentInfo.versions.length > 0 &&
-    value.agentInfo.versions.length <= 16 &&
-    value.agentInfo.versions.every((version) => BOUNDED_METADATA.test(version)) &&
-    unique(value.agentInfo.versions) &&
     (value.mcp === "provider_config" || value.mcp === "session") &&
     value.environment.length <= 32 &&
     value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
@@ -233,13 +222,7 @@ export function isCompleteAgentCapability(value: AgentCapability): boolean {
   ) {
     return false;
   }
-  const aliases = value.aliases.map(({ name, version }) => `${name}\u0000${version}`);
-  if (
-    !unique(aliases) ||
-    !value.aliases.every(
-      ({ name, version }) => BOUNDED_METADATA.test(name) && BOUNDED_METADATA.test(version),
-    )
-  ) {
+  if (!unique(value.aliases) || !value.aliases.every((name) => BOUNDED_METADATA.test(name))) {
     return false;
   }
   if (value.modes.some((mode) => mode !== "direct" && mode !== "webhook")) return false;
@@ -261,9 +244,7 @@ export function resolveAgentCapability(
     (profile) =>
       profile.enabled &&
       isCompleteAgentCapability(profile) &&
-      profile.aliases.some(
-        (alias) => alias.name === clientInfo.name && alias.version === clientInfo.version,
-      ),
+      profile.aliases.includes(clientInfo.name),
   );
   return matches.length === 1 && matches[0] !== undefined
     ? { status: "matched", profile: matches[0] }

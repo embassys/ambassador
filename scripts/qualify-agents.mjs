@@ -191,7 +191,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           report.profiles.push({
             kind: profile.kind,
             version_probe: versionProbe,
-            supported_acp_versions: profile.direct?.agentInfo.versions ?? [],
+            acp_agent_name: profile.direct?.agentInfo.name ?? "unavailable",
             acp_command: [profile.direct?.command ?? "", ...(profile.direct?.args ?? [])],
             mcp: profile.direct?.mcp ?? "unavailable",
           });

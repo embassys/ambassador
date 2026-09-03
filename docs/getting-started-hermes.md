@@ -3,13 +3,9 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate Hermes Agent `0.20.5` or `0.21.0`.
+- Install and authenticate the latest Hermes Agent release.
 - Make sure `hermes-acp` is on `PATH` for direct delivery.
 - Ambassador never receives your provider credential.
-
-Hermes Agent `0.20.5` passed both live delivery modes and is included in
-Ambassador 0.2.8's direct profile. The qualification probe records the installed
-version without treating the observation itself as a failure.
 
 ## Set up direct delivery
 
@@ -46,7 +42,10 @@ new gateway-managed session, not the chat used for registration.
 - Hermes supplies `delivery.url` and `delivery.secret_env`; it never receives
   the secret value.
 
-Production still checks the exact MCP client and ACP identities in the compiled
-profile, so a new incompatible release fails closed. See
+Ambassador selects this profile by the exact known MCP client name, then tries
+the fixed `hermes-acp` ACP v1 contract for direct delivery. Reported client and
+agent versions are diagnostic only. An incompatible release fails at startup,
+ACP initialization, session creation, or delivery instead of being rejected by
+a version list. See
 [Qualification](qualification.md) for the artifact-specific compatibility
 evidence.

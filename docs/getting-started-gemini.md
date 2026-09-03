@@ -3,7 +3,7 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and sign in to Gemini CLI `0.58.0`.
+- Install and sign in to the latest Gemini CLI release.
 - Gemini supplies native ACP through `gemini --acp`; no adapter is needed.
 - Ambassador never receives your Gemini or Google credential.
 
@@ -26,7 +26,8 @@
 Ambassador will launch `gemini --acp` when a central message arrives. That is
 a new gateway-managed session, not the chat used for registration.
 
-The qualification probe records the installed version without rejecting it.
-Production still checks the exact MCP client and ACP identities in the compiled
-profile, so a new incompatible release fails closed. See
+Ambassador selects this profile by the exact known MCP client name, then tries
+the fixed `gemini --acp` ACP v1 contract. Reported client and agent versions are
+diagnostic only. An incompatible release fails at startup, ACP initialization,
+session creation, or delivery instead of being rejected by a version list. See
 [Qualification](qualification.md) for compatibility evidence.
