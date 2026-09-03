@@ -20,6 +20,10 @@ interface ArtifactScanner {
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 
+function legacyEndpointName(kind: "API" | "MCP"): string {
+  return ["A2A", "DEV", "CENTRAL", kind, "URL"].join("_");
+}
+
 interface PackedCli {
   runCli(
     args: string[],
@@ -176,6 +180,8 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       { name: "old-binary", encoding: "utf8", value: "a2a-gateway" },
       { name: "old-webhook-flag", encoding: "utf8", value: "--webhook-url" },
       { name: "old-mode-flag", encoding: "utf8", value: "--delivery-mode" },
+      { name: "old-development-api", encoding: "utf8", value: legacyEndpointName("API") },
+      { name: "old-development-mcp", encoding: "utf8", value: legacyEndpointName("MCP") },
     ],
   });
 });
