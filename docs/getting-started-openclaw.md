@@ -1,7 +1,8 @@
 # Get started with OpenClaw
 
-Status: implementation candidate; source-reviewed against OpenClaw 2026.8.1,
-with real-agent qualification still required before publication
+Release target: `@embassys/ambassador@0.2.6`. The profile is source-reviewed
+against OpenClaw 2026.8.1. Real-agent direct and webhook qualification remain
+open under the one-release qualification exception in ADR 0015.
 
 Ambassador enables OpenClaw only for this exact contract:
 
@@ -24,30 +25,55 @@ Later versions fail closed until the registry is reviewed and updated.
 
 ## Setup
 
-1. Install and authenticate the supported OpenClaw version using its normal
-   provider setup. Ambassador never installs or updates OpenClaw.
-2. Generate a 48-character lowercase hexadecimal local token and export it,
-   for example as `AMBASSADOR_LOCAL_TOKEN`.
-3. Start Ambassador from the directory the direct agent may access:
+1. Install Node.js `>=24.19.0 <25`, then install and authenticate OpenClaw
+   2026.8.1 using its normal provider setup. Ambassador never installs or
+   updates OpenClaw.
+2. Generate the local MCP token without putting its value in chat or a command
+   argument:
 
    ```sh
-   ambassador start --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   export AMBASSADOR_LOCAL_TOKEN="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
    ```
 
-4. Configure OpenClaw's MCP client to call the printed loopback endpoint with
-   `Authorization: Bearer <local-token>`. OpenClaw's ACP interface does not
-   accept session MCP injection, so this normal provider configuration is
-   required for direct delivery.
-5. Ask OpenClaw to call `register_agent`. The first call asks direct versus
-   webhook and advertises direct as the default.
-6. For direct mode, make the follow-up with `delivery.mode` set to `direct`.
-   Ambassador records the canonical startup directory and rejects a later
-   start from a different directory.
-7. For webhook mode, configure an authenticated receiver that accepts the
-   canonical Ambassador message. Supply only its URL and the name of the
-   environment variable containing its secret. Receiver-side conversion to an
-   OpenClaw-native hook belongs outside Ambassador.
-8. Complete email verification through MCP.
+3. If you may choose webhook delivery, create its secret in the same shell
+   before starting Ambassador:
+
+   ```sh
+   export AMBASSADOR_WEBHOOK_SECRET="$(
+     node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
+   )"
+   ```
+
+4. From the directory the direct agent may access, start the exact release and
+   keep it running in the foreground:
+
+   ```sh
+   npx --yes @embassys/ambassador@0.2.6 start \
+     --local-token-env=AMBASSADOR_LOCAL_TOKEN
+   ```
+
+5. Configure OpenClaw's MCP client to use the loopback endpoint printed by
+   Ambassador, with a bearer token read from `AMBASSADOR_LOCAL_TOKEN`.
+   OpenClaw's ACP interface does not accept session MCP injection, so this
+   normal provider configuration is also required for direct delivery.
+6. Ask OpenClaw to register with your email and optional display name. The
+   first `register_agent` call contains `email` and, if wanted, `display_name`.
+   Ambassador recognizes the OpenClaw profile and asks direct versus webhook,
+   with direct as the default.
+7. For direct mode, choose direct. The follow-up repeats the same `email` and
+   optional `display_name` and adds `delivery: {"mode":"direct"}`. Ambassador
+   records the canonical startup directory and rejects a later start from a
+   different directory.
+8. For webhook mode, choose webhook and provide the HTTPS receiver URL plus
+   the environment-variable name `AMBASSADOR_WEBHOOK_SECRET`. The follow-up
+   repeats the registration fields and adds `delivery.mode`, `delivery.url`,
+   and `delivery.secret_env`; it never sends the secret value. Receiver-side
+   conversion to an OpenClaw-native hook belongs outside Ambassador.
+9. Enter the email verification code when OpenClaw asks for it. OpenClaw calls
+   `verify_email` with that `email` and six-digit `code`; the central token and
+   DPoP key stay inside Ambassador.
 
 OpenClaw receives neither the central token nor the DPoP private key. Never put
 the local token or webhook secret in chat or registration arguments.

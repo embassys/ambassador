@@ -201,7 +201,7 @@ jobs:
 
   publish:
     name: Publish npm package
-    if: false # Publication requires a separate explicit approval after qualification.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [check, central-fixture, package]
     runs-on: ubuntu-latest
     permissions:
