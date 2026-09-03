@@ -36,3 +36,5 @@ the fixed `codex-acp` ACP v1 contract. Reported client and adapter versions are
 diagnostic only. An incompatible release fails at startup, ACP initialization,
 session creation, or delivery instead of being rejected by a version list. See
 [Qualification](qualification.md) for compatibility evidence.
+
+For local reruns, see [Reset local test state](development-reset.md).

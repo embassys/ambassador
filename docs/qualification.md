@@ -3,6 +3,40 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.12 release candidate
+
+On 2026-09-03, the byte-final 0.2.12 candidate added the local-only
+`ambassador clean` command without changing central REST or agent delivery.
+Its tarball SHA-256 was
+`287a3b4907e19d07bbc11974bb3cefdf55589d4a37b01f27474d4b82c01b93a0`
+and its SRI was
+`sha512-3RMGiq5A7GCO4qbZx7MWe82PwhaU/b+HnAg+Zs/21K64GdmAbNtjD+bqbv3UZT3dzPkK6m8X/LmNLwxY33QJDQ==`.
+
+The Node 24.19.0 repository check passed 184 tests: 178 passed and six
+platform-specific or opt-in cases skipped. Linting and type checking passed.
+A clean external install passed the current REST fixture, real enrollment,
+local cleanup, restart to the three-tool bootstrap catalog, artifact scanning,
+and the production vulnerability audit. The signature audit checked 21
+packages and verified the 20 registry dependencies. The unpublished candidate
+was the only item without registry metadata.
+
+The same tarball passed the controlled live-central run with deterministic
+webhook and ACP targets. The run created and verified two disposable Mailosaur
+identities, reloaded encrypted state after restart, and passed the Bearer plus
+DPoP positive and negative cases. It verified the deployed six-action catalog,
+the correlated permission and action-result round trip, local completion before
+central acknowledgement, zero central MCP requests, artifact scanning, mail
+cleanup, and temporary-state cleanup. The server did not request a DPoP nonce.
+The qualification runner SHA-256 was
+`ba71e8e736e3c1ef2705062befb16294e79a24488e4163127b46d57e1ca0f96f`.
+
+The release does not change an agent profile, ACP handling, webhook delivery,
+or the central client. The current real-agent evidence remains the 0.2.10
+Hermes and OpenClaw four-mode matrix, the earlier Codex direct pass, and the
+published 0.2.11 Claude Code direct pass recorded below. Windows release lanes
+cover the clean command and installed package, but individual real-agent
+Windows claims still require their own qualification.
+
 ## Ambassador 0.2.11
 
 On 2026-09-03, the byte-final 0.2.11 candidate passed the complete
