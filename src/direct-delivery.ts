@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 import * as acp from "@agentclientprotocol/sdk";
 
@@ -182,6 +183,21 @@ export async function resolveWindowsNodePackageEntrypoint(
     }
   }
   throw new DirectDeliveryError("startup_failed");
+}
+
+export async function resolveBuiltInAgentEntrypoint(adapter: "claude-cli"): Promise<string> {
+  if (adapter !== "claude-cli") throw new DirectDeliveryError("agent_unavailable");
+  try {
+    const entrypoint = await realpath(
+      fileURLToPath(new URL("./claude-cli-acp.js", import.meta.url)),
+    );
+    const stats = await lstat(entrypoint);
+    if (!stats.isFile() || stats.size < 1) throw new DirectDeliveryError("agent_unavailable");
+    return entrypoint;
+  } catch (error) {
+    if (error instanceof DirectDeliveryError) throw error;
+    throw new DirectDeliveryError("agent_unavailable");
+  }
 }
 
 export interface DirectDeliveryTargetOptions {
@@ -387,7 +403,10 @@ export class DirectDeliveryTarget {
     try {
       let command = this.#capability.command;
       let args = this.#capability.args;
-      if (this.#capability.bundledNodePackage !== undefined) {
+      if (this.#capability.builtInAdapter !== undefined) {
+        command = process.execPath;
+        args = [await resolveBuiltInAgentEntrypoint(this.#capability.builtInAdapter)];
+      } else if (this.#capability.bundledNodePackage !== undefined) {
         command = process.execPath;
         args = [
           await resolveBundledNodePackageEntrypoint(this.#capability.bundledNodePackage),

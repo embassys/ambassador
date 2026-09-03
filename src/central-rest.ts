@@ -13,6 +13,8 @@ import { validateNotificationId } from "./notification-journal.js";
 
 const MAX_NORMALIZED_RESULT_BYTES = 512 * 1024;
 const MAX_MESSAGES = 256;
+const ORDINARY_DEADLINE_MS = 30_000;
+const POLL_RESPONSE_MARGIN_MS = 10_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -471,6 +473,7 @@ export class CentralRestClient {
       `/api/poll_messages?timeout=${timeout}`,
       undefined,
       signal,
+      Math.max(ORDINARY_DEADLINE_MS, timeout * 1_000 + POLL_RESPONSE_MARGIN_MS),
     );
     if (!exactKeys(result, ["messages"]) || !Array.isArray(result.messages)) {
       throw failure("central_response_invalid");
@@ -527,16 +530,21 @@ export class CentralRestClient {
     path: string,
     body: Record<string, unknown> | undefined,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await this.#transport.fetch(new URL(path, this.#origin), {
-        method,
-        ...(body === undefined
-          ? {}
-          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      response = await this.#transport.fetch(
+        new URL(path, this.#origin),
+        {
+          method,
+          ...(body === undefined
+            ? {}
+            : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        deadlineMs,
+      );
     } catch (error) {
       if (error instanceof CentralProtectedTransportError) {
         if (error.code === "central_protected_authentication_failed") {

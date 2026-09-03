@@ -107,12 +107,14 @@ ADR 0041. This keeps direct launch shell-free.
 The enabled direct profiles are OpenClaw, Hermes, Codex, and Claude Code. Only
 OpenClaw and Hermes also support webhook, with direct as their default. Codex
 and Claude Code register directly without a delivery question. Ambassador
-ships their reviewed ACP adapters as exact production dependencies, validates
-their package entrypoints, and launches them with its Node runtime. OpenClaw
-and Hermes provide their own fixed agent commands. Exact client and ACP agent
-names, commands, arguments, modes, and environment allowlists remain compiled
-in. Gemini CLI and Antigravity are not active profiles. Unknown, ambiguous,
-disabled, and incomplete profiles are unsupported.
+ships and validates the reviewed Codex ACP adapter as an exact production
+dependency. For Claude Code, Ambassador ships a small ACP v1 bridge that uses
+the separately installed official `claude` command and the user's normal
+`claude.ai` login; it does not require or forward an Anthropic API key.
+OpenClaw and Hermes provide their own fixed agent commands. Exact client and
+ACP agent names, commands, arguments, modes, and environment allowlists remain
+compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
+ambiguous, disabled, and incomplete profiles are unsupported.
 
 ## Guided registration
 
@@ -189,6 +191,12 @@ the enrolled DPoP identity.
 8. Print the MCP endpoint, fixed setup commands for all supported agents, the
    registration prompt, and remain in the foreground.
 
+A local agent or webhook delivery failure pauses incoming delivery and prints
+one bounded repair message without taking down the MCP server. Central,
+credential, state, and listener failures remain fatal. Restarting Ambassador
+after repairing the local target resumes polling for new messages; it cannot
+recover a message already consumed by central.
+
 ### Local reset
 
 1. The owner stops the foreground Ambassador process.
@@ -217,7 +225,9 @@ separately.
 5. Ambassador generates a P-256 key and verifies with its public JWK.
 6. Ambassador validates the returned key binding and timestamps.
 7. It stores the token and private key before returning token-free success and
-   enabling protected tools.
+   enabling protected tools. The complete MCP tool catalog is stable across
+   this transition: protected calls return `not_enrolled` before verification,
+   and enrollment calls return `already_enrolled` afterwards.
 
 ### Protected work
 
@@ -287,11 +297,13 @@ retrieval or redelivery is the proper future fix.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
   retroactively.
-- Codex and Claude Code direct delivery and both delivery modes for Hermes
+- Codex and the superseded Claude adapter direct delivery, plus both delivery modes for Hermes
   Agent 0.20.5 and OpenClaw 2026.8.2 have passed with the live central service.
   Ambassador 0.2.8 includes the qualified Hermes name-based ACP profile, and
-  published Ambassador 0.2.11 passed the Claude Code direct flow. Gemini CLI
-  has been removed and Antigravity is deferred under ADR 0043.
+  published Ambassador 0.2.11 passed the earlier Claude Code direct flow. The
+  built-in Claude CLI bridge requires its own live qualification before its
+  release claim is recorded. Gemini CLI has been removed and Antigravity is
+  deferred under ADR 0043.
   Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
   full real-model round trip.
 

@@ -41,7 +41,7 @@ const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "qualificat
 const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" };
 const CLAUDE_CLIENT_INFO = { name: "claude-code", version: "qualification" };
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
-const CLAUDE_ACP_COMMAND = "claude-agent-acp";
+const CLAUDE_COMMAND = "claude";
 const HERMES_ACP_COMMAND = "hermes-acp";
 const OPENCLAW_ACP_COMMAND = "openclaw";
 const OPENCLAW_WEBHOOK_PATH = "/hooks/agent";
@@ -476,15 +476,6 @@ function hermesEnvironment(home, extra = {}) {
 function claudeEnvironment(home) {
   return {
     HOME: home,
-    ...(process.env.ANTHROPIC_API_KEY === undefined
-      ? {}
-      : { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }),
-    ...(process.env.ANTHROPIC_AUTH_TOKEN === undefined
-      ? {}
-      : { ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN }),
-    ...(process.env.CLAUDE_CODE_OAUTH_TOKEN === undefined
-      ? {}
-      : { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN }),
     ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
     ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
     ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
@@ -1257,12 +1248,14 @@ async function main() {
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
   ];
   const syntheticPhone = "+447700900123";
-  const actionReason = realTarget
-    ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
-    : `synthetic-live-qualification-${randomUUID()}`;
+  const actionReason =
+    realTarget && !realClaude
+      ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
+      : `synthetic-live-qualification-${randomUUID()}`;
   const permissionScope = {
-    qualification:
-      "The operator approved this synthetic phone-number test. Grant it through respond_to_permission.",
+    qualification: realClaude
+      ? `synthetic-live-qualification-${randomUUID()}`
+      : "The operator approved this synthetic phone-number test. Grant it through respond_to_permission.",
   };
   const capturedMail = [];
   const roots = [];
@@ -1417,10 +1410,11 @@ async function main() {
       );
       assert(
         canonicalJson(claudeCapability?.aliases) === canonicalJson([CLAUDE_CLIENT_INFO.name]) &&
-          claudeCapability?.direct?.command === CLAUDE_ACP_COMMAND &&
+          claudeCapability?.direct?.command === CLAUDE_COMMAND &&
           canonicalJson(claudeCapability.direct.args) === canonicalJson([]) &&
-          claudeCapability.direct.agentInfo.name === "@agentclientprotocol/claude-agent-acp" &&
-          claudeCapability.direct.mcp === "session",
+          claudeCapability.direct.agentInfo.name === "@embassys/claude-cli-acp" &&
+          claudeCapability.direct.mcp === "session" &&
+          claudeCapability.direct.builtInAdapter === "claude-cli",
         "claude_profile",
       );
     }
@@ -1474,21 +1468,6 @@ async function main() {
         ].join("\n"),
         { encoding: "utf8", flag: "wx", mode: 0o600 },
       );
-      if (realClaude) {
-        await writeFile(
-          join(targetWorkingDirectory, "CLAUDE.md"),
-          [
-            "# Controlled Embassys qualification policy",
-            "",
-            "The user approved only the synthetic get_phone_number qualification in this directory.",
-            "For its permission_request, call respond_to_permission with decision granted.",
-            "For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and a result containing only the requested synthetic phone_number.",
-            "Do not grant, execute, or answer any other request.",
-            "",
-          ].join("\n"),
-          { encoding: "utf8", flag: "wx", mode: 0o600 },
-        );
-      }
     }
 
     const clientInfoFor = (index) =>
@@ -1615,7 +1594,19 @@ async function main() {
       const client = gateways[index].client;
       assert(
         JSON.stringify((await client.listTools()).map((tool) => tool.name)) ===
-          JSON.stringify(["register_agent", "verify_email", "resend_verification"]),
+          JSON.stringify([
+            "register_agent",
+            "verify_email",
+            "resend_verification",
+            "list_action_types",
+            "request_permission",
+            "list_pending_permission_requests",
+            "respond_to_permission",
+            "call_action",
+            "list_pending_action_calls",
+            "submit_action_result",
+            "get_my_permissions",
+          ]),
         "bootstrap_catalog",
       );
       const initial = await client.call("register_agent", { email: addresses[index] });
@@ -1689,10 +1680,15 @@ async function main() {
       assert(
         JSON.stringify(names) ===
           JSON.stringify([
+            "register_agent",
+            "verify_email",
+            "resend_verification",
             "list_action_types",
             "request_permission",
+            "list_pending_permission_requests",
             "respond_to_permission",
             "call_action",
+            "list_pending_action_calls",
             "submit_action_result",
             "get_my_permissions",
           ]),
@@ -1793,14 +1789,14 @@ async function main() {
       "permission",
     );
     phase = `permission_request_${realWebhook ? "webhook" : "direct"}`;
-    if (realTarget) {
+    if (realTarget && !realClaude) {
       await waitForObservation(
         () =>
           targetPermissionDecisionObserved &&
           successfulAckCounts[1] > recipientAckCountBeforePermission,
         "permission_request_model_timeout",
       );
-    } else {
+    } else if (!realClaude) {
       const permissionMessage = await waitForDelivered(
         directMessages,
         (message) =>
@@ -1813,6 +1809,11 @@ async function main() {
       assert(
         isRecord(permissionMessage) && typeof permissionMessage.id === "string",
         "permission_poll",
+      );
+    } else {
+      await waitForObservation(
+        () => successfulAckCounts[1] > recipientAckCountBeforePermission,
+        "claude_permission_delivery_timeout",
       );
     }
 
@@ -1837,7 +1838,7 @@ async function main() {
       permissionListing = { status: "server_error", fields: [] };
     }
 
-    if (permissionStatus === "pending" && !realTarget) {
+    if (permissionStatus === "pending" && (!realTarget || realClaude)) {
       await gateways[1].client.call("respond_to_permission", {
         permission_id: requested.permission_id,
         decision: "granted",
@@ -1871,7 +1872,7 @@ async function main() {
       "action",
     );
     phase = `action_${realWebhook ? "webhook" : "direct"}`;
-    if (realTarget) {
+    if (realTarget && !realClaude) {
       await waitForObservation(
         () =>
           targetSubmittedCallIds.has(called.call_id) &&
@@ -1882,7 +1883,7 @@ async function main() {
         targetSubmittedCallIds.has(called.call_id) && targetActionResultCallCount === 1,
         "target_action_result",
       );
-    } else {
+    } else if (!realClaude) {
       const actionMessage = await waitForDelivered(
         directMessages,
         (message) =>
@@ -1893,6 +1894,23 @@ async function main() {
         "action_direct_timeout",
       );
       assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
+      await gateways[1].client.call("submit_action_result", {
+        call_id: called.call_id,
+        result: { phone_number: syntheticPhone },
+        status: "success",
+      });
+    } else {
+      await waitForObservation(
+        () => acknowledgedByGateway[1].has(called.message_id),
+        "claude_action_delivery_timeout",
+      );
+      const pending = await gateways[1].client.call("list_pending_action_calls", {});
+      assert(
+        pending.count === 1 &&
+          Array.isArray(pending.pending_action_calls) &&
+          pending.pending_action_calls[0]?.call_id === called.call_id,
+        "claude_pending_action",
+      );
       await gateways[1].client.call("submit_action_result", {
         call_id: called.call_id,
         result: { phone_number: syntheticPhone },
@@ -1990,7 +2008,7 @@ async function main() {
     const targetAgent = realCodex
       ? "codex-acp"
       : realClaude
-        ? "claude-agent-acp"
+        ? "@embassys/claude-cli-acp"
         : realHermes
           ? "hermes-agent"
           : realOpenClaw

@@ -154,6 +154,9 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       workingDirectory: context.cwd,
       environment: context.env,
       signal,
+      onRuntimeNotice: (notice) => {
+        context.io.stderr.write(`${notice.message}\n`);
+      },
       ...(context.testOverrides === undefined
         ? {}
         : {

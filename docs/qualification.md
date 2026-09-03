@@ -3,6 +3,54 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.15 candidate
+
+On 2026-09-04, the byte-final 0.2.15 candidate added the encrypted local
+unanswered-action inbox and completed the ADR 0047 reliability cutover. It
+replaced the Claude adapter dependency with Ambassador's built-in ACP v1
+bridge over the official installed `claude` CLI, retained the package-owned
+Codex adapter, exposed one stable MCP tool catalog across enrollment, and kept
+the MCP server available when a direct agent or webhook failure paused its
+relay. No Anthropic API credential is accepted or required. The tarball
+SHA-256 was
+`88e17715db34e72615f17bc325e0cd2aa4cd49e15661a3d289d4ad3ea6302fe3`,
+and its SRI was
+`sha512-3H72E9UG9G1jkxsM/rdSxxGfN8ZK+QGHYyNIbm+5ppHYpLwu67djkzT+nZN4iCdyFnHNgDy8QgdJAZd6udgcXQ==`.
+
+The Node 26.7.0 repository check passed 202 tests: 196 passed and six
+platform-specific or opt-in cases skipped. Linting and type checking passed.
+A clean installation of the packed candidate resolved the fixed Codex adapter
+and Ambassador's own Claude bridge, then passed the installed-CLI REST
+enrollment, stable catalog, webhook delivery, acknowledgement, cleanup,
+restart, and artifact-scan test. The source signature audit verified all 76
+registry packages. The packed-install signature audit verified all 43 registry
+packages; only the unpublished top-level 0.2.15 candidate lacked registry
+metadata. The package contained neither the removed Claude adapter dependency
+nor qualification trace or multi-instance hooks.
+
+The real-agent qualification used Codex CLI 0.149.0 and Claude Code 2.1.260 in
+the same user-driven flow. Both agents registered and verified disposable
+identities through their normal chats without reconnecting to refresh tools.
+Codex requested `get_phone_number`; Claude listed the pending permission and
+granted it. Codex sent the action call. Ambassador's Claude bridge processed
+the central message with the existing `claude.ai` login and retained it in the
+encrypted pending-action inbox. Claude then listed the pending action and
+submitted a synthetic phone number. Central accepted the correlated result,
+and Codex received the matching successful `action_response`. The two
+verification messages and all temporary state were deleted after the run.
+
+An initial Claude bridge launch showed that the restricted child environment
+also needs the ordinary `USER` or `USERNAME` operating-system context; the
+registry and regression tests now preserve it without forwarding Anthropic
+API-key or token variables. The run also reproduced a central liveness defect:
+an empty 30-second message poll can exceed the client's 40-second allowance,
+and an aborted response can strand a message that central already marked
+delivered. Ambassador now reserves ten seconds beyond the requested hold, but
+listener-pool bounds, delivery leases, disconnect recovery, and redelivery are
+server work recorded in [Central service follow-ups](central-follow-ups.md).
+The successful round trip required retries around that live central behavior;
+it did not add a client fallback.
+
 ## Pending-action inbox source qualification
 
 On 2026-09-03, the current source added the encrypted local
@@ -498,9 +546,12 @@ MCP injection is unavailable.
 Hermes webhook qualification uses its authenticated generic webhook path.
 Direct qualification uses its fixed ACP command and session MCP configuration.
 
-Codex and Claude Code direct qualification use their installed ACP adapters.
+Codex direct qualification uses Ambassador's package-owned ACP adapter. Claude
+Code direct qualification uses Ambassador's built-in ACP bridge and the
+installed official `claude` command with ordinary `claude.ai` authentication.
 Both receive Ambassador MCP through ACP session configuration. The runner
-records installed versions as evidence but does not use them as allowlists.
+records installed provider versions as evidence but does not use them as
+allowlists.
 
 On 2026-09-02, isolated installs of the three entry points approved at that
 time passed ACP v1 initialization and returned the exact `agentInfo` identities

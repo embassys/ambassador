@@ -511,15 +511,17 @@ The enabled profiles and fixed contracts are:
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | session injection |
-| Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | session injection |
+| Claude Code | `claude-code` | built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | session injection |
 
 A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
-downloads at runtime are forbidden. Ambassador installs the exact Codex and
-Claude Code adapters as production dependencies; users do not install those
-adapters separately. OpenClaw and Hermes still provide their own agent
-commands. Reported MCP client and ACP agent versions are not allowlists. Gemini
-CLI and Antigravity are unsupported client names.
+downloads at runtime are forbidden. Ambassador installs the exact Codex
+adapter as a production dependency. Its built-in Claude ACP bridge uses the
+separately installed official `claude` command and the user's normal
+`claude.ai` login; it does not accept or forward an Anthropic API key or token.
+OpenClaw and Hermes still provide their own agent commands. Reported MCP client
+and ACP agent versions are not allowlists. Gemini CLI and Antigravity are
+unsupported client names.
 
 The repository qualification probe runs each profile's fixed version command,
 records a bounded semantic version or `unavailable`, and continues to that
@@ -538,6 +540,11 @@ Ambassador has no interactive approval UI during background delivery. It never
 auto-approves an ACP permission request. A request that cannot be satisfied by
 the selected agent's preconfigured policy is denied, and the prompt may finish
 with a bounded failure.
+
+The local MCP server advertises the same complete tool catalog before and
+after enrollment. Protected tools return `not_enrolled` until verification;
+bootstrap registration tools return `already_enrolled` afterwards. Correctness
+does not depend on an MCP client implementing tool-list-change notifications.
 
 For each central message, Ambassador sends one ACP prompt containing:
 
@@ -649,8 +656,9 @@ The cutover must prove at least:
   delivery, the filtered pending-decision projection, the restart-safe
   unanswered-action list, removal only after successful result submission, and
   no general reply or local delivery-control tools;
-- package-owned Codex and Claude Code adapters, validated internal entrypoint
-  launch, and bounded asynchronous child-process failures;
+- the package-owned Codex adapter, the built-in Claude CLI bridge, validated
+  internal entrypoint launch, ordinary Claude subscription authentication, and
+  bounded asynchronous child-process failures;
 - startup output with working MCP setup commands for all supported agents and
   safe operator diagnostics for each startup or delivery failure class;
 - no separate connector process, user-selected webhook format, OpenClaw
