@@ -22,7 +22,7 @@ and the OpenClaw receiver.
 | [0039](0039-zero-configuration-local-start.md) | Zero-configuration start and local-machine trust boundary |
 | [0040](0040-windows-qualification.md) | Windows implementation and qualification plan |
 | [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
-| [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and OpenClaw receiver |
+| [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and native OpenClaw hooks |
 
 ## Historical ledger
 

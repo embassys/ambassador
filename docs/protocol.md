@@ -198,7 +198,10 @@ structured content equivalent to:
 
 The label names the matched agent. The owner runs the command in a terminal
 and copies its output into that receiver's credential store. The agent never
-receives the value. The final call is:
+receives the value. For OpenClaw, the result tells the owner to set the value as
+`hooks.token`, enable native hooks for agent `main`, restart OpenClaw, and use
+its `/hooks/agent` URL. It does not install a plugin or change OpenClaw
+configuration. The final call is:
 
 ```json
 {
@@ -372,8 +375,11 @@ ID-less message may be delivered once but cannot be acknowledged.
 
 ## Webhook delivery
 
-Webhook mode sends the complete normalized central message as the JSON request
-body. There is no ID-only wake envelope and no provider-specific body:
+Each enabled webhook profile fixes one reviewed request format. User or model
+input cannot select or change it.
+
+Hermes receives the complete normalized central message as the JSON request
+body:
 
 ```http
 POST <configured-url>
@@ -389,21 +395,44 @@ The HMAC uses the webhook secret and covers the ASCII timestamp, one `.` byte,
 and the exact body bytes. The receiver validates the bearer, signature,
 timestamp window, body bounds, and idempotency key before accepting custody.
 
+OpenClaw receives a native agent-hook request:
+
+```http
+POST <configured-url>
+Authorization: Bearer <webhook-secret>
+Idempotency-Key: <message-id>
+Content-Type: application/json
+```
+
+```json
+{
+  "message": "<fixed untrusted-input instructions and complete normalized central message JSON>",
+  "name": "Embassys Ambassador",
+  "agentId": "main",
+  "sessionMode": "isolated",
+  "deliver": false
+}
+```
+
+Ambassador does not send HMAC-v2, timestamp, or request-ID headers to OpenClaw.
+OpenClaw's native hook authenticates the bearer, applies its agent allowlist,
+uses the idempotency key for bounded replay handling, safety-wraps external
+content, and admits a normal model turn. The native request body may not exceed
+256 KiB. The Hermes canonical body retains its 512 KiB limit.
+
 A `2xx` means the receiver accepted responsibility for the complete message.
 Ambassador records that transfer before acknowledging central. A non-`2xx`
 or pre-acceptance transport failure may retry within the fixed delivery budget
-using the same idempotency key and a fresh timestamp and signature. Because a
-timeout can be uncertain, receivers must deduplicate by message ID.
+using the same idempotency key. Hermes receives a fresh timestamp and signature
+on each attempt. Because a timeout can be uncertain, receivers must deduplicate
+by message ID.
 
-Hermes adapts the canonical body through its native generic webhook route. The
-package-shipped OpenClaw plugin verifies the exact request before parsing,
-deduplicates accepted IDs, and transfers the bounded message to a
-plugin-service queue before returning `202`. The service starts a durable
-embedded model turn outside the completed HTTP request's OpenClaw work-admission
-scope. Its route is `/embassys/ambassador`. A receiver `2xx` proves custody
-only; model execution, MCP invocation, and the final correlated response remain
-separate qualification observations. Ambassador does not emit
-provider-specific JSON.
+Hermes adapts the canonical body through its native generic webhook route.
+OpenClaw normally uses `/hooks/agent` and returns `200` with a run ID after
+session and global placement admission. That response does not mean the model
+finished. For both receivers, a `2xx` proves custody or admission only. Model
+execution, MCP invocation, and the final correlated response remain separate
+qualification observations.
 
 ## Direct ACP delivery
 
@@ -554,7 +583,8 @@ The cutover must prove at least:
 - bounded in-memory body custody and ID-only durable state;
 - exact target-authorized action-result submission and correlated response
   delivery, with no general reply or local delivery-control tools;
-- no separate connector process, provider-specific webhook body, old package
-  alias, old CLI, compatibility reader, or migration path in the artifact; and
+- no separate connector process, user-selected webhook format, OpenClaw
+  receiver plugin, old package alias, old CLI, compatibility reader, or
+  migration path in the artifact; and
 - no credential or content leakage in logs, databases, profiles, temporary
   files, packages, or qualification output.

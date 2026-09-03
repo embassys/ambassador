@@ -1,6 +1,6 @@
 {
   "name": "@embassys/ambassador",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Local Ambassador for the Embassys agent network",
   "license": "MIT",
   "repository": {
@@ -9,7 +9,6 @@
   },
   "files": [
     "dist",
-    "integrations/openclaw-ambassador",
     "docs/getting-started-claude.md",
     "docs/getting-started-codex.md",
     "docs/getting-started-gemini.md",

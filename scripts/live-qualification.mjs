@@ -40,7 +40,7 @@ const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" }
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
 const HERMES_ACP_COMMAND = "hermes-acp";
 const OPENCLAW_ACP_COMMAND = "openclaw";
-const OPENCLAW_WEBHOOK_PATH = "/embassys/ambassador";
+const OPENCLAW_WEBHOOK_PATH = "/hooks/agent";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
 const RESTART_POLL_DRAIN_MS = 31_000;
@@ -333,7 +333,30 @@ class QualificationMcpClient {
   }
 }
 
-async function startWebhook(token) {
+function openClawAmbassadorMessage(value) {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).sort().join(",") !== "agentId,deliver,message,name,sessionMode" ||
+    value.name !== "Embassys Ambassador" ||
+    value.agentId !== "main" ||
+    value.sessionMode !== "isolated" ||
+    value.deliver !== false ||
+    typeof value.message !== "string"
+  ) {
+    return undefined;
+  }
+  const marker = "\nEmbassys message JSON:\n";
+  const markerIndex = value.message.lastIndexOf(marker);
+  if (markerIndex < 0) return undefined;
+  try {
+    const message = JSON.parse(value.message.slice(markerIndex + marker.length));
+    return isRecord(message) ? message : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function startWebhook(token, contract = "ambassador-hmac-v2") {
   const wakes = [];
   const waiters = [];
   const server = createServer((request, response) => {
@@ -352,29 +375,49 @@ async function startWebhook(token) {
       } catch {
         valid = false;
       }
-      const timestamp = request.headers["x-webhook-timestamp"];
-      const expected =
-        typeof timestamp === "string"
-          ? createHmac("sha256", token).update(timestamp).update(".").update(body).digest("hex")
-          : "";
+      let message = parsed;
+      if (contract === "openclaw-agent") {
+        message = openClawAmbassadorMessage(parsed);
+        valid =
+          valid &&
+          request.headers["x-webhook-signature-v2"] === undefined &&
+          request.headers["x-webhook-timestamp"] === undefined &&
+          request.headers["x-request-id"] === undefined;
+      } else {
+        const timestamp = request.headers["x-webhook-timestamp"];
+        const expected =
+          typeof timestamp === "string"
+            ? createHmac("sha256", token).update(timestamp).update(".").update(body).digest("hex")
+            : "";
+        valid =
+          valid &&
+          request.headers["x-webhook-signature-v2"] === expected &&
+          request.headers["x-request-id"] === request.headers["idempotency-key"];
+      }
       valid =
         valid &&
         request.method === "POST" &&
         request.url === "/hooks/agent" &&
         request.headers.authorization === `Bearer ${token}` &&
-        request.headers["x-webhook-signature-v2"] === expected &&
-        isRecord(parsed) &&
-        typeof parsed.sender_agent_id === "string" &&
-        isRecord(parsed.payload) &&
-        typeof parsed.created_at === "string";
+        isRecord(message) &&
+        request.headers["idempotency-key"] === message.id &&
+        typeof message.sender_agent_id === "string" &&
+        isRecord(message.payload) &&
+        typeof message.created_at === "string";
       response.writeHead(valid ? 200 : 400, { "content-type": "application/json" });
-      response.end(valid ? '{"ok":true}' : '{"ok":false}');
+      response.end(
+        valid && contract === "openclaw-agent"
+          ? '{"ok":true,"runId":"qualification-run"}'
+          : valid
+            ? '{"ok":true}'
+            : '{"ok":false}',
+      );
       if (!valid) return;
       const waiter = waiters.shift();
-      if (waiter === undefined) wakes.push(parsed);
+      if (waiter === undefined) wakes.push(message);
       else {
         clearTimeout(waiter.timer);
-        waiter.resolve(parsed);
+        waiter.resolve(message);
       }
     });
   });
@@ -682,53 +725,35 @@ async function configureOpenClawGateway(home, workingDirectory, port) {
   }
 }
 
-async function prepareOpenClawWebhook(home, pluginRoot, secret) {
-  await runOpenClawConfiguration(home, [
-    "plugins",
-    "install",
-    "--force",
-    "--accept-capabilities",
-    pluginRoot,
-  ]);
+async function prepareOpenClawWebhook(home, secret) {
   await runOpenClawConfiguration(
     home,
-    ["secrets", "store", "set", "AMBASSADOR_WEBHOOK_SECRET", "--value-file", "-"],
-    `${secret}\n`,
+    ["config", "patch", "--stdin"],
+    JSON.stringify({
+      hooks: {
+        enabled: true,
+        token: secret,
+        path: "/hooks",
+        allowedAgentIds: ["main"],
+        allowRequestSessionKey: false,
+      },
+    }),
   );
-  await runOpenClawConfiguration(home, [
-    "config",
-    "set",
-    "plugins.entries.embassys-ambassador.config.secret",
-    "--ref-source",
-    "store",
-    "--ref-provider",
-    "default",
-    "--ref-id",
-    "AMBASSADOR_WEBHOOK_SECRET",
-  ]);
-  await runOpenClawConfiguration(home, [
-    "plugins",
-    "enable",
-    "embassys-ambassador",
-    "--accept-capabilities",
-  ]);
 }
 
-async function assertOpenClawWebhookBearerFilter(url, secret) {
-  const body = Buffer.from("{}", "utf8");
-  const timestamp = String(Math.floor(Date.now() / 1_000));
-  const signature = createHmac("sha256", secret)
-    .update(timestamp, "ascii")
-    .update(".", "ascii")
-    .update(body)
-    .digest("hex");
+async function assertOpenClawWebhookBearerFilter(url) {
+  const body = JSON.stringify({
+    message: "Ambassador bearer filter probe",
+    name: "Embassys Ambassador",
+    agentId: "main",
+    sessionMode: "isolated",
+    deliver: false,
+  });
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Request-ID": randomUUID(),
-      "X-Webhook-Signature-V2": signature,
-      "X-Webhook-Timestamp": timestamp,
+      "Idempotency-Key": randomUUID(),
     },
     body,
     redirect: "manual",
@@ -738,13 +763,7 @@ async function assertOpenClawWebhookBearerFilter(url, secret) {
   assert(response.status === 401, "openclaw_webhook_bearer");
 }
 
-async function startOpenClawGateway(
-  home,
-  workingDirectory,
-  endpoint,
-  requestedPort,
-  expectWebhook,
-) {
+async function startOpenClawGateway(home, workingDirectory, endpoint, requestedPort) {
   const port = requestedPort ?? (await availableLoopbackPort());
   await configureOpenClawMcp(home, endpoint);
   await configureOpenClawGateway(home, workingDirectory, port);
@@ -760,7 +779,7 @@ async function startOpenClawGateway(
     exited = true;
   });
   const url = `http://127.0.0.1:${port}${OPENCLAW_WEBHOOK_PATH}`;
-  const readinessUrl = expectWebhook ? url : `http://127.0.0.1:${port}/`;
+  const readinessUrl = `http://127.0.0.1:${port}/`;
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline && !exited) {
     const ready = await fetch(readinessUrl, {
@@ -769,7 +788,7 @@ async function startOpenClawGateway(
     })
       .then(async (response) => {
         await response.body?.cancel().catch(() => undefined);
-        return expectWebhook ? response.status === 405 : response.status < 500;
+        return response.status < 500;
       })
       .catch(() => false);
     if (ready) {
@@ -953,6 +972,10 @@ async function assertPackedRuntime(cliPath) {
   ]) {
     assert(!text.includes(forbidden), "package_scan");
   }
+  const removedPlugin = await lstat(join(packageRoot, "integrations", "openclaw-ambassador")).catch(
+    () => undefined,
+  );
+  assert(removedPlugin === undefined, "package_scan");
 }
 
 async function artifactScan(roots, captures, markers) {
@@ -1275,19 +1298,33 @@ async function main() {
   const webhookFetchFor = (gatewayIndex) => async (input, init) => {
     const request = new Request(input, init);
     const body = await request.clone().text();
-    const timestamp = request.headers.get("X-Webhook-Timestamp");
-    const signature = request.headers.get("X-Webhook-Signature-V2");
     const messageId = request.headers.get("Idempotency-Key");
     const secret = webhookSecrets[gatewayIndex];
-    assert(
-      secret !== undefined &&
-        request.headers.get("Authorization") === `Bearer ${secret}` &&
-        timestamp !== null &&
+    const openClawNative = gatewayIndex === 0 || (gatewayIndex === 1 && realOpenClawWebhook);
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      throw safeFailure("webhook_contract");
+    }
+    const message = openClawNative ? openClawAmbassadorMessage(parsed) : parsed;
+    const timestamp = request.headers.get("X-Webhook-Timestamp");
+    const signature = request.headers.get("X-Webhook-Signature-V2");
+    const authenticated =
+      secret !== undefined && request.headers.get("Authorization") === `Bearer ${secret}`;
+    const contractValid = openClawNative
+      ? timestamp === null && signature === null && request.headers.get("X-Request-ID") === null
+      : timestamp !== null &&
         signature !== null &&
         signature ===
           createHmac("sha256", secret).update(timestamp).update(".").update(body).digest("hex") &&
+        request.headers.get("X-Request-ID") === messageId;
+    assert(
+      authenticated &&
+        contractValid &&
         messageId !== null &&
-        request.headers.get("X-Request-ID") === messageId,
+        isRecord(message) &&
+        message.id === messageId,
       "webhook_contract",
     );
     const response = await fetch(request);
@@ -1334,14 +1371,14 @@ async function main() {
         canonicalJson(openClawCapability?.aliases) === canonicalJson([OPENCLAW_CLIENT_INFO.name]) &&
           openClawCapability?.direct?.command === OPENCLAW_ACP_COMMAND &&
           canonicalJson(openClawCapability.direct.args) === canonicalJson(["acp"]) &&
-          openClawCapability.direct.agentInfo.name === "openclaw-acp",
+          openClawCapability.direct.agentInfo.name === "openclaw-acp" &&
+          canonicalJson(openClawCapability.webhook) ===
+            canonicalJson({ format: "openclaw-agent", agentId: "main" }),
         "openclaw_profile",
       );
     }
     phase = "package_scan";
     await assertPackedRuntime(cliPath);
-    const packedPackageRoot = join(dirname(cliPath), "..");
-    const openClawPluginRoot = join(packedPackageRoot, "integrations", "openclaw-ambassador");
 
     phase = "state_setup";
     const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
@@ -1426,7 +1463,10 @@ async function main() {
       phase = `webhook_setup_${index + 1}`;
       const webhookSecret = await createGatewayWebhookSecret(packed, roots[index]);
       webhookSecrets.push(webhookSecret);
-      const webhook = await startWebhook(webhookSecret);
+      const webhook = await startWebhook(
+        webhookSecret,
+        index === 0 || realOpenClawWebhook ? "openclaw-agent" : "ambassador-hmac-v2",
+      );
       webhooks.push(webhook);
       phase = `gateway_setup_${index + 1}`;
       gateways.push(
@@ -1459,7 +1499,7 @@ async function main() {
         assert(openClawHome !== undefined, "openclaw_isolation");
         if (realOpenClawWebhook) {
           phase = "openclaw_webhook_configuration";
-          await prepareOpenClawWebhook(openClawHome, openClawPluginRoot, webhookSecret);
+          await prepareOpenClawWebhook(openClawHome, webhookSecret);
         }
         phase = "openclaw_gateway_setup";
         const openClawGateway = await startOpenClawGateway(
@@ -1467,12 +1507,11 @@ async function main() {
           targetWorkingDirectory,
           gateways[index].client.endpoint,
           undefined,
-          realOpenClawWebhook,
         );
         openClawGatewayPort = openClawGateway.port;
         openClawGateways.push(openClawGateway);
         if (realOpenClawWebhook) {
-          await assertOpenClawWebhookBearerFilter(openClawGateway.url, webhookSecret);
+          await assertOpenClawWebhookBearerFilter(openClawGateway.url);
         }
       }
     }
@@ -1595,7 +1634,6 @@ async function main() {
             targetWorkingDirectory,
             gateways[index].client.endpoint,
             openClawGatewayPort,
-            realOpenClawWebhook,
           ),
         );
       }
@@ -1859,7 +1897,9 @@ async function main() {
       : realHermes
         ? "hermes-agent"
         : realOpenClaw
-          ? "openclaw-acp"
+          ? realOpenClawWebhook
+            ? "openclaw-native-hook"
+            : "openclaw-acp"
           : "deterministic-mock-acp";
     const report = {
       qualification,
@@ -1905,6 +1945,7 @@ async function main() {
           : "not_applicable",
         openclaw_webhook_custody: realOpenClawWebhook ? "passed" : "not_applicable",
         openclaw_webhook_bearer_filter: realOpenClawWebhook ? "passed" : "not_applicable",
+        openclaw_native_hook: realOpenClawWebhook ? "passed" : "not_applicable",
         openclaw_acp_v1: realOpenClawDirect ? "passed" : "not_applicable",
         central_mcp_requests: 0,
         artifact_scan: "passed",

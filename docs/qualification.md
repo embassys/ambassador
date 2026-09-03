@@ -3,6 +3,75 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Ambassador 0.2.11 candidate
+
+On 2026-09-03, the byte-final 0.2.11 candidate passed the complete
+live-central correlated-result webhook flow with OpenClaw and Hermes on macOS
+26.5.2 arm64 and Node 24.19.0. Both runs used candidate SHA-256
+`3cf828e32f8942e7a1d670865ecb2c55e138f63217d7342c1c2bb2c99d3dcd11`
+and SRI
+`sha512-kAtceesTXpWX+4i9EnDCBfystNTQZBeFWEAdE0UW73KpffgWmA3B0JWV9PIzk8CzQIpXk+ACGv5J4Mw9vZtV6Q==`.
+The live runner SHA-256 was
+`e15ec9ca725e2f9a3fad11982a357ba634f6920ddda6cd9a35f3a78696af05c8`,
+and the reviewed central source revision was
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`.
+
+| Agent | Version observation | Webhook result |
+| --- | --- | --- |
+| OpenClaw | `2026.8.2` | passed through native `/hooks/agent` |
+| Hermes Agent | version probe unavailable | passed through canonical bearer and HMAC V2 route |
+
+Each run created and verified two disposable Mailosaur identities through
+their local Ambassador MCP endpoints, restarted Ambassador, reloaded the
+encrypted credential, webhook secret, and delivery profile, and exercised the
+live REST and DPoP contracts plus the deployed six-action catalog. The
+controlled requester requested `get_phone_number` permission. The real target
+model called `respond_to_permission`, then called `submit_action_result`
+exactly once with the correlated call ID and approved synthetic phone result.
+The requester received the matching `action_response`. Local custody preceded
+each central acknowledgement.
+
+OpenClaw used its built-in agent hook with the fixed `main` agent, isolated
+session, disabled announcement, bearer authentication, and the central message
+ID as its idempotency key. Ambassador validated OpenClaw's documented `200`
+admission response with a bounded run ID. The packed artifact contained no
+Ambassador-specific OpenClaw plugin, and the runner installed none. A `200`
+was treated as admission only; the run continued until the real model made both
+MCP calls and the requester received the final response.
+
+Hermes retained the complete canonical body and HMAC V2 contract. Its bounded
+version probe returned `unavailable`, which did not skip delivery. This was the
+same locally installed authenticated Hermes setup previously observed as Agent
+0.20.5, but the current pass rests on model execution and MCP results, not that
+version value.
+
+Two preliminary OpenClaw attempts reached native-hook custody and central
+acknowledgement but ended at the bounded permission-model wait without an MCP
+call. Safe OpenClaw run metadata classified both model runs as provider
+authentication failures. The disposable OpenClaw home had its own config and
+databases but was missing the separate owner-only backend authentication used
+by its configured model. A newly copied isolated home that included that
+backend configuration passed without an Ambassador code change. No prompt,
+message body, provider output, or credential was logged or retained.
+
+This setup failure is distinct from the 0.2.10 receiver timeout described
+below. That older receiver accepted the request and then lost detached model
+work when the request-scoped OpenClaw lease drained. Native `/hooks/agent`
+owns model scheduling and removes that plugin lifecycle. It is also distinct
+from the intentional wait after an Ambassador restart: an aborted local
+30-second poll may remain active at central, which has no lease or redelivery,
+so the qualification lets it expire before polling again.
+
+The Node 24.19.0 repository check passed 183 tests: 177 passed and six opt-in
+lanes were skipped as designed. Type checking and linting passed. A clean
+tarball install passed the installed-CLI REST E2E and production vulnerability
+audit. The dependency signature audit verified 29 registry packages and 22
+attestations; the unpublished local candidate itself had no registry artifact
+to verify. Both live artifact scans passed. The runner deleted captured mail
+and temporary Ambassador state, and the owner-only OpenClaw and Hermes
+credential copies were removed after their runs. The normal provider homes
+were not changed.
+
 ## Ambassador 0.2.10
 
 On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central
@@ -117,10 +186,11 @@ central.
 
 The receiver records bounded metadata and validates:
 
-- the complete canonical central message body;
-- bearer and HMAC V2 authentication;
-- timestamp and signature coverage of the exact bytes;
-- matching request and idempotency IDs;
+- the fixed webhook contract selected by the matched capability profile;
+- the complete canonical Hermes body with bearer and HMAC V2 authentication;
+- the OpenClaw native agent body, fixed `main` agent, isolated session, disabled
+  announcement, bearer authentication, and no HMAC-only headers;
+- matching request and idempotency IDs where each contract requires them;
 - retries before acceptance and no local redelivery after acceptance;
 - central acknowledgement only after a 2xx response; and
 - shutdown, timeout, duplicate, malformed-response, and capacity behavior.
@@ -205,10 +275,11 @@ For each row:
 9. Exercise one bounded failure and confirm no unsafe replay.
 10. Stop all processes and scan the isolated state and output.
 
-OpenClaw webhook qualification installs a receiver-side mapping from the
-canonical Embassys JSON message to OpenClaw's native hook input. Direct
-qualification uses OpenClaw's ACP command and its preconfigured Ambassador MCP
-entry when session MCP injection is unavailable.
+OpenClaw webhook qualification enables the built-in `/hooks/agent` endpoint in
+the isolated configuration copy. Ambassador sends the native request directly;
+no plugin or receiver mapping is installed. Direct qualification uses
+OpenClaw's ACP command and its preconfigured Ambassador MCP entry when session
+MCP injection is unavailable.
 
 Hermes webhook qualification uses its authenticated generic webhook path.
 Direct qualification uses its fixed ACP command and session MCP configuration.

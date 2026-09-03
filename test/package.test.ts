@@ -9,7 +9,7 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   ) as Record<string, unknown>;
 
   assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.10");
+  assert.equal(packageJson.version, "0.2.11");
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, "MIT");
   assert.equal(
@@ -23,7 +23,6 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   );
   assert.deepEqual(packageJson.files, [
     "dist",
-    "integrations/openclaw-ambassador",
     "docs/getting-started-claude.md",
     "docs/getting-started-codex.md",
     "docs/getting-started-gemini.md",
@@ -47,6 +46,10 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   assert.match(lockfile, /^lockfileVersion:/u);
   await assert.rejects(
     readFile(join(process.cwd(), "package-lock.json")),
+    (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
+  );
+  await assert.rejects(
+    readFile(join(process.cwd(), "integrations", "openclaw-ambassador", "package.json")),
     (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT",
   );
 });

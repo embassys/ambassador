@@ -11,6 +11,13 @@ Published Ambassador 0.2.9 corrected the version policy under ADR 0041.
 Published Ambassador 0.2.10 adds internally generated encrypted webhook
 secrets, the `ambassador webhook-secret` command, and the shipped OpenClaw
 webhook receiver.
+The 0.2.11 candidate removes that receiver and sends OpenClaw's fixed webhook
+profile directly to its native `/hooks/agent` endpoint. It keeps Hermes on the
+canonical bearer and HMAC V2 contract. The byte-final candidate passed the
+Node 24.19.0 repository and clean-package checks plus complete live-central
+webhook round trips with OpenClaw 2026.8.2 and the authenticated Hermes setup.
+Publication and registry-artifact verification remain open until the green
+pull request merges and the main-branch release job finishes.
 Exact known MCP client names still select fixed profiles, and exact ACP v1
 agent names still protect direct initialization, but reported client and agent
 versions do not gate either step. Ambassador tries the fixed contract and

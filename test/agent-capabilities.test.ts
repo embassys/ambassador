@@ -15,6 +15,10 @@ test("records all reviewed production agent contracts exactly", () => {
       enabled: true,
       aliases: ["openclaw-bundle-mcp"],
       modes: ["direct", "webhook"],
+      webhook: {
+        format: "openclaw-agent",
+        agentId: "main",
+      },
       direct: {
         command: "openclaw",
         args: ["acp"],
@@ -54,6 +58,9 @@ test("records all reviewed production agent contracts exactly", () => {
       enabled: true,
       aliases: ["mcp"],
       modes: ["direct", "webhook"],
+      webhook: {
+        format: "ambassador-hmac-v2",
+      },
       direct: {
         command: "hermes-acp",
         args: [],
@@ -240,8 +247,9 @@ test("matches exact client names and rejects unknown, ambiguous, disabled, and i
   }
   const base = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(base);
+  const { webhook: _webhook, ...baseWithoutWebhook } = base;
   const directOnly: AgentCapability = {
-    ...base,
+    ...baseWithoutWebhook,
     kind: "fixture-direct",
     displayName: "Fixture Direct",
     aliases: ["fixture-direct"],
@@ -268,6 +276,15 @@ test("matches exact client names and rejects unknown, ambiguous, disabled, and i
   assert.equal(
     resolveAgentCapability({ name: "fixture-direct", version: "1" }, [
       { ...directOnly, direct: undefined } as unknown as AgentCapability,
+    ]).status,
+    "unsupported",
+  );
+  assert.equal(
+    resolveAgentCapability({ name: "fixture-direct", version: "1" }, [
+      {
+        ...directOnly,
+        modes: ["direct", "webhook"],
+      } as unknown as AgentCapability,
     ]).status,
     "unsupported",
   );

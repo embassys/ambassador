@@ -107,6 +107,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   const webhook = await startFakeWebhook(t, {
     secret: webhookSecret,
     nowSeconds: NOW_SECONDS,
+    contract: "openclaw-agent",
   });
   const controller = new AbortController();
   let stdout = "";

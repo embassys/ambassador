@@ -107,9 +107,14 @@ switching in this cutover.
 
 ### Webhook mode
 
-Send the complete normalized central message as the canonical JSON body.
-Preserve bearer authentication, HMAC V2 signing, timestamp, request ID,
-idempotency key, body limits, deadline, and bounded pre-acceptance retries.
+Each dual-mode profile fixes a reviewed webhook format. Hermes receives the
+complete normalized central message as the canonical JSON body with bearer
+authentication, HMAC V2 signing, timestamp, request ID, and idempotency key.
+OpenClaw receives its native `/hooks/agent` body with the complete message
+inside fixed untrusted-input instructions. Its request fixes agent `main`, an
+isolated session, and `deliver: false`, and authenticates with the bearer
+secret plus the central message ID as the idempotency key. User or model input
+cannot select a webhook format or native agent ID.
 
 Permit HTTPS webhook URLs and literal-loopback HTTP URLs. Reject other
 plaintext remote targets, credentials, fragments, redirects, and control
@@ -120,9 +125,10 @@ message. Record that boundary, then acknowledge the message to central. The
 receiver does not call local "poll_messages" or "ack_message" for delivery
 control.
 
-The body is provider-neutral. Hermes owns its native mapping. ADR 0042 adds the
-package-shipped OpenClaw receiver because exact-byte HMAC verification must
-happen before OpenClaw parses the request.
+Hermes retains the 512 KiB canonical-body limit. OpenClaw's native endpoint has
+a 256 KiB request-body limit and does not accept Ambassador's HMAC V2 headers.
+ADR 0042 uses that endpoint directly and removes the package-shipped OpenClaw
+receiver.
 
 ### Direct mode
 
@@ -269,7 +275,7 @@ acknowledgement.
   state exists.
 - The command line no longer contains delivery configuration.
 - Raw webhook secrets stay outside model context.
-- Webhook receivers get enough data to act without calling delivery-control
+- Webhook receivers get the complete message without calling delivery-control
   MCP tools.
 - Direct agents have one standard invocation boundary instead of custom
   provider transports.
@@ -315,8 +321,9 @@ contract.
   callers appear qualified.
 - **Pass the webhook secret through MCP.** Rejected because the model should
   not handle a credential or a credential selector.
-- **Send provider-specific webhook bodies.** Rejected because provider mapping
-  belongs at the receiver and would couple Ambassador to webhook products.
+- **Accept a webhook format or agent ID from registration input.** Rejected
+  because webhook mapping belongs in the same fixed capability registry as the
+  direct invocation contract.
 - **Persist message bodies for restart recovery.** Rejected because server-side
   retrieval or redelivery is the proper reliability boundary.
 
@@ -364,3 +371,9 @@ reported versions must not gate registration or direct initialization. ADR
 0041 supersedes the exact-version portions of this record. The commands,
 arguments, delivery modes, environment allowlists, and ACP v1 protocol remain
 fixed.
+
+On 2026-09-03, the user approved replacing the package-shipped OpenClaw
+receiver with OpenClaw's native `/hooks/agent` endpoint. Ambassador keeps the
+secret command, does not configure OpenClaw, and retains Hermes's existing
+bearer and HMAC V2 contract. The OpenClaw webhook format and `main` agent ID are
+fixed in the compiled-in profile.
