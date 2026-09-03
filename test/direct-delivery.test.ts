@@ -41,7 +41,7 @@ async function target(
   const capability: DirectAgentCapability = {
     command: process.execPath,
     args: [fixturePath, scenario, countPath, descendantPath, promptPath],
-    agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+    agentInfo: { name: "mock-agent" },
     mcp: scenario.includes("provider-mcp") ? "provider_config" : "session",
     environment: ["HOME", "PATH", "TMPDIR"],
   };
@@ -117,6 +117,7 @@ test("initializes ACP v1, injects supported MCP setup, and completes one prompt"
     "success-session-mcp",
     "success-provider-mcp",
     "permission-session-mcp",
+    "wrong-version-session-mcp",
   ]) {
     await t.test(scenario, async (t) => {
       const value = await target(t, scenario);
@@ -138,12 +139,8 @@ test("retries a bounded startup failure only before prompt dispatch", async (t) 
   assert.equal(await value.attempts(), 2);
 });
 
-test("fails before prompting on an unsupported ACP protocol or agent identity", async (t) => {
-  for (const scenario of [
-    "wrong-protocol-session-mcp",
-    "wrong-agent-session-mcp",
-    "wrong-version-session-mcp",
-  ]) {
+test("fails before prompting on an unsupported ACP protocol or agent name", async (t) => {
+  for (const scenario of ["wrong-protocol-session-mcp", "wrong-agent-session-mcp"]) {
     await t.test(scenario, async (t) => {
       const value = await target(t, scenario, { maximumStartupAttempts: 1 });
       await assert.rejects(

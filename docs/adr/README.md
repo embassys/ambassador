@@ -1,7 +1,7 @@
 # Architecture decisions
 
-Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
-0039 for zero-configuration local startup.
+Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
+for zero-configuration local startup, and ADR 0041 for agent-version handling.
 
 ## Current decisions
 
@@ -19,6 +19,7 @@ Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
 | [0037](0037-live-central-rest-contract.md) | Current Embassys REST integration |
 | [0038](0038-ambassador-delivery-modes.md) | Guided webhook and direct ACP delivery |
 | [0039](0039-zero-configuration-local-start.md) | Zero-configuration start and local-machine trust boundary |
+| [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
 
 ## Historical ledger
 

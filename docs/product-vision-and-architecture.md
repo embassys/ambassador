@@ -77,19 +77,20 @@ session-level MCP configuration must have Ambassador MCP configured through
 its normal setup mechanism.
 
 Agent support is a fixed capability registry, not a name supplied by the model.
-Each enabled entry has exact bounded `clientInfo` aliases, allowed modes, a
-fixed executable and argument list for direct delivery, MCP setup behavior, and
-qualification evidence. User input and remote content cannot add or modify an
-entry.
+Each enabled entry has an exact bounded MCP client name, allowed modes, a fixed
+executable and argument list for direct delivery, an exact ACP agent name, MCP
+setup behavior, and qualification evidence. Reported MCP client and ACP agent
+versions are diagnostic metadata, not compatibility gates. User input and
+remote content cannot add or modify an entry.
 
 The enabled direct profiles are OpenClaw, Hermes, Codex, Claude Code, and
 Gemini CLI. Only OpenClaw and Hermes also support webhook, with direct as their
 default. Codex, Claude Code, and Gemini CLI register directly without a
-delivery question. Codex uses `@agentclientprotocol/codex-acp` 1.8.0, Claude Code uses
-`@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0 uses its
-native `--acp` mode. Exact aliases, agent identities, environment allowlists,
-and version policies remain compiled in. Unknown, ambiguous, disabled, and
-incomplete profiles are unsupported.
+delivery question. Codex uses `codex-acp`, Claude Code uses
+`claude-agent-acp`, and Gemini CLI uses its native `--acp` mode. Exact client
+and ACP agent names, commands, arguments, modes, and environment allowlists
+remain compiled in. Unknown, ambiguous, disabled, and incomplete profiles are
+unsupported.
 
 ## Guided registration
 
@@ -106,10 +107,11 @@ registry before creating any state or calling central:
   `unsupported_agent` and stops.
 
 The model never supplies an agent kind or chooses from a profile list.
-`clientInfo` is not authenticated identity, but exact matching is safe for this
-purpose because it can select only a compiled-in local profile and cannot
-change process details or widen capabilities. A failed direct launch does not
-fall back to webhook.
+`clientInfo` is not authenticated identity. Its exact known client name is
+safe for profile selection because it can select only a compiled-in local
+profile and cannot change process details or widen capabilities. Its reported
+version is bounded and observed but ignored for selection. A failed direct
+launch does not fall back to webhook.
 
 Webhook setup collects the URL and the name of an environment variable that
 contains the webhook secret. The raw secret never enters a prompt, tool
@@ -217,6 +219,9 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
+- Published Ambassador 0.2.8 still uses exact provider-version allowlists. The
+  0.2.9 candidate implements ADR 0041's name-based, version-observational
+  policy; the published artifact does not gain that behavior retroactively.
 - Codex direct delivery and both Hermes Agent 0.20.5 delivery modes have passed
   with the live central service. Ambassador 0.2.8 includes the qualified Hermes
   ACP 0.20.5 identity. Four profile/mode cases in the seven-case real-agent
