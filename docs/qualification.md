@@ -223,7 +223,11 @@ and registry SHA-1 `293f1cc8b95b8306445aab02deb3286b0fc387ac`; its SHA-256 was
 A clean install of that registry tarball passed the installed CLI REST E2E, the
 installed `ambassador` command rejected a forbidden option, the production
 audit found no known vulnerabilities, and the signature audit verified all 21
-packages with no invalid or missing entries.
+packages with no invalid or missing entries. A separate check imported code
+from that clean registry install: all five known MCP client names resolved with
+a deliberately non-release version value, and direct ACP delivery completed
+when the mock agent returned the correct ACP v1 protocol and agent name with a
+different version.
 
 The byte-final 0.2.8 release candidate tarball had SHA-256
 `6e128f2ec84af29ad663226e1449de9c1fb894426b3982982cab0215667a24f4`
