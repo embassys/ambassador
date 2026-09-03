@@ -80,6 +80,7 @@ export class ProcessLock {
         artifact.releaseFile();
         database.pragma(`busy_timeout = ${LOCK_HANDOFF_TIMEOUT_MS}`);
         database.pragma("trusted_schema = OFF");
+        database.pragma("user_version = 1");
         database.exec("BEGIN EXCLUSIVE");
         artifact.validateDirectory();
         return new ProcessLock(database, keys);
