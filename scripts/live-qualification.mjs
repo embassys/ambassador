@@ -2,12 +2,23 @@
 
 import { execFile, spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+
+import { observeAgentVersion } from "./agent-version-probes.mjs";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
 const SOURCE_REVISION = "ac3f7a6e33829eb80301c7944f611d29cc2499b5";
@@ -16,8 +27,14 @@ const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
 const CODEX_CONFIRMATION =
   "run-live-qualification-with-real-codex-and-two-disposable-mailosaur-identities";
+const HERMES_DIRECT_CONFIRMATION =
+  "run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities";
+const HERMES_WEBHOOK_CONFIRMATION =
+  "run-live-qualification-with-real-hermes-webhook-and-two-disposable-mailosaur-identities";
 const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "0.0.0" };
 const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "0.152.1" };
+const HERMES_CLIENT_INFO = { name: "mcp", version: "0.1.0" };
+const HERMES_ACP_COMMAND = "hermes-acp";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
 const RESTART_POLL_DRAIN_MS = 31_000;
@@ -391,6 +408,185 @@ async function startWebhook(token) {
   };
 }
 
+function hermesEnvironment(home, extra = {}) {
+  return {
+    HOME: home,
+    HERMES_HOME: join(home, ".hermes"),
+    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+    ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+    ...extra,
+  };
+}
+
+async function validateHermesHome(configuredHome) {
+  assert(configuredHome !== undefined && isAbsolute(configuredHome), "hermes_isolation");
+  const home = await realpath(configuredHome).catch(() => undefined);
+  const ordinaryHome =
+    process.env.HOME === undefined
+      ? undefined
+      : await realpath(process.env.HOME).catch(() => undefined);
+  assert(home !== undefined && home !== ordinaryHome, "hermes_isolation");
+  const rootMetadata = await lstat(home).catch(() => undefined);
+  assert(
+    rootMetadata?.isDirectory() === true &&
+      !rootMetadata.isSymbolicLink() &&
+      (rootMetadata.mode & 0o077) === 0,
+    "hermes_isolation",
+  );
+  for (const relativePath of [
+    ".hermes/.env",
+    ".hermes/auth.json",
+    ".hermes/config.yaml",
+    ".hermes/shared/nous_auth.json",
+  ]) {
+    const metadata = await lstat(join(home, relativePath)).catch(() => undefined);
+    assert(
+      metadata?.isFile() === true && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0,
+      "hermes_isolation",
+    );
+  }
+  return home;
+}
+
+async function runHermesConfiguration(home, arguments_, input) {
+  const child = spawn("hermes", arguments_, {
+    cwd: home,
+    env: hermesEnvironment(home),
+    shell: false,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.stdin.end(input);
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+  timeout.unref();
+  const code = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  }).finally(() => clearTimeout(timeout));
+  assert(code === 0, "hermes_mcp_configuration");
+}
+
+async function configureHermesMcp(home, endpoint) {
+  await runHermesConfiguration(home, ["mcp", "remove", "ambassador"], "\n").catch(() => undefined);
+  await runHermesConfiguration(
+    home,
+    ["mcp", "add", "ambassador", "--url", endpoint, "--connect-timeout", "15"],
+    "n\n\n",
+  );
+  const config = await readFile(join(home, ".hermes", "config.yaml"), "utf8");
+  assert(config.includes("  ambassador:") && config.includes(endpoint), "hermes_mcp_configuration");
+}
+
+async function availableLoopbackPort() {
+  const server = createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  assert(isRecord(address) && typeof address.port === "number", "hermes_webhook_setup");
+  await new Promise((resolve) => server.close(() => resolve()));
+  return address.port;
+}
+
+async function startHermesWebhook(home, workingDirectory, secret, requestedPort) {
+  const port = requestedPort ?? (await availableLoopbackPort());
+  await writeFile(
+    join(home, ".hermes", "webhook_subscriptions.json"),
+    `${JSON.stringify(
+      {
+        embassys: {
+          description: "Controlled Embassys qualification route",
+          events: [],
+          filters: [{ field: "headers.Authorization", equals: `Bearer ${secret}` }],
+          prompt: "",
+          skills: [],
+          deliver: "log",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    { encoding: "utf8", flag: "w", mode: 0o600 },
+  );
+  const child = spawn("hermes", ["gateway", "run", "--quiet", "--force"], {
+    cwd: workingDirectory,
+    detached: true,
+    env: hermesEnvironment(home, {
+      WEBHOOK_ENABLED: "true",
+      WEBHOOK_PORT: String(port),
+      WEBHOOK_SECRET: secret,
+    }),
+    shell: false,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+  const healthUrl = `http://127.0.0.1:${port}/health`;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline && !exited) {
+    const ready = await fetch(healthUrl, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(1_000),
+    })
+      .then(async (response) => {
+        await response.body?.cancel().catch(() => undefined);
+        return response.ok;
+      })
+      .catch(() => false);
+    if (ready) {
+      return {
+        url: `http://127.0.0.1:${port}/webhooks/embassys`,
+        async stop() {
+          if (exited) return;
+          if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+          const stopped = await Promise.race([
+            new Promise((resolve) => child.once("exit", () => resolve(true))),
+            new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
+          ]);
+          if (!stopped && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+        },
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!exited && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+  throw safeFailure("hermes_webhook_setup");
+}
+
+async function assertHermesWebhookBearerFilter(url, secret) {
+  const body = JSON.stringify({ synthetic: true });
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const signature = createHmac("sha256", secret)
+    .update(timestamp)
+    .update(".")
+    .update(body)
+    .digest("hex");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-ID": randomUUID(),
+      "X-Webhook-Signature-V2": signature,
+      "X-Webhook-Timestamp": timestamp,
+    },
+    body,
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
+  });
+  const result = await response.json().catch(() => undefined);
+  assert(
+    response.ok && isRecord(result) && result.status === "ignored" && result.reason === "filter",
+    "hermes_webhook_bearer",
+  );
+}
+
 async function waitForEndpoint(read) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -429,6 +625,7 @@ async function startGateway(
   clientInfo,
   extraEnvironment = {},
   workingDirectory = repositoryRoot,
+  webhookFetch,
 ) {
   const controller = new AbortController();
   let stdout = "";
@@ -461,6 +658,7 @@ async function startGateway(
       stateRoot,
       localMcpPort: 0,
       centralFetch,
+      ...(webhookFetch === undefined ? {} : { webhookFetch }),
       ...(deliveryTargetFactory === undefined ? {} : { deliveryTargetFactory }),
     },
   });
@@ -662,9 +860,24 @@ function schemaDigest(value) {
 
 async function main() {
   const directAgent = process.env.AMBASSADOR_LIVE_DIRECT_AGENT ?? "mock";
-  assert(["mock", "codex"].includes(directAgent), "direct_agent");
+  assert(
+    ["mock", "codex", "hermes-direct", "hermes-webhook"].includes(directAgent),
+    "direct_agent",
+  );
   const realCodex = directAgent === "codex";
-  const confirmation = realCodex ? CODEX_CONFIRMATION : MOCK_CONFIRMATION;
+  const realHermesDirect = directAgent === "hermes-direct";
+  const realHermesWebhook = directAgent === "hermes-webhook";
+  const realHermes = realHermesDirect || realHermesWebhook;
+  const realDirect = realCodex || realHermesDirect;
+  const realTarget = realDirect || realHermesWebhook;
+  let targetVersionProbe = { status: "not_applicable", reported_version: null };
+  const confirmation = realCodex
+    ? CODEX_CONFIRMATION
+    : realHermesDirect
+      ? HERMES_DIRECT_CONFIRMATION
+      : realHermesWebhook
+        ? HERMES_WEBHOOK_CONFIRMATION
+        : MOCK_CONFIRMATION;
   if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== confirmation) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
@@ -686,18 +899,16 @@ async function main() {
     const configuredAuthPath = join(codexHome, ".codex", "auth.json");
     const codexAuthPath = await realpath(configuredAuthPath).catch(() => undefined);
     assert(codexAuthPath === configuredAuthPath, "codex_isolation");
-    const { stdout } = await execFileAsync("codex-acp", ["--version"], {
-      encoding: "utf8",
-      env: {
-        HOME: codexHome,
-        ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
-      },
-      maxBuffer: 4_096,
-      timeout: 10_000,
-    }).catch(() => {
-      throw safeFailure("codex_version");
+    targetVersionProbe = await observeAgentVersion("codex", {
+      HOME: codexHome,
+      ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
     });
-    assert(stdout.trim() === "@agentclientprotocol/codex-acp 1.8.0", "codex_version");
+  }
+  const hermesHome = realHermes
+    ? await validateHermesHome(process.env.AMBASSADOR_HERMES_QUALIFICATION_HOME)
+    : undefined;
+  if (realHermes && hermesHome !== undefined) {
+    targetVersionProbe = await observeAgentVersion("hermes", hermesEnvironment(hermesHome));
   }
 
   const credentials = {
@@ -713,7 +924,7 @@ async function main() {
     `live-qualification-${randomUUID().replaceAll("-", "")}@${credentials.domain}`,
   ];
   const syntheticPhone = "+447700900123";
-  const actionReason = realCodex
+  const actionReason = realTarget
     ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
     : `synthetic-live-qualification-${randomUUID()}`;
   const permissionScope = {
@@ -725,14 +936,19 @@ async function main() {
   const gateways = [];
   const webhooks = [];
   const webhookSecrets = [];
+  const hermesWebhooks = [];
   const centralRoutes = new Set();
   const centralObservations = [];
   const directMessages = [];
   const routeCounts = [new Map(), new Map()];
   const successfulAckCounts = [0, 0];
   const acknowledgedByGateway = [new Set(), new Set()];
-  const codexSubmittedCallIds = new Set();
-  let codexPermissionDecisionObserved = false;
+  const webhookAcceptedByGateway = [new Set(), new Set()];
+  const localCompletedByGateway = [new Set(), new Set()];
+  const targetSubmittedCallIds = new Set();
+  let targetPermissionDecisionObserved = false;
+  let targetActionResultCallCount = 0;
+  let hermesWebhookPort;
   let catalogObservation;
   const centralFetchFor = (gatewayIndex) => async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input);
@@ -741,13 +957,13 @@ async function main() {
     const route = `${init?.method ?? "GET"} ${target.pathname}`;
     centralRoutes.add(route);
     routeCounts[gatewayIndex].set(route, (routeCounts[gatewayIndex].get(route) ?? 0) + 1);
-    const isCodexPermissionDecision =
-      realCodex && gatewayIndex === 1 && route === "POST /api/respond_to_permission";
-    const isCodexActionResult =
-      realCodex && gatewayIndex === 1 && route === "POST /api/submit_action_result";
+    const isTargetPermissionDecision =
+      realTarget && gatewayIndex === 1 && route === "POST /api/respond_to_permission";
+    const isTargetActionResult =
+      realTarget && gatewayIndex === 1 && route === "POST /api/submit_action_result";
     let acknowledgedMessageId;
     let submittedCallId;
-    if (route === "POST /api/ack_message" || isCodexActionResult) {
+    if (route === "POST /api/ack_message" || isTargetActionResult) {
       try {
         const requestBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
         if (
@@ -758,7 +974,7 @@ async function main() {
           acknowledgedMessageId = requestBody.message_id;
         }
         if (
-          isCodexActionResult &&
+          isTargetActionResult &&
           isRecord(requestBody) &&
           typeof requestBody.call_id === "string" &&
           requestBody.status === "success" &&
@@ -770,9 +986,13 @@ async function main() {
         // The production client owns request validation and serialization.
       }
     }
+    if (acknowledgedMessageId !== undefined) {
+      assert(localCompletedByGateway[gatewayIndex].has(acknowledgedMessageId), "ack_order");
+    }
     const response = await fetch(input, init);
-    if (isCodexPermissionDecision && response.ok) codexPermissionDecisionObserved = true;
-    if (submittedCallId !== undefined && response.ok) codexSubmittedCallIds.add(submittedCallId);
+    if (isTargetPermissionDecision && response.ok) targetPermissionDecisionObserved = true;
+    if (isTargetActionResult) targetActionResultCallCount += 1;
+    if (submittedCallId !== undefined && response.ok) targetSubmittedCallIds.add(submittedCallId);
     if (acknowledgedMessageId !== undefined && response.ok) {
       acknowledgedByGateway[gatewayIndex].add(acknowledgedMessageId);
       successfulAckCounts[gatewayIndex] += 1;
@@ -799,6 +1019,31 @@ async function main() {
     }
     return response;
   };
+  const webhookFetchFor = (gatewayIndex) => async (input, init) => {
+    const request = new Request(input, init);
+    const body = await request.clone().text();
+    const timestamp = request.headers.get("X-Webhook-Timestamp");
+    const signature = request.headers.get("X-Webhook-Signature-V2");
+    const messageId = request.headers.get("Idempotency-Key");
+    const secret = webhookSecrets[gatewayIndex];
+    assert(
+      secret !== undefined &&
+        request.headers.get("Authorization") === `Bearer ${secret}` &&
+        timestamp !== null &&
+        signature !== null &&
+        signature ===
+          createHmac("sha256", secret).update(timestamp).update(".").update(body).digest("hex") &&
+        messageId !== null &&
+        request.headers.get("X-Request-ID") === messageId,
+      "webhook_contract",
+    );
+    const response = await fetch(request);
+    if (response.status >= 200 && response.status < 300) {
+      webhookAcceptedByGateway[gatewayIndex].add(messageId);
+      localCompletedByGateway[gatewayIndex].add(messageId);
+    }
+    return response;
+  };
   let phase = "setup";
   try {
     phase = "package_import";
@@ -813,27 +1058,41 @@ async function main() {
     const directDeliveryModule = await import(
       pathToFileURL(join(dirname(cliPath), "direct-delivery.js")).href
     );
+    const agentCapabilitiesModule = await import(
+      pathToFileURL(join(dirname(cliPath), "agent-capabilities.js")).href
+    );
     assert(typeof packed.runCli === "function", "package_input");
+    if (realHermes) {
+      const hermesCapability = agentCapabilitiesModule.PRODUCTION_AGENT_CAPABILITIES.find(
+        (candidate) => candidate.kind === "hermes",
+      );
+      assert(
+        canonicalJson(hermesCapability?.aliases) === canonicalJson([HERMES_CLIENT_INFO]) &&
+          hermesCapability?.direct?.command === HERMES_ACP_COMMAND &&
+          hermesCapability.direct.agentInfo.name === "hermes-agent",
+        "hermes_profile",
+      );
+    }
     phase = "package_scan";
     await assertPackedRuntime(cliPath);
 
     phase = "state_setup";
     const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
     roots.push(join(qualificationRoot, "identity-a"), join(qualificationRoot, "identity-b"));
-    const codexWorkingDirectory = join(qualificationRoot, "codex-work");
+    const targetWorkingDirectory = join(qualificationRoot, "target-work");
     await Promise.all([
       ...roots.map((root) => mkdir(root, { recursive: true })),
-      mkdir(codexWorkingDirectory, { recursive: true }),
+      mkdir(targetWorkingDirectory, { recursive: true }),
     ]);
-    if (realCodex) {
+    if (realTarget) {
       await writeFile(
-        join(codexWorkingDirectory, "AGENTS.md"),
+        join(targetWorkingDirectory, "AGENTS.md"),
         [
           "# Controlled Embassys qualification policy",
           "",
           "The user approved only the synthetic get_phone_number qualification in this directory.",
           "For its permission_request, call respond_to_permission with decision granted.",
-          "For its action_call, use the explicitly supplied synthetic phone number and call submit_action_result exactly once with status success and a result containing only phone_number.",
+          `For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
           "Do not grant, execute, or answer any other request.",
           "",
         ].join("\n"),
@@ -842,38 +1101,51 @@ async function main() {
     }
 
     const clientInfoFor = (index) =>
-      realCodex && index === 1 ? CODEX_CLIENT_INFO : OPENCLAW_CLIENT_INFO;
-    const environmentFor = (index) =>
-      realCodex && index === 1
-        ? {
-            HOME: codexHome,
-            ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
-            ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
-            ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
-          }
-        : {};
+      index !== 1
+        ? OPENCLAW_CLIENT_INFO
+        : realCodex
+          ? CODEX_CLIENT_INFO
+          : realHermes
+            ? HERMES_CLIENT_INFO
+            : OPENCLAW_CLIENT_INFO;
+    const environmentFor = (index) => {
+      if (index !== 1 || !realTarget) return {};
+      const home = realCodex ? codexHome : hermesHome;
+      return {
+        HOME: home,
+        ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+        ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+        ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+        ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+      };
+    };
     const deliveryTargetFactoryFor = (index) => {
-      if (index === 0 || realCodex) return undefined;
-      return ({ endpoint }) => {
+      if (index === 0 || realHermesWebhook) return undefined;
+      return ({ capability, endpoint, profile }) => {
+        const selectedCapability = realDirect
+          ? capability.direct
+          : {
+              command: process.execPath,
+              args: [
+                join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
+                "success-provider-mcp",
+              ],
+              agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+              mcp: "provider_config",
+              environment: ["HOME", "PATH", "TMPDIR"],
+            };
+        assert(selectedCapability !== undefined && profile.mode === "direct", "direct_profile");
         const target = new directDeliveryModule.DirectDeliveryTarget({
-          capability: {
-            command: process.execPath,
-            args: [
-              join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
-              "success-provider-mcp",
-            ],
-            agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
-            mcp: "provider_config",
-            environment: ["HOME", "PATH", "TMPDIR"],
-          },
-          workingDirectory: repositoryRoot,
-          environment: process.env,
+          capability: selectedCapability,
+          workingDirectory: realDirect ? profile.working_directory : repositoryRoot,
+          environment: realDirect ? environmentFor(index) : process.env,
           mcpEndpoint: endpoint,
         });
         return {
           async deliver(message, signal) {
             const result = await target.deliver(message, signal);
-            directMessages.push(message);
+            if (!realDirect) directMessages.push(message);
+            localCompletedByGateway[index].add(message.id);
             return result;
           },
           async close() {
@@ -899,9 +1171,24 @@ async function main() {
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
-          realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
+          realTarget && index === 1 ? targetWorkingDirectory : repositoryRoot,
+          webhookFetchFor(index),
         ),
       );
+      if (realHermesWebhook && index === 1) {
+        assert(hermesHome !== undefined, "hermes_isolation");
+        phase = "hermes_mcp_configuration";
+        await configureHermesMcp(hermesHome, gateways[index].client.endpoint);
+        phase = "hermes_webhook_setup";
+        const hermesWebhook = await startHermesWebhook(
+          hermesHome,
+          targetWorkingDirectory,
+          webhookSecret,
+        );
+        hermesWebhookPort = Number(new URL(hermesWebhook.url).port);
+        hermesWebhooks.push(hermesWebhook);
+        await assertHermesWebhookBearerFilter(hermesWebhook.url, webhookSecret);
+      }
     }
 
     phase = "registration";
@@ -925,7 +1212,13 @@ async function main() {
                   url: webhooks[index].url,
                   secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
                 }
-              : { mode: "direct" },
+              : realHermesWebhook
+                ? {
+                    mode: "webhook",
+                    url: hermesWebhooks[0].url,
+                    secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
+                  }
+                : { mode: "direct" },
         });
       } else {
         assert(
@@ -951,6 +1244,7 @@ async function main() {
     }
 
     phase = "restart";
+    for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
     // Central polling is consuming, and aborting the local HTTP request does not
     // guarantee that its server-side 30-second long poll is cancelled. Do not
@@ -966,7 +1260,8 @@ async function main() {
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
-          realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
+          realTarget && index === 1 ? targetWorkingDirectory : repositoryRoot,
+          webhookFetchFor(index),
         ),
       );
       const names = (await gateways[index].client.listTools()).map((tool) => tool.name);
@@ -982,6 +1277,23 @@ async function main() {
           ]),
         "restart_catalog",
       );
+      if (realHermesWebhook && index === 1) {
+        assert(
+          hermesHome !== undefined && Number.isSafeInteger(hermesWebhookPort),
+          "hermes_webhook_setup",
+        );
+        phase = "hermes_mcp_configuration";
+        await configureHermesMcp(hermesHome, gateways[index].client.endpoint);
+        phase = "hermes_webhook_setup";
+        hermesWebhooks.push(
+          await startHermesWebhook(
+            hermesHome,
+            targetWorkingDirectory,
+            webhookSecrets[index],
+            hermesWebhookPort,
+          ),
+        );
+      }
     }
 
     phase = "catalog";
@@ -1044,11 +1356,13 @@ async function main() {
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
-    phase = "permission_request_direct";
-    if (realCodex) {
+    phase = `permission_request_${realHermesWebhook ? "webhook" : "direct"}`;
+    if (realTarget) {
       await waitForObservation(
-        () => successfulAckCounts[1] > recipientAckCountBeforePermission,
-        "permission_request_direct_timeout",
+        () =>
+          targetPermissionDecisionObserved &&
+          successfulAckCounts[1] > recipientAckCountBeforePermission,
+        "permission_request_model_timeout",
       );
     } else {
       const permissionMessage = await waitForDelivered(
@@ -1087,7 +1401,7 @@ async function main() {
       permissionListing = { status: "server_error", fields: [] };
     }
 
-    if (permissionStatus === "pending" && !realCodex) {
+    if (permissionStatus === "pending" && !realTarget) {
       await gateways[1].client.call("respond_to_permission", {
         permission_id: requested.permission_id,
         decision: "granted",
@@ -1095,7 +1409,7 @@ async function main() {
     } else {
       assert(permissionStatus === "granted", "permission_decision");
     }
-    if (realCodex) assert(codexPermissionDecisionObserved, "codex_permission_decision");
+    if (realTarget) assert(targetPermissionDecisionObserved, "target_permission_decision");
     phase = "permission_response_webhook";
     const responseMessage = await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
@@ -1103,7 +1417,8 @@ async function main() {
         typeof responseMessage.id === "string" &&
         isRecord(responseMessage.payload) &&
         responseMessage.payload.type === "permission_response" &&
-        responseMessage.payload.permission_id === requested.permission_id,
+        responseMessage.payload.permission_id === requested.permission_id &&
+        responseMessage.payload.decision === "granted",
       "permission_response",
     );
 
@@ -1119,13 +1434,18 @@ async function main() {
         called.status === "delivered",
       "action",
     );
-    phase = "action_direct";
-    if (realCodex) {
+    phase = `action_${realHermesWebhook ? "webhook" : "direct"}`;
+    if (realTarget) {
       await waitForObservation(
-        () => acknowledgedByGateway[1].has(called.message_id),
-        "action_direct_timeout",
+        () =>
+          targetSubmittedCallIds.has(called.call_id) &&
+          acknowledgedByGateway[1].has(called.message_id),
+        "action_model_timeout",
       );
-      assert(codexSubmittedCallIds.has(called.call_id), "codex_action_result");
+      assert(
+        targetSubmittedCallIds.has(called.call_id) && targetActionResultCallCount === 1,
+        "target_action_result",
+      );
     } else {
       const actionMessage = await waitForDelivered(
         directMessages,
@@ -1162,6 +1482,12 @@ async function main() {
       () => acknowledgedByGateway[0].has(actionResponse.id),
       "action_response_ack_timeout",
     );
+    if (realHermesWebhook) {
+      assert(webhookAcceptedByGateway[1].size >= 2, "hermes_webhook_custody");
+    }
+    if (realTarget) {
+      assert(targetActionResultCallCount === 1, "target_action_result_count");
+    }
 
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
@@ -1202,6 +1528,7 @@ async function main() {
     );
 
     phase = "cleanup";
+    for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
     for (const webhook of webhooks.splice(0)) await webhook.close();
     await rm(qualificationRoot, { recursive: true, force: true });
@@ -1210,8 +1537,20 @@ async function main() {
     const schemaDigests = Object.fromEntries(
       catalog.map((action) => [action.name, schemaDigest(action.input_schema)]),
     );
+    const qualification = realCodex
+      ? "ambassador-live-codex"
+      : realHermesDirect
+        ? "ambassador-live-hermes-direct"
+        : realHermesWebhook
+          ? "ambassador-live-hermes-webhook"
+          : "ambassador-live";
+    const targetAgent = realCodex
+      ? "codex-acp"
+      : realHermes
+        ? "hermes-agent"
+        : "deterministic-mock-acp";
     const report = {
-      qualification: realCodex ? "ambassador-live-codex" : "ambassador-live",
+      qualification,
       date: new Date().toISOString().slice(0, 10),
       source_repository: SOURCE_REPOSITORY,
       reviewed_source_revision: SOURCE_REVISION,
@@ -1221,7 +1560,9 @@ async function main() {
       qualification_runner_sha256: createHash("sha256")
         .update(await readFile(fileURLToPath(import.meta.url)))
         .digest("hex"),
-      direct_agent: realCodex ? "codex-acp-1.8.0" : "deterministic-mock-acp",
+      target_agent: targetAgent,
+      target_version_probe: targetVersionProbe,
+      target_delivery_mode: realHermesWebhook ? "webhook" : "direct",
       results: {
         registration: "passed",
         email_delivery: "passed",
@@ -1232,10 +1573,19 @@ async function main() {
         permission_request_decision: "passed",
         permission_listing: permissionListing,
         webhook_delivery_ack: "passed",
-        direct_delivery_ack: "passed",
+        target_delivery_ack: "passed",
+        acknowledgement_order: "passed",
         action_result_round_trip: "passed",
         codex_permission_decision: realCodex ? "passed" : "not_applicable",
         codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
+        hermes_permission_decision: realHermes ? "passed" : "not_applicable",
+        hermes_action_result_mcp_call: realHermes ? "passed" : "not_applicable",
+        hermes_action_result_call_count: realHermes
+          ? targetActionResultCallCount
+          : "not_applicable",
+        hermes_webhook_custody: realHermesWebhook ? "passed" : "not_applicable",
+        hermes_webhook_bearer_filter: realHermesWebhook ? "passed" : "not_applicable",
+        hermes_acp_v1: realHermesDirect ? "passed" : "not_applicable",
         central_mcp_requests: 0,
         artifact_scan: "passed",
         mail_cleanup: "passed",
@@ -1255,10 +1605,11 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, direct_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, codex_permission_decision_observed: codexPermissionDecisionObserved, codex_action_result_call_count: codexSubmittedCallIds.size, successful_ack_counts: successfulAckCounts, ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, target_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, target_permission_decision_observed: targetPermissionDecisionObserved, target_action_result_call_count: targetActionResultCallCount, successful_ack_counts: successfulAckCounts, webhook_custody_counts: webhookAcceptedByGateway.map((messages) => messages.size), ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {
+    for (const webhook of hermesWebhooks.splice(0)) await webhook.stop().catch(() => undefined);
     for (const gateway of gateways.splice(0)) await gateway.stop().catch(() => undefined);
     for (const webhook of webhooks.splice(0)) await webhook.close().catch(() => undefined);
     for (const messageId of capturedMail.splice(0)) {

@@ -133,9 +133,30 @@ narrow isolated policy representing the user's prior approval; it did not test
 an interactive user prompt. Captured mail and temporary state were deleted.
 The isolated credential copy was also removed. The installed Node was 24.14.0,
 below the supported 24.19.0 floor, so repeat this case on a supported runtime.
-The other six cases remain open. The user approved 0.2.6 as a one-release
-exception before this evidence was complete; these cases remain required to
-complete the qualification record.
+
+On 2026-09-03, locally authenticated Hermes Agent 0.20.5 passed the same live
+correlated-result flow in both delivery modes on macOS 26.5.2 arm64 and Node
+24.19.0. The webhook case used the actual published Ambassador 0.2.7 tarball.
+The direct case used a source candidate containing the new exact `0.20.5` ACP
+entry. Hermes called `respond_to_permission` and called
+`submit_action_result` exactly once; the requester received the correlated
+response, and local acceptance or completion preceded central acknowledgement.
+Both cases used isolated owner-only provider configuration and removed mail,
+temporary Ambassador state, and copied provider credentials. See
+[Live central qualification](live-qualification.md) for package digests,
+separate mode outcomes, and the safe failure record.
+
+Published Ambassador 0.2.7 still accepts only Hermes ACP 0.21.0 for direct
+delivery. Its installed CLI rejected Hermes ACP 0.20.5 with `startup_failed`,
+as expected. The candidate pass qualifies adding exact 0.20.5 to source; it is
+not evidence that the already published 0.2.7 artifact has that support.
+
+Four profile/mode cases remain open: OpenClaw webhook and direct, Claude Code
+direct, and Gemini CLI direct. The user approved 0.2.6 as a one-release
+exception before this evidence was complete; the remaining cases are still
+required to complete the qualification record. Hermes 0.21.0 retains only its
+earlier contract and ACP startup probe and has not run the full real-model
+round trip.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation
@@ -149,7 +170,45 @@ installs, updates, or pulls an agent. It records:
 - case names and pass/fail status; and
 - whether session MCP injection or provider configuration was used.
 
-It does not record prompts, replies, message bodies, payloads, identities,
+The installed-command version probe is observational. Run it without provider
+credentials or model work:
+
+```sh
+pnpm run probe:agents
+```
+
+It checks OpenClaw, Hermes, Codex ACP, Claude Agent ACP, and Gemini through
+fixed version commands. A bounded semantic version is `observed`; a missing,
+failing, malformed, or timed-out command is `unavailable`. Neither result
+skips a delivery case. The production direct target separately checks the
+exact ACP `agentInfo` identity after initialization.
+
+On 2026-09-03, the observational probe ran on macOS 26.5.2 arm64 with Node
+24.19.0:
+
+| Profile | Probe status | Reported version |
+| --- | --- | --- |
+| OpenClaw | `unavailable` | none |
+| Hermes | `observed` | `0.20.5` |
+| Codex ACP | `unavailable` | none |
+| Claude Agent ACP | `unavailable` | none |
+| Gemini CLI | `unavailable` | none |
+
+`unavailable` means the executable was not available to this probe. It is not
+a compatibility verdict.
+
+The byte-final 0.2.8 release candidate tarball had SHA-256
+`6e128f2ec84af29ad663226e1449de9c1fb894426b3982982cab0215667a24f4`
+and SRI digest
+`sha512-EWoq/E6GUHguCIhVi2qKWk0RUODPAsVHeAywbxEE8iDzKkXrj9r6EjarfheOujKP4V4Cxb3rCKzegc3HgjxxvQ==`.
+On Node 24.19.0 it passed clean installation, the installed-package REST E2E,
+and the production vulnerability audit with no known vulnerabilities. The
+signature audit verified 20 registry dependencies and reported only the
+expected missing registry metadata for the unpublished local 0.2.8 candidate.
+The full repository check passed 158 tests with no failures; two separate
+opt-in fixture lanes were skipped locally and remain required in CI.
+
+The runners do not record prompts, replies, message bodies, payloads, identities,
 tokens, secrets, provider credentials, paths containing user data, or raw
 provider output.
 
@@ -169,15 +228,16 @@ pnpm run qualify:agents
 ```
 
 Put secret values in the process environment, never in command arguments. The
-runner first requires the local fixture readiness endpoint, verifies the
+runner first requires the local fixture readiness endpoint, observes the
 installed provider versions, loads the code from the exact candidate archive,
 runs all seven delivery cases, and prints one safe JSON report. Configure the
 OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
 authentication before starting the runner. The other four profiles receive the
 same endpoint by ACP session injection. Each direct case must call the
 qualification `get_my_permissions` tool, which proves the real MCP client's
-exact `clientInfo` match. Missing, mismatched, unauthenticated, or failing
-agents make the run fail; the runner never invokes an installer or updater.
+exact `clientInfo` match. Missing, unauthenticated, or failing agents make the
+delivery case fail; a version-command observation does not. The runner never
+invokes an installer or updater.
 
 The reviewed OpenClaw 2026.8.1 and Hermes 0.21.0 images may provide their exact
 executables. Pin `ghcr.io/openclaw/openclaw:2026.8.1` to manifest digest
