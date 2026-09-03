@@ -1,6 +1,6 @@
 # 0015 npm distribution
 
-Status: accepted for packaging; package and CLI amended by ADR 0038
+Status: accepted for packaging; package and CLI amended by ADRs 0038 and 0039
 
 Date: 2026-08-24
 
@@ -20,7 +20,7 @@ binary. The package requires Node.js 24.
 Users run the foreground process directly from an approved npm release:
 
 ```text
-npx --yes @embassys/ambassador@<approved-version> start --local-token-env=<environment-variable>
+npx --yes @embassys/ambassador@<approved-version> start
 ```
 
 Do not publish separate connector packages. Direct ACP support and its fixed
@@ -35,12 +35,15 @@ Normally publish from `main` only after Linux and macOS checks, packed
 installation, the five-profile local qualification matrix, live central
 qualification, and artifact audits pass. ADR 0033 keeps Windows unsupported.
 
-`@embassys/ambassador@0.2.6` is a one-release exception: on 2026-09-03 the user
+`@embassys/ambassador@0.2.6` was a one-release exception: on 2026-09-03 the user
 explicitly approved publication after the deterministic CI, package, fixture,
-and live Codex evidence, but before the remaining nine real-agent cases and the
+and live Codex evidence, but before the remaining six supported real-agent
+cases and the
 supported-Node repeat of the Codex case. Keep those gaps visible as
 post-release qualification work. This exception does not relax the gate for a
-later version.
+later version. The user separately approved 0.2.7 on 2026-09-03 to remove the
+local token and correct the installation path. It inherits the same disclosed
+qualification gap; it does not count as completing the matrix.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
@@ -76,5 +79,6 @@ the exact ACP SDK approved in ADR 0038.
 The user approved npm distribution, MIT licensing, Node-based execution,
 trusted publishing, and the new package name on 2026-09-02. On 2026-09-03 the
 user separately approved publication of version 0.2.6 with the qualification
-exception described above. Later publications still require explicit approval
-after qualification.
+exception described above, then approved 0.2.7 for the zero-configuration
+startup correction. Later publications still require explicit approval after
+qualification.

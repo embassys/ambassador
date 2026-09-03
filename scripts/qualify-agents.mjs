@@ -10,7 +10,6 @@ import { pathToFileURL } from "node:url";
 const CONFIRMATION = "run-installed-supported-agents";
 const FIXTURE_ORIGIN = process.env.AMBASSADOR_QUALIFICATION_CENTRAL ?? "http://127.0.0.1:8000";
 const TARBALL = process.env.AMBASSADOR_CANDIDATE_TARBALL;
-const LOCAL_TOKEN = process.env.AMBASSADOR_QUALIFICATION_LOCAL_TOKEN;
 const VERSION = /(?:^|\D)(\d+\.\d+\.\d+)(?:$|\D)/u;
 const VERSION_PROBES = new Map([
   ["openclaw", { command: "openclaw", args: ["--version"] }],
@@ -160,8 +159,6 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
   fail(`Set AMBASSADOR_QUALIFY_CONFIRM=${CONFIRMATION} to run paid real-agent qualification.`);
 } else if (TARBALL === undefined) {
   fail("Set AMBASSADOR_CANDIDATE_TARBALL to the packed candidate.");
-} else if (LOCAL_TOKEN === undefined || !/^[0-9a-f]{48}$/u.test(LOCAL_TOKEN)) {
-  fail("Set AMBASSADOR_QUALIFICATION_LOCAL_TOKEN to a generated local token.");
 } else {
   const candidatePath = resolve(TARBALL);
   const candidateBytes = await readFile(candidatePath).catch(() => undefined);
@@ -197,7 +194,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
 
       const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-agent-qualification-"));
       const observedMcpProfiles = new Set();
-      const mcp = new LocalMcpServer(LOCAL_TOKEN, {
+      const mcp = new LocalMcpServer({
         async listTools() {
           return [
             {
@@ -246,31 +243,34 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           });
 
           if (!profile.direct?.agentInfo.versions.includes(installedVersion)) {
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
-            report.cases.push({ name: `${profile.kind}-direct`, status: "failed" });
+            for (const name of profile.qualificationCases) {
+              report.cases.push({ name, status: "failed" });
+            }
             continue;
           }
 
-          const prefix = `AMBASSADOR_${profile.kind.toUpperCase()}_WEBHOOK`;
-          try {
-            const url = process.env[`${prefix}_URL`];
-            const secret = process.env[`${prefix}_SECRET`];
-            if (url === undefined || secret === undefined) throw new Error("webhook unavailable");
-            const target = new WebhookDeliveryTarget({ url, secret });
-            await target.deliver(
-              {
-                id: `qualification-${profile.kind}-webhook`,
-                sender_agent_id: "qualification.sender",
-                action_type_id: "qualification",
-                payload: { synthetic: true },
-                created_at: new Date().toISOString(),
-              },
-              new AbortController().signal,
-            );
-            await target.close();
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "passed" });
-          } catch {
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
+          if (profile.modes.includes("webhook")) {
+            const prefix = `AMBASSADOR_${profile.kind.toUpperCase()}_WEBHOOK`;
+            try {
+              const url = process.env[`${prefix}_URL`];
+              const secret = process.env[`${prefix}_SECRET`];
+              if (url === undefined || secret === undefined) throw new Error("webhook unavailable");
+              const target = new WebhookDeliveryTarget({ url, secret });
+              await target.deliver(
+                {
+                  id: `qualification-${profile.kind}-webhook`,
+                  sender_agent_id: "qualification.sender",
+                  action_type_id: "qualification",
+                  payload: { synthetic: true },
+                  created_at: new Date().toISOString(),
+                },
+                new AbortController().signal,
+              );
+              await target.close();
+              report.cases.push({ name: `${profile.kind}-webhook`, status: "passed" });
+            } catch {
+              report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
+            }
           }
 
           try {
@@ -280,7 +280,6 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               workingDirectory,
               environment: process.env,
               mcpEndpoint: mcp.endpoint,
-              localToken: LOCAL_TOKEN,
             });
             await target.deliver(
               {

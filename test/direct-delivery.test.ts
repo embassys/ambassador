@@ -14,7 +14,6 @@ import {
   DirectDeliveryTarget,
 } from "../src/direct-delivery.js";
 
-const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const MESSAGE: CentralMessage = {
   id: "message-1",
   sender_agent_id: "agent.sender",
@@ -52,7 +51,6 @@ async function target(
     workingDirectory: root,
     environment: process.env,
     mcpEndpoint: "http://127.0.0.1:8787/mcp",
-    localToken: LOCAL_TOKEN,
     initializationDeadlineMs: 2_000,
     sessionDeadlineMs: 2_000,
     promptDeadlineMs: options.promptDeadlineMs ?? 2_000,

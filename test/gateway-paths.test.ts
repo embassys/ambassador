@@ -9,6 +9,7 @@ test("uses only a private Ambassador state root on macOS", () => {
     journalPath: "/Users/local/Library/Application Support/ambassador/notifications.sqlite",
     lockPath: "/Users/local/Library/Application Support/ambassador/ambassador.lock",
     credentialPath: "/Users/local/Library/Application Support/ambassador/central-credential.json",
+    credentialKeyPath: "/Users/local/Library/Application Support/ambassador/central-credential.key",
     profilePath: "/Users/local/Library/Application Support/ambassador/delivery-profile.json",
   });
 });
@@ -19,6 +20,7 @@ test("uses the XDG state root on Linux without a configuration path", () => {
     journalPath: "/state/ambassador/notifications.sqlite",
     lockPath: "/state/ambassador/ambassador.lock",
     credentialPath: "/state/ambassador/central-credential.json",
+    credentialKeyPath: "/state/ambassador/central-credential.key",
     profilePath: "/state/ambassador/delivery-profile.json",
   });
   assert.equal(
@@ -35,6 +37,7 @@ test("uses local application data on Windows", () => {
       journalPath: "D:\\Local\\ambassador\\notifications.sqlite",
       lockPath: "D:\\Local\\ambassador\\ambassador.lock",
       credentialPath: "D:\\Local\\ambassador\\central-credential.json",
+      credentialKeyPath: "D:\\Local\\ambassador\\central-credential.key",
       profilePath: "D:\\Local\\ambassador\\delivery-profile.json",
     },
   );

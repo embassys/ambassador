@@ -57,9 +57,7 @@ const app = acp
         server.type !== "http" ||
         server.name !== "ambassador" ||
         !server.url.startsWith("http://127.0.0.1:") ||
-        !server.headers.some(
-          (header) => header.name === "Authorization" && header.value.startsWith("Bearer "),
-        ))
+        server.headers.length !== 0)
     ) {
       throw new Error("invalid MCP server");
     }

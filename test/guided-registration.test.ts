@@ -31,18 +31,10 @@ async function fixture(t: TestContext, registry = PRODUCTION_AGENT_CAPABILITIES)
   return { root, calls, registration };
 }
 
-test("all supported agents ask for delivery with direct as the default", async (t) => {
+test("OpenClaw and Hermes ask for delivery with direct as the default", async (t) => {
   for (const { clientInfo, label } of [
     { clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" }, label: "OpenClaw" },
     { clientInfo: { name: "mcp", version: "0.1.0" }, label: "Hermes" },
-    { clientInfo: { name: "codex-mcp-client", version: "0.149.0" }, label: "Codex" },
-    { clientInfo: { name: "codex-mcp-client", version: "0.152.1" }, label: "Codex" },
-    { clientInfo: { name: "claude-code", version: "2.1.257" }, label: "Claude Code" },
-    { clientInfo: { name: "claude-code", version: "2.1.258" }, label: "Claude Code" },
-    {
-      clientInfo: { name: "gemini-cli-mcp-client", version: "0.58.0" },
-      label: "Gemini CLI",
-    },
   ]) {
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -61,6 +53,56 @@ test("all supported agents ask for delivery with direct as the default", async (
           { value: "webhook", label: "Send to a webhook" },
         ],
       });
+      assert.deepEqual(calls, []);
+    });
+  }
+});
+
+test("Codex, Claude Code, and Gemini CLI register directly without a delivery question", async (t) => {
+  for (const clientInfo of [
+    { name: "codex-mcp-client", version: "0.149.0" },
+    { name: "codex-mcp-client", version: "0.152.1" },
+    { name: "claude-code", version: "2.1.257" },
+    { name: "claude-code", version: "2.1.258" },
+    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+  ]) {
+    await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
+      const { calls, registration } = await fixture(t);
+      const result = await registration.register(
+        { email: "direct@example.test" },
+        clientInfo,
+        new AbortController().signal,
+      );
+      assert.equal(result.agent_id, "agent-1");
+      assert.deepEqual(calls, [{ email: "direct@example.test" }]);
+    });
+  }
+});
+
+test("direct-only production profiles reject webhook input before state or central", async (t) => {
+  for (const clientInfo of [
+    { name: "codex-mcp-client", version: "0.152.1" },
+    { name: "claude-code", version: "2.1.258" },
+    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+  ]) {
+    await t.test(clientInfo.name, async (t) => {
+      const { calls, registration } = await fixture(t);
+      await assert.rejects(
+        registration.register(
+          {
+            email: "webhook@example.test",
+            delivery: {
+              mode: "webhook",
+              url: "https://agent.example.test/embassys",
+              secret_env: "EMBASSYS_WEBHOOK_SECRET",
+            },
+          },
+          clientInfo,
+          new AbortController().signal,
+        ),
+        (error: unknown) =>
+          error instanceof GuidedRegistrationError && error.code === "invalid_arguments",
+      );
       assert.deepEqual(calls, []);
     });
   }
