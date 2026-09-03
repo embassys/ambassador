@@ -59,19 +59,21 @@ profile.
 
 Ambassador sends the complete validated central message to the configured
 webhook. The receiver authenticates the request, accepts custody with a `2xx`,
-and handles any provider-specific mapping. Ambassador then acknowledges the
-message to central.
+and starts the selected agent through its reviewed native contract. Ambassador
+then acknowledges the message to central.
 
 Ambassador generates and encrypts the webhook secret internally. The owner
 runs `ambassador webhook-secret` and copies the displayed value into the
 receiver's secret store. The raw value never enters MCP, a delivery profile, or
 normal logs.
 
-The webhook contract is provider-neutral. Hermes uses its native generic
-receiver. The package includes an OpenClaw plugin that verifies the exact
-bearer/HMAC-v2 request bytes, deduplicates the message ID, transfers it to a
-bounded in-memory plugin-service queue, and starts a normal OpenClaw model turn.
-Provider mapping remains receiver-side behavior, not a gateway branch.
+Each dual-mode profile fixes its webhook format. Hermes receives the complete
+canonical message through its generic bearer and HMAC-v2 route. OpenClaw
+receives its native `/hooks/agent` body with the complete message inside a
+fixed untrusted-input prompt. Ambassador selects the fixed `main` agent, an
+isolated session, and no announcement delivery. OpenClaw authenticates the
+request with the generated bearer secret and uses the central message ID as
+its idempotency key. No Ambassador-specific OpenClaw plugin is installed.
 
 ### Direct
 
@@ -219,7 +221,7 @@ retrieval or redelivery is the proper future fix.
 
 - Calling the central MCP endpoint.
 - API-version probing or compatibility branches.
-- A separate connector process or provider-specific gateway transport.
+- A separate connector process or user-supplied provider transport.
 - Recovering the exact MCP chat used during registration.
 - Passing raw secrets through the model.
 - Inventing general reply, conversation, lease, outcome-lookup, activation, or

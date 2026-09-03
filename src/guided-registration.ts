@@ -157,9 +157,13 @@ export class GuidedRegistration {
         delivery.mode === "webhook" &&
         (delivery.url === undefined || (await this.#webhookSecretStore.load()) === undefined)
       ) {
+        const prompt =
+          capability.webhook?.format === "openclaw-agent"
+            ? `Run \`ambassador webhook-secret\`, set the displayed value as OpenClaw \`hooks.token\`, enable hooks for agent \`${capability.webhook.agentId}\`, restart OpenClaw, then retry with its \`/hooks/agent\` URL.`
+            : `Run \`ambassador webhook-secret\`, configure the displayed secret in ${capability.displayName}, then retry with the receiver URL.`;
         return {
           status: "input_required",
-          prompt: `Run \`ambassador webhook-secret\`, configure the displayed secret in ${capability.displayName}, then retry with the receiver URL.`,
+          prompt,
           required: ["delivery.url"],
           command: "ambassador webhook-secret",
         };

@@ -1,8 +1,10 @@
-# 0042 Internal webhook secret and OpenClaw receiver
+# 0042 Internal webhook secret and native OpenClaw hooks
 
 Status: accepted
 
 Date: 2026-09-03
+
+Updated: 2026-09-03
 
 ## Problem
 
@@ -12,9 +14,10 @@ environment, keep that process environment stable across restarts, and
 configure the receiver separately. The model could not safely handle the raw
 secret, so it could not complete or clearly explain that setup.
 
-OpenClaw also had no committed receiver for Ambassador's canonical webhook.
-Its generic mapping layer exposes parsed payloads, not the exact request bytes
-needed to verify Ambassador's HMAC V2 contract.
+Ambassador 0.2.10 addressed OpenClaw webhook delivery with a custom plugin. Its
+installation, capability approval, secret-store reference, plugin
+configuration, and restart sequence made setup much heavier than OpenClaw's
+built-in webhook support requires.
 
 ## Decision
 
@@ -57,52 +60,40 @@ profile contains only version, mode, matched agent kind, and canonical URL.
 Profiles from the superseded `secret_env` format fail closed; there is no
 credential or profile migration. Direct profiles are unchanged.
 
-The package also ships `integrations/openclaw-ambassador`, an OpenClaw plugin
-that registers the exact `/embassys/ambassador` route. The receiver:
+Each webhook-capable registry entry fixes its receiver contract. Hermes keeps
+the complete canonical message body with bearer and HMAC V2 authentication.
+OpenClaw uses its built-in `POST /hooks/agent` endpoint. Ambassador sends the
+generated bearer secret, the central message ID as the idempotency key, and a
+native agent body containing fixed untrusted-input instructions plus the
+complete central message. The body fixes `name: "Embassys Ambassador"`,
+`agentId: "main"`, `sessionMode: "isolated"`, and `deliver: false`.
 
-- reads at most 512 KiB;
-- verifies the bearer, HMAC V2 signature over the exact bytes, five-minute
-  timestamp window, idempotency key, request ID, and canonical outer message;
-- deduplicates accepted message IDs in bounded memory;
-- returns `202` only after a bounded plugin-service queue has accepted the
-  message, then starts a durable OpenClaw embedded-agent turn outside the
-  completed HTTP request's work-admission scope; and
-- passes the complete message in a fixed untrusted-input prompt so the model
-  can use its normally configured Ambassador MCP server.
+OpenClaw's native endpoint does not accept SecretRef values for `hooks.token`.
+The owner pastes the generated value into OpenClaw's owner-only configuration.
+Using `openclaw config patch --stdin` keeps the value out of command arguments
+and shell history. Ambassador does not install a plugin, modify OpenClaw
+configuration, select a model, or expose the secret to the model.
 
-The service queue is memory-only and serial. It is bounded to 64 pending model
-turns; a full or stopped service returns `503` before accepting custody. This
-preserves the architecture's no-message-body-persistence rule. OpenClaw's
-external-plugin runtime does not make its durable ingress queue available to an
-unofficial local-path install, so the package does not bypass that trust check
-or write its own body spool.
+The OpenClaw request omits Ambassador's HMAC V2, timestamp, and request-ID
+headers because the native endpoint supports bearer authentication and its own
+idempotency handling. The request must fit OpenClaw's 256 KiB body limit.
+Hermes retains the existing 512 KiB canonical-body limit.
 
-Starting the embedded turn as a detached promise directly in the HTTP handler
-does not work. OpenClaw releases the handler's root work-admission lease when
-the handler returns; the detached continuation inherits that released lease
-and fails before model execution with `GatewayDrainingError`. The
-plugin-service handoff is created outside that request context and avoids the
-false drain classification. Logs retain only a bounded failure category, never
-the underlying error text or provider output.
-
-The plugin resolves its secret through OpenClaw's secret-input API. Public
-setup uses OpenClaw's encrypted secret store, not a plaintext plugin value.
-OpenClaw must explicitly accept the plugin's HTTP-route capability during
-installation. Ambassador does not install or configure OpenClaw.
-
-Hermes continues to use its native generic webhook receiver. The owner places
-the displayed Ambassador secret in Hermes's owner-only webhook configuration;
-Hermes verifies both bearer and HMAC V2 before starting its model turn.
+An OpenClaw `200` with a run ID proves session and global placement admission,
+not model completion. Ambassador records that admission before acknowledging
+central. Qualification continues until the model calls the required Ambassador
+MCP tool and the requester receives the correlated response.
 
 ## Consequences
 
-- The owner runs one memorable setup command instead of inventing an
-  Ambassador environment variable.
+- The owner runs one Ambassador secret command and pastes one OpenClaw
+  configuration block.
 - Restart no longer depends on recreating Ambassador's process environment.
 - The receiver still needs one deliberate copy of the value because the two
   local processes do not share a credential store.
-- OpenClaw webhook delivery has a concrete, package-shipped receiver rather
-  than an undocumented mapping assumption.
+- OpenClaw webhook setup needs no plugin, plugin capability approval, or plugin
+  secret-store reference.
+- Hermes keeps its exact-body HMAC V2 receiver contract.
 - A webhook `2xx` remains a custody boundary, not proof that the later model
   turn or MCP call succeeded. Qualification waits for the correlated central
   result.
@@ -118,8 +109,10 @@ Hermes verifies both bearer and HMAC V2 before starting its model turn.
 - **Configure provider state automatically.** Rejected because Ambassador does
   not own or mutate provider configuration. The owner copies the one value
   across the process boundary.
-- **Use OpenClaw's parsed generic mapping.** Rejected because HMAC V2
-  authenticates exact bytes before parsing.
+- **Keep the OpenClaw plugin.** Rejected because OpenClaw already has the
+  required authenticated agent ingress and the plugin made installation harder.
+- **Remove authentication on loopback.** Rejected because any same-user process
+  could then start an OpenClaw model turn through the hook.
 - **Rotate on every command.** Rejected because an uncoordinated change would
   immediately break the receiver.
 
@@ -129,3 +122,9 @@ On 2026-09-03, the user approved an Ambassador command that creates, stores,
 and displays the webhook secret, removal of `secret_env` from MCP, a guided
 follow-up after webhook selection, implementation for Hermes and OpenClaw, and
 an OpenClaw receiver followed by real live-central qualification.
+
+Later that day, the user rejected the custom OpenClaw plugin experience and
+approved the built-in `/hooks/agent` path instead. The user asked Ambassador
+not to configure OpenClaw. The accepted experience is one manual OpenClaw
+configuration block using the Ambassador-generated secret, followed by an
+OpenClaw restart.

@@ -16,9 +16,10 @@ service or delete a registered central identity.
    webhook secret and key, delivery profile, ID-only notification journal, and
    process lock. Delete the directory only after checking the exact path.
 
-3. Remove any test-only Ambassador MCP entry, Hermes webhook route, or
-   OpenClaw plugin configuration that you created for the run. Do not remove
-   normal provider credentials.
+3. Remove any test-only Ambassador MCP entry or Hermes webhook route that you
+   created for the run. If you enabled OpenClaw `hooks` only for this test,
+   remove that block or restore its prior values. Do not remove normal provider
+   credentials or unrelated hooks.
 4. Start Ambassador again from the working directory you want the new direct
    profile to use.
 

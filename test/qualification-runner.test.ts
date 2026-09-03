@@ -151,10 +151,13 @@ test("live runner has fixed, separately confirmed real-OpenClaw modes", async ()
   );
   assert.match(source, /\[\s*"mcp",\s*"set"/u);
   assert.match(source, /\[\s*"gateway",\s*"run"/u);
-  assert.match(source, /\[\s*"plugins",\s*"install"/u);
-  assert.match(source, /\[\s*"secrets",\s*"store",\s*"set"/u);
-  assert.match(source, /\[\s*"plugins",\s*"enable"/u);
-  assert.match(source, /embassys\/ambassador/u);
+  assert.match(source, /\["config", "patch", "--stdin"\]/u);
+  assert.match(source, /path: "\/hooks"/u);
+  assert.match(source, /allowedAgentIds: \["main"\]/u);
+  assert.match(source, /allowRequestSessionKey: false/u);
+  assert.match(source, /OPENCLAW_WEBHOOK_PATH = "\/hooks\/agent"/u);
+  assert.doesNotMatch(source, /plugins", "install|plugins", "enable/u);
+  assert.doesNotMatch(source, /AMBASSADOR_WEBHOOK_SECRET/u);
   assert.doesNotMatch(source, /OPENCLAW_VERSION|startsWith\(OPENCLAW_VERSION\)/u);
   assert.match(source, /webhookAcceptedByGateway/u);
   assert.match(source, /targetActionResultCallCount/u);

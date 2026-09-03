@@ -89,6 +89,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   const webhook = await startFakeWebhook(t, {
     secret: webhookSecret,
     nowSeconds: FIXTURE_NOW_SECONDS,
+    contract: "openclaw-agent",
   });
   const controller = new AbortController();
   let stdout = "";

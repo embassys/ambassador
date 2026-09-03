@@ -154,10 +154,13 @@ export async function openGatewayApplication(
     }
     if (context.profile.mode === "webhook") {
       const secret = await webhookSecretStore.load();
-      if (secret === undefined) throw new DeliveryProfileError("invalid_profile");
+      if (secret === undefined || context.capability.webhook === undefined) {
+        throw new DeliveryProfileError("invalid_profile");
+      }
       return new WebhookDeliveryTarget({
         url: context.profile.url,
         secret,
+        contract: context.capability.webhook,
         now: () => nowSeconds() * 1_000,
         ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
       });
