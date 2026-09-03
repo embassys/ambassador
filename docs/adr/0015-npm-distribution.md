@@ -15,7 +15,9 @@ also needs the Embassys product name rather than the development namespace.
 ## Decision
 
 Publish one public package as `@embassys/ambassador` with the `ambassador`
-binary. The package requires Node.js 24.
+binary. The package requires Node.js 24.19.0 or newer. Its npm engine range has
+no upper bound; newer Node majors should fail only for an actual runtime or
+native-dependency incompatibility, not a package-metadata ceiling.
 
 Users run the foreground process directly from npm's current `latest` release:
 
@@ -116,6 +118,14 @@ the candidate file tree, then passed clean-install, cleanup E2E, vulnerability,
 and signature checks. Its digests and results are recorded in the qualification
 document.
 
+Later on 2026-09-03, the user approved version 0.2.13 to remove the `<25`
+engine ceiling. This metadata and documentation release keeps Node 24.19.0 as
+the reproducible build floor and changes the public engine range to
+`>=24.19.0`. It may publish after the repository suite, cross-platform package
+jobs, Docker central fixture, artifact audits, and a clean packed-artifact run
+on Node 26 pass. The compiled runtime and central contract are unchanged, so
+the existing live-central and real-agent evidence remains applicable.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -154,8 +164,8 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11, and
-0.2.12 releases described above. Later publications still require explicit
-approval after qualification.
+0.2.12 and 0.2.13 releases described above. Later publications still require
+explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the
