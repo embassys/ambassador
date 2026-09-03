@@ -73,7 +73,7 @@ test("records all reviewed production agent contracts exactly", () => {
         { name: "codex-mcp-client", version: "0.149.0" },
         { name: "codex-mcp-client", version: "0.152.1" },
       ],
-      modes: ["direct", "webhook"],
+      modes: ["direct"],
       direct: {
         command: "codex-acp",
         args: [],
@@ -97,7 +97,7 @@ test("records all reviewed production agent contracts exactly", () => {
           "XDG_STATE_HOME",
         ],
       },
-      qualificationCases: ["codex-webhook", "codex-direct"],
+      qualificationCases: ["codex-direct"],
     },
     {
       kind: "claude",
@@ -107,7 +107,7 @@ test("records all reviewed production agent contracts exactly", () => {
         { name: "claude-code", version: "2.1.257" },
         { name: "claude-code", version: "2.1.258" },
       ],
-      modes: ["direct", "webhook"],
+      modes: ["direct"],
       direct: {
         command: "claude-agent-acp",
         args: [],
@@ -131,14 +131,14 @@ test("records all reviewed production agent contracts exactly", () => {
           "XDG_STATE_HOME",
         ],
       },
-      qualificationCases: ["claude-webhook", "claude-direct"],
+      qualificationCases: ["claude-direct"],
     },
     {
       kind: "gemini",
       displayName: "Gemini CLI",
       enabled: true,
       aliases: [{ name: "gemini-cli-mcp-client", version: "0.58.0" }],
-      modes: ["direct", "webhook"],
+      modes: ["direct"],
       direct: {
         command: "gemini",
         args: ["--acp"],
@@ -164,7 +164,7 @@ test("records all reviewed production agent contracts exactly", () => {
           "XDG_STATE_HOME",
         ],
       },
-      qualificationCases: ["gemini-webhook", "gemini-direct"],
+      qualificationCases: ["gemini-direct"],
     },
   ]);
 });

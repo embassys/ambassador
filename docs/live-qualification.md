@@ -25,10 +25,10 @@ fixed Codex profile and `codex-acp` 1.8.0 with an isolated Codex login.
 ## Required live checks after the cutover
 
 1. Pack and scan the exact candidate package.
-2. Create two disposable identities through authenticated local MCP.
+2. Create two disposable identities through loopback local MCP.
 3. Use the exact enabled `clientInfo` aliases for one webhook profile and one
-   direct profile. Prove the dual-mode registration result advertises direct
-   as its default before choosing the required mode.
+   direct profile. Prove a dual-mode profile advertises direct as its default;
+   prove a direct-only profile proceeds without a delivery question.
 4. Receive and use both verification emails without persisting their codes.
 5. Restart and prove encrypted credential and nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.

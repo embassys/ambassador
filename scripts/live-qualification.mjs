@@ -914,18 +914,25 @@ async function main() {
         "bootstrap_catalog",
       );
       const initial = await client.call("register_agent", { email: addresses[index] });
-      assert(initial.status === "input_required" && initial.default === "direct", "registration");
-      await client.call("register_agent", {
-        email: addresses[index],
-        delivery:
-          index === 0
-            ? {
-                mode: "webhook",
-                url: webhooks[index].url,
-                secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
-              }
-            : { mode: "direct" },
-      });
+      if (index === 0 || !realCodex) {
+        assert(initial.status === "input_required" && initial.default === "direct", "registration");
+        await client.call("register_agent", {
+          email: addresses[index],
+          delivery:
+            index === 0
+              ? {
+                  mode: "webhook",
+                  url: webhooks[index].url,
+                  secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
+                }
+              : { mode: "direct" },
+        });
+      } else {
+        assert(
+          typeof initial.agent_id === "string" && initial.email === addresses[index],
+          "registration",
+        );
+      }
       const mail = await findVerification(credentials, addresses[index], receivedAfter);
       capturedMail.push(mail.messageId);
       codes.push(mail.code);

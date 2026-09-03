@@ -37,8 +37,9 @@ scope on your own.
   working directory from MCP input.
 - Direct is the default. A complete direct-only profile proceeds without a
   delivery question. Ask direct versus webhook only for a complete dual-mode
-  profile, and present direct as the default. The enabled dual-mode profiles
-  are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+  profile, and present direct as the default. Only OpenClaw and Hermes are
+  dual-mode. Codex, Claude Code, and Gemini CLI are direct-only and proceed
+  without a delivery question.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
   central registration state. Do not offer a generic webhook fallback. Keep the
   exact Codex, Claude Code, and Gemini CLI contracts approved in ADR 0038; do

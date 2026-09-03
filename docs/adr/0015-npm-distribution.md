@@ -37,7 +37,8 @@ qualification, and artifact audits pass. ADR 0033 keeps Windows unsupported.
 
 `@embassys/ambassador@0.2.6` was a one-release exception: on 2026-09-03 the user
 explicitly approved publication after the deterministic CI, package, fixture,
-and live Codex evidence, but before the remaining nine real-agent cases and the
+and live Codex evidence, but before the remaining six supported real-agent
+cases and the
 supported-Node repeat of the Codex case. Keep those gaps visible as
 post-release qualification work. This exception does not relax the gate for a
 later version. The user separately approved 0.2.7 on 2026-09-03 to remove the

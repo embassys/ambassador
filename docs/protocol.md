@@ -112,9 +112,9 @@ containing those credential fields or stored token bytes.
 ```
 
 Before writing state or contacting central, Ambassador resolves the current MCP
-session to exactly one enabled capability profile. OpenClaw, Hermes, Codex,
-Claude Code, and Gemini CLI support direct and webhook delivery through their
-exact compiled-in contracts.
+session to exactly one enabled capability profile. OpenClaw and Hermes support
+direct and webhook delivery. Codex, Claude Code, and Gemini CLI are
+direct-only. All use their exact compiled-in contracts.
 
 Profile behavior is capability-driven:
 
@@ -124,7 +124,8 @@ Profile behavior is capability-driven:
 | Complete direct and webhook | Return `input_required`; direct is the default |
 | Unknown, ambiguous, disabled, or incomplete | Return `unsupported_agent`; write no state and make no central request |
 
-For a dual-mode profile, an initial call without `delivery` returns structured
+Codex, Claude Code, and Gemini CLI follow the direct-only row. For a dual-mode
+OpenClaw or Hermes profile, an initial call without `delivery` returns structured
 content equivalent to:
 
 ```json
@@ -506,8 +507,8 @@ The cutover must prove at least:
 - ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
   cancellation, crash, and uncertainty handling;
 - deterministic CI coverage with a mock webhook receiver and mock ACP agent;
-- opt-in local coverage for OpenClaw, Hermes, Codex, Claude Code, and Gemini
-  CLI in both modes;
+- opt-in local coverage for direct delivery on all five profiles and webhook
+  delivery on OpenClaw and Hermes;
 - unchanged central REST and DPoP behavior from ADR 0037;
 - bounded in-memory body custody and ID-only durable state;
 - exact target-authorized action-result submission and correlated response
