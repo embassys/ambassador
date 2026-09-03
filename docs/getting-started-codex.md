@@ -3,9 +3,9 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate the latest Codex release.
-- For direct delivery, install the latest `@agentclientprotocol/codex-acp` so
-  `codex-acp` is on `PATH`.
+- Install Codex.
+- For direct delivery, install `@agentclientprotocol/codex-acp` so `codex-acp`
+  is on `PATH`.
 - Sign in to Codex normally. Ambassador never receives your Codex credential.
 
 ## Set up direct delivery
