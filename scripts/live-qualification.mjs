@@ -27,6 +27,8 @@ const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
 const CODEX_CONFIRMATION =
   "run-live-qualification-with-real-codex-and-two-disposable-mailosaur-identities";
+const CLAUDE_CONFIRMATION =
+  "run-live-qualification-with-real-claude-and-two-disposable-mailosaur-identities";
 const HERMES_DIRECT_CONFIRMATION =
   "run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities";
 const HERMES_WEBHOOK_CONFIRMATION =
@@ -37,7 +39,9 @@ const OPENCLAW_WEBHOOK_CONFIRMATION =
   "run-live-qualification-with-real-openclaw-webhook-and-two-disposable-mailosaur-identities";
 const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "qualification" };
 const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" };
+const CLAUDE_CLIENT_INFO = { name: "claude-code", version: "qualification" };
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
+const CLAUDE_ACP_COMMAND = "claude-agent-acp";
 const HERMES_ACP_COMMAND = "hermes-acp";
 const OPENCLAW_ACP_COMMAND = "openclaw";
 const OPENCLAW_WEBHOOK_PATH = "/hooks/agent";
@@ -467,6 +471,50 @@ function hermesEnvironment(home, extra = {}) {
     ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
     ...extra,
   };
+}
+
+function claudeEnvironment(home) {
+  return {
+    HOME: home,
+    ...(process.env.ANTHROPIC_API_KEY === undefined
+      ? {}
+      : { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }),
+    ...(process.env.ANTHROPIC_AUTH_TOKEN === undefined
+      ? {}
+      : { ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN }),
+    ...(process.env.CLAUDE_CODE_OAUTH_TOKEN === undefined
+      ? {}
+      : { CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN }),
+    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+    ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+  };
+}
+
+async function validateClaudeHome(configuredHome) {
+  assert(configuredHome !== undefined && isAbsolute(configuredHome), "claude_isolation");
+  const home = await realpath(configuredHome).catch(() => undefined);
+  const ordinaryHome =
+    process.env.HOME === undefined
+      ? undefined
+      : await realpath(process.env.HOME).catch(() => undefined);
+  assert(home !== undefined && home !== ordinaryHome, "claude_isolation");
+  const rootMetadata = await lstat(home).catch(() => undefined);
+  assert(
+    rootMetadata?.isDirectory() === true &&
+      !rootMetadata.isSymbolicLink() &&
+      (rootMetadata.mode & 0o077) === 0,
+    "claude_isolation",
+  );
+  for (const relativePath of [".claude.json", ".claude/settings.json"]) {
+    const metadata = await lstat(join(home, relativePath)).catch(() => undefined);
+    assert(
+      metadata?.isFile() === true && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0,
+      "claude_isolation",
+    );
+  }
+  return home;
 }
 
 async function validateHermesHome(configuredHome) {
@@ -1117,6 +1165,7 @@ async function main() {
     [
       "mock",
       "codex",
+      "claude",
       "hermes-direct",
       "hermes-webhook",
       "openclaw-direct",
@@ -1125,6 +1174,7 @@ async function main() {
     "direct_agent",
   );
   const realCodex = directAgent === "codex";
+  const realClaude = directAgent === "claude";
   const realHermesDirect = directAgent === "hermes-direct";
   const realHermesWebhook = directAgent === "hermes-webhook";
   const realHermes = realHermesDirect || realHermesWebhook;
@@ -1132,20 +1182,23 @@ async function main() {
   const realOpenClawWebhook = directAgent === "openclaw-webhook";
   const realOpenClaw = realOpenClawDirect || realOpenClawWebhook;
   const realWebhook = realHermesWebhook || realOpenClawWebhook;
-  const realDirect = realCodex || realHermesDirect || realOpenClawDirect;
+  const realDirect = realCodex || realClaude || realHermesDirect || realOpenClawDirect;
+  const realDirectOnly = realCodex || realClaude;
   const realTarget = realDirect || realWebhook;
   let targetVersionProbe = { status: "not_applicable", reported_version: null };
   const confirmation = realCodex
     ? CODEX_CONFIRMATION
-    : realHermesDirect
-      ? HERMES_DIRECT_CONFIRMATION
-      : realHermesWebhook
-        ? HERMES_WEBHOOK_CONFIRMATION
-        : realOpenClawDirect
-          ? OPENCLAW_DIRECT_CONFIRMATION
-          : realOpenClawWebhook
-            ? OPENCLAW_WEBHOOK_CONFIRMATION
-            : MOCK_CONFIRMATION;
+    : realClaude
+      ? CLAUDE_CONFIRMATION
+      : realHermesDirect
+        ? HERMES_DIRECT_CONFIRMATION
+        : realHermesWebhook
+          ? HERMES_WEBHOOK_CONFIRMATION
+          : realOpenClawDirect
+            ? OPENCLAW_DIRECT_CONFIRMATION
+            : realOpenClawWebhook
+              ? OPENCLAW_WEBHOOK_CONFIRMATION
+              : MOCK_CONFIRMATION;
   if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== confirmation) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
@@ -1171,6 +1224,12 @@ async function main() {
       HOME: codexHome,
       ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
     });
+  }
+  const claudeHome = realClaude
+    ? await validateClaudeHome(process.env.AMBASSADOR_CLAUDE_QUALIFICATION_HOME)
+    : undefined;
+  if (realClaude && claudeHome !== undefined) {
+    targetVersionProbe = await observeAgentVersion("claude", claudeEnvironment(claudeHome));
   }
   const hermesHome = realHermes
     ? await validateHermesHome(process.env.AMBASSADOR_HERMES_QUALIFICATION_HOME)
@@ -1352,6 +1411,19 @@ async function main() {
       pathToFileURL(join(dirname(cliPath), "agent-capabilities.js")).href
     );
     assert(typeof packed.runCli === "function", "package_input");
+    if (realClaude) {
+      const claudeCapability = agentCapabilitiesModule.PRODUCTION_AGENT_CAPABILITIES.find(
+        (candidate) => candidate.kind === "claude",
+      );
+      assert(
+        canonicalJson(claudeCapability?.aliases) === canonicalJson([CLAUDE_CLIENT_INFO.name]) &&
+          claudeCapability?.direct?.command === CLAUDE_ACP_COMMAND &&
+          canonicalJson(claudeCapability.direct.args) === canonicalJson([]) &&
+          claudeCapability.direct.agentInfo.name === "@agentclientprotocol/claude-agent-acp" &&
+          claudeCapability.direct.mcp === "session",
+        "claude_profile",
+      );
+    }
     if (realHermes) {
       const hermesCapability = agentCapabilitiesModule.PRODUCTION_AGENT_CAPABILITIES.find(
         (candidate) => candidate.kind === "hermes",
@@ -1402,6 +1474,21 @@ async function main() {
         ].join("\n"),
         { encoding: "utf8", flag: "wx", mode: 0o600 },
       );
+      if (realClaude) {
+        await writeFile(
+          join(targetWorkingDirectory, "CLAUDE.md"),
+          [
+            "# Controlled Embassys qualification policy",
+            "",
+            "The user approved only the synthetic get_phone_number qualification in this directory.",
+            "For its permission_request, call respond_to_permission with decision granted.",
+            "For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and a result containing only the requested synthetic phone_number.",
+            "Do not grant, execute, or answer any other request.",
+            "",
+          ].join("\n"),
+          { encoding: "utf8", flag: "wx", mode: 0o600 },
+        );
+      }
     }
 
     const clientInfoFor = (index) =>
@@ -1409,11 +1496,17 @@ async function main() {
         ? OPENCLAW_CLIENT_INFO
         : realCodex
           ? CODEX_CLIENT_INFO
-          : realHermes
-            ? HERMES_CLIENT_INFO
-            : OPENCLAW_CLIENT_INFO;
+          : realClaude
+            ? CLAUDE_CLIENT_INFO
+            : realHermes
+              ? HERMES_CLIENT_INFO
+              : OPENCLAW_CLIENT_INFO;
     const environmentFor = (index) => {
       if (index !== 1 || !realTarget) return {};
+      if (realClaude) {
+        assert(claudeHome !== undefined, "claude_isolation");
+        return claudeEnvironment(claudeHome);
+      }
       const home = realCodex ? codexHome : realHermes ? hermesHome : openClawHome;
       return {
         HOME: home,
@@ -1526,7 +1619,7 @@ async function main() {
         "bootstrap_catalog",
       );
       const initial = await client.call("register_agent", { email: addresses[index] });
-      if (index === 0 || !realCodex) {
+      if (index === 0 || !realDirectOnly) {
         assert(initial.status === "input_required" && initial.default === "direct", "registration");
         await client.call("register_agent", {
           email: addresses[index],
@@ -1883,24 +1976,28 @@ async function main() {
     );
     const qualification = realCodex
       ? "ambassador-live-codex"
-      : realHermesDirect
-        ? "ambassador-live-hermes-direct"
-        : realHermesWebhook
-          ? "ambassador-live-hermes-webhook"
-          : realOpenClawDirect
-            ? "ambassador-live-openclaw-direct"
-            : realOpenClawWebhook
-              ? "ambassador-live-openclaw-webhook"
-              : "ambassador-live";
+      : realClaude
+        ? "ambassador-live-claude"
+        : realHermesDirect
+          ? "ambassador-live-hermes-direct"
+          : realHermesWebhook
+            ? "ambassador-live-hermes-webhook"
+            : realOpenClawDirect
+              ? "ambassador-live-openclaw-direct"
+              : realOpenClawWebhook
+                ? "ambassador-live-openclaw-webhook"
+                : "ambassador-live";
     const targetAgent = realCodex
       ? "codex-acp"
-      : realHermes
-        ? "hermes-agent"
-        : realOpenClaw
-          ? realOpenClawWebhook
-            ? "openclaw-native-hook"
-            : "openclaw-acp"
-          : "deterministic-mock-acp";
+      : realClaude
+        ? "claude-agent-acp"
+        : realHermes
+          ? "hermes-agent"
+          : realOpenClaw
+            ? realOpenClawWebhook
+              ? "openclaw-native-hook"
+              : "openclaw-acp"
+            : "deterministic-mock-acp";
     const report = {
       qualification,
       date: new Date().toISOString().slice(0, 10),
@@ -1930,6 +2027,11 @@ async function main() {
         action_result_round_trip: "passed",
         codex_permission_decision: realCodex ? "passed" : "not_applicable",
         codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
+        claude_permission_decision: realClaude ? "passed" : "not_applicable",
+        claude_action_result_mcp_call: realClaude ? "passed" : "not_applicable",
+        claude_action_result_call_count: realClaude
+          ? targetActionResultCallCount
+          : "not_applicable",
         hermes_permission_decision: realHermes ? "passed" : "not_applicable",
         hermes_action_result_mcp_call: realHermes ? "passed" : "not_applicable",
         hermes_action_result_call_count: realHermes

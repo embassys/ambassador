@@ -1,6 +1,6 @@
 # 0015 npm distribution
 
-Status: accepted for packaging; package and CLI amended by ADRs 0038 and 0039
+Status: accepted for packaging; amended by ADRs 0038, 0039, and 0043
 
 Date: 2026-08-24
 
@@ -32,7 +32,7 @@ They do not require a global install or pnpm. The repository, CI, packing, and
 release qualification use pnpm under ADR 0006.
 
 Normally publish from `main` only after Linux, macOS, and Windows checks,
-packed installation, the five-profile local qualification matrix, live central
+packed installation, the four-profile local qualification matrix, live central
 qualification, and artifact audits pass. ADR 0040 requires separate native
 evidence before documenting any agent profile and mode as supported on
 Windows. Published Ambassador 0.2.8 and 0.2.9 predate that evidence and have no
@@ -92,6 +92,11 @@ Those conditions passed. PR 23 merged on 2026-09-03, all main-branch gates
 passed, the OIDC job published 0.2.11 with the npm `latest` tag, and the
 registry artifact was independently downloaded and verified. Digests and
 artifact checks are recorded in the qualification document.
+
+ADR 0043 removes Gemini CLI from the current source registry and defers
+Antigravity. Historical release evidence above continues to describe the
+artifacts that were published at the time. A future publication from the
+current source uses the four-profile release matrix.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips

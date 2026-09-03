@@ -111,11 +111,10 @@ test("OpenClaw webhook selection points to its native hook without a plugin", as
   assert.deepEqual(calls, []);
 });
 
-test("Codex, Claude Code, and Gemini CLI register directly without a delivery question", async (t) => {
+test("Codex and Claude Code register directly without a delivery question", async (t) => {
   for (const clientInfo of [
     { name: "codex-mcp-client", version: "qualification" },
     { name: "claude-code", version: "qualification" },
-    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -134,7 +133,6 @@ test("direct-only production profiles reject webhook input before state or centr
   for (const clientInfo of [
     { name: "codex-mcp-client", version: "qualification" },
     { name: "claude-code", version: "qualification" },
-    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(clientInfo.name, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -189,7 +187,6 @@ test("persists the derived direct or webhook profile before central registration
   for (const clientInfo of [
     { name: "codex-mcp-client", version: "qualification" },
     { name: "claude-code", version: "qualification" },
-    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(clientInfo.name, async (t) => {
       const selected = await fixture(t);

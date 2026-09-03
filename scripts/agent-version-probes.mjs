@@ -7,7 +7,6 @@ export const AGENT_VERSION_PROBES = new Map([
   ["hermes", { command: "hermes", args: ["--version"] }],
   ["codex", { command: "codex-acp", args: ["--version"] }],
   ["claude", { command: "claude-agent-acp", args: ["--version"] }],
-  ["gemini", { command: "gemini", args: ["--version"] }],
 ]);
 
 function probeEnvironment(environment) {

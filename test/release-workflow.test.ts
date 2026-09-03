@@ -39,7 +39,7 @@ test("the Windows test runner serializes files that exercise native ACLs", async
 });
 
 test("every supported-agent guide uses latest Ambassador without pinning a provider release", async () => {
-  const guides = ["codex", "claude", "gemini", "hermes", "openclaw"];
+  const guides = ["codex", "claude", "hermes", "openclaw"];
   for (const guide of guides) {
     const contents = await readFile(
       join(process.cwd(), "docs", `getting-started-${guide}.md`),

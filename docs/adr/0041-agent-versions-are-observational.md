@@ -40,8 +40,8 @@ observational:
   normal bounded startup, initialization, session, prompt, or delivery failure.
   Do not fall back to another command, adapter, agent profile, or delivery mode.
 
-This policy applies equally to OpenClaw, Hermes, Codex, Claude Code, Gemini CLI,
-and future reviewed profiles. Adding a future profile still requires a fixed
+This policy applies equally to OpenClaw, Hermes, Codex, Claude Code, and future
+reviewed profiles. Adding a future profile still requires a fixed
 known client name, fixed launch contract, tests, documentation, and
 qualification.
 

@@ -173,50 +173,6 @@ test("records all reviewed production agent contracts exactly", () => {
       },
       qualificationCases: ["claude-direct"],
     },
-    {
-      kind: "gemini",
-      displayName: "Gemini CLI",
-      enabled: true,
-      aliases: ["gemini-cli-mcp-client"],
-      modes: ["direct"],
-      direct: {
-        command: "gemini",
-        args: ["--acp"],
-        agentInfo: { name: "gemini-cli" },
-        mcp: "session",
-        environment: [
-          "APPDATA",
-          "GEMINI_API_KEY",
-          "GOOGLE_API_KEY",
-          "GOOGLE_CLOUD_LOCATION",
-          "GOOGLE_CLOUD_PROJECT",
-          "GOOGLE_GENAI_USE_VERTEXAI",
-          "HOME",
-          "LANG",
-          "LC_ALL",
-          "LOCALAPPDATA",
-          "NODE_EXTRA_CA_CERTS",
-          "PATH",
-          "SSL_CERT_DIR",
-          "SSL_CERT_FILE",
-          "SystemRoot",
-          "TEMP",
-          "TMP",
-          "TMPDIR",
-          "USERPROFILE",
-          "WINDIR",
-          "XDG_CONFIG_HOME",
-          "XDG_DATA_HOME",
-          "XDG_STATE_HOME",
-        ],
-        windowsNodePackage: {
-          packageName: "@google/gemini-cli",
-          binName: "gemini",
-          entrypoint: "bundle/gemini.js",
-        },
-      },
-      qualificationCases: ["gemini-direct"],
-    },
   ]);
 });
 
@@ -239,11 +195,13 @@ test("matches exact client names and rejects unknown, ambiguous, disabled, and i
     ["codex-mcp-client", "0.152.1", "codex"],
     ["claude-code", "2.1.257", "claude"],
     ["claude-code", "2.1.258", "claude"],
-    ["gemini-cli-mcp-client", "0.58.0", "gemini"],
   ] as const) {
     const result = resolveAgentCapability({ name, version });
     assert.equal(result.status, "matched");
     assert.equal(result.status === "matched" ? result.profile.kind : undefined, kind);
+  }
+  for (const name of ["gemini-cli-mcp-client", "antigravity-client"]) {
+    assert.equal(resolveAgentCapability({ name, version: "qualification" }).status, "unsupported");
   }
   const base = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(base);
@@ -296,7 +254,6 @@ test("matches every known MCP client name without using its reported version as 
     ["mcp", "hermes"],
     ["codex-mcp-client", "codex"],
     ["claude-code", "claude"],
-    ["gemini-cli-mcp-client", "gemini"],
   ] as const) {
     for (const version of ["0.0.1", "999.999.999", "future-release"]) {
       const result = resolveAgentCapability({ name, version });
