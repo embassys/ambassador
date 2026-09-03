@@ -8,6 +8,7 @@ import {
   capabilityForKind,
   type DeliveryMode,
 } from "./agent-capabilities.js";
+import { secureWindowsArtifact, type WindowsAccessControl } from "./windows-access-control.js";
 
 export type DeliveryProfileErrorCode =
   | "incompatible_profile"
@@ -51,6 +52,11 @@ export interface WebhookDeliveryProfile {
 }
 
 export type DeliveryProfile = DirectDeliveryProfile | WebhookDeliveryProfile;
+
+export interface DeliveryProfileStoreOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly windowsAccessControl?: WindowsAccessControl;
+}
 
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 const HEADER_SAFE_SECRET = /^[\x21-\x7e]{32,256}$/u;
@@ -201,28 +207,24 @@ export async function validateStoredDeliveryProfile(
   return { profile: parsed, capability };
 }
 
-async function safeExistingFile(path: string): Promise<boolean> {
-  try {
-    const status = await lstat(path);
-    if (!status.isFile() || status.isSymbolicLink() || status.nlink !== 1) {
-      throw failure("profile_store_failed");
-    }
-    if (process.platform !== "win32" && (status.mode & 0o077) !== 0) {
-      throw failure("profile_store_failed");
-    }
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    if (error instanceof DeliveryProfileError) throw error;
-    throw failure("profile_store_failed");
-  }
-}
-
 export class DeliveryProfileStore {
-  constructor(readonly path: string) {}
+  readonly #platform: NodeJS.Platform;
+  readonly #windowsAccessControl?: WindowsAccessControl;
+
+  constructor(
+    readonly path: string,
+    options: DeliveryProfileStoreOptions = {},
+  ) {
+    this.#platform = options.platform ?? process.platform;
+    if (this.#platform === "win32") {
+      this.#windowsAccessControl = options.windowsAccessControl ?? {
+        secure: secureWindowsArtifact,
+      };
+    }
+  }
 
   async load(): Promise<DeliveryProfile | undefined> {
-    if (!(await safeExistingFile(this.path))) return undefined;
+    if (!(await this.#safeExistingFile(this.path))) return undefined;
     try {
       const bytes = await readFile(this.path);
       if (bytes.byteLength > PROFILE_MAX_BYTES) throw failure("invalid_profile");
@@ -248,7 +250,11 @@ export class DeliveryProfileStore {
       if (!directoryStatus.isDirectory() || directoryStatus.isSymbolicLink()) {
         throw failure("profile_store_failed");
       }
-      if (process.platform !== "win32") await chmod(directory, 0o700);
+      if (this.#platform === "win32") {
+        await this.#windowsAccessControl?.secure(directory, "directory");
+      } else {
+        await chmod(directory, 0o700);
+      }
     } catch (error) {
       if (error instanceof DeliveryProfileError) throw error;
       throw failure("profile_store_failed");
@@ -257,11 +263,17 @@ export class DeliveryProfileStore {
     const temporaryPath = `${this.path}.${randomUUID()}.tmp`;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
+      const noFollow = this.#platform === "win32" ? 0 : constants.O_NOFOLLOW;
       handle = await open(
         temporaryPath,
-        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
         0o600,
       );
+      if (this.#platform === "win32") {
+        await this.#windowsAccessControl?.secure(temporaryPath, "file");
+      } else {
+        await handle.chmod(0o600);
+      }
       await handle.writeFile(`${JSON.stringify(parsed)}\n`, "utf8");
       await handle.sync();
       await handle.close();
@@ -276,9 +288,9 @@ export class DeliveryProfileStore {
         throw failure("profile_conflict");
       }
       await unlink(temporaryPath);
-      if (process.platform !== "win32") await chmod(this.path, 0o600);
-      await safeExistingFile(this.path);
-      if (process.platform !== "win32") {
+      if (this.#platform !== "win32") await chmod(this.path, 0o600);
+      await this.#safeExistingFile(this.path);
+      if (this.#platform !== "win32") {
         const directoryHandle = await open(directory, constants.O_RDONLY);
         try {
           await directoryHandle.sync();
@@ -289,6 +301,35 @@ export class DeliveryProfileStore {
     } catch (error) {
       await handle?.close().catch(() => undefined);
       await unlink(temporaryPath).catch(() => undefined);
+      if (error instanceof DeliveryProfileError) throw error;
+      throw failure("profile_store_failed");
+    }
+  }
+
+  async #safeExistingFile(path: string): Promise<boolean> {
+    try {
+      const status = await lstat(path);
+      if (!status.isFile() || status.isSymbolicLink() || status.nlink !== 1) {
+        throw failure("profile_store_failed");
+      }
+      if (this.#platform === "win32") {
+        await this.#windowsAccessControl?.secure(path, "file");
+      } else if ((status.mode & 0o077) !== 0) {
+        throw failure("profile_store_failed");
+      }
+      const current = await lstat(path);
+      if (
+        !current.isFile() ||
+        current.isSymbolicLink() ||
+        current.nlink !== 1 ||
+        current.dev !== status.dev ||
+        current.ino !== status.ino
+      ) {
+        throw failure("profile_store_failed");
+      }
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       if (error instanceof DeliveryProfileError) throw error;
       throw failure("profile_store_failed");
     }

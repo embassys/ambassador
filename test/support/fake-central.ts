@@ -1081,8 +1081,10 @@ export async function startFakeCentral(t?: TestContext): Promise<FakeCentral> {
   };
 
   const close = async (): Promise<void> => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (!server.listening) return;
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()));
     server.closeAllConnections();
+    await closed;
   };
   t?.after(close);
 

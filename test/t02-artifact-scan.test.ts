@@ -28,10 +28,6 @@ interface ScanManifest {
 
 const SCANNER = join(process.cwd(), "scripts", "t02-artifact-scan.mjs");
 const SAFE_MARKER = "known-secret-marker-7db2a759";
-const WINDOWS_NO_FOLLOW_SKIP =
-  process.platform === "win32"
-    ? "ADR 0033: Windows artifact scanning is deferred pending a new approved plan"
-    : false;
 
 async function artifactRoot(t: TestContext): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "a2a-t02-artifact-scan-"));
@@ -85,9 +81,7 @@ test("treats Windows paths on different drives as disjoint", async () => {
   );
 });
 
-test("scans bounded process files and in-memory transcript captures without exposing markers", {
-  skip: WINDOWS_NO_FOLLOW_SKIP,
-}, async (t) => {
+test("scans bounded process files and in-memory transcript captures without exposing markers", async (t) => {
   const root = await artifactRoot(t);
   await mkdir(join(root, "state", "nested"), { recursive: true });
   await writeFile(join(root, "state", "journal.sqlite"), Buffer.from([0, 1, 2, 3, 4, 5]));
@@ -153,9 +147,7 @@ const FORBIDDEN_CASES = [
 ] as const;
 
 for (const forbidden of FORBIDDEN_CASES) {
-  test(`rejects ${forbidden.name} in files without echoing its value or path`, {
-    skip: WINDOWS_NO_FOLLOW_SKIP,
-  }, async (t) => {
+  test(`rejects ${forbidden.name} in files without echoing its value or path`, async (t) => {
     const root = await artifactRoot(t);
     const decoded =
       forbidden.encoding === "base64"
@@ -215,9 +207,7 @@ test("fails closed when a forbidden marker fell out of a truncated capture tail"
   assert.equal(result.stderr.includes(retainedTail), false);
 });
 
-test("fails closed at configurable file, total-byte, and depth bounds", {
-  skip: WINDOWS_NO_FOLLOW_SKIP,
-}, async (t) => {
+test("fails closed at configurable file, total-byte, and depth bounds", async (t) => {
   const root = await artifactRoot(t);
   await writeFile(join(root, "one"), "12345678");
   await writeFile(join(root, "two"), "abcdefgh");

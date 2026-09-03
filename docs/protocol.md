@@ -391,6 +391,14 @@ directory is the canonical process directory captured during registration. A
 later start from a different directory fails closed instead of silently moving
 the agent's scope.
 
+On Windows, a reviewed Node-based direct profile also fixes its package name,
+bin name, and JavaScript entrypoint. Ambassador resolves only that package next
+to an absolute `PATH` entry, checks its identity and contained entrypoint,
+requires bounded version metadata without treating it as an allowlist, and
+launches it with the current Node executable. It does not execute the npm
+batch-file shim or invoke a shell. Native direct commands retain the fixed
+executable in the registry.
+
 The enabled profiles and fixed contracts are:
 
 | Profile | MCP client name | Direct invocation | ACP agent name | MCP setup |

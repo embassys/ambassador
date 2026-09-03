@@ -18,9 +18,13 @@ interface WakeWaiter {
 }
 
 export async function startFakeWebhook(
-  t: TestContext,
+  t: TestContext | undefined,
   options: { statuses?: number[]; secret?: string; nowSeconds?: number } = {},
-): Promise<{ url: string; waitForWake: () => Promise<WebhookWake> }> {
+): Promise<{
+  url: string;
+  waitForWake: () => Promise<WebhookWake>;
+  close: () => Promise<void>;
+}> {
   const wakes: WebhookWake[] = [];
   const waiters: WakeWaiter[] = [];
   const server = createServer((request, response) => {
@@ -121,11 +125,18 @@ export async function startFakeWebhook(
       resolve();
     });
   });
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const close = async (): Promise<void> => {
+    if (!server.listening) return;
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+    server.closeAllConnections();
+    await closed;
+  };
+  t?.after(close);
 
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}/hooks/agent`,
+    close,
     waitForWake: async () => {
       const wake = wakes.shift();
       if (wake !== undefined) {

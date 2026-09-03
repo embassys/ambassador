@@ -1,10 +1,12 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 
 import * as acp from "@agentclientprotocol/sdk";
 
-import type { DirectAgentCapability } from "./agent-capabilities.js";
+import type { DirectAgentCapability, WindowsNodePackageEntrypoint } from "./agent-capabilities.js";
 import type { CentralMessage } from "./central-rest.js";
 
 const DEFAULT_INITIALIZATION_DEADLINE_MS = 15_000;
@@ -15,6 +17,9 @@ const DEFAULT_CLEANUP_DEADLINE_MS = 5_000;
 const DEFAULT_OUTER_DEADLINE_MS = 15 * 60 * 1_000 + 30_000;
 const DEFAULT_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAXIMUM_STARTUP_ATTEMPTS = 2;
+const MAXIMUM_PATH_ENTRIES = 128;
+const MAXIMUM_PACKAGE_MANIFEST_BYTES = 128 * 1024;
+const BOUNDED_PACKAGE_VERSION = /^[\x20-\x7e]{1,128}$/u;
 
 type ManagedChild = ChildProcess;
 export type SpawnProcess = (
@@ -36,6 +41,103 @@ export class DirectDeliveryError extends Error {
   }
 }
 
+function errorCode(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" && "code" in error
+    ? String(error.code)
+    : undefined;
+}
+
+function pathWithin(root: string, path: string): boolean {
+  const value = relative(root, path);
+  return value === "" || (!value.startsWith(`..${sep}`) && value !== ".." && !isAbsolute(value));
+}
+
+function validWindowsNodePackageContract(value: WindowsNodePackageEntrypoint): boolean {
+  return (
+    value.packageName.length > 0 &&
+    value.packageName.length <= 128 &&
+    value.binName.length > 0 &&
+    value.binName.length <= 128 &&
+    value.entrypoint.length > 0 &&
+    value.entrypoint.length <= 128 &&
+    !value.packageName.includes("\\") &&
+    !value.entrypoint.includes("\\") &&
+    value.packageName
+      .split("/")
+      .every((segment) => segment.length > 0 && segment !== "." && segment !== "..") &&
+    value.entrypoint
+      .split("/")
+      .every((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+  );
+}
+
+export async function resolveWindowsNodePackageEntrypoint(
+  contract: WindowsNodePackageEntrypoint,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  const pathValue = environment.PATH;
+  if (
+    !validWindowsNodePackageContract(contract) ||
+    pathValue === undefined ||
+    pathValue.length < 1 ||
+    pathValue.length > 32_768 ||
+    pathValue.includes("\u0000")
+  ) {
+    throw new DirectDeliveryError("startup_failed");
+  }
+  const entries = pathValue.split(delimiter).filter((entry) => entry.length > 0);
+  if (entries.length > MAXIMUM_PATH_ENTRIES) throw new DirectDeliveryError("startup_failed");
+  const packageSegments = contract.packageName.split("/");
+
+  for (const entry of entries) {
+    if (!isAbsolute(entry)) continue;
+    const packageRootCandidate =
+      basename(entry).toLowerCase() === ".bin"
+        ? join(dirname(entry), ...packageSegments)
+        : join(entry, "node_modules", ...packageSegments);
+    try {
+      const shim = await lstat(join(entry, `${contract.binName}.cmd`));
+      if (!shim.isFile() && !shim.isSymbolicLink()) continue;
+      const packageRoot = await realpath(packageRootCandidate);
+      const manifestPath = join(packageRoot, "package.json");
+      const manifestStats = await lstat(manifestPath);
+      if (
+        !manifestStats.isFile() ||
+        manifestStats.size < 1 ||
+        manifestStats.size > MAXIMUM_PACKAGE_MANIFEST_BYTES
+      ) {
+        continue;
+      }
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+      if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) continue;
+      const record = manifest as Record<string, unknown>;
+      const bin = record.bin;
+      const declaredEntrypoint =
+        typeof bin === "string"
+          ? bin
+          : bin !== null && typeof bin === "object" && !Array.isArray(bin)
+            ? (bin as Record<string, unknown>)[contract.binName]
+            : undefined;
+      if (
+        record.name !== contract.packageName ||
+        typeof record.version !== "string" ||
+        !BOUNDED_PACKAGE_VERSION.test(record.version) ||
+        declaredEntrypoint !== contract.entrypoint
+      ) {
+        continue;
+      }
+      const entrypoint = await realpath(resolve(packageRoot, contract.entrypoint));
+      if (!pathWithin(packageRoot, entrypoint)) continue;
+      const entrypointStats = await lstat(entrypoint);
+      if (!entrypointStats.isFile() || entrypointStats.size < 1) continue;
+      return entrypoint;
+    } catch (error) {
+      if (errorCode(error) === "ENOENT") continue;
+    }
+  }
+  throw new DirectDeliveryError("startup_failed");
+}
+
 export interface DirectDeliveryTargetOptions {
   readonly capability: DirectAgentCapability;
   readonly workingDirectory: string;
@@ -49,6 +151,7 @@ export interface DirectDeliveryTargetOptions {
   readonly outerDeadlineMs?: number;
   readonly maximumOutputBytes?: number;
   readonly maximumStartupAttempts?: number;
+  readonly platform?: NodeJS.Platform;
   readonly spawnProcess?: SpawnProcess;
 }
 
@@ -90,9 +193,9 @@ async function waitForChild(child: ManagedChild, milliseconds: number): Promise<
   ]);
 }
 
-function signalChild(child: ManagedChild, signal: NodeJS.Signals): void {
+function signalChild(child: ManagedChild, signal: NodeJS.Signals, platform: NodeJS.Platform): void {
   if (childExited(child)) return;
-  if (process.platform !== "win32" && child.pid !== undefined) {
+  if (platform !== "win32" && child.pid !== undefined) {
     try {
       process.kill(-child.pid, signal);
       return;
@@ -103,13 +206,17 @@ function signalChild(child: ManagedChild, signal: NodeJS.Signals): void {
   child.kill(signal);
 }
 
-async function cleanupChild(child: ManagedChild, milliseconds: number): Promise<boolean> {
+async function cleanupChild(
+  child: ManagedChild,
+  milliseconds: number,
+  platform: NodeJS.Platform,
+): Promise<boolean> {
   if (childExited(child)) return true;
   child.stdin?.end();
-  signalChild(child, "SIGTERM");
+  signalChild(child, "SIGTERM", platform);
   const graceful = Math.max(1, Math.floor(milliseconds / 2));
   if (await waitForChild(child, graceful)) return true;
-  signalChild(child, "SIGKILL");
+  signalChild(child, "SIGKILL", platform);
   return await waitForChild(child, Math.max(1, milliseconds - graceful));
 }
 
@@ -153,6 +260,7 @@ export class DirectDeliveryTarget {
   readonly #outerDeadlineMs: number;
   readonly #maximumOutputBytes: number;
   readonly #maximumStartupAttempts: number;
+  readonly #platform: NodeJS.Platform;
   readonly #spawn: SpawnProcess;
   readonly #lifetime = new AbortController();
   readonly #activeChildren = new Set<ManagedChild>();
@@ -172,10 +280,10 @@ export class DirectDeliveryTarget {
     this.#maximumOutputBytes = options.maximumOutputBytes ?? DEFAULT_MAXIMUM_OUTPUT_BYTES;
     this.#maximumStartupAttempts =
       options.maximumStartupAttempts ?? DEFAULT_MAXIMUM_STARTUP_ATTEMPTS;
+    this.#platform = options.platform ?? process.platform;
     this.#spawn = options.spawnProcess ?? (spawn as SpawnProcess);
 
     if (
-      process.platform === "win32" ||
       this.#capability.command.length === 0 ||
       this.#capability.args.length > 16 ||
       this.#capability.agentInfo.name.length === 0 ||
@@ -225,11 +333,23 @@ export class DirectDeliveryTarget {
   async #attempt(message: CentralMessage, outerSignal: AbortSignal): Promise<void> {
     let child: ManagedChild;
     try {
-      child = this.#spawn(this.#capability.command, this.#capability.args, {
+      let command = this.#capability.command;
+      let args = this.#capability.args;
+      if (this.#platform === "win32" && this.#capability.windowsNodePackage !== undefined) {
+        command = process.execPath;
+        args = [
+          await resolveWindowsNodePackageEntrypoint(
+            this.#capability.windowsNodePackage,
+            this.#environment,
+          ),
+          ...args,
+        ];
+      }
+      child = this.#spawn(command, args, {
         cwd: this.#workingDirectory,
         env: this.#environment,
         shell: false,
-        detached: true,
+        detached: this.#platform !== "win32",
         windowsHide: true,
         stdio: ["pipe", "pipe", "ignore"] as const,
       });
@@ -328,7 +448,7 @@ export class DirectDeliveryTarget {
       session = undefined;
       connection.close();
       connection = undefined;
-      const cleaned = await cleanupChild(child, this.#cleanupDeadlineMs);
+      const cleaned = await cleanupChild(child, this.#cleanupDeadlineMs, this.#platform);
       this.#activeChildren.delete(child);
       if (!cleaned) throw new DirectDeliveryError("uncertain_outcome");
     } catch (error) {
@@ -340,7 +460,7 @@ export class DirectDeliveryTarget {
       }
       session?.dispose();
       connection?.close();
-      const cleaned = await cleanupChild(child, this.#cleanupDeadlineMs);
+      const cleaned = await cleanupChild(child, this.#cleanupDeadlineMs, this.#platform);
       this.#activeChildren.delete(child);
       if (promptDispatched || !cleaned || error instanceof OutputLimitExceeded) {
         throw new DirectDeliveryError("uncertain_outcome");
@@ -358,7 +478,7 @@ export class DirectDeliveryTarget {
     this.#lifetime.abort();
     await Promise.all(
       [...this.#activeChildren].map(async (child) => {
-        await cleanupChild(child, this.#cleanupDeadlineMs);
+        await cleanupChild(child, this.#cleanupDeadlineMs, this.#platform);
         this.#activeChildren.delete(child);
       }),
     );
