@@ -31,9 +31,9 @@ const HERMES_DIRECT_CONFIRMATION =
   "run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities";
 const HERMES_WEBHOOK_CONFIRMATION =
   "run-live-qualification-with-real-hermes-webhook-and-two-disposable-mailosaur-identities";
-const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "0.0.0" };
-const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "0.152.1" };
-const HERMES_CLIENT_INFO = { name: "mcp", version: "0.1.0" };
+const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "qualification" };
+const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" };
+const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
 const HERMES_ACP_COMMAND = "hermes-acp";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
@@ -1067,7 +1067,7 @@ async function main() {
         (candidate) => candidate.kind === "hermes",
       );
       assert(
-        canonicalJson(hermesCapability?.aliases) === canonicalJson([HERMES_CLIENT_INFO]) &&
+        canonicalJson(hermesCapability?.aliases) === canonicalJson([HERMES_CLIENT_INFO.name]) &&
           hermesCapability?.direct?.command === HERMES_ACP_COMMAND &&
           hermesCapability.direct.agentInfo.name === "hermes-agent",
         "hermes_profile",
@@ -1130,7 +1130,7 @@ async function main() {
                 join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
                 "success-provider-mcp",
               ],
-              agentInfo: { name: "mock-agent", versions: ["1.0.0"] },
+              agentInfo: { name: "mock-agent" },
               mcp: "provider_config",
               environment: ["HOME", "PATH", "TMPDIR"],
             };

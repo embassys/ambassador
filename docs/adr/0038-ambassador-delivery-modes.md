@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039 and 0040
+Status: accepted; amended by ADRs 0039, 0040, and 0041
 
 Date: 2026-09-02
 
@@ -61,10 +61,11 @@ central URL, or configuration-path option.
 ### Delivery selection during registration
 
 Resolve delivery through `register_agent` before contacting central. Match the
-MCP session's bounded `clientInfo` exactly against a compiled-in capability
-registry. An enabled entry contains its exact aliases, supported delivery
-modes, fixed direct executable and arguments, MCP setup behavior, version
-policy, and qualification contract.
+MCP session's bounded `clientInfo.name` exactly against a compiled-in
+capability registry. Its reported version is observational under ADR 0041. An
+enabled entry contains its exact client name, supported delivery modes, fixed
+direct executable and arguments, exact ACP agent name, MCP setup behavior, and
+qualification contract.
 
 `clientInfo` is not authenticated identity. It is nevertheless sufficient to
 select among fixed local profiles because it cannot add a profile, alter
@@ -133,46 +134,42 @@ details. The child receives a minimal, reviewed environment and bounded
 working directory.
 
 On Windows, ADR 0040 keeps the no-shell rule. For a reviewed Node agent,
-Ambassador validates the exact package name, version, bin mapping, and
-JavaScript entrypoint fixed in the capability registry, then launches that
-entrypoint with its current Node executable. Native executables retain their
-fixed command. Windows direct support remains gated on native process-tree
-cleanup evidence.
+Ambassador validates the fixed package name, bin mapping, and JavaScript
+entrypoint from the capability registry, then launches that entrypoint with its
+current Node executable. The installed package version is bounded diagnostic
+metadata under ADR 0041. Native executables retain their fixed command.
 
-An agent profile is enabled only after its exact aliases, invocation, version
-policy, MCP behavior, and tests are committed. Ambassador never downloads an
-adapter at runtime. A recognizable product name without that complete contract
-is unsupported.
+An agent profile is enabled only after its exact client and ACP agent names,
+invocation, MCP behavior, and tests are committed. Ambassador never downloads
+an adapter at runtime. A recognizable product name without that complete
+contract is unsupported.
 
 The enabled direct profiles are:
 
-| Profile | Exact MCP `clientInfo` aliases | Fixed direct invocation | Required ACP `agentInfo` | Ambassador MCP setup |
+| Profile | Exact MCP client name | Fixed direct invocation | Required ACP agent name | Ambassador MCP setup |
 | --- | --- | --- | --- | --- |
-| OpenClaw | `openclaw-bundle-mcp` / `0.0.0` | `openclaw acp` | `openclaw-acp` / `2026.8.1` | provider configuration |
-| Hermes | `mcp` / `0.1.0` | `hermes-acp` | `hermes-agent` / `0.20.5` or `0.21.0` | ACP session injection |
-| Codex | `codex-mcp-client` / `0.149.0` or `0.152.1` | `codex-acp` from `@agentclientprotocol/codex-acp` 1.8.0 | `@agentclientprotocol/codex-acp` / `1.8.0` | ACP session injection |
-| Claude Code | `claude-code` / `2.1.257` or `2.1.258` | `claude-agent-acp` from `@agentclientprotocol/claude-agent-acp` 0.73.0 | `@agentclientprotocol/claude-agent-acp` / `0.73.0` | ACP session injection |
-| Gemini CLI | `gemini-cli-mcp-client` / `0.58.0` | `gemini --acp` | `gemini-cli` / `0.58.0` | ACP session injection |
+| OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
+| Hermes | `mcp` | `hermes-acp` | `hermes-agent` | ACP session injection |
+| Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
+| Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | ACP session injection |
+| Gemini CLI | `gemini-cli-mcp-client` | `gemini --acp` | `gemini-cli` | ACP session injection |
 
-Codex CLI does not expose native ACP in the reviewed versions. The selected
-Apache-2.0 adapter starts Codex App Server, translates ACP v1, and accepts HTTP
-MCP session configuration. The adapter includes a compatible `@openai/codex`
-dependency. Ambassador does not pass `CODEX_PATH`, `CODEX_CONFIG`, or another
-process or session override from its environment. It may pass the reviewed
-Codex and OpenAI API-key variables, along with the common provider environment,
-so the agent can use its own authentication.
+Codex uses the separately installed Apache-2.0 `codex-acp` adapter, which starts
+Codex App Server, translates ACP v1, and accepts HTTP MCP session
+configuration. Ambassador does not pass `CODEX_PATH`, `CODEX_CONFIG`, or
+another process or session override from its environment. It may pass the
+reviewed Codex and OpenAI API-key variables, along with the common provider
+environment, so the agent can use its own authentication.
 
-Claude Code uses the selected Apache-2.0 ACP adapter and its exact
-`@anthropic-ai/claude-agent-sdk` 0.3.257 dependency. That SDK contains Claude
-Code 2.1.257, while the separately reviewed current Claude Code client is
-2.1.258. Both exact MCP identities are aliases for the same fixed profile.
-Ambassador passes only the reviewed Anthropic authentication variables and the
-common provider environment. It does not pass a Claude executable override.
+Claude Code uses the separately installed Apache-2.0 `claude-agent-acp`
+adapter. Ambassador passes only the reviewed Anthropic authentication variables
+and the common provider environment. It does not pass a Claude executable
+override.
 
-Gemini CLI 0.58.0 supplies native ACP v1 through `gemini --acp`; Ambassador
-does not add an adapter. Its reviewed session implementation accepts the HTTP
-MCP configuration. The profile permits Gemini API-key authentication and the
-reviewed Google Vertex selection variables. Other Gemini versions fail closed.
+Gemini CLI supplies native ACP v1 through `gemini --acp`; Ambassador does not
+add an adapter. The profile permits Gemini API-key authentication and the
+reviewed Google Vertex selection variables. Qualification records the tested
+release, but reported versions do not change profile selection or acceptance.
 
 Ambassador initializes ACP, creates or safely resumes a gateway-owned session,
 and submits one prompt containing fixed untrusted-input instructions plus the
@@ -250,9 +247,10 @@ authenticated prompt and MCP call.
 
 The installed-command version probe is observational. It records a bounded
 semantic version or `unavailable` for every fixed profile and never skips a
-delivery case because of that observation. Production ACP initialization still
-requires an exact compiled-in `agentInfo` name and version. Exact MCP
-`clientInfo` aliases also remain unchanged.
+delivery case because of that observation. Production requires ACP v1 and the
+exact compiled-in `agentInfo.name`; it does not gate on the reported agent
+version. MCP profile selection likewise requires the exact compiled-in client
+name and does not gate on the reported client version.
 
 Live central qualification remains a separate controlled test for email,
 DPoP, REST schemas, permissions, action results, consuming polls, and
@@ -356,3 +354,10 @@ continues to reject unreviewed MCP client and ACP identities, and provider setup
 guidance continues to list the exact supported versions. The same day, the user
 separately approved selecting the latest Ambassador release in public install
 commands.
+
+Later on 2026-09-03, the user clarified that the observational policy applies
+to production too: known client and ACP agent names remain exact, while
+reported versions must not gate registration or direct initialization. ADR
+0041 supersedes the exact-version portions of this record. The commands,
+arguments, delivery modes, environment allowlists, and ACP v1 protocol remain
+fixed.

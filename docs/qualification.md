@@ -51,7 +51,8 @@ and the delivery profile must remain free of message content and secret values.
 
 Registration cases also prove:
 
-- exact allowlisted `clientInfo` aliases select only their fixed profile;
+- exact known `clientInfo.name` values select only their fixed profile while
+  reported client versions do not gate registration;
 - unknown, ambiguous, disabled, and incomplete profiles return
   `unsupported_agent` before state or a central call;
 - supplying a delivery object cannot bypass profile resolution;
@@ -88,8 +89,9 @@ For each row:
 2. Start the packed Ambassador candidate with no CLI options.
 3. Configure Ambassador MCP through the provider's supported mechanism.
 4. Register a synthetic fixture identity and prove the real MCP client's exact
-   alias selects the expected fixed profile. Choose the requested mode when the
-   dual-mode result asks, and prove direct is its advertised default.
+   name selects the expected fixed profile regardless of its reported version.
+   Choose the requested mode when the dual-mode result asks, and prove direct
+   is its advertised default.
 5. Inject one permission message and one action message through the fixture.
 6. Prove the real agent receives the complete message.
 7. Prove the agent can call an allowed Ambassador MCP tool. For an action call,
@@ -105,16 +107,12 @@ qualification uses OpenClaw's ACP command and its preconfigured Ambassador MCP
 entry when session MCP injection is unavailable.
 
 Hermes webhook qualification uses its authenticated generic webhook path.
-Direct qualification uses its ACP command and session MCP configuration when
-supported by the tested version.
+Direct qualification uses its fixed ACP command and session MCP configuration.
 
-Codex direct qualification uses `@agentclientprotocol/codex-acp` 1.8.0 and
-proves that the adapter injects Ambassador MCP into its Codex App Server
-session. Claude Code direct qualification uses
-`@agentclientprotocol/claude-agent-acp` 0.73.0 and its exact Claude Agent SDK
-0.3.257 dependency. Gemini CLI direct qualification uses native
-`gemini --acp` at 0.58.0. All three receive Ambassador MCP through ACP session
-configuration.
+Codex and Claude Code direct qualification use their installed ACP adapters;
+Gemini CLI direct qualification uses native `gemini --acp`. All three receive
+Ambassador MCP through ACP session configuration. The runner records installed
+versions as evidence but does not use them as allowlists.
 
 On 2026-09-02, isolated installs of the three approved entry points passed ACP
 v1 initialization and returned the exact `agentInfo` identities in ADR 0038.
@@ -181,11 +179,12 @@ pnpm run probe:agents
 It checks OpenClaw, Hermes, Codex ACP, Claude Agent ACP, and Gemini through
 fixed version commands. A bounded semantic version is `observed`; a missing,
 failing, malformed, or timed-out command is `unavailable`. Neither result
-skips a delivery case. The production direct target separately checks the
-exact ACP `agentInfo` identity after initialization.
+skips a delivery case. The production direct target separately requires ACP
+v1 and the exact compiled-in ACP agent name after initialization; its reported
+version remains observational.
 
-On 2026-09-03, the observational probe ran on macOS 26.5.2 arm64 with Node
-24.19.0:
+On 2026-09-03, the observational probe was rerun for the 0.2.9 candidate on
+macOS 26.5.2 arm64 with Node 24.19.0:
 
 | Profile | Probe status | Reported version |
 | --- | --- | --- |
@@ -196,7 +195,23 @@ On 2026-09-03, the observational probe ran on macOS 26.5.2 arm64 with Node
 | Gemini CLI | `unavailable` | none |
 
 `unavailable` means the executable was not available to this probe. It is not
-a compatibility verdict.
+a compatibility verdict. The candidate's deterministic registration and ACP
+tests also passed with deliberately non-release version strings for every
+known MCP client and with a mismatched ACP agent version under the correct ACP
+v1 protocol and agent name.
+
+The byte-final 0.2.9 candidate tarball had SHA-256
+`49983cb0cf5b18ebaab9bbeab734dad837788c05f712c498a1e3cafc4ece015d`
+and SRI digest
+`sha512-faspZV5pqwtvwHJ8NxnW+KAoT2vLSu2oeYIc9RknjDl8m9oAYvqcTxVkcyj1yutqGpxWJKPHlg5xyXLpuwyYdw==`.
+On Node 24.19.0 it passed clean installation, the installed-package REST E2E,
+and the production vulnerability audit with no known vulnerabilities. The
+signature audit verified 20 registry dependencies and reported only the
+expected missing registry metadata for the unpublished local 0.2.9 candidate.
+The full repository check passed 157 tests with no failures; the two opt-in
+package lanes were skipped in that command, and the clean-installed package
+lane then passed separately. Version 0.2.9 was not present in the npm registry
+at verification time.
 
 The byte-final 0.2.8 release candidate tarball had SHA-256
 `6e128f2ec84af29ad663226e1449de9c1fb894426b3982982cab0215667a24f4`
@@ -247,9 +262,9 @@ OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
 authentication before starting the runner. The other four profiles receive the
 same endpoint by ACP session injection. Each direct case must call the
 qualification `get_my_permissions` tool, which proves the real MCP client's
-exact `clientInfo` match. Missing, unauthenticated, or failing agents make the
-delivery case fail; a version-command observation does not. The runner never
-invokes an installer or updater.
+exact name match. Missing, unauthenticated, or failing agents make the delivery
+case fail; a version-command observation does not. The runner never invokes an
+installer or updater.
 
 The reviewed OpenClaw 2026.8.1 and Hermes 0.21.0 images may provide their exact
 executables. Pin `ghcr.io/openclaw/openclaw:2026.8.1` to manifest digest

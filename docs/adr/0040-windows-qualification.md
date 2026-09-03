@@ -29,11 +29,12 @@ DACL.
 
 Windows npm command shims are batch files and cannot be launched by Node
 without a shell. Ambassador does not execute those shims. For reviewed Node
-agents, the capability registry fixes the package name, package version, bin
-name, and JavaScript entrypoint. Ambassador searches only package roots next
-to an absolute `PATH` entry, checks the exact package metadata, resolves the
-entrypoint inside that package, and launches it with Ambassador's current Node
-executable. Native agent executables continue to use the fixed registry
+agents, the capability registry fixes the package name, bin name, and
+JavaScript entrypoint. Ambassador searches only package roots next to an
+absolute `PATH` entry, checks the package identity and bin mapping, requires a
+bounded version without treating it as an allowlist under ADR 0041, resolves
+the entrypoint inside that package, and launches it with Ambassador's current
+Node executable. Native agent executables continue to use the fixed registry
 command. Neither path accepts an executable or argument from MCP input.
 
 The fixed mock ACP cancellation, crash, and descendant-cleanup cases pass on
