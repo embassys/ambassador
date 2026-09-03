@@ -53,9 +53,9 @@ configuration or credentials.
 
 The REST, DPoP, delivery, and zero-configuration startup paths are implemented.
 Live-central qualification has passed with real Codex and with Hermes Agent
-0.20.5 in both delivery modes. Ambassador 0.2.8 includes that Hermes direct
-profile. Four other profile/mode cases remain open under the disclosed release
-exception in
+0.20.5 in both delivery modes. Ambassador 0.2.9 matches exact known client and
+ACP agent names while treating reported versions as observations. Four other
+profile/mode cases remain open under the disclosed release exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 
