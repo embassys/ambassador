@@ -59,6 +59,12 @@ profile/mode cases remain open under the disclosed release exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 
+Published Ambassador 0.2.9 has no Windows support claim. Current repository
+code is qualified under [ADR 0040](docs/adr/0040-windows-qualification.md): the
+native state, packed-package, and mock delivery lanes pass, while individual
+agent and mode claims still require exact real-agent Windows evidence and a
+future package publication requires separate approval.
+
 ## Development
 
 Use Node.js 24 and the pnpm version recorded in `package.json`.

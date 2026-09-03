@@ -57,6 +57,15 @@ artifact checks are recorded in [Live central qualification](live-qualification.
   guides should direct users to current releases and explain that actual ACP
   compatibility is tried rather than inferred from the reported version.
 
-Windows remains unsupported under ADR 0033. Optional central service work
-remains in [Central follow-ups](central-follow-ups.md) and does not authorize
-client-side compatibility behavior.
+## Windows qualification
+
+ADR 0040 reopens Windows work. The candidate CI and package lanes now pass and
+cover native state DACLs, SQLite and lock behavior, webhook delivery, ACP
+startup and descendant cleanup, the installed command shim, forbidden-marker
+scans, and the packed artifact. Before claiming support for an individual
+Windows agent profile and mode, run its exact real-agent qualification on
+Windows and record the result.
+
+Optional central service work remains in
+[Central follow-ups](central-follow-ups.md) and does not authorize client-side
+compatibility behavior.

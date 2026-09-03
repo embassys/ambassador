@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 
 import { ProcessLock } from "../src/process-lock.js";
+import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
 const WORKER_SOURCE = `
 const lockPath = process.env.A2A_TEST_LOCK_PATH;
@@ -220,4 +221,17 @@ test("enforces owner-only artifact and directory permissions on POSIX", {
 
   await lock.release();
   assert.equal((await stat(path)).mode & 0o777, 0o600);
+});
+
+test("enforces native Windows DACLs on the lock and state directory", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const path = await lockPath(t);
+  const lock = await ProcessLock.acquire(path);
+  try {
+    await assertNativeWindowsAcl(dirname(path), "directory");
+    await assertNativeWindowsAcl(path, "file");
+  } finally {
+    await lock.release();
+  }
 });

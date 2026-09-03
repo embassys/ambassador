@@ -24,7 +24,7 @@ The project needs strict TypeScript checks, cross-platform tests, formatting, an
 | Direct agent protocol | `@agentclientprotocol/sdk` 1.4.0 under ADR 0038 |
 | CLI parsing | `node:util.parseArgs` with project-owned subcommand dispatch |
 | Logging | Project-owned typed NDJSON writer with allowlisted fields |
-| CI | GitHub Actions on Linux and macOS; ADR 0033 excludes Windows from the initial-release matrix |
+| CI | GitHub Actions on Linux, macOS, and Windows; Windows support remains gated by ADR 0040 |
 
 Pin direct dependencies exactly. CI and release builds use Node 24 even when a developer has a newer Current release.
 

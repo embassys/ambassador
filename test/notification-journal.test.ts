@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 
 import Database from "better-sqlite3";
 
 import { NotificationJournal } from "../src/notification-journal.js";
+import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
 function fixture(t: TestContext): { path: string; open(): NotificationJournal } {
   const directory = mkdtempSync(join(tmpdir(), "ambassador-journal-"));
@@ -86,4 +87,15 @@ test("rejects obsolete or unrelated schemas without migration", (t) => {
   database.pragma("user_version = 1");
   database.close();
   assert.throws(() => item.open(), /schema/i);
+});
+
+test("enforces native Windows DACLs on the journal and its state directory", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const item = fixture(t);
+  const journal = item.open();
+  journal.ingest(["message-1"]);
+
+  await assertNativeWindowsAcl(dirname(item.path), "directory");
+  await assertNativeWindowsAcl(item.path, "file");
 });

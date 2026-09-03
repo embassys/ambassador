@@ -15,6 +15,7 @@ if (files.length === 0) {
 }
 
 const flags = process.argv.includes("--coverage") ? ["--experimental-test-coverage"] : [];
+const concurrencyFlags = process.platform === "win32" ? ["--test-concurrency=1"] : [];
 
 function run(arguments_) {
   return new Promise((resolveRun, reject) => {
@@ -32,7 +33,7 @@ function run(arguments_) {
 }
 
 try {
-  await run(["--test", ...flags, ...files]);
+  await run(["--test", ...flags, ...concurrencyFlags, ...files]);
 } catch {
   process.exitCode = 1;
 }

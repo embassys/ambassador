@@ -7,6 +7,13 @@ test("main publishes the Ambassador 0.2.9 candidate through npm OIDC after appro
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
+  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
+  assert.match(workflow, /name: Qualify native Windows state ACLs/u);
+  assert.match(workflow, /name: Launch installed Windows command shim/u);
+  assert.match(workflow, /\$PSNativeCommandUseErrorActionPreference = \$false/u);
+  assert.match(workflow, /\[IO\.File\]::ReadAllText\(\$stderrPath\)/u);
+  assert.match(workflow, /Remove-Item -Force -ErrorAction SilentlyContinue/u);
+  assert.match(workflow, /\n {10}exit 0\n/u);
   assert.match(
     workflow,
     /publish:\n {4}name: Publish npm package\n {4}if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/u,
@@ -23,6 +30,12 @@ test("main publishes the Ambassador 0.2.9 candidate through npm OIDC after appro
   assert.equal(packageJson.name, "@embassys/ambassador");
   assert.equal(packageJson.version, "0.2.9");
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
+});
+
+test("the Windows test runner serializes files that exercise native ACLs", async () => {
+  const runner = await readFile(join(process.cwd(), "scripts", "run-tests.mjs"), "utf8");
+
+  assert.match(runner, /process\.platform === "win32" \? \["--test-concurrency=1"\] : \[\]/u);
 });
 
 test("every supported-agent guide uses latest Ambassador without pinning a provider release", async () => {
