@@ -48,7 +48,7 @@ ACP v1 contract.
 13. Stop all processes, delete mail and temporary state, and scan artifacts.
 
 Use the mock webhook receiver and either the mock ACP agent or the fixed real
-Codex mode for this live REST test. Real-agent qualification for all five
+Codex mode for this live REST test. Real-agent qualification for all four
 enabled profiles remains a separate local matrix in
 [Delivery qualification](qualification.md).
 

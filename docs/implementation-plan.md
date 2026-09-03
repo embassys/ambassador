@@ -27,14 +27,12 @@ was independently verified. Its digests and results are recorded in
 ## Remaining qualification
 
 The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
-0.2.7 release on 2026-09-03 before completion of the real-agent matrix. This
-exception to ADR 0015 is not evidence that the remaining cases passed. Complete
-and record the following work after the release. The published 0.2.7 registry
-artifact and installed CLI have now been independently verified; completed
-artifact checks are recorded in [Live central qualification](live-qualification.md).
-
-- Complete the remaining opt-in real-agent profile case with an authenticated
-  installation: Gemini CLI direct.
+0.2.7 release on 2026-09-03 before completion of the then-current real-agent
+matrix. That historical exception is not evidence that its open cases passed.
+Gemini CLI has since been removed from the active registry and Antigravity is
+deferred under ADR 0043. The current four-profile matrix has live evidence for
+every supported mode. The remaining supported-runtime repeat and historical
+artifact checks are recorded below.
 - Claude Code direct passed the complete live correlated-result flow on
   2026-09-03 with published Ambassador 0.2.11, Claude Agent ACP 0.73.0, and its
   bundled Claude Code 2.1.257 executable. The host's separate Claude Code
@@ -59,10 +57,9 @@ artifact checks are recorded in [Live central qualification](live-qualification.
   MCP client information `mcp` / `0.1.0`; direct delivery retained exact ACP
   v1 agent-name checks. The isolated copies of their existing credentials were
   removed after the runs.
-- The isolated ACP initialization probes already pass for Codex ACP 1.8.0 and
-  native Gemini CLI ACP 0.58.0. Claude Agent ACP 0.73.0 has now also passed the
-  complete authenticated live flow. OpenClaw and
-  Hermes also pass their version and ACP startup probes.
+- The isolated ACP initialization probes pass for Codex ACP 1.8.0, Claude
+  Agent ACP 0.73.0, OpenClaw, and Hermes. Claude Agent ACP has also passed the
+  complete authenticated live flow.
   These probes do not replace an authenticated prompt and observed Ambassador
   MCP call.
 - Record only the safe version and pass/fail evidence produced by

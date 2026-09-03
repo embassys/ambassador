@@ -39,12 +39,12 @@ scope on your own.
 - Direct is the default. A complete direct-only profile proceeds without a
   delivery question. Ask direct versus webhook only for a complete dual-mode
   profile, and present direct as the default. Only OpenClaw and Hermes are
-  dual-mode. Codex, Claude Code, and Gemini CLI are direct-only and proceed
-  without a delivery question.
+  dual-mode. Codex and Claude Code are direct-only and proceed without a
+  delivery question.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
   central registration state. Do not offer a generic webhook fallback. Keep the
-  fixed Codex, Claude Code, and Gemini CLI commands and ACP agent names approved
-  in ADR 0038; do not substitute adapters or accept arbitrary agent names.
+  fixed Codex and Claude Code commands and ACP agent names approved in ADR
+  0038; do not substitute adapters or accept arbitrary agent names.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts a URL and a webhook secret environment-variable
@@ -102,7 +102,7 @@ scope on your own.
   through CLI, MCP, or the environment.
 - Write or update tests and CI expectations before production implementation.
   CI delivery tests use a mock webhook receiver and a mock ACP v1 agent. Real
-  OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI tests are explicit local
+  OpenClaw, Hermes, Codex, and Claude Code tests are explicit local
   qualification, not CI.
 - Do not select or install a framework, library, runtime, package manager,
   database driver, or build tool without explicit user approval. ACP v1 and

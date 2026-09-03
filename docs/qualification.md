@@ -122,6 +122,26 @@ owner-only Claude configuration was removed after the run, and the normal
 Claude home was unchanged. No credential, identity, code, prompt, message body,
 or provider output was recorded.
 
+## Deferred Antigravity evaluation
+
+On 2026-09-03, authenticated Antigravity CLI 1.1.25 connected to a temporary
+Ambassador MCP probe with exact client name `antigravity-client`, reported
+version `v1.0.0`, and made one real-model tool call. This proved the local MCP
+client path only; it did not prove direct delivery.
+
+A separately obtained Antigravity ACP server completed ACP v1 initialization
+with exact agent name `antigravity-acp` and reported version
+`agy_acp_server_20260818_01_RC01`. The archive SHA-256 was
+`f122ca7e7030a27f9649da4cf1a7d80e12c48c5f6118ff35affc34d56cbf83dd`.
+Session creation then failed in the authentication phase because the ACP server
+used separate credential state and did not reuse the authenticated `agy`
+configuration. No delivery prompt or Ambassador MCP result call occurred.
+
+The normal Antigravity MCP configuration was restored byte-for-byte. Temporary
+state was deleted, and no credential, prompt, message body, or provider output
+was retained. ADR 0043 defers Antigravity and removes the Gemini CLI profile;
+neither is part of the current qualification matrix.
+
 ## Ambassador 0.2.10
 
 On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central
@@ -220,8 +240,9 @@ difference.
 A clean Node 24.19.0 install of that registry artifact passed the installed
 CLI REST E2E. The installed `ambassador webhook-secret` command created and
 returned one stable value, and a forbidden option failed closed. The installed
-capability registry matched all five known MCP client names with a deliberately
-non-release version string. Installed direct delivery completed ACP v1 when a
+capability registry matched all five client names present in that historical
+artifact with a deliberately non-release version string. Installed direct
+delivery completed ACP v1 when a
 mock returned the exact agent name and a different reported agent version. The
 registry-artifact audit found zero vulnerabilities, 20 verified registry
 signatures, 13 verified attestations, and no invalid or missing signatures.
@@ -280,8 +301,8 @@ Registration cases also prove:
 - unknown, ambiguous, disabled, and incomplete profiles return
   `unsupported_agent` before state or a central call;
 - supplying a delivery object cannot bypass profile resolution;
-- Codex, Claude Code, Gemini CLI, and a complete direct-only test profile
-  proceed without a question;
+- Codex, Claude Code, and a complete direct-only test profile proceed without a
+  question;
 - OpenClaw and Hermes ask direct versus webhook with direct as the default;
 - agent kind and process configuration are rejected as tool input; and
 - a failed direct launch never falls back to webhook.
@@ -305,7 +326,6 @@ The required matrix is:
 | Hermes | required | required |
 | Codex | not supported | required |
 | Claude Code | not supported | required |
-| Gemini CLI | not supported | required |
 
 For each row:
 
@@ -334,13 +354,13 @@ MCP injection is unavailable.
 Hermes webhook qualification uses its authenticated generic webhook path.
 Direct qualification uses its fixed ACP command and session MCP configuration.
 
-Codex and Claude Code direct qualification use their installed ACP adapters;
-Gemini CLI direct qualification uses native `gemini --acp`. All three receive
-Ambassador MCP through ACP session configuration. The runner records installed
-versions as evidence but does not use them as allowlists.
+Codex and Claude Code direct qualification use their installed ACP adapters.
+Both receive Ambassador MCP through ACP session configuration. The runner
+records installed versions as evidence but does not use them as allowlists.
 
-On 2026-09-02, isolated installs of the three approved entry points passed ACP
-v1 initialization and returned the exact `agentInfo` identities in ADR 0038.
+On 2026-09-02, isolated installs of the three entry points approved at that
+time passed ACP v1 initialization and returned the exact `agentInfo` identities
+then listed in ADR 0038.
 The reviewed OpenClaw and Hermes images also passed their version and ACP
 startup probes. These are safe contract probes, not real-agent delivery passes.
 The Codex direct case first passed against the local fixture. On 2026-09-03 it
@@ -378,9 +398,10 @@ not evidence that the already published 0.2.7 artifact has that support.
 That evidence is retained to distinguish the published 0.2.7 artifact from its
 later source candidate. The 0.2.10 matrix above supersedes its former list of
 open cases: OpenClaw webhook and direct are complete, and the published 0.2.11
-Claude Code observation above completes Claude direct. Gemini CLI direct
-remains open. Hermes 0.21.0 retains only its earlier
-contract and ACP startup probe and has not run the full real-model round trip.
+Claude Code observation above completes Claude direct. ADR 0043 removes Gemini
+CLI from the current matrix and defers Antigravity. Hermes 0.21.0 retains only
+its earlier contract and ACP startup probe and has not run the full real-model
+round trip.
 
 The runner must require explicit confirmation and use exact executables already
 available on `PATH`. Those executables may come from an isolated installation
@@ -401,15 +422,30 @@ credentials or model work:
 pnpm run probe:agents
 ```
 
-It checks OpenClaw, Hermes, Codex ACP, Claude Agent ACP, and Gemini through
-fixed version commands. A bounded semantic version is `observed`; a missing,
-failing, malformed, or timed-out command is `unavailable`. Neither result
-skips a delivery case. The production direct target separately requires ACP
-v1 and the exact compiled-in ACP agent name after initialization; its reported
-version remains observational.
+It checks OpenClaw, Hermes, Codex ACP, and Claude Agent ACP through fixed version
+commands. A bounded semantic version is `observed`; a missing, failing,
+malformed, or timed-out command is `unavailable`. Neither result skips a
+delivery case. The production direct target separately requires ACP v1 and the
+exact compiled-in ACP agent name after initialization; its reported version
+remains observational.
+
+On 2026-09-03, the current four-profile probe ran on macOS arm64 with Node
+24.19.0:
+
+| Profile | Probe status | Reported version |
+| --- | --- | --- |
+| OpenClaw | `observed` | `2026.8.2` |
+| Hermes | `observed` | `0.20.5` |
+| Codex ACP | `unavailable` | none |
+| Claude Agent ACP | `unavailable` | none |
+
+The default shell did not expose the two adapter executables to this probe.
+Their separate authenticated qualification evidence remains recorded above;
+`unavailable` is not a compatibility failure.
 
 On 2026-09-03, the observational probe was rerun for the 0.2.9 candidate on
-macOS 26.5.2 arm64 with Node 24.19.0:
+macOS 26.5.2 arm64 with Node 24.19.0. This table records the five-profile
+artifact that existed at that time:
 
 | Profile | Probe status | Reported version |
 | --- | --- | --- |
@@ -450,8 +486,9 @@ A clean install of that registry tarball passed the installed CLI REST E2E, the
 installed `ambassador` command rejected a forbidden option, the production
 audit found no known vulnerabilities, and the signature audit verified all 21
 packages with no invalid or missing entries. A separate check imported code
-from that clean registry install: all five known MCP client names resolved with
-a deliberately non-release version value, and direct ACP delivery completed
+from that clean registry install: all five client names in that historical
+artifact resolved with a deliberately non-release version value, and direct
+ACP delivery completed
 when the mock agent returned the correct ACP v1 protocol and agent name with a
 different version.
 

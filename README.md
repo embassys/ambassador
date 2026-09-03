@@ -15,14 +15,13 @@ npx --yes @embassys/ambassador@latest start
   authentication.
 - Ask the agent to register your email with Ambassador.
 - OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
-  Codex, Claude Code, and Gemini CLI proceed directly without a delivery
-  question.
+  Codex and Claude Code proceed directly without a delivery question.
 - Webhook users run `ambassador webhook-secret`, copy the displayed value into
   Hermes's owner-only receiver configuration or OpenClaw's owner-only hooks
   configuration, and give the agent only the
   receiver URL during registration.
 
-Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+Direct delivery supports OpenClaw, Hermes, Codex, and Claude Code.
 Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
 fail closed. The agent cannot choose an executable, adapter, or arbitrary
 delivery implementation. Ambassador matches exact known MCP client and ACP
@@ -55,12 +54,11 @@ configuration or credentials.
 
 The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
 startup paths are implemented. Live-central qualification has passed with
-real Codex and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2 in both delivery
-modes. Ambassador matches exact known client and ACP agent names while treating
-reported versions as observations. Claude Code direct and Gemini CLI direct
-remain open under the disclosed release exception in
-[ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
-[implementation plan](docs/implementation-plan.md).
+real Codex and Claude Code, and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2
+in both delivery modes. Ambassador matches exact known client and ACP agent
+names while treating reported versions as observations. Gemini CLI and
+Antigravity are not active profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md)
+records that decision.
 
 Published Ambassador releases through 0.2.9 have no Windows support claim.
 Current repository code is qualified under
@@ -79,8 +77,8 @@ pnpm check
 ```
 
 CI uses a mock webhook receiver and mock ACP v1 agent for deterministic
-delivery tests. Opt-in local qualification covers direct delivery for all five
-agents and webhook delivery for OpenClaw and Hermes.
+delivery tests. Opt-in local qualification covers direct delivery for all four
+supported agents and webhook delivery for OpenClaw and Hermes.
 
 ## Documentation
 
@@ -92,7 +90,6 @@ agents and webhook delivery for OpenClaw and Hermes.
 - [Qualification strategy](docs/qualification.md)
 - [Codex setup](docs/getting-started-codex.md)
 - [Claude Code setup](docs/getting-started-claude.md)
-- [Gemini CLI setup](docs/getting-started-gemini.md)
 - [Hermes setup](docs/getting-started-hermes.md)
 - [OpenClaw setup](docs/getting-started-openclaw.md)
 - [Reset local test state](docs/development-reset.md)
