@@ -100,6 +100,7 @@ test("registers by client capability, delivers the full webhook, then acknowledg
     [
       "list_action_types",
       "request_permission",
+      "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
       "submit_action_result",
@@ -153,11 +154,25 @@ test("returns a correlated action result from the target MCP tool to the request
     "permission_request",
   );
 
+  const pending = await target.callTool("list_pending_permission_requests", {});
+  assert.equal(pending.count, 1);
+  assert.equal(Array.isArray(pending.pending_permission_requests), true);
+  const pendingRequest = (pending.pending_permission_requests as Array<Record<string, unknown>>)[0];
+  assert.equal(pendingRequest?.id, permission.permission_id);
+  assert.equal(pendingRequest?.grantor_email, targetEmail);
+  assert.equal(pendingRequest?.grantee_email, "ambassador-result-requester@fixture.test");
+  assert.equal(pendingRequest?.action_type, "get_phone_number");
+  assert.equal(pendingRequest?.status, "pending");
+
   const decided = await target.callTool("respond_to_permission", {
     permission_id: permission.permission_id,
     decision: "granted",
   });
   assert.equal(decided.status, "granted");
+  assert.deepEqual(await target.callTool("list_pending_permission_requests", {}), {
+    count: 0,
+    pending_permission_requests: [],
+  });
   const requesterPermissionPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterPermissionMessages = (
     (await requesterPermissionPoll.json()) as { messages: Array<Record<string, unknown>> }

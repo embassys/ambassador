@@ -35,12 +35,13 @@ function rest(central: FakeCentral, credential: LoadedCentralCredential): Centra
   });
 }
 
-test("post-enrollment catalog exposes exactly six agent-facing tools", () => {
+test("post-enrollment catalog exposes the current agent-facing tools with discoverable descriptions", () => {
   assert.deepEqual(
     REST_AUTHENTICATED_TOOLS.map((tool) => tool.name),
     [
       "list_action_types",
       "request_permission",
+      "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
       "submit_action_result",
@@ -48,6 +49,12 @@ test("post-enrollment catalog exposes exactly six agent-facing tools", () => {
     ],
   );
   const serialized = JSON.stringify(REST_AUTHENTICATED_TOOLS);
+  assert.match(serialized, /Embassys Ambassador/iu);
+  assert.match(
+    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "list_pending_permission_requests")
+      ?.description ?? "",
+    /waiting for (?:my|the user's) (?:response|approval)/iu,
+  );
   for (const removed of [
     "poll_messages",
     "ack_message",

@@ -82,12 +82,14 @@ function objectSchema(
 export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "list_action_types",
-    description: "List the deployed action names and input schemas.",
+    description:
+      "Use this Embassys Ambassador tool when the user asks what Embassys actions are available or what another agent can request. List the deployed action names and input schemas.",
     inputSchema: objectSchema({}),
   },
   {
     name: "request_permission",
-    description: "Request permission to call an action on another registered identity.",
+    description:
+      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Send that identity a permission request; do not treat a pending request as granted.",
     inputSchema: objectSchema(
       {
         target_email: { type: "string", minLength: 3, maxLength: 254 },
@@ -98,8 +100,15 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     ),
   },
   {
+    name: "list_pending_permission_requests",
+    description:
+      "Use this Embassys Ambassador tool when the user asks which actions or permission requests are waiting for my response or the user's approval. List only pending requests that this enrolled identity can grant or deny.",
+    inputSchema: objectSchema({}),
+  },
+  {
     name: "respond_to_permission",
-    description: "Grant or deny one pending permission request.",
+    description:
+      "Use this Embassys Ambassador tool after the user explicitly chooses grant or deny for one pending permission request. Send exactly that decision for the selected permission ID.",
     inputSchema: objectSchema(
       {
         permission_id: { type: "string", minLength: 1, maxLength: 128 },
@@ -110,7 +119,8 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   },
   {
     name: "call_action",
-    description: "Deliver an allowed action request to another registered identity.",
+    description:
+      "Use this Embassys Ambassador tool when the user asks to perform an Embassys action for another identity and the required permission is already granted. Deliver the action request with its payload.",
     inputSchema: objectSchema(
       {
         target_email: { type: "string", minLength: 3, maxLength: 254 },
@@ -122,7 +132,8 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   },
   {
     name: "submit_action_result",
-    description: "Return one success or error result for an action call received by this identity.",
+    description:
+      "Use this Embassys Ambassador tool only as the target of a received action call. Return one correlated success or error result using that call ID; this is not a general chat reply tool.",
     inputSchema: objectSchema(
       {
         call_id: { type: "string", format: "uuid" },
@@ -134,7 +145,8 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   },
   {
     name: "get_my_permissions",
-    description: "List permissions involving the enrolled identity.",
+    description:
+      "Use this Embassys Ambassador tool when the user asks about all their Embassys permissions, including requests they made and requests made to them. List every permission involving the enrolled identity.",
     inputSchema: objectSchema({}),
   },
 ] as const;

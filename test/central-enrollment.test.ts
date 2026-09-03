@@ -21,6 +21,8 @@ test("I02-E01 bootstrap catalog contains only current enrollment tools", () => {
   }
   const registration = REST_BOOTSTRAP_TOOLS[0];
   assert.ok(registration);
+  assert.match(registration.description ?? "", /Embassys Ambassador/iu);
+  assert.match(registration.description ?? "", /register me/iu);
   assert.deepEqual((registration.inputSchema.properties as Record<string, unknown>).delivery, {
     oneOf: [
       {

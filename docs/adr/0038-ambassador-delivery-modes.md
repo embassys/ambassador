@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, and 0043
+Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, and 0045
 
 Date: 2026-09-02
 
@@ -161,17 +161,21 @@ The enabled direct profiles are:
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
 | Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | ACP session injection |
 
-Codex uses the separately installed Apache-2.0 `codex-acp` adapter, which starts
-Codex App Server, translates ACP v1, and accepts HTTP MCP session
-configuration. Ambassador does not pass `CODEX_PATH`, `CODEX_CONFIG`, or
-another process or session override from its environment. It may pass the
-reviewed Codex and OpenAI API-key variables, along with the common provider
-environment, so the agent can use its own authentication.
+Under ADR 0045, Ambassador installs the Apache-2.0 `codex-acp` adapter as an
+exact production dependency. It starts Codex App Server, translates ACP v1,
+and accepts HTTP MCP session configuration. Ambassador validates and runs the
+dependency's fixed JavaScript entrypoint with its own Node executable; it does
+not resolve a user-installed adapter from `PATH`. It does not pass
+`CODEX_PATH`, `CODEX_CONFIG`, or another process or session override from its
+environment. It may pass the reviewed Codex and OpenAI API-key variables,
+along with the common provider environment, so the agent can use its own
+authentication.
 
-Claude Code uses the separately installed Apache-2.0 `claude-agent-acp`
-adapter. Ambassador passes only the reviewed Anthropic authentication variables
-and the common provider environment. It does not pass a Claude executable
-override.
+Under ADR 0045, Ambassador likewise installs the Apache-2.0
+`claude-agent-acp` adapter as an exact production dependency and validates its
+fixed entrypoint before launch. Ambassador passes only the reviewed Anthropic
+authentication variables and the common provider environment. It does not
+pass a Claude executable override.
 
 Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
 future profile requires a separately accepted fixed launch contract and live
@@ -211,7 +215,8 @@ chat reply and cannot be used without an action call.
 
 MCP remains the agent-to-Ambassador business tool channel. After enrollment,
 the target catalog keeps action listing, permission request and decision,
-action call, action-result submission, and permission listing.
+action call, action-result submission, permission listing, and a local
+projection of pending requests the enrolled identity can decide.
 
 Remove local "poll_messages" and "ack_message" after automatic delivery owns
 those operations. Do not present `submit_action_result` as a general reply or
