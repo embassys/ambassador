@@ -4,7 +4,7 @@ import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AmbassadorOptionsError, parseAmbassadorStartOptions } from "./ambassador-options.js";
+import { AmbassadorOptionsError, parseAmbassadorCommand } from "./ambassador-options.js";
 import type { CredentialStore } from "./credential-store.js";
 import { GatewayError } from "./errors.js";
 import {
@@ -15,6 +15,7 @@ import {
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
 import type { DeliveryTarget } from "./notification-relay.js";
 import { ProcessLock } from "./process-lock.js";
+import { EncryptedFileWebhookSecretStore } from "./webhook-secret-store.js";
 
 export interface CliIo {
   readonly stdout: Pick<NodeJS.WriteStream, "write">;
@@ -71,8 +72,9 @@ function homeDirectory(environment: NodeJS.ProcessEnv): string {
 }
 
 export async function runCli(args: string[], context: CliContext): Promise<number> {
+  let command: ReturnType<typeof parseAmbassadorCommand>;
   try {
-    parseAmbassadorStartOptions(args);
+    command = parseAmbassadorCommand(args);
   } catch (error) {
     context.io.stderr.write(
       `${error instanceof AmbassadorOptionsError ? error.message : "Invalid command or arguments"}\n`,
@@ -84,6 +86,19 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     context.testOverrides === undefined
       ? defaultGatewayPaths(process.platform, context.env, homeDirectory(context.env))
       : pathsForStateDirectory(context.testOverrides.stateRoot, join);
+  if (command.command === "webhook-secret") {
+    try {
+      const store = new EncryptedFileWebhookSecretStore(
+        paths.webhookSecretPath,
+        paths.webhookSecretKeyPath,
+      );
+      context.io.stdout.write(`${await store.createOrLoad()}\n`);
+      return 0;
+    } catch {
+      context.io.stderr.write("Ambassador webhook secret failed\n");
+      return 7;
+    }
+  }
   let lock: ProcessLock | undefined;
   let application: RunningGatewayApplication | undefined;
   const ownedSignal = context.signal === undefined ? processSignal() : undefined;
@@ -96,6 +111,8 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       journalPath: paths.journalPath,
       credentialPath: paths.credentialPath,
       credentialKeyPath: paths.credentialKeyPath,
+      webhookSecretPath: paths.webhookSecretPath,
+      webhookSecretKeyPath: paths.webhookSecretKeyPath,
       profilePath: paths.profilePath,
       workingDirectory: context.cwd,
       environment: context.env,

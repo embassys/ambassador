@@ -21,8 +21,10 @@ ambassador start
 ```
 
 `start` accepts no options. Direct delivery needs no Ambassador environment
-variable. Webhook users set their receiver secret in an environment variable
-before startup and provide only that variable's name during registration.
+variable. ADR 0042 supersedes the original webhook environment-variable
+selector: webhook users create or reveal Ambassador's separately encrypted
+receiver secret with `ambassador webhook-secret`, configure it directly in the
+receiver, and provide only the receiver URL during registration.
 
 Local MCP binds only to `127.0.0.1`. It requires the exact loopback `Host`,
 allows no non-loopback `Origin`, rejects an `Authorization` header, and applies
@@ -56,7 +58,9 @@ configuration likewise uses the URL without a bearer token.
 
 - Normal installation is one command plus provider MCP configuration.
 - Agents never receive or manage an Ambassador local token.
-- Webhook remains the only mode that needs a user-configured Ambassador secret.
+- Webhook remains the only mode that needs the owner to copy an Ambassador
+  secret across the local process boundary, but Ambassador creates and stores
+  that secret itself.
 - The local-machine trust boundary is simpler but weaker against another
   process already running as the same user.
 - The encrypted credential and its wrapping key must be backed up or removed

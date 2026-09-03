@@ -80,12 +80,8 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
               properties: {
                 mode: { const: "webhook" },
                 url: { type: "string", minLength: 1, maxLength: 2_048 },
-                secret_env: {
-                  type: "string",
-                  pattern: "^[A-Za-z_][A-Za-z0-9_]*$",
-                },
               },
-              required: ["mode", "url", "secret_env"],
+              required: ["mode"],
               additionalProperties: false,
             },
           ],

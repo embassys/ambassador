@@ -9,6 +9,7 @@ import {
   type DeliveryInput,
   type DeliveryProfileStore,
 } from "./delivery-profile.js";
+import type { WebhookSecretStore } from "./webhook-secret-store.js";
 
 export type GuidedRegistrationErrorCode = "invalid_arguments" | "registration_failed";
 
@@ -27,8 +28,8 @@ export interface CentralRegistrationArguments {
 export interface GuidedRegistrationOptions {
   readonly registry?: readonly AgentCapability[];
   readonly profileStore: DeliveryProfileStore;
+  readonly webhookSecretStore: WebhookSecretStore;
   readonly workingDirectory: string;
-  readonly environment: NodeJS.ProcessEnv;
   readonly registerCentral: (
     arguments_: CentralRegistrationArguments,
     signal: AbortSignal,
@@ -80,11 +81,10 @@ function deliveryInput(value: unknown): DeliveryInput {
   if (value.mode === "direct" && exactKeys(value, ["mode"])) return { mode: "direct" };
   if (
     value.mode === "webhook" &&
-    exactKeys(value, ["mode", "url", "secret_env"]) &&
-    typeof value.url === "string" &&
-    typeof value.secret_env === "string"
+    exactKeys(value, ["mode"], ["url"]) &&
+    (value.url === undefined || typeof value.url === "string")
   ) {
-    return { mode: "webhook", url: value.url, secret_env: value.secret_env };
+    return { mode: "webhook", ...(value.url === undefined ? {} : { url: value.url }) };
   }
   throw invalid();
 }
@@ -92,15 +92,15 @@ function deliveryInput(value: unknown): DeliveryInput {
 export class GuidedRegistration {
   readonly #registry: readonly AgentCapability[];
   readonly #profileStore: DeliveryProfileStore;
+  readonly #webhookSecretStore: WebhookSecretStore;
   readonly #workingDirectory: string;
-  readonly #environment: NodeJS.ProcessEnv;
   readonly #registerCentral: GuidedRegistrationOptions["registerCentral"];
 
   constructor(options: GuidedRegistrationOptions) {
     this.#registry = options.registry ?? PRODUCTION_AGENT_CAPABILITIES;
     this.#profileStore = options.profileStore;
+    this.#webhookSecretStore = options.webhookSecretStore;
     this.#workingDirectory = options.workingDirectory;
-    this.#environment = options.environment;
     this.#registerCentral = options.registerCentral;
   }
 
@@ -153,12 +153,18 @@ export class GuidedRegistration {
 
     if (!capability.modes.includes(delivery.mode)) throw invalid();
     try {
-      const profile = await createDeliveryProfile(
-        capability,
-        delivery,
-        this.#workingDirectory,
-        this.#environment,
-      );
+      if (
+        delivery.mode === "webhook" &&
+        (delivery.url === undefined || (await this.#webhookSecretStore.load()) === undefined)
+      ) {
+        return {
+          status: "input_required",
+          prompt: `Run \`ambassador webhook-secret\`, configure the displayed secret in ${capability.displayName}, then retry with the receiver URL.`,
+          required: ["delivery.url"],
+          command: "ambassador webhook-secret",
+        };
+      }
+      const profile = await createDeliveryProfile(capability, delivery, this.#workingDirectory);
       await this.#profileStore.save(profile);
       return await this.#registerCentral(registration, signal);
     } catch (error) {

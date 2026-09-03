@@ -65,6 +65,16 @@ four-case real-agent qualification gap remains unchanged. Those gates passed,
 the release workflow published 0.2.9, and the downloaded registry artifact was
 verified independently.
 
+The user separately approved another release on 2026-09-03 for the internal
+webhook-secret workflow, package-shipped OpenClaw receiver, production-only
+central URL, and name-based agent compatibility policy. Version 0.2.10 may be
+published only after the repository and package checks pass and Hermes Agent
+0.20.5 plus OpenClaw 2026.8.2 pass both live-central delivery modes against the
+same byte-final candidate. Claude Code direct and Gemini CLI direct remain a
+disclosed qualification exception. The user directed that the pull request be
+merged when green; normal main-branch OIDC publication and post-publication
+registry-artifact verification still apply.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -102,8 +112,8 @@ user separately approved publication of version 0.2.6 with the qualification
 exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional 0.2.9
-release described above. Later publications still require explicit approval
-after qualification.
+release described above, followed by the conditional 0.2.10 release described
+above. Later publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the

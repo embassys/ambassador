@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from "node:child_process";
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
@@ -31,10 +31,16 @@ const HERMES_DIRECT_CONFIRMATION =
   "run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities";
 const HERMES_WEBHOOK_CONFIRMATION =
   "run-live-qualification-with-real-hermes-webhook-and-two-disposable-mailosaur-identities";
+const OPENCLAW_DIRECT_CONFIRMATION =
+  "run-live-qualification-with-real-openclaw-direct-and-two-disposable-mailosaur-identities";
+const OPENCLAW_WEBHOOK_CONFIRMATION =
+  "run-live-qualification-with-real-openclaw-webhook-and-two-disposable-mailosaur-identities";
 const OPENCLAW_CLIENT_INFO = { name: "openclaw-bundle-mcp", version: "qualification" };
 const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" };
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
 const HERMES_ACP_COMMAND = "hermes-acp";
+const OPENCLAW_ACP_COMMAND = "openclaw";
+const OPENCLAW_WEBHOOK_PATH = "/embassys/ambassador";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
 const RESTART_POLL_DRAIN_MS = 31_000;
@@ -587,6 +593,206 @@ async function assertHermesWebhookBearerFilter(url, secret) {
   );
 }
 
+function openClawEnvironment(home) {
+  return {
+    HOME: home,
+    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+    ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+  };
+}
+
+async function validateOpenClawHome(configuredHome) {
+  assert(configuredHome !== undefined && isAbsolute(configuredHome), "openclaw_isolation");
+  const home = await realpath(configuredHome).catch(() => undefined);
+  const ordinaryHome =
+    process.env.HOME === undefined
+      ? undefined
+      : await realpath(process.env.HOME).catch(() => undefined);
+  assert(home !== undefined && home !== ordinaryHome, "openclaw_isolation");
+  const rootMetadata = await lstat(home).catch(() => undefined);
+  assert(
+    rootMetadata?.isDirectory() === true &&
+      !rootMetadata.isSymbolicLink() &&
+      (rootMetadata.mode & 0o077) === 0,
+    "openclaw_isolation",
+  );
+  for (const relativePath of [
+    ".openclaw/openclaw.json",
+    ".openclaw/state/openclaw.sqlite",
+    ".openclaw/agents/main/agent/openclaw-agent.sqlite",
+  ]) {
+    const metadata = await lstat(join(home, relativePath)).catch(() => undefined);
+    assert(
+      metadata?.isFile() === true && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0,
+      "openclaw_isolation",
+    );
+  }
+  return home;
+}
+
+async function runOpenClawConfiguration(home, arguments_, input = "") {
+  const child = spawn("openclaw", arguments_, {
+    cwd: home,
+    env: openClawEnvironment(home),
+    shell: false,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  child.stdin.end(input);
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 60_000);
+  timeout.unref();
+  const code = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  }).finally(() => clearTimeout(timeout));
+  assert(code === 0, "openclaw_configuration");
+}
+
+async function configureOpenClawMcp(home, endpoint) {
+  await runOpenClawConfiguration(home, [
+    "mcp",
+    "set",
+    "ambassador",
+    JSON.stringify({
+      url: endpoint,
+      transport: "streamable-http",
+      enabled: true,
+      connectionTimeoutMs: 15_000,
+      requestTimeoutMs: 90_000,
+    }),
+  ]);
+}
+
+async function configureOpenClawGateway(home, workingDirectory, port) {
+  for (const [path, value, strict] of [
+    ["agents.defaults.workspace", workingDirectory, false],
+    ["gateway.mode", "local", false],
+    ["gateway.bind", "loopback", false],
+    ["gateway.port", String(port), true],
+    ["gateway.auth.mode", "none", false],
+  ]) {
+    await runOpenClawConfiguration(home, [
+      "config",
+      "set",
+      path,
+      value,
+      ...(strict ? ["--strict-json"] : []),
+    ]);
+  }
+}
+
+async function prepareOpenClawWebhook(home, pluginRoot, secret) {
+  await runOpenClawConfiguration(home, [
+    "plugins",
+    "install",
+    "--force",
+    "--accept-capabilities",
+    pluginRoot,
+  ]);
+  await runOpenClawConfiguration(
+    home,
+    ["secrets", "store", "set", "AMBASSADOR_WEBHOOK_SECRET", "--value-file", "-"],
+    `${secret}\n`,
+  );
+  await runOpenClawConfiguration(home, [
+    "config",
+    "set",
+    "plugins.entries.embassys-ambassador.config.secret",
+    "--ref-source",
+    "store",
+    "--ref-provider",
+    "default",
+    "--ref-id",
+    "AMBASSADOR_WEBHOOK_SECRET",
+  ]);
+  await runOpenClawConfiguration(home, [
+    "plugins",
+    "enable",
+    "embassys-ambassador",
+    "--accept-capabilities",
+  ]);
+}
+
+async function assertOpenClawWebhookBearerFilter(url, secret) {
+  const body = Buffer.from("{}", "utf8");
+  const timestamp = String(Math.floor(Date.now() / 1_000));
+  const signature = createHmac("sha256", secret)
+    .update(timestamp, "ascii")
+    .update(".", "ascii")
+    .update(body)
+    .digest("hex");
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Request-ID": randomUUID(),
+      "X-Webhook-Signature-V2": signature,
+      "X-Webhook-Timestamp": timestamp,
+    },
+    body,
+    redirect: "manual",
+    signal: AbortSignal.timeout(10_000),
+  });
+  await response.body?.cancel().catch(() => undefined);
+  assert(response.status === 401, "openclaw_webhook_bearer");
+}
+
+async function startOpenClawGateway(
+  home,
+  workingDirectory,
+  endpoint,
+  requestedPort,
+  expectWebhook,
+) {
+  const port = requestedPort ?? (await availableLoopbackPort());
+  await configureOpenClawMcp(home, endpoint);
+  await configureOpenClawGateway(home, workingDirectory, port);
+  const child = spawn("openclaw", ["gateway", "run", "--allow-unconfigured"], {
+    cwd: workingDirectory,
+    detached: true,
+    env: openClawEnvironment(home),
+    shell: false,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+  const url = `http://127.0.0.1:${port}${OPENCLAW_WEBHOOK_PATH}`;
+  const readinessUrl = expectWebhook ? url : `http://127.0.0.1:${port}/`;
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline && !exited) {
+    const ready = await fetch(readinessUrl, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(1_000),
+    })
+      .then(async (response) => {
+        await response.body?.cancel().catch(() => undefined);
+        return expectWebhook ? response.status === 405 : response.status < 500;
+      })
+      .catch(() => false);
+    if (ready) {
+      return {
+        url,
+        port,
+        async stop() {
+          if (exited) return;
+          if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+          const stopped = await Promise.race([
+            new Promise((resolve) => child.once("exit", () => resolve(true))),
+            new Promise((resolve) => setTimeout(() => resolve(false), 10_000)),
+          ]);
+          if (!stopped && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+        },
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!exited && child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+  throw safeFailure("openclaw_gateway_setup");
+}
+
 async function waitForEndpoint(read) {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -620,7 +826,6 @@ async function startGateway(
   packed,
   stateRoot,
   centralFetch,
-  webhookSecret,
   deliveryTargetFactory,
   clientInfo,
   extraEnvironment = {},
@@ -647,10 +852,7 @@ async function startGateway(
         },
       },
     },
-    env: {
-      ...extraEnvironment,
-      LIVE_QUALIFICATION_WEBHOOK_SECRET: webhookSecret,
-    },
+    env: { ...extraEnvironment },
     cwd: workingDirectory,
     signal: controller.signal,
     testOverrides: {
@@ -675,6 +877,34 @@ async function startGateway(
       assert(result === 0, "gateway_stop");
     },
   };
+}
+
+async function createGatewayWebhookSecret(packed, stateRoot) {
+  let stdout = "";
+  let stderr = "";
+  const result = await packed.runCli(["webhook-secret"], {
+    io: {
+      stdout: {
+        write(chunk) {
+          stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
+        },
+      },
+      stderr: {
+        write(chunk) {
+          stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
+        },
+      },
+    },
+    env: {},
+    cwd: repositoryRoot,
+    testOverrides: { centralOrigin: LIVE_ORIGIN, stateRoot },
+  });
+  assert(result === 0 && stderr === "", "webhook_secret_setup");
+  const secret = stdout.trim();
+  assert(/^[a-f0-9]{48}$/u.test(secret), "webhook_secret_setup");
+  return secret;
 }
 
 async function readTreeFiles(root) {
@@ -861,15 +1091,26 @@ function schemaDigest(value) {
 async function main() {
   const directAgent = process.env.AMBASSADOR_LIVE_DIRECT_AGENT ?? "mock";
   assert(
-    ["mock", "codex", "hermes-direct", "hermes-webhook"].includes(directAgent),
+    [
+      "mock",
+      "codex",
+      "hermes-direct",
+      "hermes-webhook",
+      "openclaw-direct",
+      "openclaw-webhook",
+    ].includes(directAgent),
     "direct_agent",
   );
   const realCodex = directAgent === "codex";
   const realHermesDirect = directAgent === "hermes-direct";
   const realHermesWebhook = directAgent === "hermes-webhook";
   const realHermes = realHermesDirect || realHermesWebhook;
-  const realDirect = realCodex || realHermesDirect;
-  const realTarget = realDirect || realHermesWebhook;
+  const realOpenClawDirect = directAgent === "openclaw-direct";
+  const realOpenClawWebhook = directAgent === "openclaw-webhook";
+  const realOpenClaw = realOpenClawDirect || realOpenClawWebhook;
+  const realWebhook = realHermesWebhook || realOpenClawWebhook;
+  const realDirect = realCodex || realHermesDirect || realOpenClawDirect;
+  const realTarget = realDirect || realWebhook;
   let targetVersionProbe = { status: "not_applicable", reported_version: null };
   const confirmation = realCodex
     ? CODEX_CONFIRMATION
@@ -877,7 +1118,11 @@ async function main() {
       ? HERMES_DIRECT_CONFIRMATION
       : realHermesWebhook
         ? HERMES_WEBHOOK_CONFIRMATION
-        : MOCK_CONFIRMATION;
+        : realOpenClawDirect
+          ? OPENCLAW_DIRECT_CONFIRMATION
+          : realOpenClawWebhook
+            ? OPENCLAW_WEBHOOK_CONFIRMATION
+            : MOCK_CONFIRMATION;
   if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== confirmation) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
@@ -910,6 +1155,12 @@ async function main() {
   if (realHermes && hermesHome !== undefined) {
     targetVersionProbe = await observeAgentVersion("hermes", hermesEnvironment(hermesHome));
   }
+  const openClawHome = realOpenClaw
+    ? await validateOpenClawHome(process.env.AMBASSADOR_OPENCLAW_QUALIFICATION_HOME)
+    : undefined;
+  if (realOpenClaw && openClawHome !== undefined) {
+    targetVersionProbe = await observeAgentVersion("openclaw", openClawEnvironment(openClawHome));
+  }
 
   const credentials = {
     apiKey: await keychain("api-key"),
@@ -937,6 +1188,7 @@ async function main() {
   const webhooks = [];
   const webhookSecrets = [];
   const hermesWebhooks = [];
+  const openClawGateways = [];
   const centralRoutes = new Set();
   const centralObservations = [];
   const directMessages = [];
@@ -949,6 +1201,7 @@ async function main() {
   let targetPermissionDecisionObserved = false;
   let targetActionResultCallCount = 0;
   let hermesWebhookPort;
+  let openClawGatewayPort;
   let catalogObservation;
   const centralFetchFor = (gatewayIndex) => async (input, init) => {
     const target = new URL(input instanceof Request ? input.url : input);
@@ -1073,8 +1326,22 @@ async function main() {
         "hermes_profile",
       );
     }
+    if (realOpenClaw) {
+      const openClawCapability = agentCapabilitiesModule.PRODUCTION_AGENT_CAPABILITIES.find(
+        (candidate) => candidate.kind === "openclaw",
+      );
+      assert(
+        canonicalJson(openClawCapability?.aliases) === canonicalJson([OPENCLAW_CLIENT_INFO.name]) &&
+          openClawCapability?.direct?.command === OPENCLAW_ACP_COMMAND &&
+          canonicalJson(openClawCapability.direct.args) === canonicalJson(["acp"]) &&
+          openClawCapability.direct.agentInfo.name === "openclaw-acp",
+        "openclaw_profile",
+      );
+    }
     phase = "package_scan";
     await assertPackedRuntime(cliPath);
+    const packedPackageRoot = join(dirname(cliPath), "..");
+    const openClawPluginRoot = join(packedPackageRoot, "integrations", "openclaw-ambassador");
 
     phase = "state_setup";
     const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
@@ -1110,7 +1377,7 @@ async function main() {
             : OPENCLAW_CLIENT_INFO;
     const environmentFor = (index) => {
       if (index !== 1 || !realTarget) return {};
-      const home = realCodex ? codexHome : hermesHome;
+      const home = realCodex ? codexHome : realHermes ? hermesHome : openClawHome;
       return {
         HOME: home,
         ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
@@ -1120,7 +1387,7 @@ async function main() {
       };
     };
     const deliveryTargetFactoryFor = (index) => {
-      if (index === 0 || realHermesWebhook) return undefined;
+      if (index === 0 || realWebhook) return undefined;
       return ({ capability, endpoint, profile }) => {
         const selectedCapability = realDirect
           ? capability.direct
@@ -1157,7 +1424,7 @@ async function main() {
 
     for (let index = 0; index < 2; index += 1) {
       phase = `webhook_setup_${index + 1}`;
-      const webhookSecret = randomBytes(24).toString("hex");
+      const webhookSecret = await createGatewayWebhookSecret(packed, roots[index]);
       webhookSecrets.push(webhookSecret);
       const webhook = await startWebhook(webhookSecret);
       webhooks.push(webhook);
@@ -1167,7 +1434,6 @@ async function main() {
           packed,
           roots[index],
           centralFetchFor(index),
-          webhookSecret,
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
@@ -1188,6 +1454,26 @@ async function main() {
         hermesWebhookPort = Number(new URL(hermesWebhook.url).port);
         hermesWebhooks.push(hermesWebhook);
         await assertHermesWebhookBearerFilter(hermesWebhook.url, webhookSecret);
+      }
+      if (realOpenClaw && index === 1) {
+        assert(openClawHome !== undefined, "openclaw_isolation");
+        if (realOpenClawWebhook) {
+          phase = "openclaw_webhook_configuration";
+          await prepareOpenClawWebhook(openClawHome, openClawPluginRoot, webhookSecret);
+        }
+        phase = "openclaw_gateway_setup";
+        const openClawGateway = await startOpenClawGateway(
+          openClawHome,
+          targetWorkingDirectory,
+          gateways[index].client.endpoint,
+          undefined,
+          realOpenClawWebhook,
+        );
+        openClawGatewayPort = openClawGateway.port;
+        openClawGateways.push(openClawGateway);
+        if (realOpenClawWebhook) {
+          await assertOpenClawWebhookBearerFilter(openClawGateway.url, webhookSecret);
+        }
       }
     }
 
@@ -1210,15 +1496,18 @@ async function main() {
               ? {
                   mode: "webhook",
                   url: webhooks[index].url,
-                  secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
                 }
               : realHermesWebhook
                 ? {
                     mode: "webhook",
                     url: hermesWebhooks[0].url,
-                    secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
                   }
-                : { mode: "direct" },
+                : realOpenClawWebhook
+                  ? {
+                      mode: "webhook",
+                      url: openClawGateways[0].url,
+                    }
+                  : { mode: "direct" },
         });
       } else {
         assert(
@@ -1245,6 +1534,7 @@ async function main() {
 
     phase = "restart";
     for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
+    for (const gateway of openClawGateways.splice(0)) await gateway.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
     // Central polling is consuming, and aborting the local HTTP request does not
     // guarantee that its server-side 30-second long poll is cancelled. Do not
@@ -1256,7 +1546,6 @@ async function main() {
           packed,
           roots[index],
           centralFetchFor(index),
-          webhookSecrets[index],
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
@@ -1291,6 +1580,22 @@ async function main() {
             targetWorkingDirectory,
             webhookSecrets[index],
             hermesWebhookPort,
+          ),
+        );
+      }
+      if (realOpenClaw && index === 1) {
+        assert(
+          openClawHome !== undefined && Number.isSafeInteger(openClawGatewayPort),
+          "openclaw_isolation",
+        );
+        phase = "openclaw_gateway_setup";
+        openClawGateways.push(
+          await startOpenClawGateway(
+            openClawHome,
+            targetWorkingDirectory,
+            gateways[index].client.endpoint,
+            openClawGatewayPort,
+            realOpenClawWebhook,
           ),
         );
       }
@@ -1356,7 +1661,7 @@ async function main() {
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
-    phase = `permission_request_${realHermesWebhook ? "webhook" : "direct"}`;
+    phase = `permission_request_${realWebhook ? "webhook" : "direct"}`;
     if (realTarget) {
       await waitForObservation(
         () =>
@@ -1434,7 +1739,7 @@ async function main() {
         called.status === "delivered",
       "action",
     );
-    phase = `action_${realHermesWebhook ? "webhook" : "direct"}`;
+    phase = `action_${realWebhook ? "webhook" : "direct"}`;
     if (realTarget) {
       await waitForObservation(
         () =>
@@ -1482,8 +1787,8 @@ async function main() {
       () => acknowledgedByGateway[0].has(actionResponse.id),
       "action_response_ack_timeout",
     );
-    if (realHermesWebhook) {
-      assert(webhookAcceptedByGateway[1].size >= 2, "hermes_webhook_custody");
+    if (realWebhook) {
+      assert(webhookAcceptedByGateway[1].size >= 2, "target_webhook_custody");
     }
     if (realTarget) {
       assert(targetActionResultCallCount === 1, "target_action_result_count");
@@ -1529,6 +1834,7 @@ async function main() {
 
     phase = "cleanup";
     for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
+    for (const gateway of openClawGateways.splice(0)) await gateway.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
     for (const webhook of webhooks.splice(0)) await webhook.close();
     await rm(qualificationRoot, { recursive: true, force: true });
@@ -1543,12 +1849,18 @@ async function main() {
         ? "ambassador-live-hermes-direct"
         : realHermesWebhook
           ? "ambassador-live-hermes-webhook"
-          : "ambassador-live";
+          : realOpenClawDirect
+            ? "ambassador-live-openclaw-direct"
+            : realOpenClawWebhook
+              ? "ambassador-live-openclaw-webhook"
+              : "ambassador-live";
     const targetAgent = realCodex
       ? "codex-acp"
       : realHermes
         ? "hermes-agent"
-        : "deterministic-mock-acp";
+        : realOpenClaw
+          ? "openclaw-acp"
+          : "deterministic-mock-acp";
     const report = {
       qualification,
       date: new Date().toISOString().slice(0, 10),
@@ -1562,7 +1874,7 @@ async function main() {
         .digest("hex"),
       target_agent: targetAgent,
       target_version_probe: targetVersionProbe,
-      target_delivery_mode: realHermesWebhook ? "webhook" : "direct",
+      target_delivery_mode: realWebhook ? "webhook" : "direct",
       results: {
         registration: "passed",
         email_delivery: "passed",
@@ -1586,6 +1898,14 @@ async function main() {
         hermes_webhook_custody: realHermesWebhook ? "passed" : "not_applicable",
         hermes_webhook_bearer_filter: realHermesWebhook ? "passed" : "not_applicable",
         hermes_acp_v1: realHermesDirect ? "passed" : "not_applicable",
+        openclaw_permission_decision: realOpenClaw ? "passed" : "not_applicable",
+        openclaw_action_result_mcp_call: realOpenClaw ? "passed" : "not_applicable",
+        openclaw_action_result_call_count: realOpenClaw
+          ? targetActionResultCallCount
+          : "not_applicable",
+        openclaw_webhook_custody: realOpenClawWebhook ? "passed" : "not_applicable",
+        openclaw_webhook_bearer_filter: realOpenClawWebhook ? "passed" : "not_applicable",
+        openclaw_acp_v1: realOpenClawDirect ? "passed" : "not_applicable",
         central_mcp_requests: 0,
         artifact_scan: "passed",
         mail_cleanup: "passed",
@@ -1610,6 +1930,9 @@ async function main() {
     return 1;
   } finally {
     for (const webhook of hermesWebhooks.splice(0)) await webhook.stop().catch(() => undefined);
+    for (const gateway of openClawGateways.splice(0)) {
+      await gateway.stop().catch(() => undefined);
+    }
     for (const gateway of gateways.splice(0)) await gateway.stop().catch(() => undefined);
     for (const webhook of webhooks.splice(0)) await webhook.close().catch(() => undefined);
     for (const messageId of capturedMail.splice(0)) {

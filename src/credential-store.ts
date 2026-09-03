@@ -70,6 +70,7 @@ export type WindowsCredentialAccessControl = WindowsAccessControl;
 export interface EncryptedFileCredentialStoreOptions {
   readonly platform?: NodeJS.Platform;
   readonly windowsAccessControl?: WindowsCredentialAccessControl;
+  readonly validatePlaintext?: (plaintext: string) => void;
 }
 
 interface SecuredDirectory {
@@ -170,6 +171,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   readonly #credentialScope: string;
   readonly #platform: NodeJS.Platform;
   readonly #windowsAccessControl?: WindowsCredentialAccessControl;
+  readonly #validatePlaintext: (plaintext: string) => void;
 
   constructor(
     path: string,
@@ -187,6 +189,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       throw new Error("The credential key path is invalid");
     }
     this.#credentialScope = credentialScope;
+    this.#validatePlaintext = options.validatePlaintext ?? parseCentralCredential;
     this.#platform = options.platform ?? process.platform;
     if (this.#platform === "win32") {
       this.#windowsAccessControl =
@@ -222,7 +225,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
     ) {
       throw new Error("The central credential is invalid");
     }
-    parseCentralCredential(plaintext);
+    this.#validatePlaintext(plaintext);
     if (savingPaths.has(this.#path)) throw credentialExists();
     savingPaths.add(this.#path);
     let directory: SecuredDirectory | undefined;
@@ -357,7 +360,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
         decipher.setAuthTag(envelope.tag);
         decoded = Buffer.concat([decipher.update(envelope.ciphertext), decipher.final()]);
         const plaintext = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
-        parseCentralCredential(plaintext);
+        this.#validatePlaintext(plaintext);
         return plaintext;
       } catch {
         throw invalidCredential();

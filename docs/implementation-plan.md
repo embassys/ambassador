@@ -7,16 +7,17 @@ automatic central acknowledgement, restart loss, bounded state, internal
 credential-key custody, and packed-package installation. Completed design and
 behavior live in the architecture, protocol, and ADRs rather than this plan.
 
-Published Ambassador 0.2.9 corrects the version policy under ADR 0041. Exact
-known MCP client names still select fixed profiles, and exact ACP v1 agent
-names still protect direct initialization, but reported client and agent
-versions no longer gate either step. Ambassador now tries the fixed contract
-and surfaces an actual startup, initialization, session, or delivery failure.
-The required pull-request and main-branch checks passed, and the downloaded npm
-artifact was independently verified. Its digest and audit evidence are
-recorded in [Delivery qualification](qualification.md).
+Published Ambassador 0.2.9 corrects the version policy under ADR 0041. The
+0.2.10 candidate adds internally generated encrypted webhook secrets, the
+`ambassador webhook-secret` command, and the shipped OpenClaw webhook receiver.
+Exact known MCP client names still select fixed profiles, and exact ACP v1
+agent names still protect direct initialization, but reported client and agent
+versions do not gate either step. Ambassador tries the fixed contract and
+surfaces an actual startup, initialization, session, or delivery failure. The
+candidate's local checks and four-case Hermes/OpenClaw live-central matrix have
+passed. Publication and registry-artifact verification remain pending.
 
-## Post-release qualification
+## Remaining qualification
 
 The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
 0.2.7 release on 2026-09-03 before completion of the real-agent matrix. This
@@ -25,11 +26,8 @@ and record the following work after the release. The published 0.2.7 registry
 artifact and installed CLI have now been independently verified; completed
 artifact checks are recorded in [Live central qualification](live-qualification.md).
 
-- Complete the remaining four opt-in real-agent profile/mode cases with
-  authenticated installations: OpenClaw webhook and direct, Claude Code
-  direct, and Gemini CLI direct.
-  OpenClaw must pass webhook and direct delivery; Claude Code and Gemini CLI
-  must pass direct delivery.
+- Complete the remaining two opt-in real-agent profile cases with authenticated
+  installations: Claude Code direct and Gemini CLI direct.
 - Codex direct passed the
   complete live correlated-result flow on 2026-09-03 against packed candidate
   `7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`
@@ -40,14 +38,15 @@ artifact checks are recorded in [Live central qualification](live-qualification.
   isolated preapproval policy, not an interactive user prompt. Repeat it on a
   supported Node release; the installed 24.14.0 runtime was below the 24.19.0
   floor. Its isolated credential copy was removed after the run.
-- Hermes Agent 0.20.5 passed webhook with the published 0.2.7 artifact and
-  direct with the candidate that became Ambassador 0.2.8. Do not claim
-  published 0.2.7 direct support.
-  Hermes 0.21.0 still has only its contract and ACP startup probe, so its
-  historical evidence is not a complete real-model round trip.
+- Hermes Agent 0.20.5 and OpenClaw 2026.8.2 passed both direct and webhook live
+  central delivery with the byte-final 0.2.10 candidate. These version values
+  are observations, not allowlist entries. Both agents registered with exact
+  MCP client information `mcp` / `0.1.0`; direct delivery retained exact ACP
+  v1 agent-name checks. The isolated copies of their existing credentials were
+  removed after the runs.
 - The isolated ACP initialization probes already pass for Codex ACP 1.8.0,
-  Claude Agent ACP 0.73.0, and native Gemini CLI ACP 0.58.0. The pinned
-  OpenClaw and Hermes images also pass their version and ACP startup probes.
+  Claude Agent ACP 0.73.0, and native Gemini CLI ACP 0.58.0. OpenClaw and
+  Hermes also pass their version and ACP startup probes.
   These probes do not replace an authenticated prompt and observed Ambassador
   MCP call.
 - Record only the safe version and pass/fail evidence produced by
