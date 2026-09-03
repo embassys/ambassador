@@ -9,7 +9,16 @@ export class AmbassadorOptionsError extends Error {
 
 export type AmbassadorStartOptions = Record<string, never>;
 
+export type AmbassadorCommand = { readonly command: "start" | "webhook-secret" };
+
+export function parseAmbassadorCommand(args: readonly string[]): AmbassadorCommand {
+  if (args.length !== 1 || (args[0] !== "start" && args[0] !== "webhook-secret")) {
+    throw new AmbassadorOptionsError();
+  }
+  return { command: args[0] };
+}
+
 export function parseAmbassadorStartOptions(args: readonly string[]): AmbassadorStartOptions {
-  if (args.length !== 1 || args[0] !== "start") throw new AmbassadorOptionsError();
+  if (parseAmbassadorCommand(args).command !== "start") throw new AmbassadorOptionsError();
   return {};
 }

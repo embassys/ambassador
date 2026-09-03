@@ -37,9 +37,19 @@ async function fixture(t: TestContext) {
     journalPath: join(root, "notifications.sqlite3"),
     credentialPath: join(root, "central-credential.enc"),
     credentialKeyPath: join(root, "central-credential.key"),
+    webhookSecretPath: join(root, "webhook-secret.json"),
+    webhookSecretKeyPath: join(root, "webhook-secret.key"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
-    environment: { EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET },
+    environment: {},
+    webhookSecretStore: {
+      async load() {
+        return WEBHOOK_SECRET;
+      },
+      async createOrLoad() {
+        return WEBHOOK_SECRET;
+      },
+    },
     centralOrigin: central.apiUrl,
     localMcpPort: 0,
     nowSeconds: () => NOW_SECONDS,
@@ -70,7 +80,6 @@ async function enrollWebhook(
     delivery: {
       mode: "webhook",
       url: webhookUrl,
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
   });
   await client.callTool("verify_email", { email, code: central.verificationCode(email) });

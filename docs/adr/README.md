@@ -2,7 +2,8 @@
 
 Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
 for zero-configuration local startup, ADR 0040 for Windows qualification, and
-ADR 0041 for agent-version handling.
+ADR 0041 for agent-version handling, and ADR 0042 for webhook-secret ownership
+and the OpenClaw receiver.
 
 ## Current decisions
 
@@ -12,7 +13,7 @@ ADR 0041 for agent-version handling.
 | [0007](0007-sqlite.md) | SQLite for the ID-only journal |
 | [0012](0012-http-deadlines.md) | HTTP and delivery deadlines |
 | [0014](0014-lock-handoff-timeout.md) | Process lock handoff |
-| [0015](0015-npm-distribution.md) | Ambassador npm distribution; 0.2.6 through 0.2.9 qualification exceptions |
+| [0015](0015-npm-distribution.md) | Ambassador npm distribution; 0.2.6 through 0.2.10 qualification exceptions |
 | [0018](0018-mcp-sdk.md) | MCP SDK for local MCP |
 | [0019](0019-central-credential-storage.md) | Encrypted central credential |
 | [0020](0020-in-memory-central-test-service.md) | Independent central test fixtures |
@@ -21,6 +22,7 @@ ADR 0041 for agent-version handling.
 | [0039](0039-zero-configuration-local-start.md) | Zero-configuration start and local-machine trust boundary |
 | [0040](0040-windows-qualification.md) | Windows implementation and qualification plan |
 | [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
+| [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and OpenClaw receiver |
 
 ## Historical ledger
 

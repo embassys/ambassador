@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
-const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const FIXTURE_NOW_SECONDS = 1_788_220_800;
 
 interface PackedCli {
@@ -31,6 +30,41 @@ interface PackedCli {
   ): Promise<number>;
 }
 
+async function createWebhookSecret(packed: PackedCli, root: string, centralOrigin: string) {
+  let stdout = "";
+  let stderr = "";
+  const result = await packed.runCli(["webhook-secret"], {
+    io: {
+      stdout: {
+        write(chunk) {
+          stdout += String(chunk);
+          return true;
+        },
+      },
+      stderr: {
+        write(chunk) {
+          stderr += String(chunk);
+          return true;
+        },
+      },
+    },
+    env: {},
+    cwd: root,
+    signal: new AbortController().signal,
+    testOverrides: {
+      centralOrigin,
+      stateRoot: root,
+      localMcpPort: 0,
+      nowSeconds: () => FIXTURE_NOW_SECONDS,
+    },
+  });
+  assert.equal(result, 0);
+  assert.equal(stderr, "");
+  const secret = stdout.trim();
+  assert.match(secret, /^[a-f0-9]{48}$/u);
+  return secret;
+}
+
 async function waitForEndpoint(read: () => string): Promise<string> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -51,8 +85,9 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   const packed = (await import(pathToFileURL(cliPath).href)) as PackedCli;
   const root = await mkdtemp(join(tmpdir(), "ambassador-packed-current-rest-"));
   t.after(() => rm(root, { recursive: true, force: true }));
+  const webhookSecret = await createWebhookSecret(packed, root, centralOrigin);
   const webhook = await startFakeWebhook(t, {
-    secret: WEBHOOK_SECRET,
+    secret: webhookSecret,
     nowSeconds: FIXTURE_NOW_SECONDS,
   });
   const controller = new AbortController();
@@ -73,9 +108,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
         },
       },
     },
-    env: {
-      EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET,
-    },
+    env: {},
     cwd: root,
     signal: controller.signal,
     testOverrides: {
@@ -97,7 +130,6 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
     delivery: {
       mode: "webhook",
       url: webhook.url,
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
   });
   const codeResponse = await fetch(

@@ -1,6 +1,6 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039, 0040, and 0041
+Status: accepted; amended by ADRs 0039, 0040, 0041, and 0042
 
 Date: 2026-09-02
 
@@ -95,9 +95,10 @@ The direct working directory is Ambassador's canonical process directory at
 registration time. It persists in the profile. A later start from a different
 directory fails closed instead of changing agent scope.
 
-Webhook mode accepts a validated URL and the name of an environment variable
-containing the receiver secret. The raw secret is configured outside the model.
-It never appears in MCP arguments or results.
+ADR 0042 replaces the environment-variable selector. Webhook mode accepts a
+validated URL only after Ambassador has created its internal encrypted secret
+through `ambassador webhook-secret`. The raw value is configured outside the
+model and never appears in MCP arguments or results.
 
 Persist only the nonsecret delivery profile derived from the matched registry
 entry and, for a dual-mode entry, the user's choice. One profile belongs to one
@@ -119,8 +120,9 @@ message. Record that boundary, then acknowledge the message to central. The
 receiver does not call local "poll_messages" or "ack_message" for delivery
 control.
 
-The body is provider-neutral. OpenClaw, Hermes, or any other receiver owns its
-mapping from the canonical Embassys message to a native hook shape.
+The body is provider-neutral. Hermes owns its native mapping. ADR 0042 adds the
+package-shipped OpenClaw receiver because exact-byte HMAC verification must
+happen before OpenClaw parses the request.
 
 ### Direct mode
 
@@ -214,9 +216,10 @@ completion tool.
 ### Custody and restart behavior
 
 Keep central message bodies in bounded memory. Keep the journal ID-only. The
-delivery profile may contain only nonsecret mode, endpoint, agent-kind, secret
-environment-variable name, canonical direct working directory, and safe opaque
-session metadata.
+delivery profile may contain only nonsecret mode, endpoint, agent kind,
+canonical direct working directory, and safe opaque session metadata. ADR 0042
+stores webhook authentication separately as an encrypted secret and wrapping
+key.
 
 The server consumes messages when polling returns them and cannot retrieve or
 redeliver a delivered body. A process crash can therefore lose an in-memory
@@ -311,7 +314,7 @@ contract.
   version because it weakens the fixed support boundary and makes unsupported
   callers appear qualified.
 - **Pass the webhook secret through MCP.** Rejected because the model should
-  handle only the environment-variable name.
+  not handle a credential or a credential selector.
 - **Send provider-specific webhook bodies.** Rejected because provider mapping
   belongs at the receiver and would couple Ambassador to webhook products.
 - **Persist message bodies for restart recovery.** Rejected because server-side

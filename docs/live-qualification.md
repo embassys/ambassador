@@ -11,7 +11,7 @@ general reply operations. It does test the deployed, action-specific
 The runner covers the current package name, guided registration, one
 full-message webhook target, and one direct target. The default direct target
 is the deterministic mock ACP agent. Separately confirmed modes use the fixed
-Codex or Hermes profiles. Real-provider modes use isolated provider
+Codex, Hermes, or OpenClaw profiles. Real-provider modes use isolated provider
 configuration copies. Installed-version probes are observational; production
 requires the exact known client and ACP agent names and then tries the fixed
 ACP v1 contract.
@@ -33,7 +33,8 @@ ACP v1 contract.
    direct profile. Prove a dual-mode profile advertises direct as its default;
    prove a direct-only profile proceeds without a delivery question.
 4. Receive and use both verification emails without persisting their codes.
-5. Restart and prove encrypted credential and nonsecret profile loading.
+5. Restart and prove encrypted credential, encrypted webhook-secret, and
+   nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
 7. Validate the live action catalog against the recorded fixture schemas.
 8. Request and decide one synthetic `get_phone_number` permission.
@@ -112,6 +113,37 @@ gate; direct mode requires ACP v1 and the exact `hermes-agent` name. Webhook
 mode starts Hermes's authenticated generic route,
 requires its bearer filter and native HMAC V2 validation, and suppresses
 provider output. Delete the isolated home after every attempt.
+
+For OpenClaw, prepare an owner-only temporary home containing copies of
+`.openclaw/openclaw.json`, `.openclaw/state/openclaw.sqlite`, and
+`.openclaw/agents/main/agent/openclaw-agent.sqlite`. Copy only the provider
+credential used by that OpenClaw agent; for the tested Codex-backed agent this
+also means `.codex/auth.json` and its provider configuration. Use SQLite's
+backup operation for live database copies. Put the installed `openclaw` on
+`PATH`, then choose one fixed mode:
+
+```sh
+export AMBASSADOR_OPENCLAW_QUALIFICATION_HOME=/absolute/path/to/isolated/home
+export AMBASSADOR_LIVE_DIRECT_AGENT=openclaw-direct
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-openclaw-direct-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+or:
+
+```sh
+export AMBASSADOR_OPENCLAW_QUALIFICATION_HOME=/absolute/path/to/isolated/home
+export AMBASSADOR_LIVE_DIRECT_AGENT=openclaw-webhook
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-openclaw-webhook-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+The runner rejects the ordinary OpenClaw home. It configures Ambassador MCP
+only in the copy. Direct mode launches the fixed `openclaw acp` profile and
+requires ACP v1 plus exact agent name `openclaw-acp`. Webhook mode installs the
+package-shipped receiver into the copy, creates the secret through the packed
+Ambassador CLI, stores it through OpenClaw's secret store, and runs the real
+OpenClaw gateway. Delete the isolated home after every attempt.
 
 ## Required report
 
@@ -263,6 +295,45 @@ the same strict case passed. No compatibility fallback or replay was added.
 These observations approve the source registry's exact Hermes ACP 0.20.5
 entry. They do not show that published Ambassador 0.2.7 supports Hermes 0.20.5
 direct mode. Ambassador 0.2.8 contains the candidate change.
+
+## OpenClaw observations
+
+On 2026-09-03, authenticated OpenClaw 2026.8.2 ran on macOS arm64 with Node
+24.19.0 and passed the complete live correlated-result flow in direct and
+webhook modes with the Ambassador 0.2.10 candidate. Both modes registered and
+verified two disposable identities, reloaded encrypted Ambassador state after
+restart, exercised live REST and DPoP plus the deployed action catalog, and
+completed the synthetic phone-number permission and action round trip. The
+real OpenClaw model called `respond_to_permission` and called
+`submit_action_result` exactly once. The controlled requester received the
+correlated final response, and local completion or webhook custody preceded
+central acknowledgement. Final candidate digests and the separate mode results
+are recorded in [Delivery qualification](qualification.md).
+
+Direct mode proved ACP v1 initialization through fixed `openclaw acp`, exact
+agent name `openclaw-acp`, provider-side Ambassador MCP configuration, real
+model execution, and correlated submission. An earlier isolation attempt
+omitted the credential for the agent's configured provider backend; OpenClaw
+then ended the model turn with an authentication failure before any Ambassador
+MCP call. Adding that owner-only credential to the isolated copy made the
+unchanged direct flow pass. This was an isolation-fixture failure, not an
+Ambassador ACP incompatibility.
+
+Webhook mode proved the package-shipped route's bearer and exact-body HMAC V2
+checks, bounded custody queue, real model execution, Ambassador MCP calls, and
+the final response. Earlier receiver attempts returned `202` and Ambassador
+correctly acknowledged central, but OpenClaw made no model or MCP call. The
+first implementation omitted required embedded-run fields. After those were
+added, the detached run inherited the HTTP handler's released work-admission
+lease and OpenClaw rejected it with the safe class `GatewayDrainingError`. A
+plugin-service queue created outside the request context removes that false
+drain path. A `202` still proves custody only; the passing run waited for the
+model calls and requester response.
+
+All OpenClaw attempts used an owner-only isolated home. Mailosaur messages,
+temporary Ambassador state, the OpenClaw copy, and copied provider credentials
+were removed after qualification. No provider output or message content was
+recorded.
 
 ## Earlier direct observation
 

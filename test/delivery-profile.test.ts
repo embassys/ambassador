@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -13,8 +13,6 @@ import {
 } from "../src/delivery-profile.js";
 import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
-const SECRET = "webhook-secret-with-at-least-32-bytes";
-
 test("atomically stores only the registry-derived nonsecret webhook profile", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-profile-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -26,16 +24,14 @@ test("atomically stores only the registry-derived nonsecret webhook profile", as
     {
       mode: "webhook",
       url: "https://agent.example.test/embassys",
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
     root,
-    { EMBASSYS_WEBHOOK_SECRET: SECRET },
   );
   const store = new DeliveryProfileStore(path);
   await store.save(profile);
   assert.deepEqual(await store.load(), profile);
   const bytes = await readFile(path, "utf8");
-  assert.equal(bytes.includes(SECRET), false);
+  assert.equal(bytes.includes("secret"), false);
   assert.equal(bytes.includes("payload"), false);
   if (process.platform !== "win32") {
     assert.equal((await stat(path)).mode & 0o777, 0o600);
@@ -47,7 +43,7 @@ test("stores the canonical direct directory and rejects a conflicting restart", 
   t.after(() => rm(root, { recursive: true, force: true }));
   const capability = PRODUCTION_AGENT_CAPABILITIES[1];
   assert.ok(capability);
-  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root);
   assert.deepEqual(profile, {
     version: 1,
     mode: "direct",
@@ -67,12 +63,7 @@ test("loads every enabled registry-derived direct profile", async (t) => {
   for (const capability of PRODUCTION_AGENT_CAPABILITIES) {
     const workingDirectory = join(root, capability.kind);
     await mkdir(workingDirectory, { recursive: true });
-    const profile = await createDeliveryProfile(
-      capability,
-      { mode: "direct" },
-      workingDirectory,
-      {},
-    );
+    const profile = await createDeliveryProfile(capability, { mode: "direct" }, workingDirectory);
     assert.equal(profile.agent_kind, capability.kind);
     assert.deepEqual(await validateStoredDeliveryProfile(profile, workingDirectory), {
       profile,
@@ -81,27 +72,13 @@ test("loads every enabled registry-derived direct profile", async (t) => {
   }
 });
 
-test("fails closed on missing secrets, conflicting state, and obsolete records", async (t) => {
+test("fails closed on conflicting state and obsolete webhook records", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-invalid-profile-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const capability = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(capability);
-  await assert.rejects(
-    createDeliveryProfile(
-      capability,
-      {
-        mode: "webhook",
-        url: "https://agent.example.test/embassys",
-        secret_env: "MISSING_SECRET",
-      },
-      root,
-      {},
-    ),
-    (error: unknown) => error instanceof DeliveryProfileError && error.code === "missing_secret",
-  );
-
   const store = new DeliveryProfileStore(join(root, "delivery-profile.json"));
-  const direct = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const direct = await createDeliveryProfile(capability, { mode: "direct" }, root);
   await store.save(direct);
   await assert.rejects(
     store.save({
@@ -109,9 +86,25 @@ test("fails closed on missing secrets, conflicting state, and obsolete records",
       mode: "webhook",
       agent_kind: "openclaw",
       url: "https://agent.example.test/embassys",
-      secret_env: "MISSING_SECRET",
     }),
     (error: unknown) => error instanceof DeliveryProfileError && error.code === "profile_conflict",
+  );
+
+  const legacyPath = join(root, "legacy-profile.json");
+  await writeFile(
+    legacyPath,
+    JSON.stringify({
+      version: 1,
+      mode: "webhook",
+      agent_kind: "openclaw",
+      url: "https://agent.example.test/embassys",
+      secret_env: "AMBASSADOR_WEBHOOK_SECRET",
+    }),
+  );
+  if (process.platform !== "win32") await chmod(legacyPath, 0o600);
+  await assert.rejects(
+    new DeliveryProfileStore(legacyPath).load(),
+    (error: unknown) => error instanceof DeliveryProfileError && error.code === "invalid_profile",
   );
 });
 
@@ -120,16 +113,14 @@ test("concurrent writers cannot replace the first committed profile", async (t) 
   t.after(() => rm(root, { recursive: true, force: true }));
   const capability = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(capability);
-  const direct = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const direct = await createDeliveryProfile(capability, { mode: "direct" }, root);
   const webhook = await createDeliveryProfile(
     capability,
     {
       mode: "webhook",
       url: "https://agent.example.test/embassys",
-      secret_env: "EMBASSYS_WEBHOOK_SECRET",
     },
     root,
-    { EMBASSYS_WEBHOOK_SECRET: SECRET },
   );
   const path = join(root, "state", "delivery-profile.json");
   const results = await Promise.allSettled([
@@ -160,7 +151,7 @@ test("enforces native Windows DACLs on the profile and state directory", {
   const path = join(root, "state", "delivery-profile.json");
   const capability = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(capability);
-  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root);
   const store = new DeliveryProfileStore(path);
 
   await store.save(profile);
@@ -175,7 +166,7 @@ test("fails closed when Windows profile DACL enforcement fails", async (t) => {
   const path = join(root, "state", "delivery-profile.json");
   const capability = PRODUCTION_AGENT_CAPABILITIES[0];
   assert.ok(capability);
-  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root, {});
+  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root);
   const store = new DeliveryProfileStore(path, {
     platform: "win32",
     windowsAccessControl: {

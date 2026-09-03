@@ -7,6 +7,36 @@ import { test } from "node:test";
 import { runCli } from "../src/cli.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
+test("creates and prints one stable webhook secret without taking the gateway lock", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-webhook-secret-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const output: string[] = [];
+  const io = {
+    stdout: {
+      write(chunk: string | Uint8Array) {
+        output.push(String(chunk));
+        return true;
+      },
+    },
+    stderr: { write: () => true },
+  };
+  const context = {
+    io,
+    env: {},
+    cwd: root,
+    testOverrides: {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+    },
+  };
+
+  assert.equal(await runCli(["webhook-secret"], context), 0);
+  assert.equal(await runCli(["webhook-secret"], context), 0);
+  assert.equal(output.length, 2);
+  assert.match(output[0] ?? "", /^[a-f0-9]{48}\n$/u);
+  assert.equal(output[1], output[0]);
+});
+
 test("starts and serves MCP with no options or environment variables", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-zero-config-"));
   t.after(() => rm(root, { recursive: true, force: true }));
