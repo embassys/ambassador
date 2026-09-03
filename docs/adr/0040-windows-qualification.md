@@ -1,6 +1,6 @@
 # 0040 Reopen Windows qualification
 
-Status: accepted plan; Windows support remains a candidate
+Status: accepted; Windows support remains a candidate
 
 Date: 2026-09-03
 
@@ -36,11 +36,11 @@ entrypoint inside that package, and launches it with Ambassador's current Node
 executable. Native agent executables continue to use the fixed registry
 command. Neither path accepts an executable or argument from MCP input.
 
-Windows direct delivery still needs native process-tree cleanup evidence. No
-Windows direct-agent support claim is permitted until that cleanup mechanism
-is separately approved and its cancellation, crash, and descendant tests pass
-on the Windows runner. A real agent and mode may be claimed on Windows only
-after its exact packed-artifact qualification passes there.
+The fixed mock ACP cancellation, crash, and descendant-cleanup cases pass on
+the Windows runner with the current non-detached launch and termination path.
+No additional Windows API or system executable was selected. A real agent and
+mode may be claimed on Windows only after its exact packed-artifact
+qualification passes there.
 
 Windows support requires all of these results from one candidate:
 
@@ -70,4 +70,4 @@ list above rather than disappearing with the deferral.
 The user approved reopening Windows work and the qualification plan on
 2026-09-03. The user then asked for the candidate to be raised as a pull
 request. The approval does not cover a new process-tree termination API or a
-Windows direct-agent support claim before native evidence exists.
+Windows direct-agent support claim before exact real-agent evidence exists.
