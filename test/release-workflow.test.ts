@@ -32,6 +32,12 @@ test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", as
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });
 
+test("the Windows test runner serializes files that exercise native ACLs", async () => {
+  const runner = await readFile(join(process.cwd(), "scripts", "run-tests.mjs"), "utf8");
+
+  assert.match(runner, /process\.platform === "win32" \? \["--test-concurrency=1"\] : \[\]/u);
+});
+
 test("every supported-agent guide uses the latest zero-configuration start and current registration flow", async () => {
   const guides = ["codex", "claude", "gemini", "hermes", "openclaw"];
   for (const guide of guides) {
