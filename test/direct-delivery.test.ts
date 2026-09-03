@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { type SpawnOptions, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +26,7 @@ async function target(
   t: TestContext,
   scenario: string,
   options: {
+    platform?: NodeJS.Platform;
     promptDeadlineMs?: number;
     maximumOutputBytes?: number;
     maximumStartupAttempts?: number;
@@ -46,6 +47,7 @@ async function target(
     environment: ["HOME", "PATH", "TMPDIR"],
   };
   let spawnCount = 0;
+  let spawnOptions: SpawnOptions | undefined;
   const delivery = new DirectDeliveryTarget({
     capability,
     workingDirectory: root,
@@ -58,8 +60,10 @@ async function target(
     cleanupDeadlineMs: 500,
     maximumOutputBytes: options.maximumOutputBytes ?? 16 * 1024,
     maximumStartupAttempts: options.maximumStartupAttempts ?? 2,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     spawnProcess: (...arguments_) => {
       spawnCount += 1;
+      spawnOptions = arguments_[2];
       return spawn(...arguments_);
     },
   });
@@ -71,6 +75,7 @@ async function target(
     descendantPath,
     promptPath,
     spawnCount: () => spawnCount,
+    spawnOptions: () => spawnOptions,
     attempts: async () =>
       (await readFile(countPath, "utf8")).trim().split("\n").filter(Boolean).length,
   };
@@ -127,6 +132,15 @@ test("initializes ACP v1, injects supported MCP setup, and completes one prompt"
       assert.equal(await value.attempts(), 1);
     });
   }
+});
+
+test("runs a native executable through the Windows direct-delivery path", async (t) => {
+  const value = await target(t, "success-session-mcp", { platform: "win32" });
+  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+    status: "completed",
+  });
+  assert.equal(value.spawnCount(), 1);
+  assert.equal(value.spawnOptions()?.detached, false);
 });
 
 test("retries a bounded startup failure only before prompt dispatch", async (t) => {

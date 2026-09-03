@@ -23,6 +23,7 @@ import {
   type WindowsCredentialAccessControl,
 } from "../src/credential-store.js";
 import { currentCredential } from "./support/current-credential.js";
+import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
 const CENTRAL_JWT = currentCredential("first@fixture.test", "agent.first");
 const OTHER_CENTRAL_JWT = currentCredential("second@fixture.test", "agent.second");
@@ -305,11 +306,22 @@ test("reports persistence failure without writing plaintext or a final file", as
   await assertNoSecretFiles(item.root);
 });
 
-if (process.platform === "win32") {
-  test("ADR 0033 defers native Windows DACL and atomic replacement", {
-    skip: "Windows requires a new approved implementation and qualification plan",
-  }, () => {});
-}
+test("enforces native Windows DACLs on the state directory and credential pair", {
+  skip: process.platform !== "win32",
+}, async (t) => {
+  const item = await fixture(t, "ambassador-credential-native-windows-;[]$()-");
+  const store = new EncryptedFileCredentialStore(item.path, item.keyPath, CREDENTIAL_SCOPE);
+
+  await store.save(CENTRAL_JWT);
+  assert.equal(await store.load(), CENTRAL_JWT);
+  await assertNativeWindowsAcl(item.directory, "directory");
+  await assertNativeWindowsAcl(item.path, "file");
+  await assertNativeWindowsAcl(item.keyPath, "file");
+  assert.deepEqual((await readdir(item.directory)).sort(), [
+    "central-credential.json",
+    "central-credential.key",
+  ]);
+});
 
 test("fails closed when injected Windows DACL enforcement fails", async (t) => {
   const item = await fixture(t, "a2a-credential-windows-acl-test-");

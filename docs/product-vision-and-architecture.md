@@ -82,6 +82,11 @@ fixed executable and argument list for direct delivery, MCP setup behavior, and
 qualification evidence. User input and remote content cannot add or modify an
 entry.
 
+On Windows, reviewed Node-based agents bypass their batch-file command shims.
+The registry fixes the package name, version, bin mapping, and JavaScript
+entrypoint, and Ambassador launches the validated entrypoint with its current
+Node executable. This keeps direct launch shell-free.
+
 The enabled direct profiles are OpenClaw, Hermes, Codex, Claude Code, and
 Gemini CLI. Only OpenClaw and Hermes also support webhook, with direct as their
 default. Codex, Claude Code, and Gemini CLI register directly without a
@@ -217,6 +222,9 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
+- Windows is a qualification candidate under ADR 0040. Native state and packed
+  package work is implemented, but direct-agent support still needs approved
+  process-tree cleanup and real-agent evidence.
 - Codex direct delivery and both Hermes Agent 0.20.5 delivery modes have passed
   with the live central service. Ambassador 0.2.8 includes the qualified Hermes
   ACP 0.20.5 identity. Four profile/mode cases in the seven-case real-agent

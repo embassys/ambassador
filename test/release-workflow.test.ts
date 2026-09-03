@@ -7,6 +7,9 @@ test("main publishes the approved Ambassador 0.2.8 release through npm OIDC", as
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
+  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
+  assert.match(workflow, /name: Qualify native Windows state ACLs/u);
+  assert.match(workflow, /name: Launch installed Windows command shim/u);
   assert.match(
     workflow,
     /publish:\n {4}name: Publish npm package\n {4}if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/u,
