@@ -150,6 +150,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
       "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
+      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],

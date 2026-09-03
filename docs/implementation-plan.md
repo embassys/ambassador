@@ -1,9 +1,10 @@
 # Current work
 
 There is no active implementation item. The accepted Ambassador delivery
-architecture, including the 0.2.14 setup, diagnostics, package-owned adapters,
-tool descriptions, and pending-permission view, is implemented and recorded in
-the architecture, protocol, ADR 0045, and qualification record.
+architecture, including the setup, diagnostics, package-owned adapters, tool
+descriptions, pending-permission view, and encrypted unanswered-action inbox,
+is implemented and recorded in the architecture, protocol, ADRs 0045 and 0046,
+and qualification record.
 
 ## Later qualification
 

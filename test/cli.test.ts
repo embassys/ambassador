@@ -269,6 +269,9 @@ test("cleans all local registration and delivery residue and leaves provider fil
     "webhook-secret.key",
     "delivery-profile.json",
     "notifications.sqlite",
+    "pending-actions.sqlite",
+    "pending-actions.sqlite-wal",
+    "pending-actions.sqlite-shm",
     "interrupted-write.tmp",
   ]) {
     await writeFile(join(root, name), `residue:${name}`);

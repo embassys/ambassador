@@ -149,6 +149,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       credentialKeyPath: paths.credentialKeyPath,
       webhookSecretPath: paths.webhookSecretPath,
       webhookSecretKeyPath: paths.webhookSecretKeyPath,
+      pendingActionPath: paths.pendingActionPath,
       profilePath: paths.profilePath,
       workingDirectory: context.cwd,
       environment: context.env,

@@ -22,6 +22,7 @@ test("production ignores legacy development endpoint variables", async (t) => {
     credentialKeyPath: join(root, "central-credential.key"),
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    pendingActionPath: join(root, "pending-actions.sqlite"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
     environment: {

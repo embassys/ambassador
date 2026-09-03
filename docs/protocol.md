@@ -118,6 +118,7 @@ After a credential is durably stored, expose exactly these agent-facing tools:
 - `list_pending_permission_requests`
 - `respond_to_permission`
 - `call_action`
+- `list_pending_action_calls`
 - `submit_action_result`
 - `get_my_permissions`
 
@@ -136,6 +137,14 @@ only entries whose status is `pending` and whose `grantor_email` is the
 enrolled identity, plus their count. It adds no central route, local queue, or
 message persistence. The user selects a returned permission ID and explicitly
 chooses `granted` or `denied`; `respond_to_permission` submits that decision.
+
+`list_pending_action_calls` is the separate unanswered-action inbox. It accepts
+no arguments and returns a count plus the validated `call_id`,
+`sender_agent_id`, `action_type`, action `payload`, and `created_at` for each
+received action call whose result has not succeeded. These records are
+encrypted locally and survive restart. A successful `submit_action_result`
+removes the matching record. The tool adds no central route and is not a
+general message inbox.
 
 Reject any argument named `token`, `jwt`, `access_token`, `authorization`, `private_key`,
 `secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
@@ -407,9 +416,13 @@ returns them. Before accepting a batch, Ambassador enforces its response,
 nesting, structural-token, batch-count, and normalized-message limits.
 Conflicting duplicate IDs reject the batch.
 
-Message bodies remain only in a bounded in-memory queue. SQLite stores present
-IDs and delivery state only. Polling pauses while the queue contains work. An
-ID-less message may be delivered once but cannot be acknowledged.
+Message bodies remain in a bounded in-memory delivery queue. The notification
+journal stores present IDs and delivery state only. The sole body-persistence
+exception is a separate encrypted inbox for validated `action_call` fields.
+Ambassador writes that record before local delivery or central acknowledgement
+so a user can answer after the original agent turn or a restart. Other message
+types are never written there. Polling pauses while the queue contains work.
+An ID-less message may be delivered once but cannot be acknowledged.
 
 ## Webhook delivery
 
@@ -534,11 +547,13 @@ For each central message, Ambassador sends one ACP prompt containing:
 3. direction to use the configured Ambassador MCP tools when a permission or
    action operation requires them.
 
-For an `action_call`, the agent submits exactly one structured success or error
-through `submit_action_result` with the supplied `call_id` before it finishes.
-The agent constructs this result through MCP. Ambassador does not reinterpret
-free-form provider output as an action result and still discards that output
-after bounded processing.
+For an `action_call`, the agent uses `submit_action_result` with the supplied
+`call_id` when it can provide a structured success or definitive error without
+guessing. If the result needs user input that is not available in that turn,
+the agent leaves the call pending. The user can later ask for pending actions,
+supply the answer, and have an agent submit the correlated result through MCP.
+Ambassador does not reinterpret free-form provider output as an action result
+and still discards that output after bounded processing.
 
 A normal terminal ACP result completes local handling and permits central
 acknowledgement. Startup failure before prompt submission may be retried within
@@ -561,12 +576,13 @@ The current server does not make acknowledgement idempotent. Ambassador does
 not blindly replay an acknowledgement after an uncertain response. It reports
 the bounded failure without redelivering completed local work.
 
-A process crash clears message bodies from memory. Startup can remove stale
-pre-delivery journal rows whose bodies cannot be recovered. Accepted webhook
-or completed direct state may retain only enough ID-based state to avoid
-repeating local work. Central has no delivered-message retrieval, so some crash
-windows can lose a message or leave it unacknowledged. This remains a declared
-development limitation.
+A process crash clears delivery bodies from memory. Startup can remove stale
+pre-delivery journal rows whose bodies cannot be recovered. The separate
+encrypted pending-action record survives, but Ambassador does not replay it to
+the delivery target; it is available through `list_pending_action_calls` for a
+later user-driven answer. Central has no delivered-message retrieval, so some
+crash windows can still lose non-action messages or leave them unacknowledged.
+This remains a declared development limitation.
 
 ## Deadlines and data boundary
 
@@ -586,12 +602,14 @@ One 15-minute-and-30-second outer ACP delivery budget includes all ACP stages.
 A stage never extends it. Tests may inject shorter positive deadlines through
 internal seams. No deadline is a CLI option.
 
-Never write message bodies, action payloads, permission details, MCP arguments
-or results, registration emails, verification codes, tokens, private keys,
-proofs, nonces, webhook secrets, prompts, or provider output to SQLite,
-profiles, normal logs, diagnostics, metrics, temporary files, crash artifacts,
-or support bundles. The only raw webhook-secret output is the explicit
-owner-invoked `webhook-secret` command.
+Never write message bodies, permission details, MCP arguments or results,
+registration emails, verification codes, tokens, private keys, proofs, nonces,
+webhook secrets, prompts, or provider output to SQLite, profiles, normal logs,
+diagnostics, metrics, temporary files, crash artifacts, or support bundles.
+ADR 0046 defines the sole content exception: one bounded encrypted SQLite
+record for each unanswered action call, containing only its validated call ID,
+sender ID, action type, payload, and creation time. The only raw webhook-secret
+output is the explicit owner-invoked `webhook-secret` command.
 
 The encrypted central credential contains only the central token and DPoP
 private key plus minimum format metadata. The webhook secret uses a different
@@ -599,7 +617,12 @@ encrypted file, wrapping key, and authenticated-data scope. Ambassador
 generates both wrapping keys internally. All four files have the same strict
 ownership, link, permission, and atomic-write checks. A value without its
 matching key fails closed; there is no migration. The delivery profile is
-nonsecret. The journal remains ID-only.
+nonsecret. The notification journal remains ID-only. The pending-action
+encryption key is derived with domain separation from the loaded DPoP private
+key, so the inbox is bound to the enrolled identity without another
+user-managed secret. Its SQLite lookup key and authenticated ciphertext reveal
+neither the call ID nor the action payload. The inbox is bounded to 256 records
+and 480 KiB of ciphertext.
 
 ## Acceptance cases
 
@@ -620,10 +643,12 @@ The cutover must prove at least:
 - opt-in local coverage for direct delivery on all four profiles and webhook
   delivery on OpenClaw and Hermes;
 - unchanged central REST and DPoP behavior from ADR 0037;
-- bounded in-memory body custody and ID-only durable state;
+- bounded in-memory delivery custody, an ID-only notification journal, and the
+  encrypted, bounded pending-action exception;
 - exact target-authorized action-result submission and correlated response
-  delivery, the filtered pending-decision projection, and no general reply or
-  local delivery-control tools;
+  delivery, the filtered pending-decision projection, the restart-safe
+  unanswered-action list, removal only after successful result submission, and
+  no general reply or local delivery-control tools;
 - package-owned Codex and Claude Code adapters, validated internal entrypoint
   launch, and bounded asynchronous child-process failures;
 - startup output with working MCP setup commands for all supported agents and
@@ -634,5 +659,5 @@ The cutover must prove at least:
 - local cleanup removes all enrollment and delivery state, refuses while the
   process lock is held, leaves provider and central state alone, and returns to
   the bootstrap catalog; and
-- no credential or content leakage in logs, databases, profiles, temporary
-  files, packages, or qualification output.
+- no credential or plaintext pending-action content leakage in logs,
+  databases, profiles, temporary files, packages, or qualification output.

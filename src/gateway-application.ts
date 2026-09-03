@@ -36,6 +36,7 @@ import {
   NotificationRelayError,
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
+import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
 import { WebhookDeliveryTarget } from "./webhook-delivery.js";
 import {
   EncryptedFileWebhookSecretStore,
@@ -57,6 +58,7 @@ export interface GatewayApplicationOptions {
   readonly credentialKeyPath: string;
   readonly webhookSecretPath: string;
   readonly webhookSecretKeyPath: string;
+  readonly pendingActionPath: string;
   readonly profilePath: string;
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -83,6 +85,13 @@ function safeFailure(): Error {
 
 function startupFailure(error: unknown): GatewayError {
   if (error instanceof GatewayError) return error;
+  if (error instanceof PendingActionInboxError) {
+    return new GatewayError(
+      "local_state_invalid",
+      "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
+      7,
+    );
+  }
   if (error instanceof LocalMcpServerError) {
     if (error.code === "address_in_use") {
       return new GatewayError(
@@ -217,6 +226,7 @@ export async function openGatewayApplication(
   let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
+  let pendingActionInbox: PendingActionInbox | undefined;
   let closed = false;
   let activation: Promise<void> | undefined;
   let reportFailure: ((error: Error) => void) | undefined;
@@ -291,6 +301,10 @@ export async function openGatewayApplication(
         now: nowSeconds,
       });
       const nextRest = new CentralRestClient({ centralOrigin, transport });
+      const nextPendingActionInbox =
+        pendingActionInbox ??
+        new PendingActionInbox(options.pendingActionPath, identity.credential());
+      pendingActionInbox = nextPendingActionInbox;
       const target = await createDeliveryTarget({ ...profile, endpoint: local.endpoint });
       const nextRelay = new NotificationRelay({
         journal,
@@ -314,6 +328,9 @@ export async function openGatewayApplication(
         acknowledgeMessage: async (messageId, signal) => {
           await nextRest.ackMessage({ message_id: messageId }, signal);
         },
+        captureMessage: (message) => {
+          nextPendingActionInbox.capture(message);
+        },
       });
       rest = nextRest;
       relay = nextRelay;
@@ -334,6 +351,11 @@ export async function openGatewayApplication(
   const requireRest = (): CentralRestClient => {
     if (rest === undefined) throw safeFailure();
     return rest;
+  };
+
+  const requirePendingActionInbox = (): PendingActionInbox => {
+    if (pendingActionInbox === undefined) throw safeFailure();
+    return pendingActionInbox;
   };
 
   const router: LocalMcpRouter = {
@@ -388,9 +410,17 @@ export async function openGatewayApplication(
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;
-          case "submit_action_result":
-            result = await requireRest().submitActionResult(arguments_, signal);
+          case "list_pending_action_calls": {
+            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
+            const pending = requirePendingActionInbox().list();
+            result = { count: pending.length, pending_action_calls: pending };
             break;
+          }
+          case "submit_action_result": {
+            result = await requireRest().submitActionResult(arguments_, signal);
+            requirePendingActionInbox().remove(String(result.call_id));
+            break;
+          }
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
             result = { permissions: await requireRest().getMyPermissions(signal) };
@@ -418,6 +448,7 @@ export async function openGatewayApplication(
     controller.abort();
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
+    pendingActionInbox?.close();
     journal.close();
     throw startupFailure(error);
   }
@@ -432,6 +463,7 @@ export async function openGatewayApplication(
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
       await local.close();
+      pendingActionInbox?.close();
       journal.close();
     },
   };

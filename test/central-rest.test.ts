@@ -44,6 +44,7 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
       "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
+      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],
@@ -53,7 +54,12 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
   assert.match(
     REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "list_pending_permission_requests")
       ?.description ?? "",
-    /waiting for (?:my|the user's) (?:response|approval)/iu,
+    /permission requests are waiting for their approval/iu,
+  );
+  assert.match(
+    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "list_pending_action_calls")
+      ?.description ?? "",
+    /actions are waiting for their answer or result/iu,
   );
   for (const removed of [
     "poll_messages",
