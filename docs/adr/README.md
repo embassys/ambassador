@@ -3,7 +3,8 @@
 Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
 for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
 0041 for agent-version handling, ADR 0042 for webhook-secret ownership and the
-OpenClaw receiver, and ADR 0043 for the current four-profile registry.
+OpenClaw receiver, ADR 0043 for the current four-profile registry, and ADR 0044
+for local cleanup.
 
 ## Current decisions
 
@@ -13,7 +14,7 @@ OpenClaw receiver, and ADR 0043 for the current four-profile registry.
 | [0007](0007-sqlite.md) | SQLite for the ID-only journal |
 | [0012](0012-http-deadlines.md) | HTTP and delivery deadlines |
 | [0014](0014-lock-handoff-timeout.md) | Process lock handoff |
-| [0015](0015-npm-distribution.md) | Ambassador npm distribution; 0.2.6 through 0.2.10 qualification exceptions |
+| [0015](0015-npm-distribution.md) | Ambassador npm distribution and release qualification |
 | [0018](0018-mcp-sdk.md) | MCP SDK for local MCP |
 | [0019](0019-central-credential-storage.md) | Encrypted central credential |
 | [0020](0020-in-memory-central-test-service.md) | Independent central test fixtures |
@@ -24,6 +25,7 @@ OpenClaw receiver, and ADR 0043 for the current four-profile registry.
 | [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
 | [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and native OpenClaw hooks |
 | [0043](0043-remove-gemini-and-defer-antigravity.md) | Remove Gemini CLI and defer Antigravity support |
+| [0044](0044-local-clean-command.md) | Local state cleanup command |
 
 ## Historical ledger
 
