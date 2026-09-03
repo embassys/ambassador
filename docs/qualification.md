@@ -230,6 +230,14 @@ a deliberately non-release version value, and direct ACP delivery completed
 when the mock agent returned the correct ACP v1 protocol and agent name with a
 different version.
 
+On 2026-09-03, the published 0.2.9 registry tarball and the production source
+were scanned for legacy development central-endpoint environment variables.
+Neither contained them. A deterministic registration then set both old
+variables to unreachable loopback URLs and still sent the request to
+`https://mcp.embassys.ai/api/register_agent`. Ambassador has no central MCP
+client or central MCP endpoint. Local fixtures continue to use the explicit
+internal test seam described in the protocol.
+
 The byte-final 0.2.8 release candidate tarball had SHA-256
 `6e128f2ec84af29ad663226e1449de9c1fb894426b3982982cab0215667a24f4`
 and SRI digest
