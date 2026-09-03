@@ -1,10 +1,12 @@
 /**
  * Scan only a quiescent artifact tree. Callers must stop and reap the managed
  * process tree before invoking this module. The scanner revalidates directories
- * and opens files with no-follow semantics, but Node has no portable openat
- * traversal. Concurrent artifact writers, renames, and link changes are
- * outside this support contract. Callers must treat any such activity as a
- * harness failure and must not rely on this scanner to detect every race.
+ * and uses no-follow file opens where Node exposes them. On Windows it instead
+ * verifies the path, opened-handle identity, and resolved path before and after
+ * each read. Node has no portable openat traversal, so concurrent artifact
+ * writers, renames, and link changes are outside this support contract. Callers
+ * must treat any such activity as a harness failure and must not rely on this
+ * scanner to detect every race.
  */
 
 import { constants } from "node:fs";
@@ -198,12 +200,27 @@ function assertNoMarker(bytes, markers, location) {
 }
 
 async function readBoundedFile(path, maximum, remainingTotalBytes) {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw configurationError("this platform lacks no-follow artifact-file opens");
+  const supportsNoFollow = typeof constants.O_NOFOLLOW === "number";
+  let initialPathMetadata;
+  let initialResolvedPath;
+  if (!supportsNoFollow) {
+    try {
+      initialPathMetadata = await lstat(path);
+      initialResolvedPath = await realpath(path);
+    } catch {
+      throw configurationError("artifact entry could not be inspected safely");
+    }
+    if (!initialPathMetadata.isFile() || initialPathMetadata.isSymbolicLink()) {
+      throw configurationError("artifact entry changed type during the scan");
+    }
   }
+
   let handle;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(
+      path,
+      supportsNoFollow ? constants.O_RDONLY | constants.O_NOFOLLOW : constants.O_RDONLY,
+    );
   } catch {
     throw configurationError("artifact entry could not be opened safely");
   }
@@ -217,6 +234,13 @@ async function readBoundedFile(path, maximum, remainingTotalBytes) {
   if (!metadata.isFile()) {
     await handle.close().catch(() => undefined);
     throw configurationError("artifact entry changed type during the scan");
+  }
+  if (
+    initialPathMetadata !== undefined &&
+    (metadata.dev !== initialPathMetadata.dev || metadata.ino !== initialPathMetadata.ino)
+  ) {
+    await handle.close().catch(() => undefined);
+    throw configurationError("artifact entry changed identity during the scan");
   }
   if (metadata.size > maximum) {
     await handle.close().catch(() => undefined);
@@ -239,6 +263,16 @@ async function readBoundedFile(path, maximum, remainingTotalBytes) {
       chunks.push(bytes);
     }
     const finalMetadata = await handle.stat();
+    let finalPathMetadata;
+    let finalResolvedPath;
+    if (!supportsNoFollow) {
+      try {
+        finalPathMetadata = await lstat(path);
+        finalResolvedPath = await realpath(path);
+      } catch {
+        throw configurationError("artifact entry could not be revalidated safely");
+      }
+    }
     if (
       !finalMetadata.isFile() ||
       finalMetadata.dev !== metadata.dev ||
@@ -249,6 +283,22 @@ async function readBoundedFile(path, maximum, remainingTotalBytes) {
       size !== metadata.size
     ) {
       throw configurationError("artifact file changed during the scan");
+    }
+    if (
+      initialPathMetadata !== undefined &&
+      initialResolvedPath !== undefined &&
+      finalPathMetadata !== undefined &&
+      finalResolvedPath !== undefined &&
+      (!finalPathMetadata.isFile() ||
+        finalPathMetadata.isSymbolicLink() ||
+        finalPathMetadata.dev !== initialPathMetadata.dev ||
+        finalPathMetadata.ino !== initialPathMetadata.ino ||
+        finalPathMetadata.size !== initialPathMetadata.size ||
+        finalPathMetadata.mtimeMs !== initialPathMetadata.mtimeMs ||
+        finalPathMetadata.ctimeMs !== initialPathMetadata.ctimeMs ||
+        finalResolvedPath !== initialResolvedPath)
+    ) {
+      throw configurationError("artifact path changed during the scan");
     }
   } catch (error) {
     if (error instanceof ScanConfigurationError) throw error;

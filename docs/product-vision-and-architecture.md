@@ -83,6 +83,12 @@ setup behavior, and qualification evidence. Reported MCP client and ACP agent
 versions are diagnostic metadata, not compatibility gates. User input and
 remote content cannot add or modify an entry.
 
+On Windows, reviewed Node-based agents bypass their batch-file command shims.
+The registry fixes the package name, bin mapping, and JavaScript entrypoint,
+and Ambassador launches the validated entrypoint with its current Node
+executable. The installed package version is bounded diagnostic metadata under
+ADR 0041. This keeps direct launch shell-free.
+
 The enabled direct profiles are OpenClaw, Hermes, Codex, Claude Code, and
 Gemini CLI. Only OpenClaw and Hermes also support webhook, with direct as their
 default. Codex, Claude Code, and Gemini CLI register directly without a
@@ -219,6 +225,9 @@ retrieval or redelivery is the proper future fix.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
+- Windows is a qualification candidate under ADR 0040. Native state,
+  packed-package, and mock delivery qualification pass; individual agent and
+  mode claims still require exact real-agent Windows evidence.
 - Ambassador releases through 0.2.8 use exact provider-version allowlists.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
