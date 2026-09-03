@@ -21,12 +21,13 @@ The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
 exception to ADR 0015 is not evidence that the remaining cases passed. Complete
 and record the following work after the release:
 
-- Complete the remaining nine opt-in real-agent cases with exact authenticated
+- Complete the remaining six opt-in real-agent cases with exact authenticated
   profiles:
   OpenClaw 2026.8.1, Hermes Agent 0.21.0,
   `@agentclientprotocol/codex-acp` 1.8.0, backed by Codex 0.152.1,
   `@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0.
-  Every profile must pass webhook and direct delivery. Codex direct passed the
+  OpenClaw and Hermes must pass webhook and direct delivery; Codex, Claude
+  Code, and Gemini CLI must pass direct delivery. Codex direct passed the
   complete live correlated-result flow on 2026-09-03 against packed candidate
   `7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`
   and reviewed central revision

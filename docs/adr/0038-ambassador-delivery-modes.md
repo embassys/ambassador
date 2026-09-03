@@ -84,10 +84,11 @@ Direct is the default:
   `unsupported_agent`. Ambassador writes no registration state and makes no
   central request.
 
-The enabled dual-mode profiles are OpenClaw, Hermes, Codex, Claude Code, and
-Gemini CLI. Their exact contracts appear below. Do not offer an arbitrary
-command or a generic webhook fallback for an unsupported client. Do not fall
-back from a failed direct launch to webhook.
+The enabled dual-mode profiles are OpenClaw and Hermes. Codex, Claude Code,
+and Gemini CLI are direct-only and proceed without a delivery question. Their
+exact contracts appear below. Do not offer an arbitrary command or a generic
+webhook fallback for an unsupported client. Do not fall back from a failed
+direct launch to webhook.
 
 The direct working directory is Ambassador's canonical process directory at
 registration time. It persists in the profile. A later start from a different
@@ -225,15 +226,15 @@ agent. The mocks cover the full delivery contract, failure boundaries,
 acknowledgement order, crash uncertainty, and content-free durability without
 network or paid agent accounts.
 
-An opt-in local suite runs every enabled agent in this ten-case matrix:
+An opt-in local suite runs every enabled mode in this seven-case matrix:
 
 | Agent | Webhook | Direct |
 | --- | --- | --- |
 | OpenClaw | required | required |
 | Hermes | required | required |
-| Codex | required | required |
-| Claude Code | required | required |
-| Gemini CLI | required | required |
+| Codex | not supported | required |
+| Claude Code | not supported | required |
+| Gemini CLI | not supported | required |
 
 The local suite uses the central fixture by default. It records versions and
 safe pass/fail evidence, never prompts, messages, credentials, or provider
@@ -246,10 +247,10 @@ acknowledgement.
 
 ## Consequences
 
-- OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI users choose delivery in
-  the same agent conversation used for enrollment, with direct as the default.
-- Complete direct-only profiles can enroll without an unnecessary delivery
-  question.
+- OpenClaw and Hermes users choose delivery in the same agent conversation used
+  for enrollment, with direct as the default.
+- Codex, Claude Code, Gemini CLI, and later complete direct-only profiles enroll
+  without an unnecessary delivery question.
 - Unknown and incomplete clients fail before local or central registration
   state exists.
 - The command line no longer contains delivery configuration.
@@ -325,3 +326,7 @@ relax exact version matching.
 On 2026-09-03, the user approved adopting central's deployed
 `submit_action_result` route and requested a live result round trip between a
 controlled requester and real Codex.
+
+On 2026-09-03, the user corrected the delivery registry: only OpenClaw and
+Hermes support webhook. Codex, Claude Code, and Gemini CLI are direct-only and
+register without a delivery question.

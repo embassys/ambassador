@@ -14,13 +14,16 @@ npx --yes @embassys/ambassador@0.2.7 start
 - Configure your agent's MCP client for `http://127.0.0.1:8787/mcp` without
   authentication.
 - Ask the agent to register your email with Ambassador.
-- Choose **direct** (the default) or **webhook**, then enter the email code.
+- OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
+  Codex, Claude Code, and Gemini CLI proceed directly without a delivery
+  question.
 - Webhook users set a receiver secret in Ambassador's environment before
   startup and give the agent only the variable name during registration.
 
-Supported profiles are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
-Unknown or incomplete profiles fail closed. The agent cannot choose an
-executable, adapter, or arbitrary delivery implementation.
+Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
+fail closed. The agent cannot choose an executable, adapter, or arbitrary
+delivery implementation.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
@@ -45,8 +48,8 @@ pnpm check
 ```
 
 CI uses a mock webhook receiver and mock ACP v1 agent for deterministic
-delivery tests. Opt-in local qualification covers all five supported agents in
-both delivery modes.
+delivery tests. Opt-in local qualification covers direct delivery for all five
+agents and webhook delivery for OpenClaw and Hermes.
 
 ## Documentation
 

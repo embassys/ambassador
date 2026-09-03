@@ -82,9 +82,10 @@ fixed executable and argument list for direct delivery, MCP setup behavior, and
 qualification evidence. User input and remote content cannot add or modify an
 entry.
 
-The enabled profiles are OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
-All five support direct and webhook modes, with direct as the default. Codex
-uses `@agentclientprotocol/codex-acp` 1.8.0, Claude Code uses
+The enabled direct profiles are OpenClaw, Hermes, Codex, Claude Code, and
+Gemini CLI. Only OpenClaw and Hermes also support webhook, with direct as their
+default. Codex, Claude Code, and Gemini CLI register directly without a
+delivery question. Codex uses `@agentclientprotocol/codex-acp` 1.8.0, Claude Code uses
 `@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0 uses its
 native `--acp` mode. Exact aliases, agent identities, environment allowlists,
 and version policies remain compiled in. Unknown, ambiguous, disabled, and
@@ -217,6 +218,6 @@ retrieval or redelivery is the proper future fix.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
 - Codex direct delivery has passed with the live central service. The other
-  nine cases in the five-profile real-agent matrix remain open.
+  six cases in the seven-case real-agent matrix remain open.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).

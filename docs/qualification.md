@@ -55,9 +55,9 @@ Registration cases also prove:
 - unknown, ambiguous, disabled, and incomplete profiles return
   `unsupported_agent` before state or a central call;
 - supplying a delivery object cannot bypass profile resolution;
-- a complete direct-only test profile proceeds without a question;
-- all five enabled profiles ask direct versus webhook with direct as the
-  default;
+- Codex, Claude Code, Gemini CLI, and a complete direct-only test profile
+  proceed without a question;
+- OpenClaw and Hermes ask direct versus webhook with direct as the default;
 - agent kind and process configuration are rejected as tool input; and
 - a failed direct launch never falls back to webhook.
 
@@ -77,9 +77,9 @@ The required matrix is:
 | --- | --- | --- |
 | OpenClaw | required | required |
 | Hermes | required | required |
-| Codex | required | required |
-| Claude Code | required | required |
-| Gemini CLI | required | required |
+| Codex | not supported | required |
+| Claude Code | not supported | required |
+| Gemini CLI | not supported | required |
 
 For each row:
 
@@ -133,7 +133,7 @@ narrow isolated policy representing the user's prior approval; it did not test
 an interactive user prompt. Captured mail and temporary state were deleted.
 The isolated credential copy was also removed. The installed Node was 24.14.0,
 below the supported 24.19.0 floor, so repeat this case on a supported runtime.
-The other nine cases remain open. The user approved 0.2.6 as a one-release
+The other six cases remain open. The user approved 0.2.6 as a one-release
 exception before this evidence was complete; these cases remain required to
 complete the qualification record.
 
@@ -154,7 +154,7 @@ tokens, secrets, provider credentials, paths containing user data, or raw
 provider output.
 
 Build and pack the exact candidate, start the independent central fixture on
-the default `http://127.0.0.1:8000`, and configure the five authenticated
+the default `http://127.0.0.1:8000`, and configure the two authenticated
 webhook receivers. Then run:
 
 ```sh
@@ -164,12 +164,6 @@ export AMBASSADOR_OPENCLAW_WEBHOOK_URL=https://receiver.example/openclaw
 export AMBASSADOR_OPENCLAW_WEBHOOK_SECRET='<secret>'
 export AMBASSADOR_HERMES_WEBHOOK_URL=https://receiver.example/hermes
 export AMBASSADOR_HERMES_WEBHOOK_SECRET='<secret>'
-export AMBASSADOR_CODEX_WEBHOOK_URL=https://receiver.example/codex
-export AMBASSADOR_CODEX_WEBHOOK_SECRET='<secret>'
-export AMBASSADOR_CLAUDE_WEBHOOK_URL=https://receiver.example/claude
-export AMBASSADOR_CLAUDE_WEBHOOK_SECRET='<secret>'
-export AMBASSADOR_GEMINI_WEBHOOK_URL=https://receiver.example/gemini
-export AMBASSADOR_GEMINI_WEBHOOK_SECRET='<secret>'
 pnpm run build
 pnpm run qualify:agents
 ```
@@ -177,7 +171,7 @@ pnpm run qualify:agents
 Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, verifies the
 installed provider versions, loads the code from the exact candidate archive,
-runs all ten delivery cases, and prints one safe JSON report. Configure the
+runs all seven delivery cases, and prints one safe JSON report. Configure the
 OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
 authentication before starting the runner. The other four profiles receive the
 same endpoint by ACP session injection. Each direct case must call the

@@ -243,31 +243,34 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           });
 
           if (!profile.direct?.agentInfo.versions.includes(installedVersion)) {
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
-            report.cases.push({ name: `${profile.kind}-direct`, status: "failed" });
+            for (const name of profile.qualificationCases) {
+              report.cases.push({ name, status: "failed" });
+            }
             continue;
           }
 
-          const prefix = `AMBASSADOR_${profile.kind.toUpperCase()}_WEBHOOK`;
-          try {
-            const url = process.env[`${prefix}_URL`];
-            const secret = process.env[`${prefix}_SECRET`];
-            if (url === undefined || secret === undefined) throw new Error("webhook unavailable");
-            const target = new WebhookDeliveryTarget({ url, secret });
-            await target.deliver(
-              {
-                id: `qualification-${profile.kind}-webhook`,
-                sender_agent_id: "qualification.sender",
-                action_type_id: "qualification",
-                payload: { synthetic: true },
-                created_at: new Date().toISOString(),
-              },
-              new AbortController().signal,
-            );
-            await target.close();
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "passed" });
-          } catch {
-            report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
+          if (profile.modes.includes("webhook")) {
+            const prefix = `AMBASSADOR_${profile.kind.toUpperCase()}_WEBHOOK`;
+            try {
+              const url = process.env[`${prefix}_URL`];
+              const secret = process.env[`${prefix}_SECRET`];
+              if (url === undefined || secret === undefined) throw new Error("webhook unavailable");
+              const target = new WebhookDeliveryTarget({ url, secret });
+              await target.deliver(
+                {
+                  id: `qualification-${profile.kind}-webhook`,
+                  sender_agent_id: "qualification.sender",
+                  action_type_id: "qualification",
+                  payload: { synthetic: true },
+                  created_at: new Date().toISOString(),
+                },
+                new AbortController().signal,
+              );
+              await target.close();
+              report.cases.push({ name: `${profile.kind}-webhook`, status: "passed" });
+            } catch {
+              report.cases.push({ name: `${profile.kind}-webhook`, status: "failed" });
+            }
           }
 
           try {

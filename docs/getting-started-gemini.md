@@ -20,27 +20,11 @@
 3. Start or restart Gemini CLI so it sees the MCP server.
 4. Ask Gemini CLI to register your email; it calls Ambassador's
    `register_agent` tool.
-5. Choose **Send directly to this Gemini CLI agent**.
-6. Enter the six-digit code sent to your email.
+5. Enter the six-digit code sent to your email. Gemini CLI is direct-only, so
+   Ambassador does not ask a delivery question.
 
 Ambassador will launch `gemini --acp` when a central message arrives. That is
 a new gateway-managed session, not the chat used for registration.
-
-## Use a webhook instead
-
-- Before step 1, set the receiver secret in the same shell:
-
-  ```sh
-  export AMBASSADOR_WEBHOOK_SECRET="$(
-    node -e "process.stdout.write(require('node:crypto').randomBytes(24).toString('hex'))"
-  )"
-  ```
-
-- During registration, choose **Send to a webhook**.
-- Give Gemini CLI the HTTPS webhook URL and the variable name
-  `AMBASSADOR_WEBHOOK_SECRET`.
-- Gemini CLI supplies `delivery.url` and `delivery.secret_env`; it never
-  receives the secret value.
 
 Only the exact version above is enabled. Other versions fail closed until
 their capability profile is reviewed. See [Qualification](qualification.md)

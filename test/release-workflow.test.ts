@@ -36,7 +36,11 @@ test("every supported-agent guide uses the 0.2.7 zero-configuration start and cu
     assert.match(contents, /npx --yes @embassys\/ambassador@0\.2\.7 start/u, guide);
     assert.doesNotMatch(contents, /local-token|AMBASSADOR_LOCAL_TOKEN/u, guide);
     assert.match(contents, /register_agent/u, guide);
-    assert.match(contents, /delivery\.secret_env/u, guide);
+    if (guide === "hermes" || guide === "openclaw") {
+      assert.match(contents, /delivery\.secret_env/u, guide);
+    } else {
+      assert.doesNotMatch(contents, /webhook|delivery\.secret_env/u, guide);
+    }
     assert.doesNotMatch(contents, /@a2adev\/gateway|a2a-gateway/u, guide);
   }
 });
