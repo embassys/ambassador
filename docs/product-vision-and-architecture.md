@@ -228,9 +228,10 @@ retrieval or redelivery is the proper future fix.
 - Windows is a qualification candidate under ADR 0040. Native state,
   packed-package, and mock delivery qualification pass; individual agent and
   mode claims still require exact real-agent Windows evidence.
-- Published Ambassador 0.2.8 still uses exact provider-version allowlists. The
-  0.2.9 candidate implements ADR 0041's name-based, version-observational
-  policy; the published artifact does not gain that behavior retroactively.
+- Ambassador releases through 0.2.8 use exact provider-version allowlists.
+  Published Ambassador 0.2.9 implements ADR 0041's name-based,
+  version-observational policy; earlier artifacts do not gain that behavior
+  retroactively.
 - Codex direct delivery and both Hermes Agent 0.20.5 delivery modes have passed
   with the live central service. Ambassador 0.2.8 includes the qualified Hermes
   ACP 0.20.5 identity. Four profile/mode cases in the seven-case real-agent

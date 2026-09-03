@@ -53,16 +53,17 @@ configuration or credentials.
 
 The REST, DPoP, delivery, and zero-configuration startup paths are implemented.
 Live-central qualification has passed with real Codex and with Hermes Agent
-0.20.5 in both delivery modes. Ambassador 0.2.8 includes that Hermes direct
-profile. Four other profile/mode cases remain open under the disclosed release
-exception in
+0.20.5 in both delivery modes. Ambassador 0.2.9 matches exact known client and
+ACP agent names while treating reported versions as observations. Four other
+profile/mode cases remain open under the disclosed release exception in
 [ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
 [implementation plan](docs/implementation-plan.md).
 
-The released 0.2.8 package is qualified on macOS and Linux. Windows support is
-being qualified under [ADR 0040](docs/adr/0040-windows-qualification.md); the
+Published Ambassador 0.2.9 has no Windows support claim. Current repository
+code is qualified under [ADR 0040](docs/adr/0040-windows-qualification.md): the
 native state, packed-package, and mock delivery lanes pass, while individual
-agent and mode claims still require exact real-agent Windows evidence.
+agent and mode claims still require exact real-agent Windows evidence and a
+future package publication requires separate approval.
 
 ## Development
 
