@@ -37,7 +37,9 @@ test("atomically stores only the registry-derived nonsecret webhook profile", as
   const bytes = await readFile(path, "utf8");
   assert.equal(bytes.includes(SECRET), false);
   assert.equal(bytes.includes("payload"), false);
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+  }
 });
 
 test("stores the canonical direct directory and rejects a conflicting restart", async (t) => {
