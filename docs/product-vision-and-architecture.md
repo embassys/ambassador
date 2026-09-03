@@ -14,14 +14,16 @@ The public package and commands are:
 @embassys/ambassador
 ambassador start
 ambassador webhook-secret
+ambassador clean
 ```
 
-Neither command accepts options. `start` does not select an agent or delivery
-mode. `webhook-secret` creates or reveals the one encrypted receiver secret for
-owner-driven webhook setup. Ambassador resolves a fixed agent profile from MCP
-`clientInfo` during registration. It asks for a delivery choice only when that
-profile supports both modes, then stores the result as nonsecret local profile
-data.
+None of these commands accepts options. `start` does not select an agent or
+delivery mode. `webhook-secret` creates or reveals the one encrypted receiver
+secret for owner-driven webhook setup. `clean` clears local enrollment and
+delivery state after it proves no foreground Ambassador process owns the lock.
+Ambassador resolves a fixed agent profile from MCP `clientInfo` during
+registration. It asks for a delivery choice only when that profile supports
+both modes, then stores the result as nonsecret local profile data.
 
 ## System
 
@@ -178,6 +180,23 @@ a secret or message body. SQLite remains ID-only.
 6. Prepare the configured delivery target.
 7. Start REST polling only when the required stored records are valid.
 8. Print the MCP endpoint and remain in the foreground.
+
+### Local reset
+
+1. The owner stops the foreground Ambassador process.
+2. `ambassador clean` acquires the singleton process lock. It fails without
+   changing state if another process owns the lock or if the lock cannot be
+   validated.
+3. It removes the credential pair, webhook-secret pair, delivery profile,
+   notification journal, and any interrupted state writes.
+4. It retains the empty owner-only state directory and process lock for safe
+   coordination.
+5. The next `ambassador start` exposes the bootstrap enrollment tools.
+
+The command does not call central, unregister the old email address, remove
+messages from Mailosaur, or change provider configuration. A repeated local
+test therefore needs a new disposable email unless central state is cleared
+separately.
 
 ### Enrollment
 

@@ -97,8 +97,9 @@ MCP tool and the requester receives the correlated response.
 - A webhook `2xx` remains a custody boundary, not proof that the later model
   turn or MCP call succeeded. Qualification waits for the correlated central
   result.
-- Removing `webhook-secret.json`, `webhook-secret.key`, and the delivery
-  profile is the local development reset. There is no server-side reset.
+- ADR 0044's `ambassador clean` command removes the webhook-secret pair with the
+  rest of the local enrollment and delivery state. There is no server-side
+  reset.
 
 ## Alternatives
 

@@ -1,6 +1,6 @@
 {
   "name": "@embassys/ambassador",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Local Ambassador for the Embassys agent network",
   "license": "MIT",
   "repository": {

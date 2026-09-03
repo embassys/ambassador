@@ -14,14 +14,37 @@ The public package and commands are:
 @embassys/ambassador
 ambassador start
 ambassador webhook-secret
+ambassador clean
 ```
 
-Neither command accepts options or positional values. `webhook-secret` creates
-one encrypted 48-character lowercase hexadecimal secret when absent and writes
-the stable value to standard output for the owner to copy into a receiver. It
-does not take the singleton process lock. `start` has no local token, agent
-selector, delivery-mode selector, endpoint option, configuration path, webhook
-secret option, or `--acp-agent` option.
+None of these commands accepts options or positional values. `webhook-secret`
+creates one encrypted 48-character lowercase hexadecimal secret when absent
+and writes the stable value to standard output for the owner to copy into a
+receiver. It does not take the singleton process lock. `start` has no local
+token, agent selector, delivery-mode selector, endpoint option, configuration
+path, webhook secret option, or `--acp-agent` option.
+
+`clean` acquires the singleton process lock and refuses to continue if
+Ambassador is running or the lock artifact is invalid. While it owns the lock,
+it removes every entry from the private Ambassador state directory except the
+lock database and its active SQLite sidecars. This includes the encrypted
+central credential and key, encrypted webhook secret and key, delivery profile,
+notification journal, interrupted temporary writes, and later local state
+artifacts. Symbolic links inside the state directory are removed as links; the
+command does not follow them.
+
+A successful command writes exactly:
+
+```text
+Ambassador local state cleared
+```
+
+The operation is idempotent. It retains the empty state directory and lock for
+coordination, then the next `start` presents the bootstrap enrollment catalog.
+It never calls central, unregisters an email, removes provider configuration,
+or handles provider credentials. The explicit `clean` command is the owner's
+authorization for this local deletion; there is no force option or interactive
+prompt.
 
 The process acquires its singleton lock before reading credentials, binding a
 listener, calling central, starting an agent, or sending a webhook. It binds
@@ -585,5 +608,8 @@ The cutover must prove at least:
 - no separate connector process, user-selected webhook format, OpenClaw
   receiver plugin, old package alias, old CLI, compatibility reader, or
   migration path in the artifact; and
+- local cleanup removes all enrollment and delivery state, refuses while the
+  process lock is held, leaves provider and central state alone, and returns to
+  the bootstrap catalog; and
 - no credential or content leakage in logs, databases, profiles, temporary
   files, packages, or qualification output.

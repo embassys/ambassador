@@ -1,6 +1,6 @@
 # 0015 npm distribution
 
-Status: accepted for packaging; amended by ADRs 0038, 0039, and 0043
+Status: accepted for packaging; amended by ADRs 0038, 0039, 0043, and 0044
 
 Date: 2026-08-24
 
@@ -98,6 +98,17 @@ Antigravity. Historical release evidence above continues to describe the
 artifacts that were published at the time. A future publication from the
 current source uses the four-profile release matrix.
 
+ADR 0044 adds the option-free `ambassador clean` command to the current source.
+It does not change the package name, binary, dependency set, or release gate.
+Published 0.2.11 does not gain the command retroactively.
+
+On 2026-09-03, the user approved version 0.2.12 to publish the local clean
+command and its documentation. The release may publish only after the
+byte-final candidate passes the repository suite, cross-platform package
+installation, installed-CLI cleanup E2E, live qualification, and artifact
+audits. Pull-request and main-branch gates must pass before and after merge.
+The downloaded npm artifact must then be checked independently and recorded.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -134,10 +145,10 @@ trusted publishing, and the new package name on 2026-09-02. On 2026-09-03 the
 user separately approved publication of version 0.2.6 with the qualification
 exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
-and probe behavior recorded above. The user then approved the conditional 0.2.9
-release described above, followed by the conditional 0.2.10 release described
-above and the conditional 0.2.11 release described above. Later publications
-still require explicit approval after qualification.
+and probe behavior recorded above. The user then approved the conditional
+0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11, and
+0.2.12 releases described above. Later publications still require explicit
+approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the

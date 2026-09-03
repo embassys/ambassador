@@ -1,6 +1,6 @@
 # 0039 Zero-configuration local start
 
-Status: accepted
+Status: accepted; local reset amended by ADR 0044
 
 Date: 2026-09-03
 
@@ -49,7 +49,7 @@ cross-platform design.
 
 There is no migration. A credential file without its matching internal key
 fails closed. Development users may remove the complete old state and enroll
-again.
+again. ADR 0044 adds `ambassador clean` as the checked local reset path.
 
 ACP session MCP injection carries only the loopback URL. Provider-side MCP
 configuration likewise uses the URL without a bearer token.
