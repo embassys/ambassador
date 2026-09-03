@@ -79,3 +79,6 @@ stdout, stderr, logs, or another file.
 On 2026-09-03, the user requested one CLI command that deletes local Ambassador
 test residue so the next start behaves like a new installation. The user had
 already clarified that no server-side cleanup is needed.
+
+Later that day, the user approved publishing the command in a new Ambassador
+release after the release checks and documentation update pass.

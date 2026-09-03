@@ -25,9 +25,10 @@ pull-request gates, and main-branch release gates. The downloaded npm artifact
 was independently verified. Its digests and results are recorded in
 [Delivery qualification](qualification.md).
 
-Current source adds the checked local-only `ambassador clean` reset under ADR
-0044. Published 0.2.11 does not contain that command. Making it available
-through `@latest` requires a separately approved later release.
+The 0.2.12 release candidate adds the checked local-only `ambassador clean`
+reset under ADR 0044. Published 0.2.11 does not contain that command. The
+0.2.12 publication is approved after its repository, packed-package,
+live-qualification, and artifact-audit gates pass.
 
 ## Remaining qualification
 

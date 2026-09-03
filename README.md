@@ -16,10 +16,11 @@ npx --yes @embassys/ambassador@latest start
 - Ask the agent to register your email with Ambassador.
 - OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
   Codex and Claude Code proceed directly without a delivery question.
-- Webhook users run `ambassador webhook-secret`, copy the displayed value into
-  Hermes's owner-only receiver configuration or OpenClaw's owner-only hooks
-  configuration, and give the agent only the
-  receiver URL during registration.
+- Webhook users run
+  `npx --yes @embassys/ambassador@latest webhook-secret`, copy the displayed
+  value into Hermes's owner-only receiver configuration or OpenClaw's
+  owner-only hooks configuration, and give the agent only the receiver URL
+  during registration.
 
 Direct delivery supports OpenClaw, Hermes, Codex, and Claude Code.
 Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
@@ -53,6 +54,7 @@ or to an owner-only backup after stopping Ambassador:
 - macOS: `~/Library/Application Support/ambassador`
 - Linux: `$XDG_STATE_HOME/ambassador`, or `~/.local/state/ambassador` when
   `XDG_STATE_HOME` is unset
+- Windows: `%LOCALAPPDATA%\ambassador`
 
 Remove the directory as one unit. Deleting only `delivery-profile.json`, an
 encrypted value, or its key leaves an intentionally invalid partial state. The
@@ -72,11 +74,11 @@ Antigravity are not active profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-
 records that decision.
 
 Published Ambassador releases through 0.2.9 have no Windows support claim.
-Current repository code is qualified under
-[ADR 0040](docs/adr/0040-windows-qualification.md): the
-native state, packed-package, and mock delivery lanes pass, while individual
-agent and mode claims still require exact real-agent Windows evidence and a
-future package publication requires separate approval.
+The 0.2.12 candidate is qualified under
+[ADR 0040](docs/adr/0040-windows-qualification.md). Its native state,
+packed-package, local-cleanup, and mock delivery lanes pass on Windows.
+Individual agent and mode claims still require exact real-agent Windows
+evidence.
 
 ## Development
 
