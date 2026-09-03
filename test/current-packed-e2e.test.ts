@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -217,4 +217,77 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       { name: "old-development-mcp", encoding: "utf8", value: legacyEndpointName("MCP") },
     ],
   });
+
+  let cleanStdout = "";
+  let cleanStderr = "";
+  assert.equal(
+    await packed.runCli(["clean"], {
+      io: {
+        stdout: {
+          write(chunk) {
+            cleanStdout += String(chunk);
+            return true;
+          },
+        },
+        stderr: {
+          write(chunk) {
+            cleanStderr += String(chunk);
+            return true;
+          },
+        },
+      },
+      env: {},
+      cwd: root,
+      signal: new AbortController().signal,
+      testOverrides: {
+        centralOrigin: central.apiUrl,
+        stateRoot: root,
+        localMcpPort: 0,
+        nowSeconds: () => NOW_SECONDS,
+      },
+    }),
+    0,
+  );
+  assert.equal(cleanStdout, "Ambassador local state cleared\n");
+  assert.equal(cleanStderr, "");
+  assert.deepEqual(await readdir(root), ["ambassador.lock"]);
+
+  const restartController = new AbortController();
+  let restartStdout = "";
+  let restartStderr = "";
+  const restarted = packed.runCli(["start"], {
+    io: {
+      stdout: {
+        write(chunk) {
+          restartStdout += String(chunk);
+          return true;
+        },
+      },
+      stderr: {
+        write(chunk) {
+          restartStderr += String(chunk);
+          return true;
+        },
+      },
+    },
+    env: {},
+    cwd: root,
+    signal: restartController.signal,
+    testOverrides: {
+      centralOrigin: central.apiUrl,
+      stateRoot: root,
+      localMcpPort: 0,
+      nowSeconds: () => NOW_SECONDS,
+    },
+  });
+  const restartEndpoint = await waitForEndpoint(() => restartStdout);
+  const restartClient = new TestMcpClient(restartEndpoint);
+  await restartClient.initialize({ name: "openclaw-bundle-mcp", version: "clean-check" });
+  assert.deepEqual(
+    (await restartClient.listTools()).map(({ name }) => name),
+    ["register_agent", "verify_email", "resend_verification"],
+  );
+  restartController.abort();
+  assert.equal(await restarted, 0);
+  assert.equal(restartStderr, "");
 });

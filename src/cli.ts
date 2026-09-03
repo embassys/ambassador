@@ -13,6 +13,7 @@ import {
   type RunningGatewayApplication,
 } from "./gateway-application.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
+import { clearLocalGatewayState } from "./local-state-cleaner.js";
 import type { DeliveryTarget } from "./notification-relay.js";
 import { ProcessLock } from "./process-lock.js";
 import { EncryptedFileWebhookSecretStore } from "./webhook-secret-store.js";
@@ -97,6 +98,24 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     } catch {
       context.io.stderr.write("Ambassador webhook secret failed\n");
       return 7;
+    }
+  }
+  if (command.command === "clean") {
+    let lock: ProcessLock | undefined;
+    try {
+      lock = await ProcessLock.acquire(paths.lockPath);
+      await clearLocalGatewayState(paths.stateDirectory, paths.lockPath);
+      context.io.stdout.write("Ambassador local state cleared\n");
+      return 0;
+    } catch (error) {
+      if (error instanceof GatewayError) {
+        context.io.stderr.write(`${error.message}\n`);
+        return error.exitCode;
+      }
+      context.io.stderr.write("Ambassador local state cleanup failed\n");
+      return 7;
+    } finally {
+      await lock?.release().catch(() => undefined);
     }
   }
   let lock: ProcessLock | undefined;

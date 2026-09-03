@@ -27,6 +27,9 @@ scope on your own.
   local delivery profile.
 - `start` accepts no options. Do not add delivery-mode, agent, webhook URL,
   central URL, configuration path, token, or secret-value flags.
+- `clean` accepts no options. It clears local Ambassador enrollment and
+  delivery state only after proving the foreground process is stopped. It does
+  not call central or change agent/provider configuration.
 - Resolve delivery during MCP registration through a fixed capability
   registry. The two modes are `webhook` and `direct`. Do not add a third
   connector or polling mode.

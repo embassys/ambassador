@@ -11,11 +11,14 @@ test("accepts only ambassador start without options", () => {
   assert.deepEqual(parseAmbassadorStartOptions(["start"]), {});
 });
 
-test("accepts the explicit webhook-secret command without options", () => {
+test("accepts the explicit webhook-secret and clean commands without options", () => {
   assert.deepEqual(parseAmbassadorCommand(["webhook-secret"]), { command: "webhook-secret" });
+  assert.deepEqual(parseAmbassadorCommand(["clean"]), { command: "clean" });
   assert.deepEqual(parseAmbassadorCommand(["start"]), { command: "start" });
   assert.throws(() => parseAmbassadorCommand(["webhook-secret", "extra"]));
   assert.throws(() => parseAmbassadorCommand(["webhook-secret", "--json"]));
+  assert.throws(() => parseAmbassadorCommand(["clean", "extra"]));
+  assert.throws(() => parseAmbassadorCommand(["clean", "--force"]));
 });
 
 test("rejects old, split, duplicate, positional, configuration, and secret-value options", () => {
