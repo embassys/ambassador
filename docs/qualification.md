@@ -212,6 +212,19 @@ package lanes were skipped in that command, and the clean-installed package
 lane then passed separately. Version 0.2.9 was not present in the npm registry
 at verification time.
 
+After all five pull-request gates passed, PR 15 merged as
+`1d4a93c1c02f9abc7ca8c55761907c1a62be703f`. The main-branch Linux, macOS,
+package, and Docker central-fixture jobs passed, and its OIDC job published
+0.2.9 with the npm `latest` tag. The tarball downloaded directly from npm's
+published `dist.tarball` URL matched registry SRI
+`sha512-SgOUG35EtxTL02y9rWxvaDHnvmGgajY0a86w6ff2Jz+PEjpKXTHd2K+B0cuwb+yFjakl4PZDF039oQmsy4jOFw==`
+and registry SHA-1 `293f1cc8b95b8306445aab02deb3286b0fc387ac`; its SHA-256 was
+`e35e705f42411a29cf6afe185fc018de536230b717aebf25c15016a26118e5f6`.
+A clean install of that registry tarball passed the installed CLI REST E2E, the
+installed `ambassador` command rejected a forbidden option, the production
+audit found no known vulnerabilities, and the signature audit verified all 21
+packages with no invalid or missing entries.
+
 The byte-final 0.2.8 release candidate tarball had SHA-256
 `6e128f2ec84af29ad663226e1449de9c1fb894426b3982982cab0215667a24f4`
 and SRI digest
