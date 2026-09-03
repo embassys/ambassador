@@ -1,6 +1,6 @@
 # 0015 npm distribution
 
-Status: accepted for packaging; amended by ADRs 0038, 0039, and 0043
+Status: accepted for packaging; amended by ADRs 0038, 0039, 0043, and 0044
 
 Date: 2026-08-24
 
@@ -97,6 +97,10 @@ ADR 0043 removes Gemini CLI from the current source registry and defers
 Antigravity. Historical release evidence above continues to describe the
 artifacts that were published at the time. A future publication from the
 current source uses the four-profile release matrix.
+
+ADR 0044 adds the option-free `ambassador clean` command to the current source.
+It does not change the package name, binary, dependency set, or release gate.
+Published 0.2.11 does not gain the command retroactively.
 
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips

@@ -142,6 +142,27 @@ state was deleted, and no credential, prompt, message body, or provider output
 was retained. ADR 0043 defers Antigravity and removes the Gemini CLI profile;
 neither is part of the current qualification matrix.
 
+## Local clean command
+
+The deterministic CLI suite creates central-credential, webhook-secret,
+delivery-profile, journal, temporary, nested, and symbolic-link residue inside
+an isolated state directory. `ambassador clean` removes it while leaving an
+external provider file unchanged. A second call succeeds with the same empty
+result. A separate case holds the Ambassador process lock and proves cleanup
+fails without removing the stored profile.
+
+The clean-installed package lane performs a real fixture enrollment, stops the
+gateway, runs `clean`, and restarts the installed CLI. The restarted MCP server
+exposes only the three bootstrap enrollment tools. Windows runs the same packed
+test and also covers the installed command shim.
+
+On 2026-09-03, the source candidate passed linting, type checking, and the full
+Node 24.19.0 repository suite: 184 tests, 178 passed, six opt-in or
+platform-specific cases skipped, and zero failures. A clean installation of
+the packed candidate passed the REST fixture enrollment, local cleanup,
+bootstrap restart, and production vulnerability audit on macOS arm64. The
+pull-request package lane remains the cross-platform proof.
+
 ## Ambassador 0.2.10
 
 On 2026-09-03, the byte-final 0.2.10 candidate passed the complete live-central

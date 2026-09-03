@@ -3,7 +3,8 @@
 Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
 for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
 0041 for agent-version handling, ADR 0042 for webhook-secret ownership and the
-OpenClaw receiver, and ADR 0043 for the current four-profile registry.
+OpenClaw receiver, ADR 0043 for the current four-profile registry, and ADR 0044
+for local cleanup.
 
 ## Current decisions
 
@@ -24,6 +25,7 @@ OpenClaw receiver, and ADR 0043 for the current four-profile registry.
 | [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
 | [0042](0042-internal-webhook-secret-and-openclaw-receiver.md) | Internal webhook secret and native OpenClaw hooks |
 | [0043](0043-remove-gemini-and-defer-antigravity.md) | Remove Gemini CLI and defer Antigravity support |
+| [0044](0044-local-clean-command.md) | Local state cleanup command |
 
 ## Historical ledger
 

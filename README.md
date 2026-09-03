@@ -36,19 +36,30 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 
 ## Repeat a local registration test
 
-Stop the foreground Ambassador process, then move the entire local Ambassador
-state directory to Trash or to an owner-only backup:
+Stop the foreground Ambassador process, then reset local Ambassador state:
+
+```sh
+npx --yes @embassys/ambassador@latest clean
+```
+
+The command removes the local registration, encrypted credentials, delivery
+profile, webhook secret, notification journal, and interrupted state writes. It
+keeps only the empty owner-only state directory and singleton lock needed to
+prevent cleanup while Ambassador is running.
+
+For a manual reset, move the entire local Ambassador state directory to Trash
+or to an owner-only backup after stopping Ambassador:
 
 - macOS: `~/Library/Application Support/ambassador`
 - Linux: `$XDG_STATE_HOME/ambassador`, or `~/.local/state/ambassador` when
   `XDG_STATE_HOME` is unset
 
-Remove the directory as one unit. Deleting only `delivery-profile.json`, the
-encrypted credential, or its key leaves an intentionally invalid partial state.
-The next `ambassador start` creates clean local state. This does not delete the
-central registration, so use a new disposable email when rerunning without
-server-side cleanup. It does not change the agent's normal provider
-configuration or credentials.
+Remove the directory as one unit. Deleting only `delivery-profile.json`, an
+encrypted value, or its key leaves an intentionally invalid partial state. The
+next `ambassador start` presents the enrollment tools again. Neither reset
+method deletes the central registration, so use a new disposable email when
+rerunning without server-side cleanup. Neither changes the agent's normal
+provider configuration or credentials.
 
 ## Implementation status
 

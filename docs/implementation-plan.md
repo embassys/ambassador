@@ -4,8 +4,9 @@ The Ambassador delivery cutover and zero-configuration startup are implemented.
 The deterministic suite covers guided registration, complete-message webhook
 delivery, direct ACP v1 delivery, correlated action-result submission,
 automatic central acknowledgement, restart loss, bounded state, internal
-credential-key custody, and packed-package installation. Completed design and
-behavior live in the architecture, protocol, and ADRs rather than this plan.
+credential-key custody, checked local cleanup, and packed-package installation.
+Completed design and behavior live in the architecture, protocol, and ADRs
+rather than this plan.
 
 Published Ambassador 0.2.9 corrected the version policy under ADR 0041.
 Published Ambassador 0.2.11 removes the 0.2.10 OpenClaw receiver and sends
@@ -24,6 +25,10 @@ pull-request gates, and main-branch release gates. The downloaded npm artifact
 was independently verified. Its digests and results are recorded in
 [Delivery qualification](qualification.md).
 
+Current source adds the checked local-only `ambassador clean` reset under ADR
+0044. Published 0.2.11 does not contain that command. Making it available
+through `@latest` requires a separately approved later release.
+
 ## Remaining qualification
 
 The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
@@ -33,6 +38,7 @@ Gemini CLI has since been removed from the active registry and Antigravity is
 deferred under ADR 0043. The current four-profile matrix has live evidence for
 every supported mode. The remaining supported-runtime repeat and historical
 artifact checks are recorded below.
+
 - Claude Code direct passed the complete live correlated-result flow on
   2026-09-03 with published Ambassador 0.2.11, Claude Agent ACP 0.73.0, and its
   bundled Claude Code 2.1.257 executable. The host's separate Claude Code
