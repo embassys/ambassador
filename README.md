@@ -1,27 +1,29 @@
 # Embassys Ambassador
 
 Embassys Ambassador is a local bridge between an agent and the Embassys REST
-service. It exposes authenticated MCP tools to the agent and delivers incoming
-messages either to a webhook or directly to a local agent over ACP v1.
+service. Agents call it through MCP. Incoming messages go directly to a local
+agent over ACP v1 or to an authenticated webhook.
 
-The accepted package and command are:
+## Start
 
-```text
-@embassys/ambassador
-ambassador start --local-token-env=<environment-variable>
+```sh
+npx --yes @embassys/ambassador@0.2.7 start
 ```
 
-Delivery is resolved through the MCP registration flow and a fixed capability
-registry. OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI support both
-modes, so Ambassador asks their users to choose direct or webhook and presents
-direct as the default. Codex uses the existing
-`@agentclientprotocol/codex-acp` adapter, Claude Code uses
-`@agentclientprotocol/claude-agent-acp`, and Gemini CLI uses native ACP. A known
-direct-only profile would proceed without a delivery question. Unknown or
-incomplete profiles are rejected; the model cannot select an agent, command,
-or adapter. Webhook mode sends the complete message to a user-approved URL.
-Direct mode starts a gateway-managed ACP agent session. There is no agent
-selector or webhook URL on `start`.
+- No Ambassador token or environment variable is needed for direct delivery.
+- Configure your agent's MCP client for `http://127.0.0.1:8787/mcp` without
+  authentication.
+- Ask the agent to register your email with Ambassador.
+- OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
+  Codex, Claude Code, and Gemini CLI proceed directly without a delivery
+  question.
+- Webhook users set a receiver secret in Ambassador's environment before
+  startup and give the agent only the variable name during registration.
+
+Direct delivery supports OpenClaw, Hermes, Codex, Claude Code, and Gemini CLI.
+Webhook delivery supports OpenClaw and Hermes. Unknown or incomplete profiles
+fail closed. The agent cannot choose an executable, adapter, or arbitrary
+delivery implementation.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
@@ -30,12 +32,11 @@ separate DPoP proof. Ambassador does not use the central MCP endpoint.
 
 ## Implementation status
 
-The REST and DPoP integration and deterministic Ambassador delivery cutover
-are implemented. The live-central qualification with real Codex passed. The
-user approved publication of `@embassys/ambassador@0.2.6` before the remaining
-real-agent matrix is complete. That one-release exception is recorded in
-[ADR 0015](docs/adr/0015-npm-distribution.md); the outstanding qualification
-work remains visible in the [implementation plan](docs/implementation-plan.md).
+The REST, DPoP, delivery, and zero-configuration startup paths are implemented.
+The live-central qualification with real Codex passed. The remaining
+real-agent matrix is still open under the disclosed release exception in
+[ADR 0015](docs/adr/0015-npm-distribution.md); outstanding work remains in the
+[implementation plan](docs/implementation-plan.md).
 
 ## Development
 
@@ -47,8 +48,8 @@ pnpm check
 ```
 
 CI uses a mock webhook receiver and mock ACP v1 agent for deterministic
-delivery tests. Opt-in local qualification covers all five supported agents in
-both delivery modes.
+delivery tests. Opt-in local qualification covers direct delivery for all five
+agents and webhook delivery for OpenClaw and Hermes.
 
 ## Documentation
 

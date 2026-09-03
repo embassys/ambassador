@@ -1,24 +1,33 @@
 # Current work
 
-The Ambassador delivery cutover is implemented. The deterministic suite covers
-guided registration, complete-message webhook delivery, direct ACP v1
-delivery, correlated action-result submission, automatic central
-acknowledgement, restart loss, bounded state, and packed-package installation.
-The former connector packages and compatibility interfaces have been removed.
+The Ambassador delivery cutover and zero-configuration startup are implemented.
+The deterministic suite covers guided registration, complete-message webhook
+delivery, direct ACP v1 delivery, correlated action-result submission,
+automatic central acknowledgement, restart loss, bounded state, internal
+credential-key custody, and packed-package installation. Completed design and
+behavior live in the architecture, protocol, and ADRs rather than this plan.
 
-## Post-release qualification for 0.2.6
+## Release 0.2.7
 
-The user explicitly approved publication of `@embassys/ambassador@0.2.6` on
-2026-09-03 before completion of the real-agent matrix. This is a one-release
-exception to ADR 0015, not evidence that the remaining cases passed. Complete
+- Merge the approved release change after CI passes.
+- Confirm npm trusted publishing produced `@embassys/ambassador@0.2.7`.
+- Smoke-test the documented `npx --yes @embassys/ambassador@0.2.7 start`
+  command without an Ambassador token or environment variable.
+
+## Post-release qualification
+
+The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
+0.2.7 release on 2026-09-03 before completion of the real-agent matrix. This
+exception to ADR 0015 is not evidence that the remaining cases passed. Complete
 and record the following work after the release:
 
-- Complete the remaining nine opt-in real-agent cases with exact authenticated
+- Complete the remaining six opt-in real-agent cases with exact authenticated
   profiles:
   OpenClaw 2026.8.1, Hermes Agent 0.21.0,
   `@agentclientprotocol/codex-acp` 1.8.0, backed by Codex 0.152.1,
   `@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0.
-  Every profile must pass webhook and direct delivery. Codex direct passed the
+  OpenClaw and Hermes must pass webhook and direct delivery; Codex, Claude
+  Code, and Gemini CLI must pass direct delivery. Codex direct passed the
   complete live correlated-result flow on 2026-09-03 against packed candidate
   `7cbbf27fbd401024c51a48f6ae6b0a0b55059df200035cdbb33c72faf9ab4d70`
   and reviewed central revision

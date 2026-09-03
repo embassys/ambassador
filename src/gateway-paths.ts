@@ -5,6 +5,7 @@ export interface GatewayPaths {
   journalPath: string;
   lockPath: string;
   credentialPath: string;
+  credentialKeyPath: string;
   profilePath: string;
 }
 
@@ -17,6 +18,7 @@ export function pathsForStateDirectory(
     journalPath: join(stateDirectory, "notifications.sqlite"),
     lockPath: join(stateDirectory, "ambassador.lock"),
     credentialPath: join(stateDirectory, "central-credential.json"),
+    credentialKeyPath: join(stateDirectory, "central-credential.key"),
     profilePath: join(stateDirectory, "delivery-profile.json"),
   };
 }

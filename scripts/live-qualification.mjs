@@ -238,9 +238,8 @@ class QualificationMcpClient {
   #nextId = 1;
   #sessionId;
 
-  constructor(endpoint, token, clientInfo) {
+  constructor(endpoint, clientInfo) {
     this.endpoint = endpoint;
-    this.authorization = `Bearer ${token}`;
     this.clientInfo = clientInfo;
   }
 
@@ -287,7 +286,6 @@ class QualificationMcpClient {
   async #post(message, expectResponse = true) {
     const headers = {
       accept: "application/json, text/event-stream",
-      authorization: this.authorization,
       "content-type": "application/json",
       ...(this.#sessionId === undefined
         ? {}
@@ -426,7 +424,7 @@ async function startGateway(
   packed,
   stateRoot,
   centralFetch,
-  token,
+  webhookSecret,
   deliveryTargetFactory,
   clientInfo,
   extraEnvironment = {},
@@ -435,7 +433,7 @@ async function startGateway(
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(["start", "--local-token-env=LIVE_QUALIFICATION_LOCAL_TOKEN"], {
+  const running = packed.runCli(["start"], {
     io: {
       stdout: {
         write(chunk) {
@@ -454,8 +452,7 @@ async function startGateway(
     },
     env: {
       ...extraEnvironment,
-      LIVE_QUALIFICATION_LOCAL_TOKEN: token,
-      LIVE_QUALIFICATION_WEBHOOK_SECRET: token,
+      LIVE_QUALIFICATION_WEBHOOK_SECRET: webhookSecret,
     },
     cwd: workingDirectory,
     signal: controller.signal,
@@ -468,11 +465,10 @@ async function startGateway(
     },
   });
   const endpoint = await waitForEndpoint(() => stdout);
-  const client = new QualificationMcpClient(endpoint, token, clientInfo);
+  const client = new QualificationMcpClient(endpoint, clientInfo);
   await client.initialize();
   return {
     client,
-    token,
     stdout: () => stdout,
     stderr: () => stderr,
     async stop() {
@@ -728,7 +724,7 @@ async function main() {
   const roots = [];
   const gateways = [];
   const webhooks = [];
-  const localTokens = [];
+  const webhookSecrets = [];
   const centralRoutes = new Set();
   const centralObservations = [];
   const directMessages = [];
@@ -856,7 +852,7 @@ async function main() {
             ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
           }
         : {};
-    const deliveryTargetFactoryFor = (index, token) => {
+    const deliveryTargetFactoryFor = (index) => {
       if (index === 0 || realCodex) return undefined;
       return ({ endpoint }) => {
         const target = new directDeliveryModule.DirectDeliveryTarget({
@@ -873,7 +869,6 @@ async function main() {
           workingDirectory: repositoryRoot,
           environment: process.env,
           mcpEndpoint: endpoint,
-          localToken: token,
         });
         return {
           async deliver(message, signal) {
@@ -890,9 +885,9 @@ async function main() {
 
     for (let index = 0; index < 2; index += 1) {
       phase = `webhook_setup_${index + 1}`;
-      const token = randomBytes(24).toString("hex");
-      localTokens.push(token);
-      const webhook = await startWebhook(token);
+      const webhookSecret = randomBytes(24).toString("hex");
+      webhookSecrets.push(webhookSecret);
+      const webhook = await startWebhook(webhookSecret);
       webhooks.push(webhook);
       phase = `gateway_setup_${index + 1}`;
       gateways.push(
@@ -900,8 +895,8 @@ async function main() {
           packed,
           roots[index],
           centralFetchFor(index),
-          token,
-          deliveryTargetFactoryFor(index, token),
+          webhookSecret,
+          deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
           realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
@@ -919,18 +914,25 @@ async function main() {
         "bootstrap_catalog",
       );
       const initial = await client.call("register_agent", { email: addresses[index] });
-      assert(initial.status === "input_required" && initial.default === "direct", "registration");
-      await client.call("register_agent", {
-        email: addresses[index],
-        delivery:
-          index === 0
-            ? {
-                mode: "webhook",
-                url: webhooks[index].url,
-                secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
-              }
-            : { mode: "direct" },
-      });
+      if (index === 0 || !realCodex) {
+        assert(initial.status === "input_required" && initial.default === "direct", "registration");
+        await client.call("register_agent", {
+          email: addresses[index],
+          delivery:
+            index === 0
+              ? {
+                  mode: "webhook",
+                  url: webhooks[index].url,
+                  secret_env: "LIVE_QUALIFICATION_WEBHOOK_SECRET",
+                }
+              : { mode: "direct" },
+        });
+      } else {
+        assert(
+          typeof initial.agent_id === "string" && initial.email === addresses[index],
+          "registration",
+        );
+      }
       const mail = await findVerification(credentials, addresses[index], receivedAfter);
       capturedMail.push(mail.messageId);
       codes.push(mail.code);
@@ -960,8 +962,8 @@ async function main() {
           packed,
           roots[index],
           centralFetchFor(index),
-          localTokens[index],
-          deliveryTargetFactoryFor(index, localTokens[index]),
+          webhookSecrets[index],
+          deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
           realCodex && index === 1 ? codexWorkingDirectory : repositoryRoot,
@@ -1017,7 +1019,7 @@ async function main() {
     phase = "dpop";
     const store = new credentialStoreModule.EncryptedFileCredentialStore(
       join(roots[0], "central-credential.json"),
-      gateways[0].token,
+      join(roots[0], "central-credential.key"),
       JSON.stringify({ centralOrigin: LIVE_ORIGIN }),
     );
     const serializedCredential = await store.load();
@@ -1164,7 +1166,7 @@ async function main() {
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
       join(roots[1], "central-credential.json"),
-      gateways[1].token,
+      join(roots[1], "central-credential.key"),
       JSON.stringify({ centralOrigin: LIVE_ORIGIN }),
     );
     const secondSerialized = await secondStore.load();
@@ -1186,8 +1188,8 @@ async function main() {
       { name: "identity-a-jwk-y", value: loadedCredential.publicJwk.y },
       { name: "action-payload", value: actionReason },
       { name: "action-result", value: syntheticPhone },
-      { name: "local-token-a", value: gateways[0].token },
-      { name: "local-token-b", value: gateways[1].token },
+      { name: "webhook-secret-a", value: webhookSecrets[0] },
+      { name: "webhook-secret-b", value: webhookSecrets[1] },
       ...dpop.proofMarkers.map((value, index) => ({ name: `dpop-proof-${index + 1}`, value })),
     ];
     await artifactScan(

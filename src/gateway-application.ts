@@ -43,9 +43,9 @@ export interface DeliveryTargetContext {
 }
 
 export interface GatewayApplicationOptions {
-  readonly localToken: string;
   readonly journalPath: string;
   readonly credentialPath: string;
+  readonly credentialKeyPath: string;
   readonly profilePath: string;
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -92,7 +92,7 @@ export async function openGatewayApplication(
     options.credentialStore ??
     new EncryptedFileCredentialStore(
       options.credentialPath,
-      options.localToken,
+      options.credentialKeyPath,
       JSON.stringify({ centralOrigin: new URL(centralOrigin).origin }),
     );
   const controller = new AbortController();
@@ -157,7 +157,6 @@ export async function openGatewayApplication(
       workingDirectory: context.profile.working_directory,
       environment: options.environment,
       mcpEndpoint: context.endpoint,
-      localToken: options.localToken,
     });
   };
 
@@ -281,7 +280,7 @@ export async function openGatewayApplication(
   try {
     identity = await GatewayIdentity.open(store, nowSeconds);
     if (identity.enrolled) await loadProfile();
-    local = new LocalMcpServer(options.localToken, router, {
+    local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
     });
     await local.listen();

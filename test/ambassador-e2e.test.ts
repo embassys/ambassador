@@ -14,7 +14,6 @@ import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
-const LOCAL_TOKEN = "0123456789abcdef0123456789abcdef0123456789abcdef";
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 const OPENCLAW = { name: "openclaw-bundle-mcp", version: "0.0.0" };
@@ -29,9 +28,9 @@ async function fixture(t: TestContext) {
     nowSeconds: NOW_SECONDS,
   });
   const options: GatewayApplicationOptions = {
-    localToken: LOCAL_TOKEN,
     journalPath: join(root, "notifications.sqlite3"),
     credentialPath: join(root, "central-credential.enc"),
+    credentialKeyPath: join(root, "central-credential.key"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
     environment: { EMBASSYS_WEBHOOK_SECRET: WEBHOOK_SECRET },
@@ -48,7 +47,7 @@ async function enrollWebhook(
   webhookUrl: string,
   email: string,
 ): Promise<TestMcpClient> {
-  const client = new TestMcpClient(gateway.endpoint, LOCAL_TOKEN);
+  const client = new TestMcpClient(gateway.endpoint);
   await client.initialize(OPENCLAW);
   assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
   await client.callTool("register_agent", {
