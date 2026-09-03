@@ -33,8 +33,8 @@ async function fixture(t: TestContext, registry = PRODUCTION_AGENT_CAPABILITIES)
 
 test("OpenClaw and Hermes ask for delivery with direct as the default", async (t) => {
   for (const { clientInfo, label } of [
-    { clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" }, label: "OpenClaw" },
-    { clientInfo: { name: "mcp", version: "0.1.0" }, label: "Hermes" },
+    { clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" }, label: "OpenClaw" },
+    { clientInfo: { name: "mcp", version: "qualification" }, label: "Hermes" },
   ]) {
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -60,11 +60,9 @@ test("OpenClaw and Hermes ask for delivery with direct as the default", async (t
 
 test("Codex, Claude Code, and Gemini CLI register directly without a delivery question", async (t) => {
   for (const clientInfo of [
-    { name: "codex-mcp-client", version: "0.149.0" },
-    { name: "codex-mcp-client", version: "0.152.1" },
-    { name: "claude-code", version: "2.1.257" },
-    { name: "claude-code", version: "2.1.258" },
-    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+    { name: "codex-mcp-client", version: "qualification" },
+    { name: "claude-code", version: "qualification" },
+    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -81,9 +79,9 @@ test("Codex, Claude Code, and Gemini CLI register directly without a delivery qu
 
 test("direct-only production profiles reject webhook input before state or central", async (t) => {
   for (const clientInfo of [
-    { name: "codex-mcp-client", version: "0.152.1" },
-    { name: "claude-code", version: "2.1.258" },
-    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+    { name: "codex-mcp-client", version: "qualification" },
+    { name: "claude-code", version: "qualification" },
+    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(clientInfo.name, async (t) => {
       const { calls, registration } = await fixture(t);
@@ -112,7 +110,7 @@ test("persists the derived direct or webhook profile before central registration
   const direct = await fixture(t);
   const directResult = await direct.registration.register(
     { email: "direct@example.test", delivery: { mode: "direct" } },
-    { name: "openclaw-bundle-mcp", version: "0.0.0" },
+    { name: "openclaw-bundle-mcp", version: "qualification" },
     new AbortController().signal,
   );
   assert.equal(directResult.agent_id, "agent-1");
@@ -129,7 +127,7 @@ test("persists the derived direct or webhook profile before central registration
         secret_env: "EMBASSYS_WEBHOOK_SECRET",
       },
     },
-    { name: "mcp", version: "0.1.0" },
+    { name: "mcp", version: "qualification" },
     new AbortController().signal,
   );
   assert.equal(webhookResult.agent_id, "agent-1");
@@ -138,9 +136,9 @@ test("persists the derived direct or webhook profile before central registration
   ]);
 
   for (const clientInfo of [
-    { name: "codex-mcp-client", version: "0.152.1" },
-    { name: "claude-code", version: "2.1.258" },
-    { name: "gemini-cli-mcp-client", version: "0.58.0" },
+    { name: "codex-mcp-client", version: "qualification" },
+    { name: "claude-code", version: "qualification" },
+    { name: "gemini-cli-mcp-client", version: "qualification" },
   ]) {
     await t.test(clientInfo.name, async (t) => {
       const selected = await fixture(t);
@@ -162,7 +160,7 @@ test("a direct-only profile registers without asking a delivery question", async
     ...base,
     kind: "fixture-direct",
     displayName: "Fixture direct",
-    aliases: [{ name: "fixture-direct", version: "1" }],
+    aliases: ["fixture-direct"],
     modes: ["direct"],
     qualificationCases: ["fixture-direct"],
   };
@@ -192,17 +190,17 @@ test("unsupported metadata and model-supplied process fields fail before state o
     },
     {
       arguments: { email: "bad@example.test", agent: "openclaw" },
-      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
+      clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
     {
       arguments: { email: "bad@example.test", command: "openclaw" },
-      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
+      clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
     {
       arguments: { email: "bad@example.test", working_directory: "/tmp" },
-      clientInfo: { name: "openclaw-bundle-mcp", version: "0.0.0" },
+      clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
   ]) {

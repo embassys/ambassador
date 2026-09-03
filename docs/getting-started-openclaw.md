@@ -3,7 +3,7 @@
 ## Before you start
 
 - Install Node.js `>=24.19.0 <25`.
-- Install and authenticate OpenClaw `2026.8.1`.
+- Install and authenticate the latest OpenClaw release.
 - Make sure `openclaw` is on `PATH` for direct delivery.
 - Ambassador never receives your provider credential.
 
@@ -43,7 +43,9 @@ step 2 configured.
 - OpenClaw supplies `delivery.url` and `delivery.secret_env`; it never receives
   the secret value.
 
-The qualification probe records the installed version without rejecting it.
-Production still checks the exact MCP client and ACP identities in the compiled
-profile, so a new incompatible release fails closed. See
+Ambassador selects this profile by the exact known MCP client name, then tries
+the fixed `openclaw acp` ACP v1 contract for direct delivery. Reported client
+and agent versions are diagnostic only. An incompatible release fails at
+startup, ACP initialization, session creation, or delivery instead of being
+rejected by a version list. See
 [Qualification](qualification.md) for compatibility evidence.

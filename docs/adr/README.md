@@ -1,7 +1,8 @@
 # Architecture decisions
 
-Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
-0039 for zero-configuration local startup.
+Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
+for zero-configuration local startup, ADR 0040 for Windows qualification, and
+ADR 0041 for agent-version handling.
 
 ## Current decisions
 
@@ -19,6 +20,7 @@ Read ADR 0037 for central integration, ADR 0038 for local delivery, and ADR
 | [0038](0038-ambassador-delivery-modes.md) | Guided webhook and direct ACP delivery |
 | [0039](0039-zero-configuration-local-start.md) | Zero-configuration start and local-machine trust boundary |
 | [0040](0040-windows-qualification.md) | Windows implementation and qualification plan |
+| [0041](0041-agent-versions-are-observational.md) | Known agent names with observational versions |
 
 ## Historical ledger
 

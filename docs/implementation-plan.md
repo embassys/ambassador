@@ -7,6 +7,16 @@ automatic central acknowledgement, restart loss, bounded state, internal
 credential-key custody, and packed-package installation. Completed design and
 behavior live in the architecture, protocol, and ADRs rather than this plan.
 
+The 0.2.9 candidate corrects the version policy under ADR 0041. Exact known MCP
+client names still select fixed profiles, and exact ACP v1 agent names still
+protect direct initialization, but reported client and agent versions no longer
+gate either step. Ambassador now tries the fixed contract and surfaces an
+actual startup, initialization, session, or delivery failure. Publication is
+authorized once the required pull-request checks are green. The Node 24.19.0
+repository and clean-installed package checks are green; the candidate digest
+and audit evidence are recorded in
+[Delivery qualification](qualification.md).
+
 ## Post-release qualification
 
 The user explicitly approved `@embassys/ambassador@0.2.6` and the corrective
@@ -16,10 +26,9 @@ and record the following work after the release. The published 0.2.7 registry
 artifact and installed CLI have now been independently verified; completed
 artifact checks are recorded in [Live central qualification](live-qualification.md).
 
-- Complete the remaining four opt-in real-agent profile/mode cases with exact
-  authenticated profiles:
-  OpenClaw 2026.8.1,
-  `@agentclientprotocol/claude-agent-acp` 0.73.0, and Gemini CLI 0.58.0.
+- Complete the remaining four opt-in real-agent profile/mode cases with
+  authenticated installations: OpenClaw webhook and direct, Claude Code
+  direct, and Gemini CLI direct.
   OpenClaw must pass webhook and direct delivery; Claude Code and Gemini CLI
   must pass direct delivery.
 - Codex direct passed the
@@ -35,9 +44,8 @@ artifact checks are recorded in [Live central qualification](live-qualification.
 - Hermes Agent 0.20.5 passed webhook with the published 0.2.7 artifact and
   direct with the candidate that became Ambassador 0.2.8. Do not claim
   published 0.2.7 direct support.
-  Hermes 0.21.0 still has only its contract and ACP startup probe, so complete
-  its real-model MCP round trip if that exact version remains in a future
-  release candidate.
+  Hermes 0.21.0 still has only its contract and ACP startup probe, so its
+  historical evidence is not a complete real-model round trip.
 - The isolated ACP initialization probes already pass for Codex ACP 1.8.0,
   Claude Agent ACP 0.73.0, and native Gemini CLI ACP 0.58.0. The pinned
   OpenClaw and Hermes images also pass their version and ACP startup probes.
@@ -46,8 +54,9 @@ artifact checks are recorded in [Live central qualification](live-qualification.
 - Record only the safe version and pass/fail evidence produced by
   `scripts/qualify-agents.mjs`. Do not record prompts, messages, credentials,
   secrets, paths containing user data, or provider output.
-- Replace remaining source-reviewed version labels in the getting-started
-  guides only when their exact real-agent qualification passes.
+- Keep provider versions in dated qualification evidence only. Getting-started
+  guides should direct users to current releases and explain that actual ACP
+  compatibility is tried rather than inferred from the reported version.
 
 ## Windows qualification
 

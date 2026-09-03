@@ -6,7 +6,11 @@ import { type TestContext, test } from "node:test";
 
 import { resolveWindowsNodePackageEntrypoint } from "../src/direct-delivery.js";
 
-async function fixture(t: TestContext, version = "1.8.0") {
+async function fixture(
+  t: TestContext,
+  version = "1.8.0",
+  packageName = "@agentclientprotocol/codex-acp",
+) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-windows-agent-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const modules = join(root, "node_modules");
@@ -18,7 +22,7 @@ async function fixture(t: TestContext, version = "1.8.0") {
   await writeFile(
     join(packageRoot, "package.json"),
     JSON.stringify({
-      name: "@agentclientprotocol/codex-acp",
+      name: packageName,
       version,
       bin: { "codex-acp": "dist/index.js" },
     }),
@@ -30,13 +34,12 @@ async function fixture(t: TestContext, version = "1.8.0") {
 
 const CONTRACT = {
   packageName: "@agentclientprotocol/codex-acp",
-  packageVersion: "1.8.0",
   binName: "codex-acp",
   entrypoint: "dist/index.js",
 } as const;
 
-test("resolves an exact Windows Node agent package without invoking its command shim", async (t) => {
-  const item = await fixture(t);
+test("resolves a fixed Windows Node agent package without gating on its version", async (t) => {
+  const item = await fixture(t, "1.8.1");
   assert.equal(
     await resolveWindowsNodePackageEntrypoint(CONTRACT, { PATH: item.binDirectory }),
     await realpath(item.entrypoint),
@@ -44,7 +47,7 @@ test("resolves an exact Windows Node agent package without invoking its command 
 });
 
 test("rejects missing, mismatched, and path-escaping Windows Node agent packages", async (t) => {
-  const mismatch = await fixture(t, "1.8.1");
+  const mismatch = await fixture(t, "1.8.0", "@agentclientprotocol/not-codex-acp");
   await assert.rejects(
     resolveWindowsNodePackageEntrypoint(CONTRACT, { PATH: mismatch.binDirectory }),
   );
@@ -55,4 +58,9 @@ test("rejects missing, mismatched, and path-escaping Windows Node agent packages
       { PATH: mismatch.binDirectory },
     ),
   );
+});
+
+test("rejects unbounded Windows Node package version metadata", async (t) => {
+  const item = await fixture(t, "x".repeat(129));
+  await assert.rejects(resolveWindowsNodePackageEntrypoint(CONTRACT, { PATH: item.binDirectory }));
 });

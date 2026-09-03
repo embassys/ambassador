@@ -19,6 +19,7 @@ const DEFAULT_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAXIMUM_STARTUP_ATTEMPTS = 2;
 const MAXIMUM_PATH_ENTRIES = 128;
 const MAXIMUM_PACKAGE_MANIFEST_BYTES = 128 * 1024;
+const BOUNDED_PACKAGE_VERSION = /^[\x20-\x7e]{1,128}$/u;
 
 type ManagedChild = ChildProcess;
 export type SpawnProcess = (
@@ -55,8 +56,6 @@ function validWindowsNodePackageContract(value: WindowsNodePackageEntrypoint): b
   return (
     value.packageName.length > 0 &&
     value.packageName.length <= 128 &&
-    value.packageVersion.length > 0 &&
-    value.packageVersion.length <= 128 &&
     value.binName.length > 0 &&
     value.binName.length <= 128 &&
     value.entrypoint.length > 0 &&
@@ -121,7 +120,8 @@ export async function resolveWindowsNodePackageEntrypoint(
             : undefined;
       if (
         record.name !== contract.packageName ||
-        record.version !== contract.packageVersion ||
+        typeof record.version !== "string" ||
+        !BOUNDED_PACKAGE_VERSION.test(record.version) ||
         declaredEntrypoint !== contract.entrypoint
       ) {
         continue;
@@ -286,7 +286,7 @@ export class DirectDeliveryTarget {
     if (
       this.#capability.command.length === 0 ||
       this.#capability.args.length > 16 ||
-      this.#capability.agentInfo.versions.length === 0 ||
+      this.#capability.agentInfo.name.length === 0 ||
       !this.#mcpEndpoint.startsWith("http://127.0.0.1:") ||
       ![
         this.#initializationDeadlineMs,
@@ -401,8 +401,7 @@ export class DirectDeliveryTarget {
       );
       if (
         initialized.protocolVersion !== acp.PROTOCOL_VERSION ||
-        initialized.agentInfo?.name !== this.#capability.agentInfo.name ||
-        !this.#capability.agentInfo.versions.includes(initialized.agentInfo.version)
+        initialized.agentInfo?.name !== this.#capability.agentInfo.name
       ) {
         throw new DirectDeliveryError("startup_failed");
       }

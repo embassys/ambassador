@@ -56,6 +56,13 @@ the production `clientInfo` or ACP `agentInfo` allowlists. This release retains
 the four open profile/mode cases and the supported-Node Codex repeat as a
 disclosed qualification exception.
 
+ADR 0041 supersedes that production version-gating policy for the 0.2.9
+candidate. On 2026-09-03, the user requested another release and directed that
+the pull request be merged once green. That authorizes the main-branch OIDC
+publication of 0.2.9 only after the local candidate checks and required Linux,
+macOS, package, and central-fixture pull-request gates pass. The disclosed
+four-case real-agent qualification gap remains unchanged.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -92,8 +99,9 @@ trusted publishing, and the new package name on 2026-09-02. On 2026-09-03 the
 user separately approved publication of version 0.2.6 with the qualification
 exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
-and probe behavior recorded above. Later publications still require explicit
-approval after qualification.
+and probe behavior recorded above. The user then approved the conditional 0.2.9
+release described above. Later publications still require explicit approval
+after qualification.
 
 The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the
