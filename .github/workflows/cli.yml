@@ -220,7 +220,9 @@ jobs:
         run: |
           $stdoutPath = Join-Path $env:RUNNER_TEMP "ambassador-shim.stdout"
           $stderrPath = Join-Path $env:RUNNER_TEMP "ambassador-shim.stderr"
+          $nativeErrorPreference = $PSNativeCommandUseErrorActionPreference
           try {
+            $PSNativeCommandUseErrorActionPreference = $false
             & "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\ambassador.cmd" invalid 1> $stdoutPath 2> $stderrPath
             $exitCode = $LASTEXITCODE
             $stdout = [IO.File]::ReadAllText($stdoutPath)
@@ -230,6 +232,7 @@ jobs:
               throw "Installed Ambassador command returned unexpected output"
             }
           } finally {
+            $PSNativeCommandUseErrorActionPreference = $nativeErrorPreference
             Remove-Item -Force -ErrorAction SilentlyContinue $stdoutPath, $stderrPath
           }
 
