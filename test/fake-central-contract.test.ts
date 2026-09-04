@@ -180,18 +180,14 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
     }),
   });
   assert.equal(requested.status, 200);
-  const permissionId = ((await requested.json()) as Record<string, unknown>).permission_id;
+  const requestedBody = (await requested.json()) as Record<string, unknown>;
+  const permissionId = requestedBody.permission_id;
   assert.equal(typeof permissionId, "string");
+  assert.equal(requestedBody.already_granted, false);
+  assert.equal(requestedBody.decision, null);
 
   const targetPoll = await target.protectedFetch("/api/poll_messages?timeout=0");
-  const targetMessages = ((await targetPoll.json()) as { messages: Array<Record<string, unknown>> })
-    .messages;
-  assert.equal(targetMessages.length, 1);
-  const permissionMessageId = targetMessages[0]?.id;
-  assert.equal(typeof permissionMessageId, "string");
-
-  const consumed = await target.protectedFetch("/api/poll_messages?timeout=0");
-  assert.deepEqual(await consumed.json(), { messages: [] });
+  assert.deepEqual(await targetPoll.json(), { messages: [] });
 
   const decided = await target.protectedFetch("/api/respond_to_permission", {
     method: "POST",
@@ -199,13 +195,6 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
     body: JSON.stringify({ permission_id: permissionId, decision: "granted" }),
   });
   assert.equal(decided.status, 200);
-
-  const acknowledged = await target.protectedFetch("/api/ack_message", {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify({ message_id: permissionMessageId }),
-  });
-  assert.equal(acknowledged.status, 200);
   const permissionResponse = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const permissionResponseMessages = (
     (await permissionResponse.json()) as { messages: Array<Record<string, unknown>> }
@@ -223,12 +212,6 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
     body: JSON.stringify({ message_id: permissionResponseId }),
   });
   assert.equal(acknowledgedResponse.status, 200);
-  const repeatedAck = await target.protectedFetch("/api/ack_message", {
-    method: "POST",
-    headers: jsonHeaders,
-    body: JSON.stringify({ message_id: permissionMessageId }),
-  });
-  assert.equal(repeatedAck.status, 404);
 
   const action = await requester.protectedFetch("/api/call_action", {
     method: "POST",

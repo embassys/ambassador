@@ -58,8 +58,21 @@ Later, you can ask:
 Ambassador includes the approved Codex ACP adapter and launches it when a
 central message arrives. You do not install `codex-acp` separately. The
 incoming message runs in a new Ambassador-managed session, not the registration
-chat. Ambassador does not add a safe-mode restriction to Codex; the adapter
-retains Codex's native tool and policy behavior.
+chat. Ambassador loads tools from normal Codex configuration, passes no extra
+MCP servers, and does not disable built-in tools, choose safe mode, or request
+permission bypass. If Codex asks its ACP client to approve a tool, Ambassador
+automatically chooses **allow once** when offered, otherwise an advertised
+positive choice. Configure only tools you are willing to make available to
+unattended direct requests.
+
+## Inspect sessions
+
+- Stop Ambassador first.
+- Run `npx --yes @embassys/ambassador@latest sessions list`.
+- Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
+- Add `--verbose` to `show` for bounded tool events.
+- Use `sessions delete <session-id>` to delete provider history, or
+  `sessions forget <session-id>` to remove only Ambassador's record.
 
 If startup or ACP initialization fails, Ambassador prints a bounded reason.
 Confirm Codex is signed in, update Ambassador, and restart it. For a clean local

@@ -1,0 +1,166 @@
+# 0050 Persistent and observable ACP sessions
+
+Status: accepted
+
+Date: 2026-09-04
+
+## Problem
+
+Direct delivery currently treats each ACP turn as disposable. Ambassador
+creates a new session, denies every ACP tool permission request, discards the
+session identifier, and terminates the agent. The Claude bridge also disables
+session persistence and built-in tools while bypassing provider permissions.
+Hermes and Codex receive a second Ambassador MCP definition through ACP even
+though setup already requires users to configure Ambassador in the provider.
+
+This prevents useful continuity and makes delivery hard to inspect. It also
+creates four different execution policies for what should be one direct-mode
+contract.
+
+## Decision
+
+### One direct-delivery policy
+
+Apply the same ACP v1 policy to OpenClaw, Hermes, Codex, and Claude Code:
+
+- use the provider's normal configuration for Ambassador MCP and every other
+  provider tool;
+- send an empty `mcpServers` array in ACP session lifecycle requests;
+- keep provider built-in tools enabled;
+- do not request a provider bypass, safe mode, restricted mode, or disabled
+  tool set;
+- when the agent asks the ACP client to approve a tool, select an
+  `allow_once` option when present, otherwise select the first positive option
+  advertised by the agent;
+- if the agent offers no positive option, cancel the request because ACP gives
+  the client no approval it can select; and
+- retain the provider's normal authentication and billing behavior. Native
+  subscription login works without an API key, while an API key deliberately
+  configured in the provider environment remains supported.
+
+Automatic tool approval is a temporary development policy. It gives a
+background direct-delivery turn access to the tools available in the user's
+provider configuration. A fixed Embassys prompt marks remote fields as data,
+but it is not a hard prompt-injection boundary. The user accepted this risk to
+unblock unattended development flows. A later approval service may replace
+automatic approval without changing the central permission protocol.
+
+### Adapter distribution
+
+Use the reviewed public ACP adapters for Codex and Claude Code. Their
+production dependency declarations use unpinned npm wildcards, so a fresh or
+updated Ambassador installation resolves the current adapter release. Running
+`ambassador start` never downloads packages or changes an existing
+installation. OpenClaw and Hermes continue to provide their own ACP commands.
+All agent versions remain diagnostic metadata rather than compatibility gates.
+
+Remove Ambassador's built-in Claude bridge. The Claude ACP adapter launches
+the official Claude runtime and owns its provider integration. Ambassador does
+not add authentication flags, inspect provider credentials, or promise a
+specific provider billing method.
+
+### Session ownership and lifecycle
+
+Create one provider session for each incoming central message. Store only
+bounded session metadata in an owner-only SQLite database:
+
+- provider session ID;
+- fixed agent profile;
+- canonical working directory;
+- central message ID when present;
+- action `call_id` when present;
+- creation and last-use times; and
+- `active` or `retired` state with an optional retirement time.
+
+Do not copy prompts, message bodies, provider output, tool arguments, tool
+results, or credentials into the session database. The provider remains the
+owner of conversation history.
+
+Require an enabled direct profile to advertise `session/resume` or
+`session/load`. Reuse the stored session only when retrying the same central
+message before prompt dispatch. New central messages receive new sessions and
+cannot inherit data from another sender or request.
+
+After a normal turn, retire sessions for messages that need no later action
+result. Keep an action-call session active while its encrypted pending-action
+record remains. Retire it only after central successfully accepts the matching
+`submit_action_result`. Correlate this transition by `call_id`, even when a
+different MCP chat submits the result. An uncertain or rejected central result
+does not retire the session.
+
+Retain retired session metadata for 30 days. A cleanup pass runs at startup and
+at a bounded interval while Ambassador runs. After retention:
+
+- call ACP `session/delete` when the current agent advertises it;
+- forget the local record when deletion succeeds;
+- forget the local record when the agent does not support deletion; and
+- retain the record and retry later after a transient deletion failure.
+
+Closing an active adapter connection does not delete provider history.
+
+### CLI and diagnostics
+
+The public commands become:
+
+```text
+ambassador start
+ambassador start --verbose
+ambassador sessions list
+ambassador sessions show <session-id>
+ambassador sessions show <session-id> --verbose
+ambassador sessions delete <session-id>
+ambassador sessions forget <session-id>
+ambassador webhook-secret
+ambassador clean
+```
+
+Session management commands require the foreground Ambassador process to be
+stopped. `list` reads Ambassador-owned metadata. `show` asks the configured ACP
+agent to load the provider history and prints user and agent messages. Its
+verbose form also prints bounded tool events. `delete` requires advertised ACP
+deletion and removes local metadata only after provider success. `forget`
+removes only Ambassador's local record and leaves provider history alone.
+
+`start --verbose` writes bounded execution events to the console. It may show
+message data, MCP arguments and results, and central response bodies, so the
+startup banner warns that personally identifying data may appear. It always
+redacts authorization, DPoP material, nonces, access tokens, verification
+codes, private keys, cookies, and webhook secrets. Verbose output is never
+persisted.
+
+`clean` also removes the ACP session database. It does not delete provider
+sessions because local reset must not start providers or make external
+changes.
+
+## Consequences
+
+Direct agents can use their normal resource tools, and ACP permission behavior
+is consistent across providers. A user can inspect retained sessions and
+remove them deliberately. Provider session history may remain after local
+metadata is forgotten or cleaned.
+
+The unpinned dependency ranges make fresh installations follow adapter releases.
+The lockfile still records the versions tested by this repository. An
+incompatible future adapter fails through the existing bounded ACP startup
+path and must be fixed in Ambassador rather than hidden behind a version gate.
+
+## Superseded decisions
+
+This record supersedes:
+
+- ADR 0038's session MCP injection and denial of ACP approvals;
+- ADR 0039's rule that `start` accepts no options;
+- ADR 0045's exact Codex adapter dependency;
+- ADR 0047's built-in Claude bridge and non-persistent sessions; and
+- ADR 0049's Claude-only permission bypass and disabled built-in tools.
+
+The fixed agent registry, no-shell launch, provider-owned authentication,
+central credential custody, and encrypted pending-action inbox remain in
+force.
+
+## Approval
+
+The user approved common provider-configured tools, automatic positive ACP
+permission selection, persistent inspectable sessions, CLI session management,
+redacted verbose output, current adapter releases, and 30-day retirement on
+2026-09-04.

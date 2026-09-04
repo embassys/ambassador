@@ -185,17 +185,7 @@ class CurrentCentralFixtureTests(unittest.TestCase):
                 target_key, target.public_jwk, target_token, "GET", poll_path
             ),
         )
-        messages = target_poll.json()["messages"]
-        self.assertEqual(len(messages), 1)
-        permission_message_id = messages[0]["id"]
-
-        second_poll = self.client.get(
-            poll_path,
-            headers=self.protected_headers(
-                target_key, target.public_jwk, target_token, "GET", poll_path
-            ),
-        )
-        self.assertEqual(second_poll.json(), {"messages": []})
+        self.assertEqual(target_poll.json(), {"messages": []})
 
         response_path = "/api/respond_to_permission"
         decided = self.client.post(
@@ -207,11 +197,37 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         )
         self.assertEqual(decided.status_code, 200)
 
+        requester_poll = self.client.get(
+            poll_path,
+            headers=self.protected_headers(
+                requester_key,
+                requester.public_jwk,
+                requester_token,
+                "GET",
+                poll_path,
+            ),
+        )
+        messages = requester_poll.json()["messages"]
+        self.assertEqual(len(messages), 1)
+        permission_message_id = messages[0]["id"]
+        self.assertEqual(
+            messages[0]["payload"],
+            {
+                "type": "permission_response",
+                "permission_id": permission_id,
+                "decision": "granted",
+            },
+        )
+
         ack_path = "/api/ack_message"
         acknowledged = self.client.post(
             ack_path,
             headers=self.protected_headers(
-                target_key, target.public_jwk, target_token, "POST", ack_path
+                requester_key,
+                requester.public_jwk,
+                requester_token,
+                "POST",
+                ack_path,
             ),
             json={"message_id": permission_message_id},
         )
@@ -219,7 +235,11 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         repeated = self.client.post(
             ack_path,
             headers=self.protected_headers(
-                target_key, target.public_jwk, target_token, "POST", ack_path
+                requester_key,
+                requester.public_jwk,
+                requester_token,
+                "POST",
+                ack_path,
             ),
             json={"message_id": permission_message_id},
         )

@@ -42,29 +42,31 @@ Later, you can ask:
 
 ## Incoming messages
 
-Ambassador includes its Claude bridge and launches your installed `claude`
-command when a central message arrives. You do not install an ACP adapter or
-give a credential to Ambassador. The official CLI uses whichever native
-authentication you configured. The incoming message runs in a new
-Ambassador-managed session, not the registration chat.
-
-That background session loads your normal Claude configuration. Its configured
-MCP tools run without an interactive permission prompt, subject to managed
-provider policy. This lets Claude query a calendar, for example, after an
-Embassys calendar permission has been granted. Claude's built-in filesystem
-and shell tools remain disabled. Configure only MCP tools you are willing to
-make available to direct Embassys requests.
-
-Ambassador does not promise which Claude allowance pays for a programmatic
-request. Anthropic decides whether `claude --print` usage consumes plan credit,
-extra usage, API billing, or a cloud-provider account.
+- Ambassador includes the public Claude ACP adapter; you do not install it.
+- The adapter uses Claude Code's normal authentication and configuration.
+- Each incoming message gets a separate persistent provider session, not the
+  chat used for registration.
+- Ambassador passes no extra MCP servers and does not disable built-in tools,
+  choose safe mode, or request permission bypass.
+- If Claude asks its ACP client to approve a tool, Ambassador automatically
+  chooses **allow once** when offered, otherwise an advertised positive choice.
+- Configure only tools you are willing to make available to unattended direct
+  requests. Anthropic remains responsible for authentication, policy, and
+  billing behavior.
 
 If startup or ACP initialization fails, Ambassador leaves MCP available and
-prints a bounded reason while incoming delivery is paused. Confirm the official
-`claude` command can complete a non-interactive request with its current
-authentication, update Ambassador, and restart it. For a
-clean local registration test, see
+prints a bounded reason while incoming delivery is paused. Confirm Claude Code
+is signed in, update Ambassador, and restart it. For a clean local registration test, see
 [Reset local test state](development-reset.md).
+
+## Inspect sessions
+
+- Stop Ambassador first.
+- Run `npx --yes @embassys/ambassador@latest sessions list`.
+- Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
+- Add `--verbose` to `show` for bounded tool events.
+- Use `sessions delete <session-id>` to delete provider history, or
+  `sessions forget <session-id>` to remove only Ambassador's record.
 
 The command follows the current
 [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).

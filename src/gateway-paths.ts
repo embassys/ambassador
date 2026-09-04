@@ -9,6 +9,7 @@ export interface GatewayPaths {
   webhookSecretPath: string;
   webhookSecretKeyPath: string;
   pendingActionPath: string;
+  acpSessionPath: string;
   profilePath: string;
 }
 
@@ -25,6 +26,7 @@ export function pathsForStateDirectory(
     webhookSecretPath: join(stateDirectory, "webhook-secret.json"),
     webhookSecretKeyPath: join(stateDirectory, "webhook-secret.key"),
     pendingActionPath: join(stateDirectory, "pending-actions.sqlite"),
+    acpSessionPath: join(stateDirectory, "acp-sessions.sqlite"),
     profilePath: join(stateDirectory, "delivery-profile.json"),
   };
 }

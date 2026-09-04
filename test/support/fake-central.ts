@@ -775,23 +775,13 @@ async function route(
         createdAt: currentTimestamp(state),
       };
       state.permissions.set(permission.id, permission);
-      queueMessage(
-        state,
-        body.target_email,
-        identity.email,
-        {
-          type: "permission_request",
-          permission_id: permission.id,
-          action_type: permission.actionType,
-          scope: permission.scope,
-        },
-        permission.actionType,
-      );
     }
     safeJson(response, 200, {
       permission_id: permission.id,
       status: permission.status,
       message: "Permission request sent to target agent",
+      already_granted: permission.status === "granted",
+      decision: permission.status === "pending" ? null : permission.status,
     });
     return;
   }

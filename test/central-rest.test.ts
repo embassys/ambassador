@@ -128,19 +128,17 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
     scope: { use: "current fixture" },
   });
   assert.equal(requested.status, "pending");
+  assert.equal(requested.already_granted, false);
+  assert.equal(requested.decision, null);
 
   const receivedPermission = await target.pollRemoteMessages(0);
-  assert.equal(receivedPermission.messages.length, 1);
-  assert.equal(receivedPermission.messages[0]?.payload.type, "permission_request");
-  const permissionMessageId = receivedPermission.messages[0]?.id;
-  assert.equal(typeof permissionMessageId, "string");
+  assert.deepEqual(receivedPermission.messages, []);
 
   const decided = await target.respondToPermission({
     permission_id: requested.permission_id,
     decision: "granted",
   });
   assert.equal(decided.status, "granted");
-  await target.ackMessage({ message_id: permissionMessageId as string });
   const permissionResponse = await requester.pollRemoteMessages(0);
   const permissionResponseId = permissionResponse.messages[0]?.id;
   assert.equal(permissionResponse.messages[0]?.payload.type, "permission_response");
@@ -215,7 +213,6 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
         authorizationScheme: "Bearer",
         dpopCount: 1,
       },
-      { method: "POST", path: "/api/ack_message", authorizationScheme: "Bearer", dpopCount: 1 },
       {
         method: "GET",
         path: "/api/poll_messages?timeout=0",

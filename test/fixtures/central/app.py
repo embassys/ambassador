@@ -529,7 +529,7 @@ async def list_action_types(request: Request) -> list[dict[str, Any]]:
 
 
 @app.post("/api/request_permission")
-async def request_permission(input: PermissionRequest, request: Request) -> dict[str, str]:
+async def request_permission(input: PermissionRequest, request: Request) -> dict[str, Any]:
     identity = validate_dpop(request)
     target_email = validate_email(input.target_email)
     target = state.identities.get(target_email)
@@ -555,21 +555,12 @@ async def request_permission(input: PermissionRequest, request: Request) -> dict
             created_at=state.timestamp(),
         )
         state.permissions[permission.id] = permission
-        queue_message(
-            target_email,
-            identity.email,
-            {
-                "type": "permission_request",
-                "permission_id": permission.id,
-                "action_type": permission.action_type,
-                "scope": permission.scope,
-            },
-            permission.action_type,
-        )
     return {
         "permission_id": permission.id,
         "status": permission.status,
         "message": "Permission request sent to target agent",
+        "already_granted": permission.status == "granted",
+        "decision": None if permission.status == "pending" else permission.status,
     }
 
 
