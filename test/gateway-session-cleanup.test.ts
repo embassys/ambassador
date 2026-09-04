@@ -84,14 +84,17 @@ test("startup deletes or forgets expired sessions and retains transient failures
       },
     }),
   });
-  t.after(() => application.close());
 
-  assert.deepEqual(deleted, ["delete-me", "forget-me", "retry-me"]);
-  const observed = new AcpSessionStore(sessionPath);
-  assert.equal(observed.get("delete-me"), undefined);
-  assert.equal(observed.get("forget-me"), undefined);
-  assert.equal(observed.get("retry-me")?.status, "retired");
-  assert.equal(observed.get("active-session")?.status, "active");
-  observed.close();
-  controller.abort();
+  try {
+    assert.deepEqual(deleted, ["delete-me", "forget-me", "retry-me"]);
+    const observed = new AcpSessionStore(sessionPath);
+    assert.equal(observed.get("delete-me"), undefined);
+    assert.equal(observed.get("forget-me"), undefined);
+    assert.equal(observed.get("retry-me")?.status, "retired");
+    assert.equal(observed.get("active-session")?.status, "active");
+    observed.close();
+  } finally {
+    controller.abort();
+    await application.close();
+  }
 });

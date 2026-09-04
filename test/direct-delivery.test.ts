@@ -23,6 +23,19 @@ const MESSAGE: CentralMessage = {
   created_at: "2026-09-02T12:00:00Z",
 };
 
+const SPAWN_ENVIRONMENT = [
+  "APPDATA",
+  "HOME",
+  "LOCALAPPDATA",
+  "PATH",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "USERPROFILE",
+  "WINDIR",
+] as const;
+
 async function target(
   t: TestContext,
   scenario: string,
@@ -36,7 +49,13 @@ async function target(
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  let cleanupDelivery: DirectDeliveryTarget | undefined;
+  let cleanupStore: AcpSessionStore | undefined;
+  t.after(async () => {
+    await cleanupDelivery?.close();
+    cleanupStore?.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const countPath = join(root, "attempt-count.txt");
   const descendantPath = join(root, "descendant-pid.txt");
   const promptPath = join(root, "prompt-dispatched.txt");
@@ -47,11 +66,12 @@ async function target(
     args: [fixturePath, scenario, countPath, descendantPath, promptPath],
     agentInfo: { name: "mock-agent" },
     mcp: "provider_config",
-    environment: options.environment ?? ["HOME", "PATH", "TMPDIR"],
+    environment: options.environment ?? SPAWN_ENVIRONMENT,
   };
   let spawnCount = 0;
   let spawnOptions: SpawnOptions | undefined;
   const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
+  cleanupStore = sessionStore;
   const delivery = new DirectDeliveryTarget({
     agentKind: "mock",
     capability,
@@ -72,8 +92,7 @@ async function target(
       return spawn(...arguments_);
     },
   });
-  t.after(() => delivery.close());
-  t.after(() => sessionStore.close());
+  cleanupDelivery = delivery;
   return {
     delivery,
     root,
@@ -204,8 +223,7 @@ test("runs a native executable through the Windows direct-delivery path", async 
 
 test("a fixed inherit profile preserves the user's native agent authentication environment", async (t) => {
   const sourceEnvironment: NodeJS.ProcessEnv = {
-    HOME: process.env.HOME,
-    PATH: process.env.PATH,
+    ...process.env,
     ANTHROPIC_API_KEY: "synthetic-api-key",
     CLAUDE_CODE_OAUTH_TOKEN: "synthetic-oauth-token",
     CLAUDE_CODE_USE_BEDROCK: "1",
@@ -229,23 +247,21 @@ test("a fixed inherit profile preserves the user's native agent authentication e
 
 test("a fixed Codex-style profile preserves subscription and optional API-key authentication", async (t) => {
   const sourceEnvironment: NodeJS.ProcessEnv = {
-    HOME: process.env.HOME,
+    ...process.env,
     OPENAI_API_KEY: "synthetic-openai-key",
     CODEX_API_KEY: "synthetic-codex-key",
     AMBASSADOR_UNRELATED_MARKER: "excluded",
   };
   const value = await target(t, "success-session-mcp", {
-    environment: ["HOME", "OPENAI_API_KEY", "CODEX_API_KEY"],
+    environment: [...SPAWN_ENVIRONMENT, "OPENAI_API_KEY", "CODEX_API_KEY"],
     sourceEnvironment,
   });
   assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
     status: "completed",
   });
-  assert.deepEqual(value.spawnOptions()?.env, {
-    HOME: process.env.HOME,
-    OPENAI_API_KEY: "synthetic-openai-key",
-    CODEX_API_KEY: "synthetic-codex-key",
-  });
+  assert.equal(value.spawnOptions()?.env?.OPENAI_API_KEY, "synthetic-openai-key");
+  assert.equal(value.spawnOptions()?.env?.CODEX_API_KEY, "synthetic-codex-key");
+  assert.equal(value.spawnOptions()?.env?.AMBASSADOR_UNRELATED_MARKER, undefined);
 });
 
 test("inherited agent environments remain bounded and valid", async (t) => {
@@ -302,9 +318,7 @@ test("fails before prompting on an unsupported ACP protocol or agent name", asyn
 
 test("turns an asynchronous missing-command spawn error into a bounded failure", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-missing-command-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
-  t.after(() => sessionStore.close());
   const delivery = new DirectDeliveryTarget({
     agentKind: "missing",
     capability: {
@@ -320,7 +334,11 @@ test("turns an asynchronous missing-command spawn error into a bounded failure",
     initializationDeadlineMs: 500,
     maximumStartupAttempts: 1,
   });
-  t.after(() => delivery.close());
+  t.after(async () => {
+    await delivery.close();
+    sessionStore.close();
+    await rm(root, { recursive: true, force: true });
+  });
 
   await assert.rejects(
     delivery.deliver(MESSAGE, new AbortController().signal),
