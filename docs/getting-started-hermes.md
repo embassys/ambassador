@@ -33,17 +33,20 @@ authentication for this loopback MCP server.
 
 Later, you can ask:
 
-- **Check my Embassys inbox.** Hermes lists permission decisions and action
-  answers waiting for you, plus unread results returned by other identities.
+- **Check my Embassys inbox.** Hermes lists action requests waiting for an
+  answer and unread results returned by other identities.
+- When another identity requests an Embassys permission, you decide from the
+  email sent to your registered address. Hermes does not approve it.
 
 ## Direct delivery
 
 Ambassador launches the installed `hermes-acp` command for incoming messages
 and loads tools from normal Hermes configuration. It passes no extra MCP
 servers. The incoming message does not return to the registration chat.
-Ambassador does not disable built-in tools or request permission bypass. It
-automatically approves an ACP tool request once when possible. Configure only
-tools you are willing to make available to unattended direct requests.
+Ambassador does not disable built-in tools or request permission bypass. If
+Hermes asks to use a tool, Ambassador emails the human grantor and keeps the
+request pending until the decision arrives through Embassys. An approval is
+passed to Hermes as **allow once** when available.
 
 ## Inspect sessions
 

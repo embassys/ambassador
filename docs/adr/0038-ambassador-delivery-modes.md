@@ -1,7 +1,7 @@
 # 0038 Ambassador delivery modes
 
 Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
-0047, 0048, 0049, 0050, and 0051
+0047, 0048, 0049, 0050, 0051, and 0055
 
 Date: 2026-09-02
 
@@ -191,10 +191,10 @@ Ambassador initializes ACP, creates or safely resumes a gateway-owned session,
 and submits one prompt containing fixed untrusted-input instructions plus the
 complete canonical central message.
 
-Ambassador has no interactive approval UI during background delivery. It does
-not auto-approve ACP permission requests. The selected agent must rely on its
-preconfigured policy and Ambassador MCP tools; any remaining permission request
-is denied.
+Ambassador has no interactive approval UI during background delivery. ADR 0055
+defines the current policy: hold an ACP permission request open, ask the local
+agent's own owner through central `get_human_input`, and return the correlated
+polled answer to ACP.
 
 Ambassador supplies its loopback MCP endpoint in ACP session configuration
 where the agent supports it. If an agent rejects session MCP configuration, its

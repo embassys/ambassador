@@ -10,17 +10,26 @@ correlated action-result round trip. Evidence is in
 
 ADR 0051's encrypted received-action-result storage is implemented. ADR 0052
 replaces the three separate inbox views with `get_inbox`, which combines
-pending permission decisions, unanswered action calls, and unread action
-results. Verbose ACP logging reports the available-command count without
-printing the command catalog or its descriptions.
+unanswered action calls and unread action results. ADR 0054 replaces agent-side
+Embassys permission decisions with the deployed human email flow and updates
+the current request schema and live qualification. Verbose ACP logging reports
+the available-command count without printing the command catalog or its
+descriptions.
+
+ADR 0055's implementation replaces automatic ACP tool approval with
+`get_human_input`. The deterministic gateway test proves that the ACP request
+remains pending, the local agent's own owner receives the question, the answer
+is received as a correlated `human_input_response`, unrelated messages are
+preserved, the control response is not prompted to the provider, and all
+messages are acknowledged in order.
 
 ADR 0053's live session inspection is implemented. `sessions list` and
 `sessions show` use the foreground process while it runs; destructive session
 commands remain stopped-only.
 
-There is no open Ambassador implementation phase. Version 0.2.17 is published
-under the npm `latest` tag. Any later publication remains a separate
-owner-controlled release action.
+The controlled live Codex-to-Claude qualification of ADR 0055 passed against
+the deployed own-human input endpoint. The remaining work is a separately
+approved release. Version 0.2.17 remains published under the npm `latest` tag.
 
 The deterministic Windows lanes cover state, startup, packaging, and mock
 delivery. A support claim for an individual real-agent mode on Windows still

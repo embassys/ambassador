@@ -196,6 +196,7 @@ export interface DirectDeliveryTargetOptions {
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly sessionStore: AcpSessionStore;
+  readonly approvePermission: AcpPermissionApproval;
   readonly nowMs?: () => number;
   readonly log?: VerboseLogger;
   readonly initializationDeadlineMs?: number;
@@ -210,8 +211,79 @@ export interface DirectDeliveryTargetOptions {
   readonly spawnProcess?: SpawnProcess;
 }
 
+export interface AcpPermissionRequest {
+  readonly agentKind: string;
+  readonly message: CentralMessage;
+  readonly sessionId: string;
+  readonly toolCall: {
+    readonly toolCallId: string;
+    readonly title?: string | null | undefined;
+    readonly kind?: string | null | undefined;
+    readonly status?: string | null | undefined;
+    readonly rawInput?: unknown | undefined;
+  };
+}
+
+export type AcpPermissionApproval = (
+  request: AcpPermissionRequest,
+  signal: AbortSignal,
+) => Promise<"allow" | "deny">;
+
 class StageExpired extends Error {}
 class OutputLimitExceeded extends Error {}
+
+class PausableDeadline {
+  readonly #controller = new AbortController();
+  readonly #nowMs: () => number;
+  #remainingMs: number;
+  #startedAtMs = 0;
+  #pauseDepth = 0;
+  #timer: NodeJS.Timeout | undefined;
+  #closed = false;
+  readonly signal: AbortSignal;
+
+  constructor(parent: AbortSignal, durationMs: number, nowMs: () => number = Date.now) {
+    this.#remainingMs = durationMs;
+    this.#nowMs = nowMs;
+    this.signal = AbortSignal.any([parent, this.#controller.signal]);
+    this.#start();
+  }
+
+  pause(): () => void {
+    if (this.#closed || this.signal.aborted) return () => undefined;
+    this.#pauseDepth += 1;
+    if (this.#pauseDepth === 1) {
+      this.#remainingMs = Math.max(0, this.#remainingMs - (this.#nowMs() - this.#startedAtMs));
+      if (this.#timer !== undefined) clearTimeout(this.#timer);
+      this.#timer = undefined;
+    }
+    let resumed = false;
+    return () => {
+      if (resumed || this.#closed) return;
+      resumed = true;
+      this.#pauseDepth -= 1;
+      if (this.#pauseDepth === 0) this.#start();
+    };
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#timer = undefined;
+  }
+
+  #start(): void {
+    if (this.#closed || this.#pauseDepth > 0 || this.signal.aborted) return;
+    if (this.#remainingMs <= 0) {
+      this.#controller.abort();
+      return;
+    }
+    this.#startedAtMs = this.#nowMs();
+    this.#timer = setTimeout(() => this.#controller.abort(), this.#remainingMs);
+    this.#timer.unref();
+  }
+}
 
 function positiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -357,6 +429,7 @@ export class DirectDeliveryTarget {
   readonly #workingDirectory: string;
   readonly #environment: Record<string, string>;
   readonly #sessionStore: AcpSessionStore;
+  readonly #approvePermission: AcpPermissionApproval;
   readonly #nowMs: () => number;
   readonly #log: VerboseLogger;
   readonly #initializationDeadlineMs: number;
@@ -378,6 +451,7 @@ export class DirectDeliveryTarget {
     this.#capability = options.capability;
     this.#workingDirectory = options.workingDirectory;
     this.#sessionStore = options.sessionStore;
+    this.#approvePermission = options.approvePermission;
     this.#nowMs = options.nowMs ?? Date.now;
     this.#log = options.log ?? (() => undefined);
     this.#initializationDeadlineMs =
@@ -398,6 +472,7 @@ export class DirectDeliveryTarget {
       this.#agentKind.length === 0 ||
       this.#capability.args.length > 16 ||
       this.#capability.agentInfo.name.length === 0 ||
+      typeof this.#approvePermission !== "function" ||
       ![
         this.#initializationDeadlineMs,
         this.#sessionDeadlineMs,
@@ -419,34 +494,43 @@ export class DirectDeliveryTarget {
     signal: AbortSignal,
   ): Promise<{ readonly status: "completed" }> {
     if (this.#closed) throw new DirectDeliveryError("cancelled");
-    const outerSignal = AbortSignal.any([
-      signal,
-      this.#lifetime.signal,
-      AbortSignal.timeout(this.#outerDeadlineMs),
-    ]);
-    let lastFailure: DirectDeliveryError | undefined;
-    for (let attempt = 1; attempt <= this.#maximumStartupAttempts; attempt += 1) {
-      if (outerSignal.aborted) throw new DirectDeliveryError("cancelled");
-      try {
-        await this.#attempt(message, outerSignal);
-        return { status: "completed" };
-      } catch (error) {
-        const failure =
-          error instanceof DirectDeliveryError ? error : new DirectDeliveryError("startup_failed");
-        if (
-          failure.code === "uncertain_outcome" ||
-          failure.code === "cancelled" ||
-          failure.code === "agent_unavailable"
-        ) {
-          throw failure;
+    const outerDeadline = new PausableDeadline(
+      AbortSignal.any([signal, this.#lifetime.signal]),
+      this.#outerDeadlineMs,
+    );
+    try {
+      let lastFailure: DirectDeliveryError | undefined;
+      for (let attempt = 1; attempt <= this.#maximumStartupAttempts; attempt += 1) {
+        if (outerDeadline.signal.aborted) throw new DirectDeliveryError("cancelled");
+        try {
+          await this.#attempt(message, outerDeadline.signal, () => outerDeadline.pause());
+          return { status: "completed" };
+        } catch (error) {
+          const failure =
+            error instanceof DirectDeliveryError
+              ? error
+              : new DirectDeliveryError("startup_failed");
+          if (
+            failure.code === "uncertain_outcome" ||
+            failure.code === "cancelled" ||
+            failure.code === "agent_unavailable"
+          ) {
+            throw failure;
+          }
+          lastFailure = failure;
         }
-        lastFailure = failure;
       }
+      throw lastFailure ?? new DirectDeliveryError("startup_failed");
+    } finally {
+      outerDeadline.close();
     }
-    throw lastFailure ?? new DirectDeliveryError("startup_failed");
   }
 
-  async #attempt(message: CentralMessage, outerSignal: AbortSignal): Promise<void> {
+  async #attempt(
+    message: CentralMessage,
+    outerSignal: AbortSignal,
+    pauseOuterDeadline: () => () => void,
+  ): Promise<void> {
     let child: ManagedChild;
     try {
       let command = this.#capability.command;
@@ -499,6 +583,7 @@ export class DirectDeliveryTarget {
     let promptDispatched = false;
     let connection: acp.ClientConnection | undefined;
     let currentSessionId: string | undefined;
+    let promptDeadline: PausableDeadline | undefined;
     let observedBytes = 0;
     try {
       if (child.stdin === null || child.stdout === null) {
@@ -522,15 +607,36 @@ export class DirectDeliveryTarget {
       const stream = acp.ndJsonStream(input, boundedOutput);
       const client = acp
         .client({ name: "ambassador" })
-        .onRequest(acp.methods.client.session.requestPermission, (context) => {
+        .onRequest(acp.methods.client.session.requestPermission, async (context) => {
+          const resumeOuterDeadline = pauseOuterDeadline();
+          const resumePromptDeadline = promptDeadline?.pause() ?? (() => undefined);
+          let approval: "allow" | "deny";
+          try {
+            approval = await this.#approvePermission(
+              {
+                agentKind: this.#agentKind,
+                message,
+                sessionId: context.params.sessionId,
+                toolCall: context.params.toolCall,
+              },
+              outerSignal,
+            );
+          } finally {
+            resumePromptDeadline();
+            resumeOuterDeadline();
+          }
           const selected =
-            context.params.options.find((option) => option.kind === "allow_once") ??
-            context.params.options.find((option) => option.kind === "allow_always");
+            approval === "allow"
+              ? (context.params.options.find((option) => option.kind === "allow_once") ??
+                context.params.options.find((option) => option.kind === "allow_always"))
+              : (context.params.options.find((option) => option.kind === "reject_once") ??
+                context.params.options.find((option) => option.kind === "reject_always"));
           this.#log("acp.permission", {
             agent: this.#agentKind,
             session_id: context.params.sessionId,
             tool_call: context.params.toolCall,
             offered: context.params.options,
+            approval,
             selected: selected?.optionId,
           });
           return selected === undefined
@@ -645,7 +751,8 @@ export class DirectDeliveryTarget {
         this.#log("acp.session.created", { session_id: currentSessionId });
       }
 
-      const promptSignal = stageSignal(outerSignal, this.#promptDeadlineMs);
+      promptDeadline = new PausableDeadline(outerSignal, this.#promptDeadlineMs);
+      const promptSignal = promptDeadline.signal;
       promptDispatched = true;
       this.#log("acp.prompt", { session_id: currentSessionId, message });
       const result = await raceSignal(
@@ -673,6 +780,8 @@ export class DirectDeliveryTarget {
         session_id: currentSessionId,
         stop_reason: result.stopReason,
       });
+      promptDeadline.close();
+      promptDeadline = undefined;
       if (initialized.agentCapabilities?.sessionCapabilities?.close !== undefined) {
         await connection.agent
           .request(acp.methods.agent.session.close, { sessionId: currentSessionId })
@@ -685,6 +794,7 @@ export class DirectDeliveryTarget {
       this.#activeChildren.delete(child);
       if (!cleaned) throw new DirectDeliveryError("uncertain_outcome");
     } catch (error) {
+      promptDeadline?.close();
       if (promptDispatched && currentSessionId !== undefined && connection !== undefined) {
         await connection.agent
           .notify(acp.methods.agent.session.cancel, { sessionId: currentSessionId })

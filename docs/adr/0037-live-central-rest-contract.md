@@ -1,7 +1,7 @@
 # 0037 Central REST integration
 
-Status: accepted; local delivery and encrypted action persistence amended by
-ADRs 0038, 0046, and 0051
+Status: accepted; local delivery, encrypted action persistence, and permission
+decisions amended by ADRs 0038, 0046, 0051, and 0054
 
 Date: 2026-09-01
 
@@ -47,18 +47,20 @@ Protected work uses these REST routes:
 | --- | --- |
 | List action types | `GET /api/list_action_types` |
 | Request permission | `POST /api/request_permission` |
-| Grant or deny | `POST /api/respond_to_permission` |
+| Ask the authenticated agent's owner | `POST /api/get_human_input` |
 | Deliver an action call | `POST /api/call_action` |
 | Submit an action result | `POST /api/submit_action_result` |
 | Poll messages | `GET /api/poll_messages?timeout=<seconds>` |
 | List permissions | `GET /api/get_my_permissions` |
 | Acknowledge a message | `POST /api/ack_message` |
 
-The current permission-request response includes the original
-`permission_id`, `status`, and `message` fields and may also include
-`already_granted` and `decision`. Ambassador accepts both shapes because the
-live deployment added those two bounded status fields before the public server
-repository exposed them.
+The current permission request requires at least one of `target_email` and
+`message_id`. It accepts both when they identify the same grantor, with
+`message_id` taking precedence. It requires exactly one of `action_type` and
+`permission_type`, and accepts optional `decision_options`, `reason`, and
+`scope`. Its response requires
+`permission_id`, `status`, and `message`, and may include `already_granted` and
+`decision`.
 
 Ambassador does not use central MCP or OAuth. It does not expose duplicate
 grant and deny routes, invitation routes, or health checks as local MCP tools.
@@ -98,10 +100,22 @@ on `GET` so mail scanners cannot make a decision; its form applies the human's
 choice. Central then queues `permission_outcome` to the requester. For a
 granted outcome, the fixed local-delivery prompt maps `grantor_email` and
 `action_type` into one `call_action` attempt without forwarding outcome-only
-fields. The protected `respond_to_permission` route and Ambassador's
-pending-permission projection remain available for an explicit request made by
-a user who is already in their agent chat. Ambassador does not poll email or
-submit emailed decision tokens in production.
+fields. Ambassador does not expose the deployed legacy
+`respond_to_permission` route, project pending permission requests into its
+inbox, poll email, or submit emailed decision tokens in production.
+
+When `decision_options` is `once_always`, central offers `allow_once`,
+`allow_always`, and `deny`; the default `accept_deny` menu offers `accept` and
+`deny`. One-use grants are consumed by the first successful action call. A
+standing grant makes a later request return `already_granted: true` without a
+new approval email.
+
+ACP provider-tool approval uses the distinct `get_human_input` route. Central
+emails the authenticated agent's own owner and later queues a
+`human_input_response` back to that agent. Ambassador correlates the request to
+the triggering message, offers allow-once and deny, and waits through
+`poll_messages?timeout=0`. It does not use `get_human_input_status` or expose
+this internal control operation as a local MCP tool.
 
 `call_action` queues an `action_call` with a new `call_id`. Only its target may
 call `submit_action_result`. The target supplies that `call_id`, a structured

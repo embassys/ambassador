@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import { observeAgentVersion } from "./agent-version-probes.mjs";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
-const SOURCE_REVISION = "ac3f7a6e33829eb80301c7944f611d29cc2499b5";
+const SOURCE_REVISION = "708f205bfaee5010eb86fcfae55967fb5d02071c";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
@@ -52,6 +52,7 @@ const OPENCLAW_ACP_COMMAND = "openclaw";
 const OPENCLAW_WEBHOOK_PATH = "/hooks/agent";
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const WEBHOOK_WAIT_MS = 90_000;
+const REAL_AGENT_WAIT_MS = 5 * 60_000;
 const RESTART_POLL_DRAIN_MS = 31_000;
 const execFileAsync = promisify(execFile);
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -245,9 +246,51 @@ function permissionDecisionToken(detail) {
   return undefined;
 }
 
-async function findPermissionDecision(credentials, address, receivedAfter) {
-  const deadline = Date.now() + 90_000;
+function humanInputResponseToken(detail) {
+  if (!isRecord(detail)) return undefined;
+  const candidates = [];
+  for (const format of ["text", "html"]) {
+    const content = detail[format];
+    if (!isRecord(content)) continue;
+    if (Array.isArray(content.links)) {
+      for (const link of content.links) {
+        if (isRecord(link) && typeof link.href === "string") candidates.push(link.href);
+      }
+    }
+    if (typeof content.body === "string" && content.body.length <= 2 * 1024 * 1024) {
+      candidates.push(...(content.body.match(/https:\/\/[^\s"'<>]+/gu) ?? []));
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const target = new URL(candidate.replaceAll("&amp;", "&"));
+      const token = target.searchParams.get("token");
+      if (
+        target.origin === LIVE_ORIGIN &&
+        target.pathname === "/human_input/respond" &&
+        token !== null &&
+        token.length >= 16 &&
+        token.length <= 512
+      ) {
+        return token;
+      }
+    } catch {
+      // Ignore unrelated or presentation-only links in the test message.
+    }
+  }
+  return undefined;
+}
+
+async function findPermissionDecision(
+  credentials,
+  address,
+  receivedAfter,
+  completed,
+  waitMs = WEBHOOK_WAIT_MS,
+) {
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
+    if (completed?.() === true) return undefined;
     const query = new URLSearchParams({
       server: credentials.serverId,
       receivedAfter: receivedAfter.toISOString(),
@@ -272,9 +315,46 @@ async function findPermissionDecision(credentials, address, receivedAfter) {
         if (token !== undefined) return { token, messageId: summary.id };
       }
     }
+    if (completed?.() === true) return undefined;
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
+  if (completed?.() === true) return undefined;
   throw safeFailure("permission_mail_timeout");
+}
+
+async function findHumanInputResponse(credentials, address, receivedAfter, completed, waitMs) {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
+    if (completed?.() === true) return undefined;
+    const query = new URLSearchParams({
+      server: credentials.serverId,
+      receivedAfter: receivedAfter.toISOString(),
+      itemsPerPage: "10",
+    });
+    const search = await mailosaurFetch(credentials, `/api/messages/search?${query.toString()}`, {
+      method: "POST",
+      body: JSON.stringify({ sentTo: address }),
+    });
+    const result = await search.json();
+    if (isRecord(result) && Array.isArray(result.items)) {
+      for (const summary of result.items) {
+        if (!isRecord(summary) || typeof summary.id !== "string" || summary.id.length === 0) {
+          continue;
+        }
+        const detailResponse = await mailosaurFetch(
+          credentials,
+          `/api/messages/${encodeURIComponent(summary.id)}`,
+        );
+        const detail = await detailResponse.json();
+        const token = humanInputResponseToken(detail);
+        if (token !== undefined) return { token, messageId: summary.id };
+      }
+    }
+    if (completed?.() === true) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  if (completed?.() === true) return undefined;
+  throw safeFailure("human_input_mail_timeout");
 }
 
 async function deleteMessage(credentials, messageId) {
@@ -1002,8 +1082,8 @@ async function waitForEndpoint(read) {
   throw safeFailure("gateway_start");
 }
 
-async function waitForDelivered(messages, predicate, phase) {
-  const deadline = Date.now() + WEBHOOK_WAIT_MS;
+async function waitForDelivered(messages, predicate, phase, waitMs = WEBHOOK_WAIT_MS) {
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const index = messages.findIndex(predicate);
     if (index >= 0) return messages.splice(index, 1)[0];
@@ -1012,8 +1092,8 @@ async function waitForDelivered(messages, predicate, phase) {
   throw safeFailure(phase);
 }
 
-async function waitForObservation(predicate, phase) {
-  const deadline = Date.now() + WEBHOOK_WAIT_MS;
+async function waitForObservation(predicate, phase, waitMs = WEBHOOK_WAIT_MS) {
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -1447,9 +1527,7 @@ async function main() {
       ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
       : `synthetic-live-qualification-${randomUUID()}`;
   const permissionScope = {
-    qualification: realClaude
-      ? `synthetic-live-qualification-${randomUUID()}`
-      : "The operator approved this synthetic phone-number test. Grant it through respond_to_permission.",
+    qualification: `synthetic-live-qualification-${randomUUID()}`,
   };
   const capturedMail = [];
   const roots = [];
@@ -1469,7 +1547,10 @@ async function main() {
   const webhookAcceptedByGateway = [new Set(), new Set()];
   const localCompletedByGateway = [new Set(), new Set()];
   const targetSubmittedCallIds = new Set();
+  const humanInputByRequestId = new Map();
+  const internalOutcomeTriggerByMessageId = new Map();
   let targetPermissionDecisionObserved = false;
+  let agentPermissionDecisionCount = 0;
   let targetActionResultCallCount = 0;
   let requesterActionCall;
   let requesterRejectedActionCalls = 0;
@@ -1483,15 +1564,19 @@ async function main() {
     const route = `${init?.method ?? "GET"} ${target.pathname}`;
     centralRoutes.add(route);
     routeCounts[gatewayIndex].set(route, (routeCounts[gatewayIndex].get(route) ?? 0) + 1);
-    const isTargetPermissionDecision =
-      realTarget && gatewayIndex === 1 && route === "POST /api/respond_to_permission";
     const isTargetActionResult =
       realTarget && gatewayIndex === 1 && route === "POST /api/submit_action_result";
     let acknowledgedMessageId;
     let submittedCallId;
-    if (route === "POST /api/ack_message" || isTargetActionResult) {
+    let requestBody;
+    if (
+      route === "POST /api/ack_message" ||
+      route === "POST /api/request_permission" ||
+      route === "POST /api/get_human_input" ||
+      isTargetActionResult
+    ) {
       try {
-        const requestBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+        requestBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
         if (
           route === "POST /api/ack_message" &&
           isRecord(requestBody) &&
@@ -1513,9 +1598,55 @@ async function main() {
       }
     }
     if (acknowledgedMessageId !== undefined) {
-      assert(localCompletedByGateway[gatewayIndex].has(acknowledgedMessageId), "ack_order");
+      const triggeringMessageId = internalOutcomeTriggerByMessageId.get(acknowledgedMessageId);
+      assert(
+        localCompletedByGateway[gatewayIndex].has(acknowledgedMessageId) ||
+          (triggeringMessageId !== undefined &&
+            localCompletedByGateway[gatewayIndex].has(triggeringMessageId)),
+        "ack_order",
+      );
     }
     const response = await fetch(input, init);
+    if (
+      route === "POST /api/get_human_input" &&
+      isRecord(requestBody) &&
+      requestBody.permission_type === "ambassador_acp_tool_execution" &&
+      typeof requestBody.message_id === "string" &&
+      response.ok
+    ) {
+      const result = await response
+        .clone()
+        .json()
+        .catch(() => undefined);
+      if (isRecord(result) && typeof result.request_id === "string") {
+        humanInputByRequestId.set(result.request_id, {
+          gatewayIndex,
+          triggeringMessageId: requestBody.message_id,
+        });
+      }
+    }
+    if (route === "GET /api/poll_messages" && response.ok) {
+      const result = await response
+        .clone()
+        .json()
+        .catch(() => undefined);
+      if (isRecord(result) && Array.isArray(result.messages)) {
+        for (const message of result.messages) {
+          if (
+            !isRecord(message) ||
+            typeof message.id !== "string" ||
+            !isRecord(message.payload) ||
+            typeof message.payload.request_id !== "string"
+          ) {
+            continue;
+          }
+          const approval = humanInputByRequestId.get(message.payload.request_id);
+          if (approval?.gatewayIndex === gatewayIndex) {
+            internalOutcomeTriggerByMessageId.set(message.id, approval.triggeringMessageId);
+          }
+        }
+      }
+    }
     if (realCodexClaude && gatewayIndex === 0 && route === "POST /api/call_action") {
       if (!response.ok) {
         requesterRejectedActionCalls += 1;
@@ -1535,7 +1666,6 @@ async function main() {
         }
       }
     }
-    if (isTargetPermissionDecision && response.ok) targetPermissionDecisionObserved = true;
     if (isTargetActionResult) targetActionResultCallCount += 1;
     if (submittedCallId !== undefined && response.ok) targetSubmittedCallIds.add(submittedCallId);
     if (acknowledgedMessageId !== undefined && response.ok) {
@@ -1602,6 +1732,85 @@ async function main() {
       localCompletedByGateway[gatewayIndex].add(messageId);
     }
     return response;
+  };
+  const applyPermissionDecisionFromEmail = async (
+    address,
+    decision,
+    decisionPhase,
+    completed,
+    waitMs,
+  ) => {
+    phase = decisionPhase;
+    const permissionMail = await findPermissionDecision(
+      credentials,
+      address,
+      receivedAfter,
+      completed,
+      waitMs,
+    );
+    if (permissionMail === undefined) return false;
+    capturedMail.push(permissionMail.messageId);
+    const decisionTarget = new URL("/api/permission_decision", LIVE_ORIGIN);
+    centralRoutes.add("POST /api/permission_decision");
+    const decisionResponse = await fetch(decisionTarget, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: permissionMail.token, decision }),
+      credentials: "omit",
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const decisionObservation = await sanitizedResponseObservation(
+      decisionTarget,
+      decisionResponse,
+    );
+    if (
+      centralObservations.length < 64 &&
+      !centralObservations.some(
+        (existing) => canonicalJson(existing) === canonicalJson(decisionObservation),
+      )
+    ) {
+      centralObservations.push(decisionObservation);
+    }
+    assert(decisionResponse.ok, decisionPhase);
+    await deleteMessage(credentials, permissionMail.messageId);
+    capturedMail.splice(capturedMail.indexOf(permissionMail.messageId), 1);
+    return true;
+  };
+  const applyHumanInputFromEmail = async (address, decisionPhase, completed) => {
+    phase = decisionPhase;
+    const humanInputMail = await findHumanInputResponse(
+      credentials,
+      address,
+      receivedAfter,
+      completed,
+      REAL_AGENT_WAIT_MS,
+    );
+    if (humanInputMail === undefined) return false;
+    capturedMail.push(humanInputMail.messageId);
+    const responseTarget = new URL("/api/human_input_response", LIVE_ORIGIN);
+    centralRoutes.add("POST /api/human_input_response");
+    const response = await fetch(responseTarget, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: humanInputMail.token, value: "allow_once" }),
+      credentials: "omit",
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const observation = await sanitizedResponseObservation(responseTarget, response);
+    if (
+      centralObservations.length < 64 &&
+      !centralObservations.some(
+        (existing) => canonicalJson(existing) === canonicalJson(observation),
+      )
+    ) {
+      centralObservations.push(observation);
+    }
+    assert(response.ok, decisionPhase);
+    await deleteMessage(credentials, humanInputMail.messageId);
+    capturedMail.splice(capturedMail.indexOf(humanInputMail.messageId), 1);
+    return true;
   };
   let phase = "setup";
   try {
@@ -1757,14 +1966,14 @@ async function main() {
         : 0;
     const deliveryTargetFactoryFor = (index) => {
       if ((index === 0 && !realCodexClaude) || realWebhook) return undefined;
-      return ({ capability, profile, sessionStore }) => {
+      return ({ capability, profile, sessionStore, approvePermission }) => {
         const selectedCapability = realDirect
           ? capability.direct
           : {
               command: process.execPath,
               args: [
                 join(repositoryRoot, ".test-dist", "test", "fixtures", "mock-acp-agent.js"),
-                "success-provider-mcp",
+                "permission-provider-mcp",
               ],
               agentInfo: { name: "mock-agent" },
               mcp: "provider_config",
@@ -1782,6 +1991,7 @@ async function main() {
           workingDirectory: realDirect ? profile.working_directory : repositoryRoot,
           environment: realDirect ? environmentFor(index) : process.env,
           sessionStore,
+          approvePermission,
         });
         return {
           async deliver(message, signal) {
@@ -1900,10 +2110,8 @@ async function main() {
             "resend_verification",
             "list_action_types",
             "request_permission",
-            "list_pending_permission_requests",
-            "respond_to_permission",
+            "get_inbox",
             "call_action",
-            "list_pending_action_calls",
             "submit_action_result",
             "get_my_permissions",
           ]),
@@ -2000,10 +2208,8 @@ async function main() {
             "resend_verification",
             "list_action_types",
             "request_permission",
-            "list_pending_permission_requests",
-            "respond_to_permission",
+            "get_inbox",
             "call_action",
-            "list_pending_action_calls",
             "submit_action_result",
             "get_my_permissions",
           ]),
@@ -2096,63 +2302,46 @@ async function main() {
     const requested = await gateways[0].client.call("request_permission", {
       target_email: addresses[1],
       action_type: "get_phone_number",
+      decision_options: "once_always",
+      reason: "Needed to complete the controlled live qualification.",
       scope: permissionScope,
     });
     assert(
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
-    phase = "permission_listing";
-    const pendingListing = await gateways[1].client.call("list_pending_permission_requests", {});
-    assert(
-      pendingListing.count >= 1 &&
-        Array.isArray(pendingListing.pending_permission_requests) &&
-        pendingListing.pending_permission_requests.some(
-          (permission) => isRecord(permission) && permission.id === requested.permission_id,
-        ),
-      "permission_listing",
-    );
+    phase = "permission_email_pending";
+    const targetInbox = await gateways[1].client.call("get_inbox", {});
+    assert(targetInbox.count === 0 && Array.isArray(targetInbox.items), "permission_email_pending");
     const listing = await gateways[1].client.call("get_my_permissions", {});
-    assert(Array.isArray(listing.permissions), "permission_listing");
+    assert(Array.isArray(listing.permissions), "permission_email_pending");
     const listed = listing.permissions.find(
       (permission) => isRecord(permission) && permission.id === requested.permission_id,
     );
-    assert(isRecord(listed) && listed.status === "pending", "permission_listing");
-    const permissionListing = {
+    assert(isRecord(listed) && listed.status === "pending", "permission_email_pending");
+    const permissionPendingState = {
       status: "ok",
       decision: listed.status,
       fields: Object.keys(listed).sort(),
     };
 
-    phase = "permission_email_decision";
-    const permissionMail = await findPermissionDecision(credentials, addresses[1], receivedAfter);
-    capturedMail.push(permissionMail.messageId);
-    const decisionTarget = new URL("/api/permission_decision", LIVE_ORIGIN);
-    centralRoutes.add("POST /api/permission_decision");
-    const decisionResponse = await fetch(decisionTarget, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: permissionMail.token, decision: "accept" }),
-      credentials: "omit",
-      redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
-    });
-    const decisionObservation = await sanitizedResponseObservation(
-      decisionTarget,
-      decisionResponse,
-    );
-    if (
-      centralObservations.length < 64 &&
-      !centralObservations.some(
-        (existing) => canonicalJson(existing) === canonicalJson(decisionObservation),
-      )
-    ) {
-      centralObservations.push(decisionObservation);
-    }
-    assert(decisionResponse.ok, "permission_email_decision");
+    await applyPermissionDecisionFromEmail(addresses[1], "allow_once", "permission_email_decision");
     targetPermissionDecisionObserved = true;
-    await deleteMessage(credentials, permissionMail.messageId);
-    capturedMail.splice(capturedMail.indexOf(permissionMail.messageId), 1);
+
+    if (realCodexClaude) {
+      const requesterAgentPermissionApplied = await applyHumanInputFromEmail(
+        addresses[0],
+        "requester_agent_permission_email_decision",
+        () =>
+          requesterActionCall !== undefined ||
+          requesterDirectMessages.some(
+            (message) =>
+              isRecord(message.payload) &&
+              message.payload.permission_id === requested.permission_id,
+          ),
+      );
+      if (requesterAgentPermissionApplied) agentPermissionDecisionCount += 1;
+    }
 
     phase = realCodexClaude ? "permission_response_codex" : "permission_response_webhook";
     const responseMessage = realCodexClaude
@@ -2163,6 +2352,7 @@ async function main() {
             isRecord(message.payload) &&
             message.payload.permission_id === requested.permission_id,
           "permission_response_codex_timeout",
+          REAL_AGENT_WAIT_MS,
         )
       : await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
@@ -2171,10 +2361,10 @@ async function main() {
         isRecord(responseMessage.payload) &&
         responseMessage.payload.type === "permission_outcome" &&
         responseMessage.payload.permission_id === requested.permission_id &&
-        responseMessage.payload.decision === "accept" &&
+        responseMessage.payload.decision === "allow_once" &&
         responseMessage.payload.status === "granted" &&
         responseMessage.payload.granted === true &&
-        responseMessage.payload.single_use === false,
+        responseMessage.payload.single_use === true,
       "permission_response",
     );
     if (realCodexClaude) {
@@ -2189,6 +2379,7 @@ async function main() {
       await waitForObservation(
         () => requesterActionCall !== undefined,
         "permission_outcome_action_timeout",
+        REAL_AGENT_WAIT_MS,
       );
       assert(requesterRejectedActionCalls === 0, "permission_outcome_action_rejected");
     }
@@ -2207,12 +2398,21 @@ async function main() {
       "action",
     );
     phase = `action_${realWebhook ? "webhook" : "direct"}`;
+    if (!realWebhook) {
+      const targetAgentPermissionApplied = await applyHumanInputFromEmail(
+        addresses[1],
+        "target_agent_permission_email_decision",
+        () => localCompletedByGateway[1].has(called.message_id),
+      );
+      if (targetAgentPermissionApplied) agentPermissionDecisionCount += 1;
+    }
     if (realTarget) {
       await waitForObservation(
         () =>
           targetSubmittedCallIds.has(called.call_id) &&
           acknowledgedByGateway[1].has(called.message_id),
         "action_model_timeout",
+        REAL_AGENT_WAIT_MS,
       );
       assert(
         targetSubmittedCallIds.has(called.call_id) && targetActionResultCallCount === 1,
@@ -2246,6 +2446,7 @@ async function main() {
             message.payload.type === "action_response" &&
             message.payload.call_id === called.call_id,
           "action_response_codex_timeout",
+          REAL_AGENT_WAIT_MS,
         )
       : await webhooks[0].wait("action_response_webhook_timeout");
     assert(
@@ -2499,7 +2700,8 @@ async function main() {
         dpop_positive: "passed",
         dpop_negative_matrix: "passed",
         permission_email_decision: "passed",
-        permission_listing: permissionListing,
+        agent_permission_email_decisions: agentPermissionDecisionCount,
+        permission_pending_state: permissionPendingState,
         webhook_delivery_ack: realCodexClaude ? "not_applicable" : "passed",
         codex_response_delivery: realCodexClaude ? "passed" : "not_applicable",
         target_delivery_ack: "passed",
@@ -2553,7 +2755,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, target_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, delivered_payload_observations: deliveredPayloadObservations, action_catalog: catalogObservation, target_permission_decision_observed: targetPermissionDecisionObserved, target_action_result_call_count: targetActionResultCallCount, requester_rejected_action_calls: requesterRejectedActionCalls, successful_ack_counts: successfulAckCounts, webhook_custody_counts: webhookAcceptedByGateway.map((messages) => messages.size), ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, target_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, delivered_payload_observations: deliveredPayloadObservations, action_catalog: catalogObservation, target_permission_decision_observed: targetPermissionDecisionObserved, human_input_request_count: humanInputByRequestId.size, agent_permission_decision_count: agentPermissionDecisionCount, target_action_result_call_count: targetActionResultCallCount, requester_rejected_action_calls: requesterRejectedActionCalls, local_completed_counts: localCompletedByGateway.map((messages) => messages.size), successful_ack_counts: successfulAckCounts, webhook_custody_counts: webhookAcceptedByGateway.map((messages) => messages.size), ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {

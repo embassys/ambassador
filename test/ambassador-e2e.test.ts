@@ -16,6 +16,7 @@ import { TestMcpClient } from "./support/mcp-client.js";
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
 const OPENCLAW = { name: "openclaw-bundle-mcp", version: "0.0.0" };
+const CODEX = { name: "codex-mcp-client", version: "0.0.0" };
 const JSON_HEADERS = { "content-type": "application/json" };
 
 async function fixture(t: TestContext) {
@@ -99,6 +100,18 @@ async function enrollWebhook(
   return client;
 }
 
+async function enrollDirect(
+  gateway: Awaited<ReturnType<typeof openGatewayApplication>>,
+  central: Awaited<ReturnType<typeof startFakeCentral>>,
+  email: string,
+): Promise<TestMcpClient> {
+  const client = new TestMcpClient(gateway.endpoint);
+  await client.initialize(CODEX);
+  await client.callTool("register_agent", { email });
+  await client.callTool("verify_email", { email, code: central.verificationCode(email) });
+  return client;
+}
+
 test("registers by client capability, delivers the full webhook, then acknowledges centrally", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
@@ -117,7 +130,6 @@ test("registers by client capability, delivers the full webhook, then acknowledg
       "list_action_types",
       "request_permission",
       "get_inbox",
-      "respond_to_permission",
       "call_action",
       "submit_action_result",
       "get_my_permissions",
@@ -198,6 +210,98 @@ test("stores received action results before acknowledgement and consumes them fr
   await assert.rejects(restartedClient.callTool("get_inbox", { limit: 1 }));
 });
 
+test("holds an ACP permission request for its owner's emailed answer", async (t) => {
+  const value = await fixture(t);
+  const recipientEmail = "ambassador-acp-permission@fixture.test";
+  const approver = value.central.seedClient("approver@fixture.test");
+  const deliveredTypes: unknown[] = [];
+  let approvalResult: "allow" | "deny" | undefined;
+  let finishApproval!: () => void;
+  const approvalFinished = new Promise<void>((resolve) => {
+    finishApproval = resolve;
+  });
+  const gateway = value.trackGateway(
+    await openGatewayApplication({
+      ...value.options,
+      centralAgentPermissionPollIntervalMs: 5,
+      deliveryTargetFactory: (context) => ({
+        async deliver(message, signal) {
+          deliveredTypes.push(message.payload.type);
+          if (message.payload.type === "request_agent_tool") {
+            approvalResult = await context.approvePermission(
+              {
+                agentKind: context.capability.kind,
+                message,
+                sessionId: "fixture-session",
+                toolCall: {
+                  toolCallId: "fixture-tool-call",
+                  title: "Run a shell command",
+                  kind: "execute",
+                  status: "pending",
+                },
+              },
+              signal,
+            );
+            finishApproval();
+          }
+          return { status: "completed" };
+        },
+        async close() {},
+      }),
+    }),
+  );
+  await enrollDirect(gateway, value.central, recipientEmail);
+  const triggeringMessageId = value.central.queueMessage(
+    recipientEmail,
+    { type: "request_agent_tool" },
+    approver.email,
+  );
+
+  let humanInput: { readonly requestId: string; readonly messageId: string } | undefined;
+  for (let attempt = 0; attempt < 100 && humanInput === undefined; attempt += 1) {
+    humanInput = value.central.pendingHumanInputRequest(recipientEmail);
+    if (humanInput === undefined) await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(humanInput?.messageId, triggeringMessageId);
+  assert.equal(approvalResult, undefined);
+
+  const unrelatedMessageId = value.central.queueMessage(
+    recipientEmail,
+    { type: "unrelated" },
+    approver.email,
+  );
+  const decided = await fetch(`${value.central.apiUrl}/api/human_input_response`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      token: value.central.humanInputResponseToken(humanInput?.requestId as string),
+      value: "allow_once",
+    }),
+  });
+  assert.equal(decided.status, 200);
+  await approvalFinished;
+  assert.equal(approvalResult, "allow");
+
+  const outcomeMessageId = value.central.humanInputResponseMessageId(
+    humanInput?.requestId as string,
+  );
+  assert.equal(typeof outcomeMessageId, "string");
+  for (
+    let attempt = 0;
+    attempt < 100 &&
+    (value.central.messageState(triggeringMessageId) !== "acked" ||
+      value.central.messageState(unrelatedMessageId) !== "acked" ||
+      value.central.messageState(outcomeMessageId as string) !== "acked");
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.deepEqual(deliveredTypes, ["request_agent_tool", "unrelated"]);
+  assert.equal(value.central.messageState(triggeringMessageId), "acked");
+  assert.equal(value.central.messageState(unrelatedMessageId), "acked");
+  assert.equal(value.central.messageState(outcomeMessageId as string), "acked");
+});
+
 test("returns a correlated action result from the target MCP tool to the requester", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
@@ -208,34 +312,28 @@ test("returns a correlated action result from the target MCP tool to the request
   const permissionResponse = await requester.protectedFetch("/api/request_permission", {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ target_email: targetEmail, action_type: "get_phone_number" }),
+    body: JSON.stringify({
+      target_email: targetEmail,
+      action_type: "get_phone_number",
+      decision_options: "once_always",
+      reason: "deterministic result round trip",
+    }),
   });
   assert.equal(permissionResponse.status, 200);
   const permission = (await permissionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof permission.permission_id, "string");
 
-  const pending = await target.callTool("get_inbox", {});
-  assert.equal(pending.count, 1);
-  assert.equal(Array.isArray(pending.items), true);
-  const pendingRequest = (pending.items as Array<Record<string, unknown>>)[0];
-  assert.equal(pendingRequest?.kind, "permission_request");
-  assert.equal(pendingRequest?.permission_id, permission.permission_id);
-  assert.equal(pendingRequest?.requester_email, "ambassador-result-requester@fixture.test");
-  assert.equal(pendingRequest?.action_type, "get_phone_number");
-  assert.deepEqual(pendingRequest?.response, {
-    tool: "respond_to_permission",
-    required: {
-      permission_id: permission.permission_id,
-      decision: ["granted", "denied"],
-    },
-  });
-  assert.equal((await target.callTool("get_inbox", {})).count, 1);
+  assert.deepEqual(await target.callTool("get_inbox", {}), { count: 0, items: [] });
 
-  const decided = await target.callTool("respond_to_permission", {
-    permission_id: permission.permission_id,
-    decision: "granted",
+  const decided = await fetch(`${value.central.apiUrl}/api/permission_decision`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      token: value.central.permissionDecisionToken(String(permission.permission_id)),
+      decision: "allow_once",
+    }),
   });
-  assert.equal(decided.status, "granted");
+  assert.equal(decided.status, 200);
   assert.deepEqual(await target.callTool("get_inbox", {}), { count: 0, items: [] });
   const requesterPermissionPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterPermissionMessages = (

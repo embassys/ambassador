@@ -12,7 +12,8 @@ Before starting any task, read these files in order:
    central REST contract, ADR 0038 for local delivery, ADR 0039 for local
    startup and trust, ADR 0046 for pending actions, ADR 0050 for ACP sessions,
    ADR 0051 for received action results, ADR 0052 for the unified inbox, and
-   ADR 0053 for live session inspection
+   ADR 0053 for live session inspection, ADR 0054 for Embassys permission
+   decisions, and ADR 0055 for ACP provider-tool approval
 
 The architecture and protocol describe the accepted target. The implementation
 plan says which parts are not built yet. During the delivery cutover, replace
@@ -76,16 +77,21 @@ scope on your own.
 - MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
   control through local `poll_messages` or `ack_message` tools after the
   cutover. Expose the exact central `submit_action_result` operation for the
-  target of an action call. Expose pending permission decisions, unanswered
-  action calls, and unread action results through the local `get_inbox` view
-  from ADR 0052. Do not treat it as general chat or delivery control.
+  target of an action call. Expose unanswered action calls and unread action
+  results through the local `get_inbox` view. Embassys permission decisions
+  belong to the human email flow in ADR 0054; do not expose a local decision
+  tool or project them into `get_inbox`. Do not treat the inbox as general chat
+  or delivery control.
 - Direct-agent work is a persistent gateway-managed ACP session. It is not the
   exact chat in which registration happened. All supported agents load
   Ambassador MCP and other tools from normal provider configuration; send an
   empty `mcpServers` array through ACP.
 - Keep provider built-in tools enabled and do not request safe mode, restricted
-  mode, or permission bypass. When ACP requests tool permission, choose
-  `allow_once` when offered, otherwise choose the first positive option.
+  mode, or permission bypass. When ACP requests tool permission, keep the ACP
+  request open, call central `get_human_input` using the triggering message ID,
+  consume the correlated `human_input_response` from `poll_messages`, and map
+  `allow_once` to the provider's narrowest positive option. Do not auto-approve
+  and do not use `request_permission` for the provider approval.
 - Store only bounded ACP session metadata. Retire non-action sessions after a
   normal turn and action sessions after central accepts their correlated
   result. Delete or forget retired sessions after 30 days as defined by ADR
@@ -106,6 +112,10 @@ scope on your own.
   `/api/verify_email`, and `/api/resend_verification`. Registration is
   email-based. Verification sends the generated P-256 public JWK in the JSON
   body and intercepts the returned token before generic result handling.
+- `request_permission` accepts the deployed target and permission-name selector
+  pairs plus optional email decision menu, reason, and scope. A new request
+  emails the grantor's human and queues no request to the grantor's agent.
+  Ambassador never handles an emailed decision token in normal operation.
 - Protected central requests send `Authorization: Bearer <token>` and a
   separate `DPoP: <proof>` header. A nonce is optional and is used only after
   the server supplies one.
