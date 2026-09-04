@@ -16,6 +16,12 @@ import {
   type RunningGatewayApplication,
 } from "./gateway-application.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
+import {
+  EncryptedFileLocalControlSecretStore,
+  LocalControlClient,
+  LocalControlClientError,
+  type LocalControlSecretStore,
+} from "./local-control.js";
 import { clearLocalGatewayState } from "./local-state-cleaner.js";
 import type { DeliveryTarget } from "./notification-relay.js";
 import { ProcessLock } from "./process-lock.js";
@@ -39,6 +45,8 @@ export interface CliTestOverrides {
   readonly acpSessionControllerFactory?: (
     capability: DirectAgentCapability,
   ) => Pick<AcpSessionController, "show" | "delete">;
+  readonly localControlSecretStore?: LocalControlSecretStore;
+  readonly localControlMcpEndpoint?: string;
 }
 
 export interface CliContext {
@@ -100,6 +108,64 @@ function homeDirectory(environment: NodeJS.ProcessEnv): string {
   return environment.HOME || environment.USERPROFILE || homedir();
 }
 
+function writeSessionList(io: CliIo, sessions: ReturnType<AcpSessionStore["list"]>): void {
+  if (sessions.length === 0) {
+    io.stdout.write("No Ambassador sessions\n");
+    return;
+  }
+  for (const session of sessions) io.stdout.write(`${JSON.stringify(session)}\n`);
+}
+
+function writeSessionHistory(io: CliIo, lines: readonly string[]): void {
+  if (lines.length === 0) io.stdout.write("No session messages\n");
+  else io.stdout.write(`${lines.join("\n")}\n`);
+}
+
+async function runLiveSessionRead(
+  command: Extract<ReturnType<typeof parseAmbassadorCommand>, { command: "sessions" }>,
+  context: CliContext,
+  paths: ReturnType<typeof pathsForStateDirectory>,
+  runningError: GatewayError,
+): Promise<number> {
+  if (command.action !== "list" && command.action !== "show") throw runningError;
+  const secretStore =
+    context.testOverrides?.localControlSecretStore ??
+    new EncryptedFileLocalControlSecretStore(
+      paths.localControlSecretPath,
+      paths.localControlSecretKeyPath,
+    );
+  const secret = await secretStore.load();
+  if (secret === undefined) throw runningError;
+  const client = new LocalControlClient(
+    context.testOverrides?.localControlMcpEndpoint ?? "http://127.0.0.1:8787/mcp",
+    secret,
+  );
+  try {
+    if (command.action === "list") {
+      writeSessionList(context.io, [...(await client.listSessions(context.signal))]);
+    } else {
+      writeSessionHistory(
+        context.io,
+        await client.showSession(command.sessionId, command.verbose, context.signal),
+      );
+    }
+    return 0;
+  } catch (error) {
+    if (error instanceof LocalControlClientError) {
+      if (error.code === "session_not_found") {
+        context.io.stderr.write("Ambassador session not found\n");
+        return 4;
+      }
+      if (error.code === "agent_unsupported") {
+        context.io.stderr.write("Ambassador session agent is no longer supported\n");
+        return 5;
+      }
+    }
+    context.io.stderr.write("Ambassador session command failed\n");
+    return 7;
+  }
+}
+
 export async function runCli(args: string[], context: CliContext): Promise<number> {
   let command: ReturnType<typeof parseAmbassadorCommand>;
   try {
@@ -119,17 +185,17 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     let lock: ProcessLock | undefined;
     let store: AcpSessionStore | undefined;
     try {
-      lock = await ProcessLock.acquire(paths.lockPath);
+      try {
+        lock = await ProcessLock.acquire(paths.lockPath);
+      } catch (error) {
+        if (error instanceof GatewayError && error.code === "daemon_running") {
+          return await runLiveSessionRead(command, context, paths, error);
+        }
+        throw error;
+      }
       store = new AcpSessionStore(paths.acpSessionPath);
       if (command.action === "list") {
-        const sessions = store.list();
-        if (sessions.length === 0) {
-          context.io.stdout.write("No Ambassador sessions\n");
-        } else {
-          for (const session of sessions) {
-            context.io.stdout.write(`${JSON.stringify(session)}\n`);
-          }
-        }
+        writeSessionList(context.io, store.list());
         return 0;
       }
       const record = store.get(command.sessionId);
@@ -152,8 +218,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
         new AcpSessionController({ capability, environment: context.env });
       if (command.action === "show") {
         const lines = await controller.show(record, command.verbose, new AbortController().signal);
-        if (lines.length === 0) context.io.stdout.write("No session messages\n");
-        else context.io.stdout.write(`${lines.join("\n")}\n`);
+        writeSessionHistory(context.io, lines);
         return 0;
       }
       const deleted: AcpSessionDeleteResult = await controller.delete(
@@ -231,7 +296,10 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       credentialKeyPath: paths.credentialKeyPath,
       webhookSecretPath: paths.webhookSecretPath,
       webhookSecretKeyPath: paths.webhookSecretKeyPath,
+      localControlSecretPath: paths.localControlSecretPath,
+      localControlSecretKeyPath: paths.localControlSecretKeyPath,
       pendingActionPath: paths.pendingActionPath,
+      actionResultPath: paths.actionResultPath,
       acpSessionPath: paths.acpSessionPath,
       profilePath: paths.profilePath,
       workingDirectory: context.cwd,
@@ -263,6 +331,14 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
             ...(context.testOverrides.nowSeconds === undefined
               ? {}
               : { nowSeconds: context.testOverrides.nowSeconds }),
+            ...(context.testOverrides.localControlSecretStore === undefined
+              ? {}
+              : { localControlSecretStore: context.testOverrides.localControlSecretStore }),
+            ...(context.testOverrides.acpSessionControllerFactory === undefined
+              ? {}
+              : {
+                  acpSessionControllerFactory: context.testOverrides.acpSessionControllerFactory,
+                }),
           }),
     });
     context.io.stdout.write(startupGuide(application.endpoint));

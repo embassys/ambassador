@@ -8,7 +8,10 @@ export interface GatewayPaths {
   credentialKeyPath: string;
   webhookSecretPath: string;
   webhookSecretKeyPath: string;
+  localControlSecretPath: string;
+  localControlSecretKeyPath: string;
   pendingActionPath: string;
+  actionResultPath: string;
   acpSessionPath: string;
   profilePath: string;
 }
@@ -25,7 +28,10 @@ export function pathsForStateDirectory(
     credentialKeyPath: join(stateDirectory, "central-credential.key"),
     webhookSecretPath: join(stateDirectory, "webhook-secret.json"),
     webhookSecretKeyPath: join(stateDirectory, "webhook-secret.key"),
+    localControlSecretPath: join(stateDirectory, "local-control-secret.json"),
+    localControlSecretKeyPath: join(stateDirectory, "local-control-secret.key"),
     pendingActionPath: join(stateDirectory, "pending-actions.sqlite"),
+    actionResultPath: join(stateDirectory, "action-results.sqlite"),
     acpSessionPath: join(stateDirectory, "acp-sessions.sqlite"),
     profilePath: join(stateDirectory, "delivery-profile.json"),
   };

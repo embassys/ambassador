@@ -1,6 +1,7 @@
 # 0050 Persistent and observable ACP sessions
 
-Status: accepted
+Status: accepted; verbose logging amended by ADR 0051 and running inspection
+amended by ADR 0053
 
 Date: 2026-09-04
 
@@ -114,12 +115,14 @@ ambassador webhook-secret
 ambassador clean
 ```
 
-Session management commands require the foreground Ambassador process to be
-stopped. `list` reads Ambassador-owned metadata. `show` asks the configured ACP
-agent to load the provider history and prints user and agent messages. Its
-verbose form also prints bounded tool events. `delete` requires advertised ACP
-deletion and removes local metadata only after provider success. `forget`
-removes only Ambassador's local record and leaves provider history alone.
+ADR 0053 allows `list` and `show` while the foreground process runs, with that
+process retaining exclusive ACP control. `list` reads Ambassador-owned
+metadata. `show` asks the configured ACP agent to load provider history and
+prints user and agent messages. Its verbose form also prints bounded tool
+events. `delete` and `forget` still require the foreground process to be
+stopped. `delete` requires advertised ACP deletion and removes local metadata
+only after provider success. `forget` removes only Ambassador's local record
+and leaves provider history alone.
 
 `start --verbose` writes bounded execution events to the console. It may show
 message data, MCP arguments and results, and central response bodies, so the

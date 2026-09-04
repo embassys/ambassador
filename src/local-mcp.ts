@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import {
   createServer as createHttpServer,
@@ -15,16 +15,47 @@ import {
   type Tool,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
+import {
+  LOCAL_CONTROL_PATH,
+  type LocalSessionControl,
+  LocalSessionControlError,
+} from "./local-control.js";
 import { serializeLocalToolResult } from "./local-tool-result.js";
 import type { CentralToolDefinition } from "./mcp-contract.js";
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
+const MAX_CONTROL_REQUEST_BYTES = 4 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_HEADERS_BYTES = 16 * 1024;
 const MAX_SESSIONS = 32;
 const MAX_CONCURRENT_TOOL_CALLS = 8;
 const LOCAL_REQUEST_TIMEOUT_MS = 35_000;
 const PROTOCOL_VERSION = "2025-06-18";
+const SERVER_INSTRUCTIONS =
+  "Embassys Ambassador connects this local agent to the Embassys agent network. When the user says 'register me', 'sign me up', or asks to connect to Embassys or Ambassador and gives an email, call register_agent immediately. Do not use a browser, treat this as website signup, or ask for a URL or password. After the emailed code arrives, call verify_email. When the user asks what needs attention, what they need to answer, or whether an action answer came back, call get_inbox.";
+
+function toolErrorMessage(code: string): string {
+  switch (code) {
+    case "unsupported_email_format":
+      return "Embassys rejected this email address format. The current service does not accept '+' email aliases; use the mailbox address without its +tag.";
+    case "registration_conflict":
+      return "This email is already registered with Embassys.";
+    case "central_rate_limited":
+      return "Embassys rate-limited this request. Wait before trying again.";
+    case "invalid_arguments":
+      return "Ambassador rejected the tool arguments. Check the tool schema and try again.";
+    case "profile_conflict":
+      return "Ambassador already has a different local delivery profile. Stop Ambassador and run the documented clean command before registering another agent.";
+    case "not_enrolled":
+      return "Ambassador is not enrolled yet. Register and verify an email first.";
+    case "already_enrolled":
+      return "Ambassador is already enrolled.";
+    case "verification_failed":
+      return "Embassys rejected the verification code or email.";
+    default:
+      return `Ambassador could not complete the tool call (${code}). Run Ambassador with --verbose for the error source and safe details.`;
+  }
+}
 
 export interface LocalMcpRouter {
   listTools(): Promise<CentralToolDefinition[]>;
@@ -45,8 +76,9 @@ export class LocalMcpToolError extends Error {
   constructor(
     readonly code: string,
     readonly retryAfterMs?: number | null,
+    readonly source?: string,
   ) {
-    super("Tool call failed");
+    super(toolErrorMessage(code));
     this.name = "LocalMcpToolError";
   }
 
@@ -54,6 +86,7 @@ export class LocalMcpToolError extends Error {
     return {
       code: this.code,
       ...(this.retryAfterMs === undefined ? {} : { retry_after_ms: this.retryAfterMs }),
+      ...(this.source === undefined ? {} : { source: this.source }),
     };
   }
 }
@@ -61,6 +94,10 @@ export class LocalMcpToolError extends Error {
 export interface LocalMcpServerOptions {
   port?: number;
   requestTimeoutMs?: number;
+  control?: {
+    readonly secret: string;
+    readonly sessions: LocalSessionControl;
+  };
 }
 
 export class LocalMcpServerError extends Error {
@@ -93,7 +130,10 @@ function safeHttpError(response: ServerResponse, status: number): void {
   response.end("Request rejected\n");
 }
 
-function readJsonBody(request: IncomingMessage): Promise<unknown> {
+function readJsonBody(
+  request: IncomingMessage,
+  maximumBytes = MAX_REQUEST_BYTES,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -103,7 +143,7 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
       if (settled) return;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       size += bytes.byteLength;
-      if (size > MAX_REQUEST_BYTES) {
+      if (size > maximumBytes) {
         settled = true;
         request.pause();
         reject(new RequestBodyTooLarge());
@@ -135,6 +175,43 @@ function readJsonBody(request: IncomingMessage): Promise<unknown> {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function exactKeys(value: Record<string, unknown>, required: readonly string[]): boolean {
+  return (
+    required.every((key) => key in value) &&
+    Object.keys(value).every((key) => required.includes(key))
+  );
+}
+
+function authorizedControlRequest(request: IncomingMessage, secret: string): boolean {
+  const supplied = request.headers.authorization;
+  if (typeof supplied !== "string") return false;
+  const expected = `Bearer ${secret}`;
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return (
+    suppliedBytes.length === expectedBytes.length && timingSafeEqual(suppliedBytes, expectedBytes)
+  );
+}
+
+function writeControlJson(
+  response: ServerResponse,
+  status: number,
+  value: Record<string, unknown>,
+): void {
+  let responseStatus = status;
+  let body = Buffer.from(JSON.stringify(value), "utf8");
+  if (body.byteLength > MAX_RESPONSE_BYTES) {
+    responseStatus = 500;
+    body = Buffer.from('{"error":"operation_failed"}', "utf8");
+  }
+  response.writeHead(responseStatus, {
+    "cache-control": "no-store",
+    "content-length": body.byteLength,
+    "content-type": "application/json; charset=utf-8",
+  });
+  response.end(body);
 }
 
 function isInitializeRequest(value: unknown): boolean {
@@ -231,6 +308,7 @@ export class LocalMcpServer {
   readonly #http: HttpServer;
   readonly #requestTimeoutMs: number;
   readonly #port: number;
+  readonly #control: LocalMcpServerOptions["control"];
   readonly #sessions = new Map<string, McpSession>();
   readonly #sessionRecords = new Set<McpSession>();
   #activeToolCalls = 0;
@@ -242,6 +320,7 @@ export class LocalMcpServer {
     options: LocalMcpServerOptions = {},
   ) {
     this.#port = options.port ?? 8787;
+    this.#control = options.control;
     this.#requestTimeoutMs = options.requestTimeoutMs ?? LOCAL_REQUEST_TIMEOUT_MS;
     if (!Number.isInteger(this.#port) || this.#port < 0 || this.#port > 65_535) {
       throw new Error("Invalid MCP listener port");
@@ -305,6 +384,7 @@ export class LocalMcpServer {
       { name: "ambassador", version: "1" },
       {
         capabilities: { tools: {} },
+        instructions: SERVER_INSTRUCTIONS,
         supportedProtocolVersions: [PROTOCOL_VERSION],
       },
     );
@@ -351,7 +431,7 @@ export class LocalMcpServer {
         );
       } catch (error) {
         if (error instanceof LocalMcpToolError) {
-          throw new ProtocolError(-32_002, "Tool call failed", error.data);
+          throw new ProtocolError(-32_002, error.message, error.data);
         }
         throw new Error("Tool call failed");
       } finally {
@@ -403,6 +483,10 @@ export class LocalMcpServer {
   async #handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (!this.#accepting) {
       safeHttpError(response, 503);
+      return;
+    }
+    if (request.url === LOCAL_CONTROL_PATH) {
+      await this.#handleControlRequest(request, response);
       return;
     }
     if (request.url !== "/mcp") {
@@ -478,6 +562,77 @@ export class LocalMcpServer {
         return;
       }
       if (!response.headersSent) safeHttpError(response, 400);
+    } finally {
+      clearTimeout(timeout);
+      response.off("close", onResponseClose);
+    }
+  }
+
+  async #handleControlRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const control = this.#control;
+    if (control === undefined) {
+      safeHttpError(response, 404);
+      return;
+    }
+    const address = this.#http.address() as AddressInfo;
+    if (request.headers.host !== `127.0.0.1:${address.port}`) {
+      safeHttpError(response, 421);
+      return;
+    }
+    if (request.headers.origin !== undefined) {
+      safeHttpError(response, 403);
+      return;
+    }
+    if (!authorizedControlRequest(request, control.secret)) {
+      writeControlJson(response, 401, { error: "unauthorized" });
+      return;
+    }
+    if (request.method !== "POST" || request.headers["content-type"] !== "application/json") {
+      writeControlJson(response, 400, { error: "operation_failed" });
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#requestTimeoutMs);
+    const onResponseClose = (): void => {
+      if (!response.writableEnded) controller.abort();
+    };
+    response.once("close", onResponseClose);
+    try {
+      const body = await readJsonBody(request, MAX_CONTROL_REQUEST_BYTES);
+      if (!isObject(body) || typeof body.operation !== "string") {
+        writeControlJson(response, 400, { error: "operation_failed" });
+        return;
+      }
+      if (body.operation === "sessions.list" && exactKeys(body, ["operation"])) {
+        writeControlJson(response, 200, { sessions: [...(await control.sessions.list())] });
+        return;
+      }
+      if (
+        body.operation === "sessions.show" &&
+        exactKeys(body, ["operation", "session_id", "verbose"]) &&
+        typeof body.session_id === "string" &&
+        body.session_id.length >= 1 &&
+        body.session_id.length <= 512 &&
+        typeof body.verbose === "boolean"
+      ) {
+        const lines = await control.sessions.show(body.session_id, body.verbose, controller.signal);
+        writeControlJson(response, 200, { lines: [...lines] });
+        return;
+      }
+      writeControlJson(response, 400, { error: "operation_failed" });
+    } catch (error) {
+      if (error instanceof RequestBodyTooLarge) {
+        request.resume();
+        writeControlJson(response, 413, { error: "operation_failed" });
+        return;
+      }
+      if (error instanceof LocalSessionControlError) {
+        const status = error.code === "session_not_found" ? 404 : 422;
+        writeControlJson(response, status, { error: error.code });
+        return;
+      }
+      writeControlJson(response, 500, { error: "operation_failed" });
     } finally {
       clearTimeout(timeout);
       response.off("close", onResponseClose);

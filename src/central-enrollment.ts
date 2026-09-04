@@ -14,7 +14,7 @@ import type { CentralToolDefinition } from "./mcp-contract.js";
 
 const DEFAULT_DEADLINE_MS = 30_000;
 const RESPONSE_MAX_BYTES = 64 * 1024;
-const EMAIL = /^[\w.-]+@[\w.-]+\.\w+$/u;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const CODE = /^\d{6}$/u;
 const AGENT_ID = /^[A-Za-z0-9._~-]{1,256}$/u;
 
@@ -25,11 +25,27 @@ export type CentralEnrollmentErrorCode =
   | "central_verification_credential_invalid"
   | "central_verification_response_unsafe"
   | "registration_conflict"
+  | "unsupported_email_format"
   | "verification_failed";
+
+function errorMessage(code: CentralEnrollmentErrorCode): string {
+  switch (code) {
+    case "unsupported_email_format":
+      return "The current Embassys service rejected this email address format";
+    case "registration_conflict":
+      return "The email is already registered with Embassys";
+    case "central_rate_limited":
+      return "Embassys rate-limited the enrollment request";
+    case "verification_failed":
+      return "Embassys rejected the verification email or code";
+    default:
+      return "The Embassys enrollment request failed its contract";
+  }
+}
 
 export class CentralEnrollmentError extends Error {
   constructor(readonly code: CentralEnrollmentErrorCode) {
-    super("Central enrollment failed");
+    super(errorMessage(code));
     this.name = "CentralEnrollmentError";
   }
 }
@@ -63,7 +79,7 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "register_agent",
     description:
-      "Use this Embassys Ambassador tool when the user says 'register me', 'sign me up', or asks to connect this agent to Embassys. Register the user's email identity and begin guided delivery setup.",
+      "Register this local agent with Embassys Ambassador. Call this tool when the user says 'register me', 'sign me up', 'connect me to Embassys', or 'register me in Ambassador'. Use the supplied email. Do not ask for a website URL or password. Follow any setup question returned by the tool.",
     inputSchema: schema(
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
@@ -94,7 +110,7 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "verify_email",
     description:
-      "Use this Embassys Ambassador tool when the user provides the six-digit email code after registration. Verify the code and finish enrollment without exposing the returned credential.",
+      "Finish Embassys registration through Ambassador. Call this tool when the user gives the six-digit code emailed after register_agent; use the same email and never ask for a password.",
     inputSchema: schema(
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
@@ -106,7 +122,7 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "resend_verification",
     description:
-      "Use this Embassys Ambassador tool when the user asks Embassys to resend or send another verification code. Send a new code to the unverified email identity.",
+      "Ask Embassys through Ambassador to email another registration code. Call this tool when the user says to resend the verification code for their unverified email.",
     inputSchema: schema({ email: { type: "string", minLength: 3, maxLength: 254 } }, ["email"]),
   },
 ] as const;
@@ -209,6 +225,10 @@ export class CentralEnrollmentClient {
     if (response.status === 409) {
       await cancel(response);
       throw failure("registration_conflict");
+    }
+    if (response.status === 422 && requestEmail.includes("+")) {
+      await cancel(response);
+      throw failure("unsupported_email_format");
     }
     const result = await this.#success(response);
     if (

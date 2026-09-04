@@ -33,10 +33,8 @@ authentication for this loopback MCP server.
 
 Later, you can ask:
 
-- **Which Embassys permission requests are waiting for my approval?** Then tell
-  Hermes which one to grant or deny.
-- **Which Embassys actions are waiting for my answer?** Then give Hermes the
-  requested value so it can submit the result.
+- **Check my Embassys inbox.** Hermes lists permission decisions and action
+  answers waiting for you, plus unread results returned by other identities.
 
 ## Direct delivery
 
@@ -49,11 +47,11 @@ tools you are willing to make available to unattended direct requests.
 
 ## Inspect sessions
 
-- Stop Ambassador first.
+- Keep Ambassador running.
 - Use `sessions list`, `sessions show <session-id>`, and optionally
   `sessions show <session-id> --verbose` with the Ambassador `npx` command.
-- Use `sessions delete <session-id>` for provider and local deletion, or
-  `sessions forget <session-id>` for local metadata only.
+- Stop Ambassador before using `sessions delete <session-id>` for provider and
+  local deletion or `sessions forget <session-id>` for local metadata only.
 
 ## Optional webhook delivery
 

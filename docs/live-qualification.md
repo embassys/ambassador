@@ -47,9 +47,9 @@ exact known client and ACP agent names and then tries the fixed ACP v1 contract.
 11. Prove each local acceptance or completion precedes its central
     acknowledgement.
 12. Prove one provider session per message, action-result retirement,
-    `sessions list`, normal and verbose `sessions show`, `sessions delete`,
-    `sessions forget`, stable repeated `webhook-secret`, and redacted
-    `start --verbose` output.
+    running-process `sessions list`, normal and verbose running-process
+    `sessions show`, stopped-process `sessions delete` and `sessions forget`,
+    stable repeated `webhook-secret`, and redacted `start --verbose` output.
 13. Record the consuming-poll restart-loss and non-idempotent result-submission
     limitations.
 14. Stop all processes, delete mail and temporary state, and scan artifacts.

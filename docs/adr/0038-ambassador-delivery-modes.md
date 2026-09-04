@@ -1,7 +1,7 @@
 # 0038 Ambassador delivery modes
 
 Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
-0047, 0048, and 0049
+0047, 0048, 0049, 0050, and 0051
 
 Date: 2026-09-02
 
@@ -225,7 +225,8 @@ MCP remains the agent-to-Ambassador business tool channel. After enrollment,
 the target catalog keeps action listing, permission request and decision,
 action call, action-result submission, permission listing, and a local
 projection of pending requests the enrolled identity can decide. ADR 0046 adds
-a separate encrypted local projection of unanswered action calls.
+a separate encrypted local projection of unanswered action calls. ADR 0051
+adds another encrypted projection for received action results.
 
 Remove local "poll_messages" and "ack_message" after automatic delivery owns
 those operations. Do not present `submit_action_result` as a general reply or
@@ -234,9 +235,10 @@ completion tool.
 ### Custody and restart behavior
 
 Keep central message bodies in bounded delivery memory and keep the
-notification journal ID-only. ADR 0046 makes one narrow exception: validated
-unanswered action-call fields persist in a separate encrypted local inbox until
-their result succeeds. The delivery profile may contain only nonsecret mode,
+notification journal ID-only. ADR 0046 persists validated unanswered
+action-call fields in one encrypted local inbox until their result succeeds.
+ADR 0051 persists received action results in a second encrypted inbox for
+later MCP retrieval. The delivery profile may contain only nonsecret mode,
 endpoint, agent kind, canonical direct working directory, and safe opaque
 session metadata. ADR 0042 stores webhook authentication separately as an
 encrypted secret and wrapping key.
@@ -244,8 +246,8 @@ encrypted secret and wrapping key.
 The server consumes messages when polling returns them and cannot retrieve or
 redeliver a delivered body. A process crash can therefore lose an in-memory
 message. This accepted development limitation does not justify storing message
-bodies locally beyond ADR 0046's narrow action-call exception or using that
-inbox as a redelivery queue.
+bodies locally beyond ADRs 0046 and 0051 or using either inbox as a redelivery
+queue.
 
 ### Qualification
 
@@ -341,8 +343,9 @@ contract.
   direct invocation contract.
 - **Persist every message body for restart recovery.** Rejected because
   server-side retrieval or redelivery is the proper delivery-reliability
-  boundary. ADR 0046 later approved only encrypted unanswered action calls so
-  the user can supply a result asynchronously.
+  boundary. ADR 0046 later approved encrypted unanswered action calls so the
+  user can supply a result asynchronously. ADR 0051 later approved encrypted
+  received action results so the requester can retrieve returned data.
 
 ## Approval
 
