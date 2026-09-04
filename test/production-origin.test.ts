@@ -22,7 +22,10 @@ test("production ignores legacy development endpoint variables", async (t) => {
     credentialKeyPath: join(root, "central-credential.key"),
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    localControlSecretPath: join(root, "local-control-secret.json"),
+    localControlSecretKeyPath: join(root, "local-control-secret.key"),
     pendingActionPath: join(root, "pending-actions.sqlite"),
+    actionResultPath: join(root, "action-results.sqlite"),
     acpSessionPath: join(root, "acp-sessions.sqlite"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
@@ -36,6 +39,14 @@ test("production ignores legacy development endpoint variables", async (t) => {
       },
       async createOrLoad() {
         return WEBHOOK_SECRET;
+      },
+    },
+    localControlSecretStore: {
+      async load() {
+        return "0123456789abcdef".repeat(4);
+      },
+      async createOrLoad() {
+        return "0123456789abcdef".repeat(4);
       },
     },
     centralFetch: async (input) => {

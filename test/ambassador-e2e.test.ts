@@ -39,7 +39,10 @@ async function fixture(t: TestContext) {
     credentialKeyPath: join(root, "central-credential.key"),
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    localControlSecretPath: join(root, "local-control-secret.json"),
+    localControlSecretKeyPath: join(root, "local-control-secret.key"),
     pendingActionPath: join(root, "pending-actions.sqlite"),
+    actionResultPath: join(root, "action-results.sqlite"),
     acpSessionPath: join(root, "acp-sessions.sqlite"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
@@ -50,6 +53,14 @@ async function fixture(t: TestContext) {
       },
       async createOrLoad() {
         return WEBHOOK_SECRET;
+      },
+    },
+    localControlSecretStore: {
+      async load() {
+        return "0123456789abcdef".repeat(4);
+      },
+      async createOrLoad() {
+        return "0123456789abcdef".repeat(4);
       },
     },
     centralOrigin: central.apiUrl,
@@ -105,10 +116,9 @@ test("registers by client capability, delivers the full webhook, then acknowledg
       "resend_verification",
       "list_action_types",
       "request_permission",
-      "list_pending_permission_requests",
+      "get_inbox",
       "respond_to_permission",
       "call_action",
-      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],
@@ -139,6 +149,55 @@ test("registers by client capability, delivers the full webhook, then acknowledg
   await assert.rejects(client.callTool("ack_message", { message_id: messageId }));
 });
 
+test("stores received action results before acknowledgement and consumes them from one inbox", async (t) => {
+  const value = await fixture(t);
+  const gateway = value.trackGateway(await openGatewayApplication(value.options));
+  const email = "ambassador-result-inbox@fixture.test";
+  await enrollWebhook(gateway, value.central, value.webhook.url, email);
+  const callId = "10000000-0000-4000-8000-000000000001";
+  const messageId = value.central.queueMessage(email, {
+    type: "action_response",
+    call_id: callId,
+    action_type: "get_phone_number",
+    status: "success",
+    result: { phone_number: "+447700900001" },
+  });
+
+  const wake = await value.webhook.waitForWake();
+  for (
+    let attempt = 0;
+    attempt < 100 && value.central.messageState(messageId) !== "acked";
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(value.central.messageState(messageId), "acked");
+  const bytes = await readFile(value.options.actionResultPath);
+  assert.equal(bytes.includes(Buffer.from("+447700900001", "utf8")), false);
+  assert.equal(bytes.includes(Buffer.from(callId, "utf8")), false);
+  await gateway.close();
+
+  const restarted = value.trackGateway(await openGatewayApplication(value.options));
+  const restartedClient = new TestMcpClient(restarted.endpoint);
+  await restartedClient.initialize(OPENCLAW);
+  assert.deepEqual(await restartedClient.callTool("get_inbox", {}), {
+    count: 1,
+    items: [
+      {
+        kind: "action_result",
+        call_id: callId,
+        sender_agent_id: wake.ambassadorMessage.sender_agent_id,
+        action_type: "get_phone_number",
+        status: "success",
+        result: { phone_number: "+447700900001" },
+        created_at: wake.ambassadorMessage.created_at,
+      },
+    ],
+  });
+  assert.deepEqual(await restartedClient.callTool("get_inbox", {}), { count: 0, items: [] });
+  await assert.rejects(restartedClient.callTool("get_inbox", { limit: 1 }));
+});
+
 test("returns a correlated action result from the target MCP tool to the requester", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
@@ -155,25 +214,29 @@ test("returns a correlated action result from the target MCP tool to the request
   const permission = (await permissionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof permission.permission_id, "string");
 
-  const pending = await target.callTool("list_pending_permission_requests", {});
+  const pending = await target.callTool("get_inbox", {});
   assert.equal(pending.count, 1);
-  assert.equal(Array.isArray(pending.pending_permission_requests), true);
-  const pendingRequest = (pending.pending_permission_requests as Array<Record<string, unknown>>)[0];
-  assert.equal(pendingRequest?.id, permission.permission_id);
-  assert.equal(pendingRequest?.grantor_email, targetEmail);
-  assert.equal(pendingRequest?.grantee_email, "ambassador-result-requester@fixture.test");
+  assert.equal(Array.isArray(pending.items), true);
+  const pendingRequest = (pending.items as Array<Record<string, unknown>>)[0];
+  assert.equal(pendingRequest?.kind, "permission_request");
+  assert.equal(pendingRequest?.permission_id, permission.permission_id);
+  assert.equal(pendingRequest?.requester_email, "ambassador-result-requester@fixture.test");
   assert.equal(pendingRequest?.action_type, "get_phone_number");
-  assert.equal(pendingRequest?.status, "pending");
+  assert.deepEqual(pendingRequest?.response, {
+    tool: "respond_to_permission",
+    required: {
+      permission_id: permission.permission_id,
+      decision: ["granted", "denied"],
+    },
+  });
+  assert.equal((await target.callTool("get_inbox", {})).count, 1);
 
   const decided = await target.callTool("respond_to_permission", {
     permission_id: permission.permission_id,
     decision: "granted",
   });
   assert.equal(decided.status, "granted");
-  assert.deepEqual(await target.callTool("list_pending_permission_requests", {}), {
-    count: 0,
-    pending_permission_requests: [],
-  });
+  assert.deepEqual(await target.callTool("get_inbox", {}), { count: 0, items: [] });
   const requesterPermissionPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterPermissionMessages = (
     (await requesterPermissionPoll.json()) as { messages: Array<Record<string, unknown>> }
@@ -212,18 +275,28 @@ test("returns a correlated action result from the target MCP tool to the request
   const restartedTarget = new TestMcpClient(restartedGateway.endpoint);
   await restartedTarget.initialize(OPENCLAW);
 
-  await assert.rejects(restartedTarget.callTool("list_pending_action_calls", { limit: 1 }));
-  const pendingActions = await restartedTarget.callTool("list_pending_action_calls", {});
+  await assert.rejects(restartedTarget.callTool("get_inbox", { limit: 1 }));
+  const pendingActions = await restartedTarget.callTool("get_inbox", {});
   assert.equal(pendingActions.count, 1);
-  assert.deepEqual(pendingActions.pending_action_calls, [
+  assert.deepEqual(pendingActions.items, [
     {
+      kind: "action_call",
       call_id: action.call_id,
       sender_agent_id: actionWake.ambassadorMessage.sender_agent_id,
       action_type: "get_phone_number",
       payload: { reason: "deterministic result round trip" },
       created_at: actionWake.ambassadorMessage.created_at,
+      response: {
+        tool: "submit_action_result",
+        required: {
+          call_id: action.call_id,
+          status: ["success", "error"],
+          result: { type: "object" },
+        },
+      },
     },
   ]);
+  assert.deepEqual((await restartedTarget.callTool("get_inbox", {})).items, pendingActions.items);
 
   const submitted = await restartedTarget.callTool("submit_action_result", {
     call_id: action.call_id,
@@ -232,10 +305,7 @@ test("returns a correlated action result from the target MCP tool to the request
   });
   assert.equal(submitted.call_id, action.call_id);
   assert.equal(submitted.status, "completed");
-  assert.deepEqual(await restartedTarget.callTool("list_pending_action_calls", {}), {
-    count: 0,
-    pending_action_calls: [],
-  });
+  assert.deepEqual(await restartedTarget.callTool("get_inbox", {}), { count: 0, items: [] });
 
   const requesterResultPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterResultMessages = (

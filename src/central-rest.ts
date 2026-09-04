@@ -102,9 +102,9 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     ),
   },
   {
-    name: "list_pending_permission_requests",
+    name: "get_inbox",
     description:
-      "Use this Embassys Ambassador tool when the user asks which permission requests are waiting for their approval. List only pending requests that this enrolled identity can grant or deny.",
+      "Use this Embassys Ambassador tool when the user asks what needs their attention, what they need to answer, or whether an answer came back. It returns pending permission requests, unanswered action calls, and unread action results. Pending requests stay until answered; returned action results are marked read and removed from the inbox.",
     inputSchema: objectSchema({}),
   },
   {
@@ -131,12 +131,6 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
       },
       ["target_email", "action_type", "payload"],
     ),
-  },
-  {
-    name: "list_pending_action_calls",
-    description:
-      "Use this Embassys Ambassador tool when the user asks which actions are waiting for their answer or result. List locally encrypted action calls that this identity received but has not completed.",
-    inputSchema: objectSchema({}),
   },
   {
     name: "submit_action_result",

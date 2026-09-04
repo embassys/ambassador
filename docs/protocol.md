@@ -35,10 +35,11 @@ option.
 Ambassador is running or the lock artifact is invalid. While it owns the lock,
 it removes every entry from the private Ambassador state directory except the
 lock database and its active SQLite sidecars. This includes the encrypted
-central credential and key, encrypted webhook secret and key, delivery profile,
-ACP session metadata, notification journal, interrupted temporary writes, and
-later local state artifacts. Symbolic links inside the state directory are
-removed as links; the command does not follow them.
+central credential and key, encrypted webhook secret and key, encrypted local
+control secret and key, delivery profile, ACP session metadata, notification
+journal, interrupted temporary writes, and later local state artifacts.
+Symbolic links inside the state directory are removed as links; the command
+does not follow them.
 
 A successful command writes exactly:
 
@@ -67,13 +68,15 @@ MCP endpoint: http://127.0.0.1:8787/mcp
 the active delivery target within its deadline, close local state, and release
 the lock.
 
-Session management commands acquire the same process lock and therefore
-require the foreground process to be stopped. `sessions list` prints only
-Ambassador-owned metadata. `sessions show` starts the fixed configured agent,
-uses ACP `session/load`, and prints bounded user and agent history supplied by
-that provider. `--verbose` also includes bounded tool events. `sessions delete`
-requires the agent to advertise `session/delete` and forgets metadata only
-after provider success. `sessions forget` removes only the local record.
+When Ambassador is running, `sessions list` and `sessions show` use its private
+authenticated loopback control route. The foreground process serializes
+`show` with delivery and retention cleanup, starts the fixed configured agent,
+uses ACP `session/load`, and prints bounded provider history. `--verbose` also
+includes bounded tool events. When Ambassador is stopped, both read commands
+retain the same behavior under the singleton lock. `sessions delete` and
+`sessions forget` always require Ambassador to be stopped. Deletion requires
+the agent to advertise `session/delete` and forgets metadata only after
+provider success; forgetting removes only the local record.
 
 Startup failures use bounded operator messages. They distinguish an occupied
 MCP port, invalid or unavailable local state, an unavailable agent or bundled
@@ -86,6 +89,8 @@ permission choices, MCP tool calls, central REST requests, and delivery state.
 It may include personally identifying request and result data. It always
 redacts authorization, DPoP material, nonces, tokens, verification codes,
 private keys, cookies, and webhook secrets. Verbose output is console-only.
+ACP available-command catalogs and their descriptions are omitted; the log
+records only the session ID and command count for that update.
 
 ## Local MCP
 
@@ -93,6 +98,12 @@ Every local MCP request uses Streamable HTTP at `/mcp` without bearer
 authentication. Ambassador requires `Host: 127.0.0.1:8787`. A present
 `Origin` must be exactly `http://127.0.0.1:8787`. A supplied `Authorization`
 header is rejected. Host and Origin checks happen before body parsing.
+
+The same listener has a non-MCP private control route used only by Ambassador's
+CLI for live session reads. It requires exact loopback Host, rejects every
+Origin, requires the generated encrypted internal bearer secret, and accepts
+only exact bounded `sessions.list` and `sessions.show` operations. The route,
+secret, and operations are never exposed in the MCP catalog or configuration.
 
 The local MCP boundary trusts processes running as the owner on the same
 machine. Host and Origin validation protect against DNS rebinding and ordinary
@@ -104,13 +115,19 @@ The boundary keeps these limits:
 | --- | --- |
 | Request headers | 16 KiB |
 | Local MCP request body | 1 MiB |
+| Private control request body | 4 KiB |
 | Local or upstream response body | 4 MiB |
 | Active MCP sessions | 32 |
 | Concurrent tool calls | 8 |
 | Serialized structured tool result | 512 KiB |
 
 JSON-RPC batches and redirects are rejected. Errors do not reflect request
-bodies, remote bodies, URLs, headers, or credentials.
+bodies, remote bodies, URLs, headers, or credentials. Expected tool failures
+use a bounded human-readable MCP error message and structured `code` and
+`source` fields. Verbose mode also prints the original bounded error name,
+message, error code, and cause chain. This lets an operator distinguish local
+profile, central enrollment, protected REST, and delivery failures without
+exposing credentials.
 
 MCP initialization `clientInfo` is retained as bounded session metadata. Its
 name is matched exactly against a compiled-in capability registry; its version
@@ -119,6 +136,12 @@ authenticated identity, so it cannot authorize central work or supply process
 configuration. The name may only select a complete fixed local profile whose
 delivery modes, command, arguments, ACP agent name, and MCP behavior have been
 reviewed and tested.
+
+The MCP initialization response tells the client that Ambassador handles
+Embassys registration and agent-network operations. It directs the client to
+call `register_agent` when the user says "register me" or asks to connect to
+Embassys or Ambassador. It also says that registration needs an email, not a
+website or browser flow, and points the emailed-code step to `verify_email`.
 
 An unknown, ambiguous, disabled, or incomplete match is unsupported. The model
 cannot supply an agent kind, executable, arguments, adapter, or fallback
@@ -136,10 +159,9 @@ After a credential is durably stored, expose exactly these agent-facing tools:
 
 - `list_action_types`
 - `request_permission`
-- `list_pending_permission_requests`
+- `get_inbox`
 - `respond_to_permission`
 - `call_action`
-- `list_pending_action_calls`
 - `submit_action_result`
 - `get_my_permissions`
 
@@ -152,23 +174,28 @@ Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
 catalog. `list_action_types` returns central action definitions as data; those
 definitions do not become additional local tools.
 
-`list_pending_permission_requests` is a local projection over the current
-`GET /api/get_my_permissions` response. It accepts no arguments and returns
-only entries whose status is `pending` and whose `grantor_email` is the
-enrolled identity, plus their count. It adds no central route, local queue, or
-message persistence. Normal permission requests are decided asynchronously by
-the human through central's emailed decision page; they do not wake the
-grantor's agent. If the user is already in their agent chat, they may instead
-select a returned permission ID and explicitly ask for `granted` or `denied`;
-`respond_to_permission` submits that decision.
+`get_inbox` is the single agent-facing view of work and unread results. It
+accepts no arguments and returns:
 
-`list_pending_action_calls` is the separate unanswered-action inbox. It accepts
-no arguments and returns a count plus the validated `call_id`,
-`sender_agent_id`, `action_type`, action `payload`, and `created_at` for each
-received action call whose result has not succeeded. These records are
-encrypted locally and survive restart. A successful `submit_action_result`
-removes the matching record. The tool adds no central route and is not a
-general message inbox.
+- pending permissions from `GET /api/get_my_permissions` whose
+  `grantor_email` is the enrolled identity;
+- encrypted local action calls that still need a result; and
+- encrypted local action results that have not appeared in a previous inbox
+  response.
+
+Each permission or action-call item includes the tool and fields needed for
+its response. Permissions remain until `respond_to_permission` succeeds.
+Action calls remain until `submit_action_result` succeeds. Ambassador removes
+received action results after returning them through `get_inbox`, so the
+default view contains unread results only. The tool adds no central route,
+does not poll central on demand, and is not a general message inbox.
+
+Central action definitions currently describe request payloads through
+`input_schema` but do not publish a result schema. Ambassador therefore tells
+the agent to submit a structured success or error object, but it cannot state
+or validate action-specific result fields. A central `result_schema` is tracked
+as server work. Ambassador does not duplicate the central action catalog in a
+local result-schema registry.
 
 Reject any argument named `token`, `jwt`, `access_token`, `authorization`, `private_key`,
 `secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
@@ -455,12 +482,13 @@ nesting, structural-token, batch-count, and normalized-message limits.
 Conflicting duplicate IDs reject the batch.
 
 Message bodies remain in a bounded in-memory delivery queue. The notification
-journal stores present IDs and delivery state only. The sole body-persistence
-exception is a separate encrypted inbox for validated `action_call` fields.
-Ambassador writes that record before local delivery or central acknowledgement
-so a user can answer after the original agent turn or a restart. Other message
-types are never written there. Polling pauses while the queue contains work.
-An ID-less message may be delivered once but cannot be acknowledged.
+journal stores present IDs and delivery state only. Two bounded persistence
+exceptions use separate encrypted inboxes. Ambassador stores validated
+`action_call` fields so a user can answer later, and validated
+`action_response` fields so a foreground agent can retrieve a returned result.
+It writes either record before local delivery or central acknowledgement.
+Other message types are not persisted. Polling pauses while the queue contains
+work. An ID-less message may be delivered once but cannot be acknowledged.
 
 ## Webhook delivery
 
@@ -642,10 +670,12 @@ the bounded failure without redelivering completed local work.
 A process crash clears delivery bodies from memory. Startup can remove stale
 pre-delivery journal rows whose bodies cannot be recovered. The separate
 encrypted pending-action record survives, but Ambassador does not replay it to
-the delivery target; it is available through `list_pending_action_calls` for a
-later user-driven answer. Central has no delivered-message retrieval, so some
-crash windows can still lose non-action messages or leave them unacknowledged.
-This remains a declared development limitation.
+the delivery target; it is available through `get_inbox` for a later
+user-driven answer. A captured action response remains unread in `get_inbox`
+until that tool returns it once. Central has no delivered-message retrieval, so a crash
+between central's consuming poll and local capture can still lose any message.
+Other non-action messages can also be lost or left unacknowledged. This remains
+a declared development limitation.
 
 ## Deadlines and data boundary
 
@@ -671,10 +701,10 @@ webhook secrets, prompts, or provider output to SQLite, profiles, normal logs,
 metrics, temporary files, crash artifacts, or support bundles. Verbose console
 output may contain bounded message, MCP, provider-history, and REST data after
 mandatory credential redaction; it is never persisted. ADR 0046 defines the
-sole durable content exception: one bounded encrypted SQLite record for each
-unanswered action call, containing only its validated call ID, sender ID,
-action type, payload, and creation time. The ACP session database contains only
-bounded identifiers, lifecycle state, and timestamps. The only raw
+bounded encrypted record for each unanswered action call. ADR 0051 defines a
+separate bounded encrypted record for each received action result. The ACP
+session database contains only bounded identifiers, lifecycle state, and
+timestamps. The only raw
 webhook-secret output is the explicit owner-invoked `webhook-secret` command.
 
 The encrypted central credential contains only the central token and DPoP
@@ -688,7 +718,10 @@ encryption key is derived with domain separation from the loaded DPoP private
 key, so the inbox is bound to the enrolled identity without another
 user-managed secret. Its SQLite lookup key and authenticated ciphertext reveal
 neither the call ID nor the action payload. The inbox is bounded to 256 records
-and 480 KiB of ciphertext.
+and 480 KiB of ciphertext. The action-result inbox uses separate domain labels
+with the same identity binding. Its lookup key and authenticated ciphertext
+reveal neither the call ID nor the returned data. It is bounded to 256 records
+and 400 KiB of ciphertext.
 
 ## Acceptance cases
 
@@ -714,8 +747,9 @@ The cutover must prove at least:
   encrypted, bounded pending-action exception;
 - exact target-authorized action-result submission and correlated response
   delivery, the filtered pending-decision projection, the restart-safe
-  unanswered-action list, removal only after successful result submission, and
-  no general reply or local delivery-control tools;
+  unanswered-action list, the encrypted received-result list, removal only
+  after successful result submission, and no general reply or local
+  delivery-control tools;
 - current package-owned Codex and Claude adapters, validated internal
   entrypoint launch, provider authentication ownership, normal
   provider-configured MCP and built-in tool access, and bounded asynchronous
@@ -730,5 +764,6 @@ The cutover must prove at least:
 - local cleanup removes all enrollment and delivery state, refuses while the
   process lock is held, leaves provider and central state alone, and returns to
   the bootstrap catalog; and
-- no credential or plaintext pending-action content leakage in logs,
-  databases, profiles, temporary files, packages, or qualification output.
+- no credential, plaintext pending-action content, or plaintext received-result
+  content leakage in databases, profiles, temporary files, packages, or
+  qualification output.

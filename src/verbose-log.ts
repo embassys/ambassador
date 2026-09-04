@@ -7,6 +7,34 @@ const COMPACT_JWT = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu;
 
 export type VerboseLogger = (event: string, data?: unknown) => void;
 
+const MAX_ERROR_TEXT = 2_048;
+const MAX_ERROR_DEPTH = 4;
+
+function boundedErrorText(value: string): string {
+  return value.length <= MAX_ERROR_TEXT ? value : `${value.slice(0, MAX_ERROR_TEXT)}[bounded]`;
+}
+
+export function describeVerboseError(error: unknown, depth = 0): Record<string, unknown> {
+  if (!(error instanceof Error)) return { name: "NonError" };
+  const diagnostic: Record<string, unknown> = {
+    name: boundedErrorText(error.name),
+    message: boundedErrorText(error.message),
+  };
+  const candidate = error as Error & {
+    readonly code?: unknown;
+    readonly stage?: unknown;
+    readonly cause?: unknown;
+  };
+  if (typeof candidate.code === "string") {
+    diagnostic.error_code = boundedErrorText(candidate.code);
+  }
+  if (typeof candidate.stage === "string") diagnostic.stage = boundedErrorText(candidate.stage);
+  if (candidate.cause !== undefined && depth + 1 < MAX_ERROR_DEPTH) {
+    diagnostic.cause = describeVerboseError(candidate.cause, depth + 1);
+  }
+  return diagnostic;
+}
+
 function redactedString(value: string): string {
   return value.replaceAll(BEARER, `Bearer ${REDACTED}`).replaceAll(COMPACT_JWT, REDACTED);
 }
@@ -102,7 +130,7 @@ export function traceFetch(fetchImplementation: typeof fetch, log: VerboseLogger
         method,
         url,
         duration_ms: Date.now() - started,
-        error: error instanceof Error ? error.name : "Error",
+        error: describeVerboseError(error),
       });
       throw error;
     }

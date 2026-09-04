@@ -1,6 +1,7 @@
 # 0037 Central REST integration
 
-Status: accepted; local delivery amended by ADR 0038
+Status: accepted; local delivery and encrypted action persistence amended by
+ADRs 0038, 0046, and 0051
 
 Date: 2026-09-01
 
@@ -113,9 +114,10 @@ schema, idempotency key, or outcome lookup. Ambassador therefore never retries
 an uncertain result submission.
 
 Central marks queued messages delivered before returning them from a poll.
-Ambassador keeps returned bodies in bounded memory and stores only message
-IDs and relay state in SQLite. Acknowledgement removes local state only after
-central confirms it.
+Ambassador keeps returned bodies in bounded memory and stores only message IDs
+and relay state in its journal. ADRs 0046 and 0051 define separate encrypted
+inboxes for unanswered action calls and received action results.
+Acknowledgement removes journal state only after central confirms it.
 
 Central has no delivered-message retrieval or redelivery. A crash after a
 successful poll can lose the body. This remains visible as a development
@@ -130,11 +132,12 @@ retry is the DPoP nonce challenge described above.
 
 ### Data boundary
 
-Tokens, private keys, proofs, verification codes, email addresses, action
-payloads, permission details, messages, MCP bodies, and remote response bodies
-must not enter SQLite, normal logs, diagnostics, metrics, temporary files,
-crash artifacts, or support bundles. The encrypted credential is the only
-approved durable location for the central token and private key.
+Tokens, private keys, proofs, verification codes, email addresses, permission
+details, unrelated messages, MCP bodies, and remote response bodies must not
+enter SQLite, normal logs, diagnostics, metrics, temporary files, crash
+artifacts, or support bundles. The encrypted credential is the only approved
+durable location for the central token and private key. ADRs 0046 and 0051
+define the only encrypted action-content exceptions.
 
 ## Consequences
 

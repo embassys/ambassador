@@ -1,6 +1,6 @@
 # 0046 Encrypted pending-action inbox
 
-Status: accepted
+Status: accepted; agent-facing view amended by ADR 0052
 
 Date: 2026-09-03
 
@@ -66,3 +66,7 @@ Central idempotency or outcome lookup is tracked as a follow-up.
 
 The user approved implementing the unanswered-action list with encrypted local
 persistence and no new central API on 2026-09-03.
+
+ADR 0052 later replaced the separate list tool with the unified `get_inbox`
+view. The encrypted storage and removal after a successful result submission
+remain current.

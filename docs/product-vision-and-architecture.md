@@ -26,9 +26,9 @@ ambassador clean
 Only `start --verbose` and `sessions show <session-id> --verbose` accept an
 option. No command selects an agent, delivery mode, executable, endpoint, or
 credential. `webhook-secret` creates or reveals the one encrypted receiver
-secret for owner-driven webhook setup. `clean` clears local enrollment,
-delivery, and ACP session metadata after it proves no foreground Ambassador
-process owns the lock.
+secret for owner-driven webhook setup. Session reads work while Ambassador is
+running; session deletion, session forgetting, and `clean` require it to be
+stopped. `clean` clears local enrollment, delivery, and ACP session metadata.
 Ambassador resolves a fixed agent profile from MCP `clientInfo` during
 registration. It asks for a delivery choice only when that profile supports
 both modes, then stores the result as nonsecret local profile data.
@@ -52,6 +52,8 @@ Central permissions, actions, and messages
 Bounded in-memory delivery queue and ID-only journal
   |
   +--> validated action call: encrypted pending-action inbox until result
+  |
+  +--> validated action response: encrypted result inbox for later retrieval
   |
   +--> webhook mode: complete message to an authenticated endpoint
   |
@@ -175,38 +177,43 @@ does not probe alternate contracts or keep an old client as fallback.
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
-| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal, encrypted unanswered action calls | Provider account credentials or durable copies of other message bodies |
+| Ambassador | Loopback MCP and private-control boundary checks, encrypted central credential, encrypted webhook and local-control secrets, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal, encrypted unanswered action calls, encrypted received action results | Provider account credentials or durable copies of unrelated message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
 The central token and P-256 private key persist only inside one encrypted
-credential file. The webhook secret persists in a different encrypted file.
-Each has independently generated wrapping material in a separate owner-only
-state file. This protects against disclosure of one encrypted value without
-its key, not compromise of the owner's complete state directory.
+credential file. The webhook and private-control secrets persist in their own
+encrypted files. Each encrypted value has independently generated wrapping
+material in a separate owner-only state file. This protects against disclosure
+of one encrypted value without its key, not compromise of the owner's complete
+state directory.
 Local MCP trusts other processes running as the owner; strict loopback, Host,
 and Origin checks protect the browser and network boundary. The delivery
 profile may persist the mode, recognized agent kind, webhook URL, and canonical
 direct working directory. An owner-only SQLite database holds bounded ACP
 session IDs, central correlation IDs, lifecycle state, and timestamps. It never
 contains a secret, message body, prompt, tool data, or provider output. The
-notification journal remains ID-only. A separate SQLite inbox stores only
-encrypted, validated unanswered action calls, keyed to the enrolled DPoP
-identity.
+notification journal remains ID-only. Two separate SQLite inboxes store only
+encrypted, validated unanswered action calls and received action results. Both
+are keyed to the enrolled DPoP identity.
 
 ## Main flows
 
 ### Startup
 
 1. Acquire the singleton lock.
-2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
-3. Reject supplied local Authorization credentials.
-4. Load the delivery profile, encrypted central credential, encrypted
-   pending-action inbox, and ACP session metadata if present.
-5. For webhook mode, load the separately encrypted webhook secret.
-6. Prepare the configured delivery target.
-7. Start REST polling only when the required stored records are valid.
-8. Print the MCP endpoint, fixed setup commands for all supported agents, the
+2. Open the ID-only journal, create or load the encrypted internal control
+   secret, and load the encrypted central credential and delivery profile when
+   present.
+3. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks and a
+   separately authenticated non-MCP route for live session reads.
+4. Reject supplied Authorization credentials on `/mcp`.
+5. For an enrolled identity, open the encrypted action-call and action-result
+   inboxes and ACP session metadata.
+6. For webhook mode, load the separately encrypted webhook secret.
+7. Prepare the configured delivery target.
+8. Start REST polling only when the required stored records are valid.
+9. Print the MCP endpoint, fixed setup commands for all supported agents, the
    registration prompt, and remain in the foreground.
 
 A local agent or webhook delivery failure pauses incoming delivery and prints
@@ -222,15 +229,27 @@ preferring `allow_once`. This is an accepted owner-machine trust choice. A
 missing tool leaves an action available through the encrypted pending-action
 inbox.
 
+### Session inspection
+
+`sessions list` and `sessions show` work whether Ambassador is stopped or
+running. While it runs, the CLI calls a fixed private route on the same
+loopback listener with an internally generated encrypted secret. This route is
+not an MCP tool and is never disclosed to the agent. The foreground process
+serializes provider history loading with direct delivery and session cleanup.
+
+When Ambassador is stopped, read commands acquire the singleton lock and open
+the local session store directly. `sessions delete` and `sessions forget`
+always require that stopped path because they remove provider or local state.
+
 ### Local reset
 
 1. The owner stops the foreground Ambassador process.
 2. `ambassador clean` acquires the singleton process lock. It fails without
    changing state if another process owns the lock or if the lock cannot be
    validated.
-3. It removes the credential pair, webhook-secret pair, delivery profile,
-   encrypted pending-action inbox, ACP session metadata, notification journal,
-   and any interrupted state writes.
+3. It removes the credential pair, webhook-secret pair, local-control-secret
+   pair, delivery profile, encrypted action-call and action-result inboxes, ACP
+   session metadata, notification journal, and any interrupted state writes.
 4. It retains the empty owner-only state directory and process lock for safe
    coordination.
 5. The next `ambassador start` exposes the bootstrap enrollment tools.
@@ -263,12 +282,12 @@ action call may deliver a message to another identity. The target submits one
 structured success or error result for the call. Central correlates it by
 `call_id` and queues an `action_response` for the original caller.
 
-The agent-facing `list_pending_permission_requests` tool derives a user's
-unanswered inbox from `get_my_permissions`: pending rows where the enrolled
-identity is the grantor. It stores no second queue. Central normally asks the
-human asynchronously by email and does not wake the grantor's local agent for
-a new permission request. A user who is already in the agent chat can still
-inspect the projection and explicitly grant or deny through
+The agent-facing `get_inbox` tool derives pending permission decisions from
+`get_my_permissions`: pending rows where the enrolled identity is the grantor.
+It stores no second permission queue. Central normally asks the human
+asynchronously by email and does not wake the grantor's local agent for a new
+permission request. A user who is already in the agent chat can inspect the
+same permission and explicitly grant or deny it through
 `respond_to_permission`.
 
 After the human decides, central sends the requester a `permission_outcome`.
@@ -276,20 +295,27 @@ For a grant, Ambassador's fixed delivery prompt tells the receiving agent to
 continue the approved action once, using the outcome's `grantor_email` as the
 target and its `action_type`; outcome metadata is not passed to `call_action`.
 
-`list_pending_action_calls` is different: it lists action calls already
-delivered to this identity that still need a result. Ambassador encrypts the
-validated call ID, sender ID, action type, payload, and creation time locally
-before local delivery and central acknowledgement. A successful
-`submit_action_result` removes that call and retires its ACP session. No new
-central route is required.
+The same `get_inbox` response includes action calls already delivered to this
+identity that still need a result. Ambassador encrypts the validated call ID,
+sender ID, action type, payload, and creation time before local delivery and
+central acknowledgement. A successful `submit_action_result` removes that call
+and retires its ACP session.
+
+The final inbox item is an unread `action_response` received for an action this
+identity requested. Ambassador encrypts the call ID, sender ID, action type,
+status, structured result, and creation time before local delivery and central
+acknowledgement. Results survive restarts until `get_inbox` returns them once.
+This lets a foreground agent answer "have we heard back?" without access to
+the background ACP session. None of these inbox views requires a new central
+route.
 
 ### Incoming message
 
 1. Ambassador long-polls central.
 2. Central marks selected messages delivered before returning them.
 3. Ambassador validates a bounded batch and journals only message IDs and
-   delivery state. For an action call only, it first writes the validated call
-   fields to the encrypted pending-action inbox.
+   delivery state. It first writes validated action calls or action responses
+   to their separate encrypted inboxes.
 4. The selected delivery target receives the complete message. If it needs
    unavailable user input, it leaves the action call pending.
 5. A webhook `2xx` or successful direct ACP completion transfers or completes
@@ -313,10 +339,10 @@ retrieval or redelivery is the proper future fix.
 - A separate connector process or user-supplied provider transport.
 - Recovering the exact MCP chat used during registration.
 - Passing raw secrets through the model.
-- Inventing general reply, conversation, lease, outcome-lookup, activation, or
-  token-reissue APIs that central does not expose.
-- Persisting central message bodies locally except for the encrypted,
-  validated unanswered-action records defined by ADR 0046.
+- Inventing general reply, conversation, lease, central outcome-lookup,
+  activation, or token-reissue APIs that central does not expose.
+- Persisting central message bodies locally except for encrypted validated
+  unanswered action calls and received action results.
 - Native service management or a GUI.
 
 ## Current limitations

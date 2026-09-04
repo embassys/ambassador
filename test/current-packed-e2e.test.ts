@@ -188,10 +188,9 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     "resend_verification",
     "list_action_types",
     "request_permission",
-    "list_pending_permission_requests",
+    "get_inbox",
     "respond_to_permission",
     "call_action",
-    "list_pending_action_calls",
     "submit_action_result",
     "get_my_permissions",
   ];

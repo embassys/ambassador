@@ -1,6 +1,6 @@
 # 0045 Self-contained adapters and permission inbox
 
-Status: accepted; Claude adapter selection superseded by ADR 0047
+Status: accepted; Claude adapter selection superseded by ADR 0047; inbox view superseded by ADR 0052
 
 Date: 2026-09-03
 
@@ -64,4 +64,5 @@ the pending-request tool, and a follow-up release on 2026-09-03.
 
 ADR 0047 later replaced only the Claude adapter and authentication details.
 The Codex dependency, setup guidance, diagnostics, tool descriptions, and
-pending-permission decision remain current.
+pending-permission decision remain current. ADR 0052 later replaced the
+separate pending-permission list with `get_inbox`.

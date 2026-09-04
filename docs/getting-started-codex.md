@@ -48,10 +48,8 @@ not connect to this loopback server.
 
 Later, you can ask:
 
-- **Which Embassys permission requests are waiting for my approval?** Then tell
-  Codex which one to grant or deny.
-- **Which Embassys actions are waiting for my answer?** Then give Codex the
-  requested value so it can submit the result.
+- **Check my Embassys inbox.** Codex lists permission decisions and action
+  answers waiting for you, plus unread results returned by other identities.
 
 ## Incoming messages
 
@@ -67,12 +65,13 @@ unattended direct requests.
 
 ## Inspect sessions
 
-- Stop Ambassador first.
+- Keep Ambassador running.
 - Run `npx --yes @embassys/ambassador@latest sessions list`.
 - Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
 - Add `--verbose` to `show` for bounded tool events.
-- Use `sessions delete <session-id>` to delete provider history, or
-  `sessions forget <session-id>` to remove only Ambassador's record.
+- Stop Ambassador before using `sessions delete <session-id>` to delete
+  provider history or `sessions forget <session-id>` to remove only
+  Ambassador's record.
 
 If startup or ACP initialization fails, Ambassador prints a bounded reason.
 Confirm Codex is signed in, update Ambassador, and restart it. For a clean local
