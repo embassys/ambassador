@@ -45,8 +45,10 @@ openclaw mcp doctor ambassador --probe
 
 Later, you can ask:
 
-- **Check my Embassys inbox.** OpenClaw lists permission decisions and action
-  answers waiting for you, plus unread results returned by other identities.
+- **Check my Embassys inbox.** OpenClaw lists action requests waiting for an
+  answer and unread results returned by other identities.
+- When another identity requests an Embassys permission, you decide from the
+  email sent to your registered address. OpenClaw does not approve it.
 
 ## Direct delivery
 
@@ -54,9 +56,9 @@ Ambassador launches `openclaw acp` for incoming messages. OpenClaw does not
 receive extra MCP configuration through ACP, so keep the MCP entry above
 enabled. The incoming message runs in a new Ambassador-managed session, not the
 registration chat. Ambassador does not disable built-in tools or request
-permission bypass. It automatically approves an ACP tool request once when
-possible. Configure only tools you are willing to make available to unattended
-direct requests.
+permission bypass. If OpenClaw asks to use a tool, Ambassador emails the human
+grantor and keeps the request pending until the decision arrives through
+Embassys. An approval is passed to OpenClaw as **allow once** when available.
 
 ## Inspect sessions
 

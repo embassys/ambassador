@@ -17,6 +17,10 @@ modes use isolated provider configuration copies where native authentication
 allows it. Installed-version probes are observational; production requires the
 exact known client and ACP agent names and then tries the fixed ACP v1 contract.
 
+Historical observations below ADR 0054 may mention the former
+`respond_to_permission` agent flow. They remain evidence for those artifacts,
+not instructions for the current runner. The current flow is email-only.
+
 ## Safety
 
 - Use disposable Mailosaur addresses and synthetic action data.
@@ -38,21 +42,26 @@ exact known client and ACP agent names and then tries the fixed ACP v1 contract.
    nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
 7. Validate the live action catalog against the recorded fixture schemas.
-8. Request one synthetic `get_phone_number` permission, prove that the
-   grantor's agent is not woken, and apply the human decision from the
-   disposable permission email.
-9. Deliver the action request to the direct target.
-10. Submit one correlated synthetic result from the target and deliver the
+8. Request one synthetic `get_phone_number` permission with the
+   `once_always` menu, prove that the grantor's agent has no inbox item, and
+   apply `allow_once` from the disposable permission email.
+9. Make the direct ACP target request one harmless fixture tool, prove its ACP
+   request remains pending, answer `Allow once` through the target owner's
+   `get_human_input` email, and prove Ambassador receives the correlated
+   `human_input_response` through `poll_messages?timeout=0` before selecting
+   ACP `allow_once`. Prove the control response is not prompted to the agent.
+10. Deliver the action request to the direct target.
+11. Submit one correlated synthetic result from the target and deliver the
     resulting `action_response` to the selected requester endpoint.
-11. Prove each local acceptance or completion precedes its central
+12. Prove each local acceptance or completion precedes its central
     acknowledgement.
-12. Prove one provider session per message, action-result retirement,
+13. Prove one provider session per message, action-result retirement,
     running-process `sessions list`, normal and verbose running-process
     `sessions show`, stopped-process `sessions delete` and `sessions forget`,
     stable repeated `webhook-secret`, and redacted `start --verbose` output.
-13. Record the consuming-poll restart-loss and non-idempotent result-submission
+14. Record the consuming-poll restart-loss and non-idempotent result-submission
     limitations.
-14. Stop all processes, delete mail and temporary state, and scan artifacts.
+15. Stop all processes, delete mail and temporary state, and scan artifacts.
 
 Use the mock webhook receiver and either the mock ACP agent or the fixed real
 Codex mode for this live REST test. Real-agent qualification for all four
@@ -122,8 +131,9 @@ ACP requires exact agent name `@agentclientprotocol/claude-agent-acp`. The
 adapter and Claude Code own authentication. Claude loads normal provider
 configuration and keeps its built-in tools. Ambassador requests no safe mode,
 tool restriction, or permission bypass; it selects `allow_once` when ACP asks
-for approval. The runner applies the permission through the disposable human
-decision email; Claude is not invoked for that step. The controlled
+for approval only after the correlated human decision arrives through central
+polling. The runner applies each permission through the disposable human
+decision email. The controlled
 qualification policy directs Claude only to submit the synthetic action result
 through Ambassador MCP. Record the authentication category, not a credential
 value. Delete an isolated home after every attempt. The runner never deletes
@@ -233,6 +243,25 @@ messages, action payloads, permission scopes, webhook details, prompts,
 provider output, or remote error bodies.
 
 ## Correlated-result observation
+
+### ADR 0055 own-human input candidate
+
+On 2026-09-04, the clean packed ADR 0055 candidate passed the combined
+Codex-to-Claude run against reviewed central source revision
+`708f205bfaee5010eb86fcfae55967fb5d02071c`. The candidate tarball SHA-256 was
+`59d6114213a4aac63ea59b3cf34a7b50f7023d2893c4def7d907cdc67350d76b`,
+and the exact runner SHA-256 was
+`6d9de51f592d0eacda995d02db854d0860ab012fc863d7be9101523b72d08a64`.
+
+One provider emitted an ACP permission request. Ambassador called
+`get_human_input`, the disposable owner selected allow once by email, central
+queued the correlated `human_input_response`, and Ambassador resumed the ACP
+request before completing delivery. The other provider completed without an
+ACP permission callback. The distinct Embassys permission email, action call,
+single correlated phone-number result, response delivery, and acknowledgement
+ordering all passed. The run also passed registration, verification, encrypted
+restart, DPoP checks, the six-action catalog, session and utility commands,
+artifact scanning, mail cleanup, and temporary-state cleanup.
 
 ### Ambassador 0.2.12
 
