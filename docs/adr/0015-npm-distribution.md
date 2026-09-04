@@ -170,6 +170,11 @@ key, while deliberately configured provider API keys remain supported. The
 candidate passed the repository and clean-installed package suites plus a real
 Codex-to-Claude permission and action round trip against the deployed service.
 
+Those conditions passed. PR 33 merged on 2026-09-04, all pull-request and
+`main` gates passed, and the OIDC job published 0.2.17 with the npm `latest`
+tag. A fresh registry download passed the clean-installed runtime lane; its
+digests are recorded in the qualification document.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
