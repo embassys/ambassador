@@ -3,24 +3,28 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## Authentication-neutral Claude bridge source qualification
+## Provider-configured Claude bridge source qualification
 
 On 2026-09-04, the current source removed the Claude-specific authentication
 preflight. The built-in bridge now lets the installed official CLI apply its
 native authentication and organization policy. The fixed Claude profile alone
 inherits Ambassador's bounded process environment; every other profile keeps
-its compiled allowlist. The unattended prompt still uses safe mode, the exact
-injected Ambassador MCP server, no built-in tools, no session persistence, and
-bounded provider output.
+its compiled allowlist. ADR 0049 subsequently changed Claude to normal provider
+MCP configuration so resource-backed actions can use configured tools. The
+unattended prompt keeps no built-in tools, no session persistence, and bounded
+provider output.
 
-The repository check passed 203 tests: 197 passed and six platform-specific or
+The repository check passed 204 tests: 198 passed and six platform-specific or
 opt-in cases skipped. Linting and type checking passed. Regression cases prove
 that the bridge makes no separate auth invocation, preserves representative
 native authentication environments, rejects inherited-environment bounds and
-invalid names, exposes only Ambassador MCP, and does not reflect provider
-failure details. A new real-provider or published-release qualification has
-not yet been run; the required pre-release follow-up remains in the
-[implementation plan](implementation-plan.md).
+invalid names, loads normal configured MCP tools without safe or strict
+isolation, and does not reflect provider failure details. The live runner now
+configures Ambassador through the isolated Claude provider configuration and
+requires the real background turn to submit its result automatically. A new
+real-provider or published-release qualification has not yet been run; the
+required pre-release follow-up remains in the [implementation
+plan](implementation-plan.md).
 
 ## Ambassador 0.2.15 candidate
 
@@ -776,10 +780,11 @@ pnpm run qualify:agents
 Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, observes the
 installed provider versions, loads the code from the exact candidate archive,
-runs all seven delivery cases, and prints one safe JSON report. Configure the
-OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
-authentication before starting the runner. The other four profiles receive the
-same endpoint by ACP session injection. Each direct case must call the
+runs the delivery cases, and prints one safe JSON report. Configure OpenClaw's
+provider-side MCP entry for `http://127.0.0.1:8787/mcp` without authentication
+before starting the runner. The real-Claude runner configures the same endpoint
+as a user-scope MCP entry in its isolated provider home. Hermes and Codex
+receive it by ACP session injection. Each direct case must call the
 qualification `get_my_permissions` tool, which proves the real MCP client's
 exact name match. Missing, unauthenticated, or failing agents make the delivery
 case fail; a version-command observation does not. The runner never invokes an

@@ -189,7 +189,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       command: "claude",
       args: [],
       agentInfo: { name: "@embassys/claude-cli-acp" },
-      mcp: "session",
+      mcp: "provider_config",
       environment: "inherit",
       builtInAdapter: "claude-cli",
     },
@@ -227,7 +227,7 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     (value.builtInAdapter === "claude-cli" &&
       value.command === "claude" &&
       value.args.length === 0 &&
-      value.mcp === "session" &&
+      value.mcp === "provider_config" &&
       value.agentInfo.name === "@embassys/claude-cli-acp" &&
       windowsNodePackage === undefined &&
       bundledNodePackage === undefined);

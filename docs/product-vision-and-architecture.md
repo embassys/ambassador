@@ -113,6 +113,11 @@ the separately installed official `claude` command and its existing native
 authentication. The official CLI owns authentication, and the provider decides
 billing. Ambassador does not select an authentication method, initiate login,
 or inspect, store, log, or return provider credentials.
+Claude loads its normal provider configuration for a direct turn, including
+configured MCP tools. Ambassador disables Claude's built-in tools but
+allows configured MCP tools without an interactive prompt, subject to provider
+and managed deny policy, so resource-backed actions can finish.
+Claude therefore requires the documented user-scope Ambassador MCP entry.
 OpenClaw and Hermes provide their own fixed agent commands. Exact client and
 ACP agent names, commands, arguments, modes, and environment policies remain
 compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
@@ -198,6 +203,14 @@ one bounded repair message without taking down the MCP server. Central,
 credential, state, and listener failures remain fatal. Restarting Ambassador
 after repairing the local target resumes polling for new messages; it cannot
 recover a message already consumed by central.
+
+Direct agents may use their normally configured tools while handling the fixed
+Embassys delivery prompt. Claude loads its normal MCP configuration and
+allows configured MCP tools without an interactive prompt, subject to provider
+policy; OpenClaw, Hermes, and Codex retain their native tool behavior without
+an Ambassador-imposed safe mode. This is an accepted owner-machine trust
+choice. A missing tool leaves an action available through the encrypted
+pending-action inbox.
 
 ### Local reset
 

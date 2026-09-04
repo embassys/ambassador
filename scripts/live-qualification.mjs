@@ -483,6 +483,39 @@ function claudeEnvironment(home) {
   };
 }
 
+async function runClaudeConfiguration(home, arguments_) {
+  const child = spawn(CLAUDE_COMMAND, arguments_, {
+    cwd: home,
+    env: claudeEnvironment(home),
+    shell: false,
+    stdio: "ignore",
+  });
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+  timeout.unref();
+  const code = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  }).finally(() => clearTimeout(timeout));
+  assert(code === 0, "claude_mcp_configuration");
+}
+
+async function configureClaudeMcp(home, endpoint) {
+  await runClaudeConfiguration(home, ["mcp", "remove", "ambassador", "--scope", "user"]).catch(
+    () => undefined,
+  );
+  await runClaudeConfiguration(home, [
+    "mcp",
+    "add",
+    "--transport",
+    "http",
+    "--scope",
+    "user",
+    "ambassador",
+    endpoint,
+  ]);
+  await runClaudeConfiguration(home, ["mcp", "get", "ambassador"]);
+}
+
 async function validateClaudeHome(configuredHome) {
   assert(configuredHome !== undefined && isAbsolute(configuredHome), "claude_isolation");
   const home = await realpath(configuredHome).catch(() => undefined);
@@ -1413,7 +1446,7 @@ async function main() {
           claudeCapability?.direct?.command === CLAUDE_COMMAND &&
           canonicalJson(claudeCapability.direct.args) === canonicalJson([]) &&
           claudeCapability.direct.agentInfo.name === "@embassys/claude-cli-acp" &&
-          claudeCapability.direct.mcp === "session" &&
+          claudeCapability.direct.mcp === "provider_config" &&
           claudeCapability.direct.builtInAdapter === "claude-cli",
         "claude_profile",
       );
@@ -1455,19 +1488,27 @@ async function main() {
       mkdir(targetWorkingDirectory, { recursive: true }),
     ]);
     if (realTarget) {
-      await writeFile(
-        join(targetWorkingDirectory, "AGENTS.md"),
-        [
-          "# Controlled Embassys qualification policy",
-          "",
-          "The user approved only the synthetic get_phone_number qualification in this directory.",
-          "For its permission_request, call respond_to_permission with decision granted.",
-          `For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
-          "Do not grant, execute, or answer any other request.",
-          "",
-        ].join("\n"),
-        { encoding: "utf8", flag: "wx", mode: 0o600 },
-      );
+      const qualificationPolicy = [
+        "# Controlled Embassys qualification policy",
+        "",
+        "The user approved only the synthetic get_phone_number qualification in this directory.",
+        "For its permission_request, call respond_to_permission with decision granted.",
+        `For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
+        "Do not grant, execute, or answer any other request.",
+        "",
+      ].join("\n");
+      await writeFile(join(targetWorkingDirectory, "AGENTS.md"), qualificationPolicy, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      if (realClaude) {
+        await writeFile(join(targetWorkingDirectory, "CLAUDE.md"), qualificationPolicy, {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+        });
+      }
     }
 
     const clientInfoFor = (index) =>
@@ -1553,6 +1594,11 @@ async function main() {
           webhookFetchFor(index),
         ),
       );
+      if (realClaude && index === 1) {
+        assert(claudeHome !== undefined, "claude_isolation");
+        phase = "claude_mcp_configuration";
+        await configureClaudeMcp(claudeHome, gateways[index].client.endpoint);
+      }
       if (realHermesWebhook && index === 1) {
         assert(hermesHome !== undefined, "hermes_isolation");
         phase = "hermes_mcp_configuration";
@@ -1789,14 +1835,14 @@ async function main() {
       "permission",
     );
     phase = `permission_request_${realWebhook ? "webhook" : "direct"}`;
-    if (realTarget && !realClaude) {
+    if (realTarget) {
       await waitForObservation(
         () =>
           targetPermissionDecisionObserved &&
           successfulAckCounts[1] > recipientAckCountBeforePermission,
         "permission_request_model_timeout",
       );
-    } else if (!realClaude) {
+    } else {
       const permissionMessage = await waitForDelivered(
         directMessages,
         (message) =>
@@ -1809,11 +1855,6 @@ async function main() {
       assert(
         isRecord(permissionMessage) && typeof permissionMessage.id === "string",
         "permission_poll",
-      );
-    } else {
-      await waitForObservation(
-        () => successfulAckCounts[1] > recipientAckCountBeforePermission,
-        "claude_permission_delivery_timeout",
       );
     }
 
@@ -1838,7 +1879,7 @@ async function main() {
       permissionListing = { status: "server_error", fields: [] };
     }
 
-    if (permissionStatus === "pending" && (!realTarget || realClaude)) {
+    if (permissionStatus === "pending" && !realTarget) {
       await gateways[1].client.call("respond_to_permission", {
         permission_id: requested.permission_id,
         decision: "granted",
@@ -1872,7 +1913,7 @@ async function main() {
       "action",
     );
     phase = `action_${realWebhook ? "webhook" : "direct"}`;
-    if (realTarget && !realClaude) {
+    if (realTarget) {
       await waitForObservation(
         () =>
           targetSubmittedCallIds.has(called.call_id) &&
@@ -1883,7 +1924,7 @@ async function main() {
         targetSubmittedCallIds.has(called.call_id) && targetActionResultCallCount === 1,
         "target_action_result",
       );
-    } else if (!realClaude) {
+    } else {
       const actionMessage = await waitForDelivered(
         directMessages,
         (message) =>
@@ -1894,23 +1935,6 @@ async function main() {
         "action_direct_timeout",
       );
       assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
-      await gateways[1].client.call("submit_action_result", {
-        call_id: called.call_id,
-        result: { phone_number: syntheticPhone },
-        status: "success",
-      });
-    } else {
-      await waitForObservation(
-        () => acknowledgedByGateway[1].has(called.message_id),
-        "claude_action_delivery_timeout",
-      );
-      const pending = await gateways[1].client.call("list_pending_action_calls", {});
-      assert(
-        pending.count === 1 &&
-          Array.isArray(pending.pending_action_calls) &&
-          pending.pending_action_calls[0]?.call_id === called.call_id,
-        "claude_pending_action",
-      );
       await gateways[1].client.call("submit_action_result", {
         call_id: called.call_id,
         result: { phone_number: syntheticPhone },

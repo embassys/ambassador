@@ -1,7 +1,7 @@
 # 0038 Ambassador delivery modes
 
 Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
-0047, and 0048
+0047, 0048, and 0049
 
 Date: 2026-09-02
 
@@ -162,7 +162,7 @@ The enabled direct profiles are:
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | ACP session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
-| Claude Code | `claude-code` | Ambassador's built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | ACP session injection |
+| Claude Code | `claude-code` | Ambassador's built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | provider configuration |
 
 Under ADR 0045, Ambassador installs the Apache-2.0 `codex-acp` adapter as an
 exact production dependency. It starts Codex App Server, translates ACP v1,
@@ -176,11 +176,12 @@ authentication.
 
 ADR 0047 replaces the Claude dependency selected in ADR 0045. Ambassador
 launches its own bounded ACP v1 bridge, which in turn launches the fixed
-official `claude` command in headless, non-persistent mode with the injected
-Ambassador MCP endpoint. ADR 0048 makes the official CLI responsible for
-authentication and gives it the Ambassador process environment unchanged.
+official `claude` command in headless, non-persistent mode. ADR 0048 makes the
+official CLI responsible for authentication and gives it the Ambassador
+process environment unchanged. ADR 0049 removes Claude's safe and strict MCP
+isolation so the background turn can use normally configured MCP tools.
 Ambassador does not initiate login or inspect, store, log, or return provider
-credentials.
+credentials or MCP configuration.
 
 Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
 future profile requires a separately accepted fixed launch contract and live
@@ -387,6 +388,7 @@ reported versions must not gate registration or direct initialization. ADR
 0041 supersedes the exact-version portions of this record. The commands,
 arguments, delivery modes, environment policies, and ACP v1 protocol remain
 fixed. ADR 0048 later changes only the fixed Claude environment policy.
+ADR 0049 later changes Claude's MCP behavior to provider configuration.
 
 On 2026-09-03, the user approved replacing the package-shipped OpenClaw
 receiver with OpenClaw's native `/hooks/agent` endpoint. Ambassador keeps the

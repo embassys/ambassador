@@ -141,7 +141,7 @@ test("records all reviewed production agent contracts exactly", () => {
         command: "claude",
         args: [],
         agentInfo: { name: "@embassys/claude-cli-acp" },
-        mcp: "session",
+        mcp: "provider_config",
         environment: "inherit",
         builtInAdapter: "claude-cli",
       },
@@ -160,6 +160,7 @@ test("Claude direct delivery leaves every native authentication method to the in
   assert.equal(claude?.direct?.command, "claude");
   assert.equal(claude?.direct?.builtInAdapter, "claude-cli");
   assert.deepEqual(claude?.direct?.agentInfo, { name: "@embassys/claude-cli-acp" });
+  assert.equal(claude?.direct?.mcp, "provider_config");
   assert.equal(claude?.direct?.environment, "inherit");
 });
 

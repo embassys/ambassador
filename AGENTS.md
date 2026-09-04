@@ -52,6 +52,13 @@ scope on your own.
   unmodified official CLI can apply its own authentication policy. Ambassador
   does not initiate login or inspect, store, log, or return provider
   credentials.
+- Under ADR 0049, the Claude bridge uses normal provider configuration rather
+  than safe or strict MCP isolation. It disables Claude's built-in tools but
+  allows configured MCP tools for the fixed Embassys delivery prompt, subject
+  to provider and managed deny policy.
+  Claude must therefore have Ambassador MCP configured normally. Do not add an
+  Ambassador-imposed safe mode to another direct profile without a new
+  approved decision.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts only a URL after the owner creates Ambassador's
