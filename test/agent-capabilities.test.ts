@@ -142,28 +142,7 @@ test("records all reviewed production agent contracts exactly", () => {
         args: [],
         agentInfo: { name: "@embassys/claude-cli-acp" },
         mcp: "session",
-        environment: [
-          "APPDATA",
-          "HOME",
-          "LANG",
-          "LC_ALL",
-          "LOCALAPPDATA",
-          "NODE_EXTRA_CA_CERTS",
-          "PATH",
-          "SSL_CERT_DIR",
-          "SSL_CERT_FILE",
-          "SystemRoot",
-          "TEMP",
-          "TMP",
-          "TMPDIR",
-          "USER",
-          "USERNAME",
-          "USERPROFILE",
-          "WINDIR",
-          "XDG_CONFIG_HOME",
-          "XDG_DATA_HOME",
-          "XDG_STATE_HOME",
-        ],
+        environment: "inherit",
         builtInAdapter: "claude-cli",
       },
       qualificationCases: ["claude-direct"],
@@ -176,16 +155,12 @@ test("Hermes ACP support fixes the agent name without pinning a version", () => 
   assert.deepEqual(hermes?.direct?.agentInfo, { name: "hermes-agent" });
 });
 
-test("Claude direct delivery uses its installed CLI login without accepting credential variables", () => {
+test("Claude direct delivery leaves every native authentication method to the installed CLI", () => {
   const claude = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "claude");
   assert.equal(claude?.direct?.command, "claude");
   assert.equal(claude?.direct?.builtInAdapter, "claude-cli");
   assert.deepEqual(claude?.direct?.agentInfo, { name: "@embassys/claude-cli-acp" });
-  assert.equal(claude?.direct?.environment.includes("ANTHROPIC_API_KEY"), false);
-  assert.equal(claude?.direct?.environment.includes("ANTHROPIC_AUTH_TOKEN"), false);
-  assert.equal(claude?.direct?.environment.includes("CLAUDE_CODE_OAUTH_TOKEN"), false);
-  assert.equal(claude?.direct?.environment.includes("USER"), true);
-  assert.equal(claude?.direct?.environment.includes("USERNAME"), true);
+  assert.equal(claude?.direct?.environment, "inherit");
 });
 
 test("matches exact client names and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {
@@ -241,6 +216,15 @@ test("matches exact client names and rejects unknown, ambiguous, disabled, and i
   assert.equal(
     resolveAgentCapability({ name: "fixture-direct", version: "1" }, [
       { ...directOnly, direct: undefined } as unknown as AgentCapability,
+    ]).status,
+    "unsupported",
+  );
+  assert.equal(
+    resolveAgentCapability({ name: "fixture-direct", version: "1" }, [
+      {
+        ...directOnly,
+        direct: { ...directOnly.direct, environment: "inherit" },
+      } as AgentCapability,
     ]).status,
     "unsupported",
   );

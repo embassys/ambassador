@@ -84,9 +84,9 @@ message. Delete the isolated home after the run.
 
 For the real Claude Code mode, prepare an owner-only temporary home containing
 an owner-only copy of `.claude.json` and a minimal `.claude/settings.json`.
-Provide the copy with the existing ordinary `claude.ai` authentication needed
-for the run without printing it or saving it in the repository. Use the
-candidate's built-in Claude CLI bridge, then set:
+Configure the copy through the official Claude CLI with the authentication
+method being qualified, without printing a credential or saving it in the
+repository. Use the candidate's built-in Claude CLI bridge, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude
@@ -98,12 +98,13 @@ pnpm run qualify:live
 The runner rejects the ordinary user home, non-owner-only configuration files,
 and command overrides. It registers with exact MCP client name `claude-code`
 and a deliberately non-release diagnostic version. Ambassador launches its
-compiled-in bridge, the bridge validates `claude auth status`, and only the
-fixed `claude` command is started. ACP requires exact agent name
+compiled-in bridge and only the fixed `claude` command is started. The CLI owns
+authentication. ACP requires exact agent name
 `@embassys/claude-cli-acp`, and Ambassador MCP is injected into the ACP
 session. The background turn leaves the permission and action pending; the
 runner exercises the same later MCP decision and response path a user would.
-No Anthropic API key is supplied. Delete the isolated home after every attempt.
+Record the authentication category, not a credential value. Delete the isolated
+home after every attempt.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and

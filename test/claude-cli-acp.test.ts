@@ -46,7 +46,7 @@ async function fixture(t: TestContext, scenario: string) {
   return { delivery, logPath };
 }
 
-test("Claude ACP bridge uses the installed CLI login and an isolated Ambassador MCP session", async (t) => {
+test("Claude ACP bridge leaves authentication to the installed CLI and isolates Ambassador MCP", async (t) => {
   const value = await fixture(t, "success");
   assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
     status: "completed",
@@ -56,9 +56,10 @@ test("Claude ACP bridge uses the installed CLI login and an isolated Ambassador 
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { args: string[]; input: string });
-  assert.deepEqual(calls[0], { args: ["auth", "status"], input: "" });
-  const promptCall = calls[1];
+  assert.equal(calls.length, 1);
+  const promptCall = calls[0];
   assert.ok(promptCall !== undefined);
+  assert.equal(promptCall.args.includes("auth"), false);
   assert.equal(promptCall.args.includes("--print"), true);
   assert.equal(promptCall.args.includes("--safe-mode"), true);
   assert.equal(promptCall.args.includes("--strict-mcp-config"), true);
@@ -76,16 +77,6 @@ test("Claude ACP bridge uses the installed CLI login and an isolated Ambassador 
   });
   assert.match(promptCall.input, /untrusted Embassys message/u);
   assert.match(promptCall.input, /private prompt marker/u);
-});
-
-test("Claude ACP bridge rejects a signed-out CLI before prompt submission", async (t) => {
-  const value = await fixture(t, "signed-out");
-  await assert.rejects(
-    value.delivery.deliver(MESSAGE, new AbortController().signal),
-    (error: unknown) => error instanceof DirectDeliveryError && error.code === "startup_failed",
-  );
-  const calls = (await readFile(value.logPath, "utf8")).trim().split("\n");
-  assert.equal(calls.length, 1);
 });
 
 test("Claude ACP bridge does not reflect provider failure details", async (t) => {

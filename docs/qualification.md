@@ -3,6 +3,25 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Authentication-neutral Claude bridge source qualification
+
+On 2026-09-04, the current source removed the Claude-specific authentication
+preflight. The built-in bridge now lets the installed official CLI apply its
+native authentication and organization policy. The fixed Claude profile alone
+inherits Ambassador's bounded process environment; every other profile keeps
+its compiled allowlist. The unattended prompt still uses safe mode, the exact
+injected Ambassador MCP server, no built-in tools, no session persistence, and
+bounded provider output.
+
+The repository check passed 203 tests: 197 passed and six platform-specific or
+opt-in cases skipped. Linting and type checking passed. Regression cases prove
+that the bridge makes no separate auth invocation, preserves representative
+native authentication environments, rejects inherited-environment bounds and
+invalid names, exposes only Ambassador MCP, and does not reflect provider
+failure details. A new real-provider or published-release qualification has
+not yet been run; the required pre-release follow-up remains in the
+[implementation plan](implementation-plan.md).
+
 ## Ambassador 0.2.15 candidate
 
 On 2026-09-04, the byte-final 0.2.15 candidate added the encrypted local

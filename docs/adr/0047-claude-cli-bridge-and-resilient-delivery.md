@@ -1,6 +1,6 @@
 # 0047 Claude CLI bridge and resilient local delivery
 
-Status: accepted
+Status: accepted; Claude authentication superseded by ADR 0048
 
 Date: 2026-09-04
 
@@ -22,9 +22,9 @@ verification.
 - Remove `@agentclientprotocol/claude-agent-acp`. Ambassador owns a small ACP
   v1 bridge for Claude Code and launches that bridge with its Node runtime. The
   bridge launches the separately installed `claude` command without a shell.
-- Before accepting a session, the bridge runs the fixed `claude auth status`
-  check and requires an ordinary `claude.ai` login. It does not accept, copy,
-  or forward Anthropic API-key or token environment variables.
+- At acceptance, the bridge ran the fixed `claude auth status` check and
+  required an ordinary `claude.ai` login. ADR 0048 removes this preflight and
+  leaves authentication to the official CLI.
 - Each incoming message uses a non-persistent headless Claude invocation with
   only the exact loopback Ambassador MCP endpoint and the bounded Ambassador
   tools required for permission and action handling. Provider stderr and model
@@ -44,10 +44,11 @@ verification.
 
 ## Consequences
 
-Claude Code users need the official CLI installed and signed in, but no ACP
-adapter or API key. Ambassador still speaks ACP v1 internally, so the direct
+Claude Code users need the official CLI installed and authenticated, but no
+separate ACP adapter. Ambassador still speaks ACP v1 internally, so the direct
 delivery client and its message-custody rules do not fork by provider. Codex
-continues through its established adapter.
+continues through its established adapter. ADR 0048 defines current Claude
+authentication behavior.
 
 The Claude bridge is deliberately narrower than a general Claude Code session.
 It exists only to process an Ambassador wake with Ambassador tools. An action

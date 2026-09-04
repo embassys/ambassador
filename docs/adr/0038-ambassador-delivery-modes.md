@@ -1,7 +1,7 @@
 # 0038 Ambassador delivery modes
 
 Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
-and 0047
+0047, and 0048
 
 Date: 2026-09-02
 
@@ -139,8 +139,10 @@ implementation. The user approved ACP v1 and delegated the SDK choice.
 
 For a selected profile, Ambassador launches one fixed executable and argument
 set without a shell. Agent input and remote messages cannot select process
-details. The child receives a minimal, reviewed environment and bounded
-working directory.
+details. Each profile fixes its environment policy and working directory. Most
+profiles use a minimal allowlist. ADR 0048 makes the built-in Claude bridge
+inherit Ambassador's environment so the official CLI retains every native
+authentication method.
 
 On Windows, ADR 0040 keeps the no-shell rule. For a reviewed Node agent,
 Ambassador validates the fixed package name, bin mapping, and JavaScript
@@ -175,9 +177,10 @@ authentication.
 ADR 0047 replaces the Claude dependency selected in ADR 0045. Ambassador
 launches its own bounded ACP v1 bridge, which in turn launches the fixed
 official `claude` command in headless, non-persistent mode with the injected
-Ambassador MCP endpoint. The bridge requires the user's normal `claude.ai`
-login and neither accepts nor forwards Anthropic API-key or token environment
-variables.
+Ambassador MCP endpoint. ADR 0048 makes the official CLI responsible for
+authentication and gives it the Ambassador process environment unchanged.
+Ambassador does not initiate login or inspect, store, log, or return provider
+credentials.
 
 Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
 future profile requires a separately accepted fixed launch contract and live
@@ -382,8 +385,8 @@ Later on 2026-09-03, the user clarified that the observational policy applies
 to production too: known client and ACP agent names remain exact, while
 reported versions must not gate registration or direct initialization. ADR
 0041 supersedes the exact-version portions of this record. The commands,
-arguments, delivery modes, environment allowlists, and ACP v1 protocol remain
-fixed.
+arguments, delivery modes, environment policies, and ACP v1 protocol remain
+fixed. ADR 0048 later changes only the fixed Claude environment policy.
 
 On 2026-09-03, the user approved replacing the package-shipped OpenClaw
 receiver with OpenClaw's native `/hooks/agent` endpoint. Ambassador keeps the
