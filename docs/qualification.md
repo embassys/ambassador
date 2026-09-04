@@ -51,6 +51,24 @@ server work recorded in [Central service follow-ups](central-follow-ups.md).
 The successful round trip required retries around that live central behavior;
 it did not add a client fallback.
 
+PR 30 passed all seven required checks and merged as
+`d3bebc73416c27bf7500a645b7ce15ccfb9fdd95`. Main-branch run `33823471270`
+repeated the Linux, macOS, Windows, package-install, production vulnerability,
+signature, Windows ACL and command-shim, and Docker central-fixture gates. Its
+OIDC job published `@embassys/ambassador@0.2.15`, and the npm `latest` tag
+resolves to 0.2.15.
+
+The artifact downloaded from npm's published tarball URL had registry SRI
+`sha512-nTqGHCnCaNBUL7xyPHqOxwz/vm0ZnOx6mKombI4BJ6BBBZJ3Sa/ZwWa+GH7gv1XTR5x+UhA12tavUeGqZIdeSA==`,
+registry SHA-1 `e5d84b5250703a06546567fc7067e6936943861a`, and tarball
+SHA-256 `95cff931c82eec5e4f36407693bc0746ab4468955741e79ca1e258a3626fe611`.
+Its extracted file tree was identical to the qualified candidate; npm's
+archive encoding accounts for the archive-level digest difference. A clean
+registry installation passed the installed-CLI REST enrollment, stable tool
+catalog, webhook delivery, acknowledgement, cleanup, restart, and artifact
+scan. Its signature audit verified all 44 packages with no invalid or missing
+entry.
+
 ## Pending-action inbox source qualification
 
 On 2026-09-03, the current source added the encrypted local
