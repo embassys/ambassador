@@ -10,6 +10,7 @@ import * as acp from "@agentclientprotocol/sdk";
 
 import type {
   DirectAgentCapability,
+  DirectAgentEnvironment,
   NodePackageEntrypoint,
   WindowsNodePackageEntrypoint,
 } from "./agent-capabilities.js";
@@ -25,6 +26,9 @@ const DEFAULT_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DEFAULT_MAXIMUM_STARTUP_ATTEMPTS = 2;
 const MAXIMUM_PATH_ENTRIES = 128;
 const MAXIMUM_PACKAGE_MANIFEST_BYTES = 128 * 1024;
+const MAXIMUM_ENVIRONMENT_ENTRIES = 512;
+const MAXIMUM_ENVIRONMENT_BYTES = 1024 * 1024;
+const MAXIMUM_ENVIRONMENT_VALUE_BYTES = 32 * 1024;
 const BOUNDED_PACKAGE_VERSION = /^[\x20-\x7e]{1,128}$/u;
 
 type ManagedChild = ChildProcess;
@@ -284,18 +288,32 @@ async function cleanupChild(
 
 function safeEnvironment(
   source: NodeJS.ProcessEnv,
-  allowlist: readonly string[],
+  policy: DirectAgentEnvironment,
 ): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const name of allowlist) {
+  const names = policy === "inherit" ? Object.keys(source) : policy;
+  if (names.length > MAXIMUM_ENVIRONMENT_ENTRIES) {
+    throw new DirectDeliveryError("invalid_configuration");
+  }
+  const entries: [string, string][] = [];
+  let bytes = 0;
+  for (const name of names) {
     const value = source[name];
     if (value === undefined) continue;
-    if (value.length > 32_768 || value.includes("\u0000")) {
+    const valueBytes = Buffer.byteLength(value, "utf8");
+    bytes += Buffer.byteLength(name, "utf8") + valueBytes + 2;
+    if (
+      name.length === 0 ||
+      name.includes("=") ||
+      name.includes("\u0000") ||
+      valueBytes > MAXIMUM_ENVIRONMENT_VALUE_BYTES ||
+      value.includes("\u0000") ||
+      bytes > MAXIMUM_ENVIRONMENT_BYTES
+    ) {
       throw new DirectDeliveryError("invalid_configuration");
     }
-    result[name] = value;
+    entries.push([name, value]);
   }
-  return result;
+  return Object.fromEntries(entries);
 }
 
 export function buildDirectPrompt(message: CentralMessage): string {

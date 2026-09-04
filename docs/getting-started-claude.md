@@ -3,8 +3,8 @@
 ## 1. Start Ambassador
 
 - Install Node.js `>=24.19.0` and Claude Code.
-- Sign in to Claude Code normally. Ambassador never receives your Claude
-  credential.
+- Configure Claude Code authentication normally. Ambassador leaves account,
+  API, cloud-provider, and organization policy decisions to the official CLI.
 - In the directory Claude Code may access, run:
 
   ```sh
@@ -44,12 +44,18 @@ Later, you can ask:
 
 Ambassador includes its Claude bridge and launches your installed `claude`
 command when a central message arrives. You do not install an ACP adapter or
-set an Anthropic API key. The incoming message runs in a new
+give a credential to Ambassador. The official CLI uses whichever native
+authentication you configured. The incoming message runs in a new
 Ambassador-managed session, not the registration chat.
 
+Ambassador does not promise which Claude allowance pays for a programmatic
+request. Anthropic decides whether `claude --print` usage consumes plan credit,
+extra usage, API billing, or a cloud-provider account.
+
 If startup or ACP initialization fails, Ambassador leaves MCP available and
-prints a bounded reason while incoming delivery is paused. Confirm `claude auth
-status` reports a `claude.ai` login, update Ambassador, and restart it. For a
+prints a bounded reason while incoming delivery is paused. Confirm the official
+`claude` command can complete a non-interactive request with its current
+authentication, update Ambassador, and restart it. For a
 clean local registration test, see
 [Reset local test state](development-reset.md).
 

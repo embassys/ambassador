@@ -13,6 +13,7 @@ export interface NodePackageEntrypoint {
 }
 
 export type WindowsNodePackageEntrypoint = NodePackageEntrypoint;
+export type DirectAgentEnvironment = readonly string[] | "inherit";
 
 export interface DirectAgentCapability {
   readonly command: string;
@@ -21,7 +22,7 @@ export interface DirectAgentCapability {
     readonly name: string;
   };
   readonly mcp: McpConfigurationBehavior;
-  readonly environment: readonly string[];
+  readonly environment: DirectAgentEnvironment;
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
   readonly bundledNodePackage?: NodePackageEntrypoint;
   readonly builtInAdapter?: "claude-cli";
@@ -189,28 +190,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       args: [],
       agentInfo: { name: "@embassys/claude-cli-acp" },
       mcp: "session",
-      environment: [
-        "APPDATA",
-        "HOME",
-        "LANG",
-        "LC_ALL",
-        "LOCALAPPDATA",
-        "NODE_EXTRA_CA_CERTS",
-        "PATH",
-        "SSL_CERT_DIR",
-        "SSL_CERT_FILE",
-        "SystemRoot",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "USER",
-        "USERNAME",
-        "USERPROFILE",
-        "WINDIR",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        "XDG_STATE_HOME",
-      ],
+      environment: "inherit",
       builtInAdapter: "claude-cli",
     },
     qualificationCases: ["claude-direct"],
@@ -251,6 +231,13 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
       value.agentInfo.name === "@embassys/claude-cli-acp" &&
       windowsNodePackage === undefined &&
       bundledNodePackage === undefined);
+  const completeEnvironment =
+    value !== undefined &&
+    (value.environment === "inherit"
+      ? value.builtInAdapter === "claude-cli"
+      : value.environment.length <= 32 &&
+        value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
+        unique(value.environment));
   return (
     value !== undefined &&
     BOUNDED_METADATA.test(value.command) &&
@@ -258,9 +245,7 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     value.args.every((argument) => BOUNDED_METADATA.test(argument)) &&
     BOUNDED_METADATA.test(value.agentInfo.name) &&
     (value.mcp === "provider_config" || value.mcp === "session") &&
-    value.environment.length <= 32 &&
-    value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
-    unique(value.environment) &&
+    completeEnvironment &&
     completeWindowsNodePackage &&
     completeBundledNodePackage &&
     completeBuiltInAdapter &&

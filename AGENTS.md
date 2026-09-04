@@ -47,7 +47,11 @@ scope on your own.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
   central registration state. Do not offer a generic webhook fallback. Keep the
   fixed Codex and Claude Code commands and ACP agent names approved in ADR
-  0038; do not substitute adapters or accept arbitrary agent names.
+  0038; do not substitute adapters or accept arbitrary agent names. Under ADR
+  0048, Claude Code alone inherits the Ambassador process environment so the
+  unmodified official CLI can apply its own authentication policy. Ambassador
+  does not initiate login or inspect, store, log, or return provider
+  credentials.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts only a URL after the owner creates Ambassador's

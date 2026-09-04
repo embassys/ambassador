@@ -109,10 +109,12 @@ OpenClaw and Hermes also support webhook, with direct as their default. Codex
 and Claude Code register directly without a delivery question. Ambassador
 ships and validates the reviewed Codex ACP adapter as an exact production
 dependency. For Claude Code, Ambassador ships a small ACP v1 bridge that uses
-the separately installed official `claude` command and the user's normal
-`claude.ai` login; it does not require or forward an Anthropic API key.
+the separately installed official `claude` command and its existing native
+authentication. The official CLI owns authentication, and the provider decides
+billing. Ambassador does not select an authentication method, initiate login,
+or inspect, store, log, or return provider credentials.
 OpenClaw and Hermes provide their own fixed agent commands. Exact client and
-ACP agent names, commands, arguments, modes, and environment allowlists remain
+ACP agent names, commands, arguments, modes, and environment policies remain
 compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
 ambiguous, disabled, and incomplete profiles are unsupported.
 

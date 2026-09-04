@@ -490,7 +490,7 @@ qualification observations.
 Direct mode uses ACP v1 through exact `@agentclientprotocol/sdk` 1.4.0.
 Ambassador is the ACP client and starts a fixed command for the selected agent
 profile without a shell. User or message input cannot change the executable,
-arguments, environment allowlist, transport, or working directory. The working
+arguments, environment policy, transport, or working directory. The working
 directory is the canonical process directory captured during registration. A
 later start from a different directory fails closed instead of silently moving
 the agent's scope.
@@ -517,8 +517,10 @@ A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
 downloads at runtime are forbidden. Ambassador installs the exact Codex
 adapter as a production dependency. Its built-in Claude ACP bridge uses the
-separately installed official `claude` command and the user's normal
-`claude.ai` login; it does not accept or forward an Anthropic API key or token.
+separately installed official `claude` command and leaves authentication to
+that command. The Claude process inherits the environment supplied to
+Ambassador so its normal authentication precedence remains intact. Ambassador
+does not initiate login or inspect, store, log, or return provider credentials.
 OpenClaw and Hermes still provide their own agent commands. Reported MCP client
 and ACP agent versions are not allowlists. Gemini CLI and Antigravity are
 unsupported client names.
@@ -657,7 +659,7 @@ The cutover must prove at least:
   unanswered-action list, removal only after successful result submission, and
   no general reply or local delivery-control tools;
 - the package-owned Codex adapter, the built-in Claude CLI bridge, validated
-  internal entrypoint launch, ordinary Claude subscription authentication, and
+  internal entrypoint launch, native Claude authentication ownership, and
   bounded asynchronous child-process failures;
 - startup output with working MCP setup commands for all supported agents and
   safe operator diagnostics for each startup or delivery failure class;
