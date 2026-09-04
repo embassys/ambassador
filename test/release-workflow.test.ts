@@ -22,6 +22,10 @@ test("main publishes the Ambassador 0.2.16 candidate through npm OIDC after appr
   assert.match(workflow, /id-token: write/u);
   assert.match(workflow, /npm install --global npm@11\.19\.0/u);
   assert.match(workflow, /npm publish "\$\{\{ steps\.artifact\.outputs\.tarball \}\}"/u);
+  assert.equal(
+    workflow.match(/audit --prod --audit-level=high --ignore-registry-errors/gu)?.length,
+    3,
+  );
   assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.NPM/u);
 
   const packageJson = JSON.parse(
