@@ -39,6 +39,7 @@ async function fixture(t: TestContext) {
     credentialKeyPath: join(root, "central-credential.key"),
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    pendingActionPath: join(root, "pending-actions.sqlite"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
     environment: {},
@@ -98,11 +99,15 @@ test("registers by client capability, delivers the full webhook, then acknowledg
   assert.deepEqual(
     (await client.listTools()).map((tool) => tool.name),
     [
+      "register_agent",
+      "verify_email",
+      "resend_verification",
       "list_action_types",
       "request_permission",
       "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
+      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],
@@ -197,13 +202,44 @@ test("returns a correlated action result from the target MCP tool to the request
     action.call_id,
   );
 
-  const submitted = await target.callTool("submit_action_result", {
+  for (
+    let attempt = 0;
+    attempt < 100 && value.central.messageState(String(action.message_id)) !== "acked";
+    attempt += 1
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(value.central.messageState(String(action.message_id)), "acked");
+  await gateway.close();
+
+  const restartedGateway = value.trackGateway(await openGatewayApplication(value.options));
+  const restartedTarget = new TestMcpClient(restartedGateway.endpoint);
+  await restartedTarget.initialize(OPENCLAW);
+
+  await assert.rejects(restartedTarget.callTool("list_pending_action_calls", { limit: 1 }));
+  const pendingActions = await restartedTarget.callTool("list_pending_action_calls", {});
+  assert.equal(pendingActions.count, 1);
+  assert.deepEqual(pendingActions.pending_action_calls, [
+    {
+      call_id: action.call_id,
+      sender_agent_id: actionWake.ambassadorMessage.sender_agent_id,
+      action_type: "get_phone_number",
+      payload: { reason: "deterministic result round trip" },
+      created_at: actionWake.ambassadorMessage.created_at,
+    },
+  ]);
+
+  const submitted = await restartedTarget.callTool("submit_action_result", {
     call_id: action.call_id,
     result: { phone_number: "+447700900001" },
     status: "success",
   });
   assert.equal(submitted.call_id, action.call_id);
   assert.equal(submitted.status, "completed");
+  assert.deepEqual(await restartedTarget.callTool("list_pending_action_calls", {}), {
+    count: 0,
+    pending_action_calls: [],
+  });
 
   const requesterResultPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterResultMessages = (

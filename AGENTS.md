@@ -50,11 +50,11 @@ scope on your own.
   0038; do not substitute adapters or accept arbitrary agent names.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
-- Webhook registration accepts a URL and a webhook secret environment-variable
-  name, never the secret value. The gateway sends the complete validated
-  central message with bearer and HMAC authentication. A `2xx` transfers
-  responsibility to the webhook receiver, after which the gateway acknowledges
-  central.
+- Webhook registration accepts only a URL after the owner creates Ambassador's
+  encrypted receiver secret with `ambassador webhook-secret`. The secret value
+  never enters MCP. The gateway sends the complete validated central message
+  with the profile's fixed authentication. A `2xx` transfers responsibility to
+  the webhook receiver, after which the gateway acknowledges central.
 - Direct mode makes Ambassador an ACP v1 client. It launches and controls the
   selected local agent and submits the complete message as an ACP prompt. It
   does not attempt to call back through the MCP connection that registered the
@@ -66,13 +66,17 @@ scope on your own.
 - MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
   control through local `poll_messages` or `ack_message` tools after the
   cutover. Expose the exact central `submit_action_result` operation for the
-  target of an action call. Do not treat it as a general chat reply tool.
+  target of an action call and the local `list_pending_action_calls` view from
+  ADR 0046. Do not treat either as a general chat or delivery-control tool.
 - Direct-agent work is a gateway-managed ACP session. It is not the exact chat
   in which registration happened. Configure Ambassador MCP in that session
   when the agent supports session MCP injection; otherwise require normal
   provider configuration.
-- Keep central message bodies in bounded memory and the notification journal
-  ID-only. Do not invent local body persistence or server redelivery.
+- Keep the notification journal ID-only. The sole local body-persistence
+  exception is ADR 0046's encrypted pending-action inbox: capture only the
+  validated action-call fields and remove them after a successful
+  `submit_action_result`. Keep every other central message body in bounded
+  memory; do not invent server redelivery.
 - The gateway follows the current
   [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST service
   at `https://mcp.embassys.ai`. Review current server code and live behavior

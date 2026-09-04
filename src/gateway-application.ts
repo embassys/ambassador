@@ -36,7 +36,8 @@ import {
   NotificationRelayError,
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
-import { WebhookDeliveryTarget } from "./webhook-delivery.js";
+import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
+import { WebhookDeliveryError, WebhookDeliveryTarget } from "./webhook-delivery.js";
 import {
   EncryptedFileWebhookSecretStore,
   type WebhookSecretStore,
@@ -57,6 +58,7 @@ export interface GatewayApplicationOptions {
   readonly credentialKeyPath: string;
   readonly webhookSecretPath: string;
   readonly webhookSecretKeyPath: string;
+  readonly pendingActionPath: string;
   readonly profilePath: string;
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
@@ -69,6 +71,7 @@ export interface GatewayApplicationOptions {
   readonly localMcpPort?: number;
   readonly nowSeconds?: () => number;
   readonly signal?: AbortSignal;
+  readonly onRuntimeNotice?: (notice: GatewayError) => void;
 }
 
 export interface RunningGatewayApplication {
@@ -83,6 +86,13 @@ function safeFailure(): Error {
 
 function startupFailure(error: unknown): GatewayError {
   if (error instanceof GatewayError) return error;
+  if (error instanceof PendingActionInboxError) {
+    return new GatewayError(
+      "local_state_invalid",
+      "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
+      7,
+    );
+  }
   if (error instanceof LocalMcpServerError) {
     if (error.code === "address_in_use") {
       return new GatewayError(
@@ -143,27 +153,46 @@ function directDeliveryFailure(error: unknown): DirectDeliveryError["code"] | un
   return undefined;
 }
 
+function webhookDeliveryFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current instanceof WebhookDeliveryError) return true;
+    if (current === null || typeof current !== "object") return false;
+    const candidate = current as { cause?: unknown; name?: unknown };
+    if (candidate.name === "WebhookDeliveryError") return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
 function runtimeFailure(error: unknown, agentName: string): GatewayError {
   const direct = directDeliveryFailure(error);
   if (direct === "agent_unavailable") {
     return new GatewayError(
       "direct_agent_unavailable",
-      `Ambassador could not start direct delivery for ${agentName}. Reinstall the latest Ambassador, then confirm ${agentName} is installed and signed in`,
-      7,
+      `Ambassador paused incoming delivery because ${agentName} is unavailable. Confirm ${agentName} is installed and signed in, then restart Ambassador to resume delivery`,
+      0,
     );
   }
   if (direct === "startup_failed") {
     return new GatewayError(
       "direct_agent_startup_failed",
-      `Ambassador could not initialize ${agentName} over ACP v1. Confirm the agent is signed in, then restart Ambassador`,
-      7,
+      `Ambassador paused incoming delivery because ${agentName} could not start. Confirm the agent is signed in, then restart Ambassador to resume delivery`,
+      0,
     );
   }
   if (direct === "uncertain_outcome") {
     return new GatewayError(
       "direct_delivery_uncertain",
-      `Ambassador lost confirmation after sending a message to ${agentName}. It stopped without retrying to avoid a duplicate action`,
-      7,
+      `Ambassador paused incoming delivery after losing confirmation from ${agentName}. It did not retry the message because that could duplicate an action. Restart Ambassador to resume new delivery`,
+      0,
+    );
+  }
+  if (webhookDeliveryFailure(error)) {
+    return new GatewayError(
+      "webhook_delivery_failed",
+      "Ambassador paused incoming delivery because the configured webhook could not accept a message. Check the webhook and restart Ambassador to resume delivery",
+      0,
     );
   }
   return new GatewayError(
@@ -171,6 +200,18 @@ function runtimeFailure(error: unknown, agentName: string): GatewayError {
     "Ambassador stopped because incoming-message delivery failed. Check the configured agent or webhook, then restart Ambassador",
     7,
   );
+}
+
+function localDeliveryFailure(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current instanceof DirectDeliveryError || current instanceof WebhookDeliveryError) {
+      return true;
+    }
+    if (current === null || typeof current !== "object") return false;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 function localError(error: unknown): LocalMcpToolError {
@@ -217,6 +258,7 @@ export async function openGatewayApplication(
   let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
+  let pendingActionInbox: PendingActionInbox | undefined;
   let closed = false;
   let activation: Promise<void> | undefined;
   let reportFailure: ((error: Error) => void) | undefined;
@@ -291,6 +333,10 @@ export async function openGatewayApplication(
         now: nowSeconds,
       });
       const nextRest = new CentralRestClient({ centralOrigin, transport });
+      const nextPendingActionInbox =
+        pendingActionInbox ??
+        new PendingActionInbox(options.pendingActionPath, identity.credential());
+      pendingActionInbox = nextPendingActionInbox;
       const target = await createDeliveryTarget({ ...profile, endpoint: local.endpoint });
       const nextRelay = new NotificationRelay({
         journal,
@@ -314,13 +360,21 @@ export async function openGatewayApplication(
         acknowledgeMessage: async (messageId, signal) => {
           await nextRest.ackMessage({ message_id: messageId }, signal);
         },
+        captureMessage: (message) => {
+          nextPendingActionInbox.capture(message);
+        },
       });
       rest = nextRest;
       relay = nextRelay;
       relayRun = nextRelay.run(lifetimeSignal);
       void relayRun.catch((error: unknown) => {
         if (!closed && !lifetimeSignal.aborted) {
-          reportFailure?.(runtimeFailure(error, profile.capability.displayName));
+          const notice = runtimeFailure(error, profile.capability.displayName);
+          if (localDeliveryFailure(error)) {
+            options.onRuntimeNotice?.(notice);
+          } else {
+            reportFailure?.(notice);
+          }
         }
       });
     })();
@@ -336,9 +390,14 @@ export async function openGatewayApplication(
     return rest;
   };
 
+  const requirePendingActionInbox = (): PendingActionInbox => {
+    if (pendingActionInbox === undefined) throw safeFailure();
+    return pendingActionInbox;
+  };
+
   const router: LocalMcpRouter = {
     async listTools() {
-      return [...(identity.enrolled ? REST_AUTHENTICATED_TOOLS : REST_BOOTSTRAP_TOOLS)];
+      return [...REST_BOOTSTRAP_TOOLS, ...REST_AUTHENTICATED_TOOLS];
     },
     async callTool(name, untrustedArguments, signal, clientInfo) {
       try {
@@ -356,9 +415,11 @@ export async function openGatewayApplication(
               await loadProfile();
               result = await identity.enroll(() => enrollment.verify(arguments_, signal));
               await enableEnrolledIdentity();
-              await local.sendToolListChanged();
               break;
             default:
+              if (REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name)) {
+                throw new LocalMcpToolError("not_enrolled");
+              }
               throw new LocalMcpToolError("tool_not_found");
           }
           assertSafeUpstreamResult(result);
@@ -366,6 +427,10 @@ export async function openGatewayApplication(
         }
 
         switch (name) {
+          case "register_agent":
+          case "verify_email":
+          case "resend_verification":
+            throw new LocalMcpToolError("already_enrolled");
           case "list_action_types":
             result = { action_types: await requireRest().listActionTypes(signal) };
             break;
@@ -388,9 +453,17 @@ export async function openGatewayApplication(
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;
-          case "submit_action_result":
-            result = await requireRest().submitActionResult(arguments_, signal);
+          case "list_pending_action_calls": {
+            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
+            const pending = requirePendingActionInbox().list();
+            result = { count: pending.length, pending_action_calls: pending };
             break;
+          }
+          case "submit_action_result": {
+            result = await requireRest().submitActionResult(arguments_, signal);
+            requirePendingActionInbox().remove(String(result.call_id));
+            break;
+          }
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
             result = { permissions: await requireRest().getMyPermissions(signal) };
@@ -418,6 +491,7 @@ export async function openGatewayApplication(
     controller.abort();
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
+    pendingActionInbox?.close();
     journal.close();
     throw startupFailure(error);
   }
@@ -432,6 +506,7 @@ export async function openGatewayApplication(
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
       await local.close();
+      pendingActionInbox?.close();
       journal.close();
     },
   };

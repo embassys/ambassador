@@ -1,9 +1,9 @@
 # Current work
 
-There is no active implementation item. The accepted Ambassador delivery
-architecture, including the 0.2.14 setup, diagnostics, package-owned adapters,
-tool descriptions, and pending-permission view, is implemented and recorded in
-the architecture, protocol, ADR 0045, and qualification record.
+There is no open product implementation item. The ADR 0047 reliability
+cutover, stable MCP catalog, encrypted unanswered-action inbox, and built-in
+Claude CLI bridge are implemented and qualified. Release evidence belongs in
+[Delivery qualification](qualification.md), not in this plan.
 
 ## Later qualification
 

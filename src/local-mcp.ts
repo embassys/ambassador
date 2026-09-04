@@ -286,10 +286,6 @@ export class LocalMcpServer {
     this.#accepting = true;
   }
 
-  async sendToolListChanged(): Promise<void> {
-    await Promise.all([...this.#sessionRecords].map((record) => record.sdk.sendToolListChanged()));
-  }
-
   async close(): Promise<void> {
     this.#accepting = false;
     const closed = new Promise<void>((resolve) => {
@@ -308,9 +304,8 @@ export class LocalMcpServer {
     const sdk = new Server(
       { name: "ambassador", version: "1" },
       {
-        capabilities: { tools: { listChanged: true } },
+        capabilities: { tools: {} },
         supportedProtocolVersions: [PROTOCOL_VERSION],
-        debouncedNotificationMethods: ["notifications/tools/list_changed"],
       },
     );
     sdk.onerror = () => undefined;

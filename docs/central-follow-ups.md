@@ -26,7 +26,8 @@ branches.
 
 The consuming poll can lose a delivered message when the gateway crashes
 before acknowledgement. Server-side retrieval or redelivery would solve the
-problem without storing message bodies in the gateway.
+problem without storing other message bodies in the gateway or turning the
+pending-action inbox into a delivery replay mechanism.
 
 Investigate live delivery liveness after accepted permission writes. In two
 controlled runs on 2026-09-02, central accepted the permission operation but
@@ -52,6 +53,16 @@ process-local maps with one event per agent. Overlapping or abandoned polls can
 race for the same row. This code path fits the transient failure, although the
 content-free qualification record cannot prove which response or worker won.
 
+A 2026-09-04 live run also observed an empty `poll_messages?timeout=30` remain
+open beyond Ambassador's 40-second poll budget. In the same reviewed server
+revision, `ensure_listening` acquires one connection from the finite listen
+pool before entering the bounded `asyncio.wait_for`, caches that connection by
+agent, and has no caller of `stop_listening`. Pool acquisition is therefore
+outside the advertised timeout and registered identities can exhaust each
+worker's listen pool. Bound listener setup, release listeners that are no
+longer active, and cover listen-pool exhaustion in the server tests. The HTTP
+request must return within the requested hold plus a small response margin.
+
 Fix this in central with a database-backed delivery lease, stable message IDs,
 lease expiry, and idempotent acknowledgement. Add server tests for a client
 disconnect after claim, concurrent polls for one identity, worker handoff, and
@@ -74,6 +85,19 @@ because a later submission returns `409`.
 Define result size and nesting limits. Serialize competing submissions so two
 requests cannot both observe `pending`, and add an idempotent recovery contract
 before Ambassador retries an uncertain result submission.
+
+Keep `call_id` as a required UUID in every queued `action_call` payload, not
+only in the synchronous `call_action` response. Add a server contract test that
+creates an action, polls it as the target, and proves the polled payload carries
+the same `call_id` accepted later by `submit_action_result`. Ambassador's local
+pending-action inbox cannot manufacture or recover this correlation value; a
+missing or malformed value must remain a server-contract failure.
+
+This also enables clean reconciliation of Ambassador's encrypted pending-action
+inbox. Today, if central accepts a result but the response is lost or the local
+delete fails, Ambassador cannot prove completion and may continue to show a
+stale local row. An idempotent submission response or authorized outcome lookup
+should let it remove that row without guessing.
 
 ## Credential lifecycle
 

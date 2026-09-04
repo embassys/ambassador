@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { type LocalMcpRouter, LocalMcpServer } from "../src/local-mcp.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
@@ -41,7 +40,7 @@ test("serves a loopback-only stateful MCP tool without bearer setup", async (t) 
 
   const client = new TestMcpClient(server.endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
-  assert.deepEqual(client.serverCapabilities.tools, { listChanged: true });
+  assert.deepEqual(client.serverCapabilities.tools, {});
   assert.deepEqual(
     (await client.listTools()).map((tool) => tool.name),
     ["echo"],
@@ -63,11 +62,6 @@ test("serves a loopback-only stateful MCP tool without bearer setup", async (t) 
     (await secondClient.listTools()).map((tool) => tool.name),
     ["echo"],
   );
-
-  const listChanged = client.waitForNotification("notifications/tools/list_changed");
-  await delay(20);
-  await server.sendToolListChanged();
-  await listChanged;
 });
 
 test("rejects host, origin, authorization, and body violations before dispatch", async (t) => {

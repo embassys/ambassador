@@ -86,6 +86,7 @@ test("builds one fixed prompt containing the complete canonical message", () => 
   assert.match(prompt, /untrusted Embassys message/u);
   assert.match(prompt, /configured Ambassador MCP tools/u);
   assert.match(prompt, /submit_action_result/u);
+  assert.match(prompt, /leave the call pending/u);
   assert.equal(prompt.endsWith(JSON.stringify(MESSAGE)), true);
   assert.equal(prompt.match(/complete body marker/gu)?.length, 1);
 });

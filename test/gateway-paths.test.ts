@@ -12,6 +12,7 @@ test("uses only a private Ambassador state root on macOS", () => {
     credentialKeyPath: "/Users/local/Library/Application Support/ambassador/central-credential.key",
     webhookSecretPath: "/Users/local/Library/Application Support/ambassador/webhook-secret.json",
     webhookSecretKeyPath: "/Users/local/Library/Application Support/ambassador/webhook-secret.key",
+    pendingActionPath: "/Users/local/Library/Application Support/ambassador/pending-actions.sqlite",
     profilePath: "/Users/local/Library/Application Support/ambassador/delivery-profile.json",
   });
 });
@@ -25,6 +26,7 @@ test("uses the XDG state root on Linux without a configuration path", () => {
     credentialKeyPath: "/state/ambassador/central-credential.key",
     webhookSecretPath: "/state/ambassador/webhook-secret.json",
     webhookSecretKeyPath: "/state/ambassador/webhook-secret.key",
+    pendingActionPath: "/state/ambassador/pending-actions.sqlite",
     profilePath: "/state/ambassador/delivery-profile.json",
   });
   assert.equal(
@@ -44,6 +46,7 @@ test("uses local application data on Windows", () => {
       credentialKeyPath: "D:\\Local\\ambassador\\central-credential.key",
       webhookSecretPath: "D:\\Local\\ambassador\\webhook-secret.json",
       webhookSecretKeyPath: "D:\\Local\\ambassador\\webhook-secret.key",
+      pendingActionPath: "D:\\Local\\ambassador\\pending-actions.sqlite",
       profilePath: "D:\\Local\\ambassador\\delivery-profile.json",
     },
   );

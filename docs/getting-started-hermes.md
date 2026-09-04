@@ -31,9 +31,12 @@ authentication for this loopback MCP server.
   webhook**.
 - Give Hermes the six-digit code sent to your email.
 
-To review unanswered requests later, say: **Which Embassys permission requests
-are waiting for my response?** After Hermes lists them, tell it which request
-to grant or deny.
+Later, you can ask:
+
+- **Which Embassys permission requests are waiting for my approval?** Then tell
+  Hermes which one to grant or deny.
+- **Which Embassys actions are waiting for my answer?** Then give Hermes the
+  requested value so it can submit the result.
 
 ## Direct delivery
 

@@ -43,6 +43,8 @@ Central permissions, actions, and messages
   v
 Bounded in-memory delivery queue and ID-only journal
   |
+  +--> validated action call: encrypted pending-action inbox until result
+  |
   +--> webhook mode: complete message to an authenticated endpoint
   |
   `--> direct mode: complete message to a gateway-managed ACP v1 agent
@@ -105,12 +107,14 @@ ADR 0041. This keeps direct launch shell-free.
 The enabled direct profiles are OpenClaw, Hermes, Codex, and Claude Code. Only
 OpenClaw and Hermes also support webhook, with direct as their default. Codex
 and Claude Code register directly without a delivery question. Ambassador
-ships their reviewed ACP adapters as exact production dependencies, validates
-their package entrypoints, and launches them with its Node runtime. OpenClaw
-and Hermes provide their own fixed agent commands. Exact client and ACP agent
-names, commands, arguments, modes, and environment allowlists remain compiled
-in. Gemini CLI and Antigravity are not active profiles. Unknown, ambiguous,
-disabled, and incomplete profiles are unsupported.
+ships and validates the reviewed Codex ACP adapter as an exact production
+dependency. For Claude Code, Ambassador ships a small ACP v1 bridge that uses
+the separately installed official `claude` command and the user's normal
+`claude.ai` login; it does not require or forward an Anthropic API key.
+OpenClaw and Hermes provide their own fixed agent commands. Exact client and
+ACP agent names, commands, arguments, modes, and environment allowlists remain
+compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
+ambiguous, disabled, and incomplete profiles are unsupported.
 
 ## Guided registration
 
@@ -155,7 +159,7 @@ does not probe alternate contracts or keep an old client as fallback.
 | Component | Owns | Does not own |
 | --- | --- | --- |
 | Central service | Email identities, public DPoP keys, tokens, permissions, action schemas, correlated action results, messages, acknowledgements | Local delivery or provider credentials |
-| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal | Provider account credentials or durable message bodies |
+| Ambassador | Loopback MCP boundary checks, encrypted central credential, encrypted webhook secret, separate internal wrapping keys, DPoP proofs, delivery profile, bounded message memory, ID-only journal, encrypted unanswered action calls | Provider account credentials or durable copies of other message bodies |
 | Webhook receiver | Accepted message body, receiver secret, provider-specific mapping | Central credential or DPoP key |
 | Direct agent | Its own authentication, history, tools, policy, and model execution | Central credential, DPoP key, or webhook secret |
 
@@ -168,7 +172,9 @@ Local MCP trusts other processes running as the owner; strict loopback, Host,
 and Origin checks protect the browser and network boundary. The delivery
 profile may persist the mode, recognized agent kind, webhook URL, canonical
 direct working directory, and minimum ACP session metadata. It never contains
-a secret or message body. SQLite remains ID-only.
+a secret or message body. The notification journal remains ID-only. A separate
+SQLite inbox stores only encrypted, validated unanswered action calls, keyed to
+the enrolled DPoP identity.
 
 ## Main flows
 
@@ -177,12 +183,19 @@ a secret or message body. SQLite remains ID-only.
 1. Acquire the singleton lock.
 2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
 3. Reject supplied local Authorization credentials.
-4. Load the delivery profile and encrypted central credential if present.
+4. Load the delivery profile, encrypted central credential, and encrypted
+   pending-action inbox if present.
 5. For webhook mode, load the separately encrypted webhook secret.
 6. Prepare the configured delivery target.
 7. Start REST polling only when the required stored records are valid.
 8. Print the MCP endpoint, fixed setup commands for all supported agents, the
    registration prompt, and remain in the foreground.
+
+A local agent or webhook delivery failure pauses incoming delivery and prints
+one bounded repair message without taking down the MCP server. Central,
+credential, state, and listener failures remain fatal. Restarting Ambassador
+after repairing the local target resumes polling for new messages; it cannot
+recover a message already consumed by central.
 
 ### Local reset
 
@@ -191,7 +204,8 @@ a secret or message body. SQLite remains ID-only.
    changing state if another process owns the lock or if the lock cannot be
    validated.
 3. It removes the credential pair, webhook-secret pair, delivery profile,
-   notification journal, and any interrupted state writes.
+   encrypted pending-action inbox, notification journal, and any interrupted
+   state writes.
 4. It retains the empty owner-only state directory and process lock for safe
    coordination.
 5. The next `ambassador start` exposes the bootstrap enrollment tools.
@@ -211,7 +225,9 @@ separately.
 5. Ambassador generates a P-256 key and verifies with its public JWK.
 6. Ambassador validates the returned key binding and timestamps.
 7. It stores the token and private key before returning token-free success and
-   enabling protected tools.
+   enabling protected tools. The complete MCP tool catalog is stable across
+   this transition: protected calls return `not_enrolled` before verification,
+   and enrollment calls return `already_enrolled` afterwards.
 
 ### Protected work
 
@@ -227,13 +243,21 @@ unanswered inbox from `get_my_permissions`: pending rows where the enrolled
 identity is the grantor. It stores no second queue and requires an explicit
 grant or deny through `respond_to_permission`.
 
+`list_pending_action_calls` is different: it lists action calls already
+delivered to this identity that still need a result. Ambassador encrypts the
+validated call ID, sender ID, action type, payload, and creation time locally
+before local delivery and central acknowledgement. A successful
+`submit_action_result` removes that call. No new central route is required.
+
 ### Incoming message
 
 1. Ambassador long-polls central.
 2. Central marks selected messages delivered before returning them.
-3. Ambassador validates a bounded batch, keeps bodies in memory, and journals
-   only message IDs and delivery state.
-4. The selected delivery target receives the complete message.
+3. Ambassador validates a bounded batch and journals only message IDs and
+   delivery state. For an action call only, it first writes the validated call
+   fields to the encrypted pending-action inbox.
+4. The selected delivery target receives the complete message. If it needs
+   unavailable user input, it leaves the action call pending.
 5. A webhook `2xx` or successful direct ACP completion transfers or completes
    local responsibility.
 6. Ambassador acknowledges the message to central and removes its local state.
@@ -252,14 +276,17 @@ retrieval or redelivery is the proper future fix.
 - Passing raw secrets through the model.
 - Inventing general reply, conversation, lease, outcome-lookup, activation, or
   token-reissue APIs that central does not expose.
-- Persisting message bodies locally.
+- Persisting central message bodies locally except for the encrypted,
+  validated unanswered-action records defined by ADR 0046.
 - Native service management or a GUI.
 
 ## Current limitations
 
 - Central has no message retrieval or redelivery after a consuming poll.
 - Action results have no per-action output schema or outcome lookup. A
-  completed submission cannot be repeated to recover its response.
+  completed submission cannot be repeated to recover its response. A rare
+  local deletion failure after central success can therefore leave a stale
+  pending-action row that Ambassador cannot reconcile automatically.
 - Central has no token refresh or reissue route.
 - Acknowledgement is not idempotent.
 - Central currently disables verification-code expiry.
@@ -270,11 +297,13 @@ retrieval or redelivery is the proper future fix.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
   retroactively.
-- Codex and Claude Code direct delivery and both delivery modes for Hermes
+- Codex and the superseded Claude adapter direct delivery, plus both delivery modes for Hermes
   Agent 0.20.5 and OpenClaw 2026.8.2 have passed with the live central service.
   Ambassador 0.2.8 includes the qualified Hermes name-based ACP profile, and
-  published Ambassador 0.2.11 passed the Claude Code direct flow. Gemini CLI
-  has been removed and Antigravity is deferred under ADR 0043.
+  published Ambassador 0.2.11 passed the earlier Claude Code direct flow. The
+  built-in Claude CLI bridge requires its own live qualification before its
+  release claim is recorded. Gemini CLI has been removed and Antigravity is
+  deferred under ADR 0043.
   Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
   full real-model round trip.
 

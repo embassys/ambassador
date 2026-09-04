@@ -24,6 +24,7 @@ export interface DirectAgentCapability {
   readonly environment: readonly string[];
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
   readonly bundledNodePackage?: NodePackageEntrypoint;
+  readonly builtInAdapter?: "claude-cli";
 }
 
 export type WebhookAgentCapability =
@@ -184,15 +185,12 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     aliases: ["claude-code"],
     modes: ["direct"],
     direct: {
-      command: "claude-agent-acp",
+      command: "claude",
       args: [],
-      agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
+      agentInfo: { name: "@embassys/claude-cli-acp" },
       mcp: "session",
       environment: [
         "APPDATA",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_AUTH_TOKEN",
-        "CLAUDE_CODE_OAUTH_TOKEN",
         "HOME",
         "LANG",
         "LC_ALL",
@@ -205,17 +203,15 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
         "TEMP",
         "TMP",
         "TMPDIR",
+        "USER",
+        "USERNAME",
         "USERPROFILE",
         "WINDIR",
         "XDG_CONFIG_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
       ],
-      bundledNodePackage: {
-        packageName: "@agentclientprotocol/claude-agent-acp",
-        binName: "claude-agent-acp",
-        entrypoint: "dist/index.js",
-      },
+      builtInAdapter: "claude-cli",
     },
     qualificationCases: ["claude-direct"],
   },
@@ -246,6 +242,15 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
       bundledNodePackage.entrypoint
         .split("/")
         .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."));
+  const completeBuiltInAdapter =
+    value?.builtInAdapter === undefined ||
+    (value.builtInAdapter === "claude-cli" &&
+      value.command === "claude" &&
+      value.args.length === 0 &&
+      value.mcp === "session" &&
+      value.agentInfo.name === "@embassys/claude-cli-acp" &&
+      windowsNodePackage === undefined &&
+      bundledNodePackage === undefined);
   return (
     value !== undefined &&
     BOUNDED_METADATA.test(value.command) &&
@@ -258,6 +263,7 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     unique(value.environment) &&
     completeWindowsNodePackage &&
     completeBundledNodePackage &&
+    completeBuiltInAdapter &&
     !(windowsNodePackage !== undefined && bundledNodePackage !== undefined)
   );
 }
