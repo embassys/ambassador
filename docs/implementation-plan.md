@@ -8,8 +8,9 @@ the deployed email-decision permission flow, all public CLI commands, and the
 correlated action-result round trip. Evidence is in
 [Delivery qualification](qualification.md).
 
-There is no open Ambassador implementation phase. Publication remains a
-separate owner-controlled release action.
+There is no open Ambassador implementation phase. Version 0.2.17 is published
+under the npm `latest` tag. Any later publication remains a separate
+owner-controlled release action.
 
 The deterministic Windows lanes cover state, startup, packaging, and mock
 delivery. A support claim for an individual real-agent mode on Windows still

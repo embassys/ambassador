@@ -48,10 +48,17 @@ The same run proved persistent per-message sessions, result-based retirement,
 temporary-state cleanup, and credential redaction passed.
 
 That live artifact used 0.2.16 package metadata before the separate release
-approval. The final 0.2.17 release candidate changes only the package version;
-its tarball SHA-256 is
-`b14b7dd89934e0e77fd698a450a3c0bc71fe063dd657793c798094273e9d37e7`.
-The clean-installed 0.2.17 artifact passed the packaged REST enrollment,
+approval. The final 0.2.17 release also contains the Windows process-tree and
+test-handle cleanup found by the pull-request gates. Both Windows check lanes
+then passed, as did every Linux, macOS, Docker, package, audit, and signature
+gate on the pull request and `main`.
+
+GitHub OIDC trusted publishing released 0.2.17 with the npm `latest` tag. The
+registry tarball SHA-256 is
+`4b07256f5c72fff01decb81a2e18886a52cb271c70c8e3eb4539bdc30c771d0e`;
+its npm integrity is
+`sha512-eIZCR2d1UBK2jWzCxlIr/Ya43aXdeX0xI8z8BHEFHJCcig4ojKQhQDmsCcC11L2F4zxkt3Ero4UNXwLmslFe0A==`.
+A fresh registry download passed the clean-installed packaged REST enrollment,
 delivery, acknowledgement, cleanup, and artifact-scan lane.
 
 This is a combined direct-delivery qualification, not an interactive chat
