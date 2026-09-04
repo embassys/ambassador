@@ -1,6 +1,7 @@
 # 0047 Claude CLI bridge and resilient local delivery
 
-Status: accepted; Claude authentication superseded by ADR 0048
+Status: accepted; Claude authentication superseded by ADR 0048 and Claude tool
+isolation superseded by ADR 0049
 
 Date: 2026-09-04
 
@@ -25,10 +26,10 @@ verification.
 - At acceptance, the bridge ran the fixed `claude auth status` check and
   required an ordinary `claude.ai` login. ADR 0048 removes this preflight and
   leaves authentication to the official CLI.
-- Each incoming message uses a non-persistent headless Claude invocation with
-  only the exact loopback Ambassador MCP endpoint and the bounded Ambassador
-  tools required for permission and action handling. Provider stderr and model
-  output remain bounded and are not returned or logged.
+- At acceptance, each incoming message used a non-persistent headless Claude
+  invocation with only the exact loopback Ambassador MCP endpoint. ADR 0049
+  replaces that isolation with normal provider-configured MCP tools. Provider
+  stderr and model output remain bounded and are not returned or logged.
 - Advertise one stable MCP tool catalog before and after enrollment. Calls to
   protected tools before verification fail with `not_enrolled`; calls to
   enrollment tools afterwards fail with `already_enrolled`. Do not depend on
@@ -50,10 +51,10 @@ delivery client and its message-custody rules do not fork by provider. Codex
 continues through its established adapter. ADR 0048 defines current Claude
 authentication behavior.
 
-The Claude bridge is deliberately narrower than a general Claude Code session.
-It exists only to process an Ambassador wake with Ambassador tools. An action
-that needs information unavailable in that background turn remains in the
-encrypted pending-action inbox for a later user-driven MCP chat.
+The Claude bridge exists only to process an Ambassador wake. ADR 0049 lets that
+turn use normal provider-configured MCP tools so resource-backed actions can
+finish automatically. An action still remains in the encrypted pending-action
+inbox when the required tool or information is unavailable.
 
 Keeping MCP alive after a local delivery failure lets the owner inspect and
 repair enrollment state. It does not make a consumed central message

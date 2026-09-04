@@ -511,7 +511,7 @@ The enabled profiles and fixed contracts are:
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | session injection |
-| Claude Code | `claude-code` | built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | session injection |
+| Claude Code | `claude-code` | built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | provider configuration |
 
 A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
@@ -525,6 +525,15 @@ OpenClaw and Hermes still provide their own agent commands. Reported MCP client
 and ACP agent versions are not allowlists. Gemini CLI and Antigravity are
 unsupported client names.
 
+The Claude bridge does not use safe mode or strict MCP isolation. It loads the
+official CLI's normal provider configuration, disables built-in tools with
+`--tools ""`, and allows configured MCP tools without an interactive prompt
+with `--allowedTools "mcp__*"`, subject to provider and managed deny policy.
+Its normal configuration must include Ambassador.
+OpenClaw already uses provider MCP configuration. Hermes and Codex retain their
+native configuration while Ambassador also supplies its endpoint through ACP.
+Ambassador imposes no safe-mode flag on those profiles.
+
 The repository qualification probe runs each profile's fixed version command,
 records a bounded semantic version or `unavailable`, and continues to that
 profile's delivery cases. Production uses the same observational policy for
@@ -534,9 +543,9 @@ initialization, session, or delivery handling.
 
 Ambassador initializes the agent and opens a gateway-managed session. It
 provides its loopback MCP endpoint in ACP session configuration where the
-agent supports that field. Agents that reject session MCP configuration, such
-as the reviewed OpenClaw interface, must have Ambassador MCP configured before
-direct delivery.
+agent supports that field. Agents that use provider configuration, such as the
+reviewed OpenClaw and Claude interfaces, must have Ambassador MCP configured
+before direct delivery.
 
 Ambassador has no interactive approval UI during background delivery. It never
 auto-approves an ACP permission request. A request that cannot be satisfied by
@@ -550,8 +559,8 @@ does not depend on an MCP client implementing tool-list-change notifications.
 
 For each central message, Ambassador sends one ACP prompt containing:
 
-1. fixed instructions that identify the following data as an untrusted
-   Embassys message;
+1. a fixed, trusted Embassys instruction envelope that identifies the
+   following remote fields as data;
 2. the complete canonical JSON message; and
 3. direction to use the configured Ambassador MCP tools when a permission or
    action operation requires them.
@@ -659,8 +668,9 @@ The cutover must prove at least:
   unanswered-action list, removal only after successful result submission, and
   no general reply or local delivery-control tools;
 - the package-owned Codex adapter, the built-in Claude CLI bridge, validated
-  internal entrypoint launch, native Claude authentication ownership, and
-  bounded asynchronous child-process failures;
+  internal entrypoint launch, native Claude authentication ownership, normal
+  provider-configured MCP access, and bounded asynchronous child-process
+  failures;
 - startup output with working MCP setup commands for all supported agents and
   safe operator diagnostics for each startup or delivery failure class;
 - no separate connector process, user-selected webhook format, OpenClaw

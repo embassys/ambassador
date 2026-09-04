@@ -86,7 +86,9 @@ For the real Claude Code mode, prepare an owner-only temporary home containing
 an owner-only copy of `.claude.json` and a minimal `.claude/settings.json`.
 Configure the copy through the official Claude CLI with the authentication
 method being qualified, without printing a credential or saving it in the
-repository. Use the candidate's built-in Claude CLI bridge, then set:
+repository. The runner replaces the isolated copy's `ambassador` user-scope MCP
+entry with the qualification gateway endpoint through the official CLI. Use
+the candidate's built-in Claude CLI bridge, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude
@@ -100,11 +102,13 @@ and command overrides. It registers with exact MCP client name `claude-code`
 and a deliberately non-release diagnostic version. Ambassador launches its
 compiled-in bridge and only the fixed `claude` command is started. The CLI owns
 authentication. ACP requires exact agent name
-`@embassys/claude-cli-acp`, and Ambassador MCP is injected into the ACP
-session. The background turn leaves the permission and action pending; the
-runner exercises the same later MCP decision and response path a user would.
-Record the authentication category, not a credential value. Delete the isolated
-home after every attempt.
+`@embassys/claude-cli-acp`. Claude loads normal provider configuration, finds
+Ambassador through that configuration, keeps built-in tools disabled, and may
+use configured MCP tools without an interactive prompt. The controlled
+qualification policy directs the background turn to grant the synthetic
+permission and submit the synthetic action result through Ambassador MCP.
+Record the authentication category, not a credential value. Delete the
+isolated home after every attempt.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and

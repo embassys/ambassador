@@ -55,6 +55,7 @@ Later, you can ask:
 Ambassador launches `openclaw acp` for incoming messages. OpenClaw does not
 accept MCP session injection, so keep the MCP entry above enabled. The incoming
 message runs in a new Ambassador-managed session, not the registration chat.
+Ambassador does not disable OpenClaw's normally configured tools.
 
 ## Optional webhook delivery
 

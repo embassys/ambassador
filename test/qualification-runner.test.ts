@@ -127,6 +127,8 @@ test("live runner has a fixed, separately confirmed real-Claude mode", async () 
   );
   assert.match(source, /@embassys\/claude-cli-acp/u);
   assert.match(source, /\.claude\.json/u);
+  assert.match(source, /configureClaudeMcp/u);
+  assert.match(source, /claudeCapability\.direct\.mcp === "provider_config"/u);
   assert.match(source, /target_version_probe/u);
   assert.match(source, /claude_permission_decision/u);
   assert.match(source, /claude_action_result_mcp_call/u);

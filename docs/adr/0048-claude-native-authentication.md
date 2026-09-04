@@ -1,6 +1,6 @@
 # 0048 Claude CLI owns authentication
 
-Status: accepted
+Status: accepted; Claude MCP isolation superseded by ADR 0049
 
 Date: 2026-09-04
 
@@ -39,12 +39,9 @@ billing, while Zed may forward MCP configuration over ACP.
 - Do not inspect, parse, persist, log, return, or copy a provider credential to
   Ambassador state. Passing the existing process environment to the official
   child is not an Ambassador credential interface.
-- Keep the exact executable, arguments, ACP agent name, working directory, and
-  MCP configuration fixed. User input and central messages cannot alter them.
-- Pass the exact loopback Ambassador MCP definition as inline `--mcp-config`
-  JSON. The value contains no secret and is neither printed nor persisted. A
-  new headless Claude process needs it because it is not the chat that enrolled
-  the user and `--safe-mode` ignores normal MCP configuration.
+- Keep the exact executable, arguments, ACP agent name, and working directory
+  fixed. User input and central messages cannot alter them. ADR 0049 later
+  changes MCP handling to normal provider configuration.
 
 ## Consequences
 
@@ -55,9 +52,9 @@ billing. The CLI decides which configured method wins.
 The Claude child receives every environment value available to the Ambassador
 process. This is broader than the former allowlist, but it matches what the
 same installed CLI receives when the user runs it from that shell. The bridge
-still exposes only bounded Ambassador tools, disables built-in tools, uses no
-shell, and returns no provider output. Environment inheritance is a fixed
-Claude capability, not an agent-supplied option.
+still uses no shell and returns no provider output. ADR 0049 defines its
+current tool surface. Environment inheritance is a fixed Claude capability,
+not an agent-supplied option.
 
 Public implementations confirm the shape is established rather than novel.
 [Zed ships Claude](https://zed.dev/docs/ai/use-an-existing-subscription) as an

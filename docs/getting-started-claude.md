@@ -48,6 +48,13 @@ give a credential to Ambassador. The official CLI uses whichever native
 authentication you configured. The incoming message runs in a new
 Ambassador-managed session, not the registration chat.
 
+That background session loads your normal Claude configuration. Its configured
+MCP tools are allowed without an interactive prompt, subject to your provider
+and organization policy. This lets Claude query a calendar, for example, after
+an Embassys calendar permission has been granted. Claude's built-in filesystem
+and shell tools remain disabled. Configure only MCP tools you are willing to
+make available to direct Embassys requests.
+
 Ambassador does not promise which Claude allowance pays for a programmatic
 request. Anthropic decides whether `claude --print` usage consumes plan credit,
 extra usage, API billing, or a cloud-provider account.
