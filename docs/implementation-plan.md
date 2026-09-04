@@ -7,17 +7,11 @@ Claude-specific login preflight and leaves authentication to the official CLI.
 ADR 0049 removes Claude's safe and strict MCP isolation so resource-backed
 actions can use normal provider-configured tools. The other direct profiles
 already retain their native tool behavior.
+The post-ADR 0049 candidate passed two consecutive real-Claude live runs, a
+real-Codex live run, and a clean combined Codex-to-Claude direct exchange
+against the same packed archive.
 Release evidence belongs in [Delivery qualification](qualification.md), not in
 this plan.
-
-## Later qualification
-
-Before the next release, repeat the real Claude qualification with the native
-authentication method selected for that run and its user-scope Ambassador MCP
-entry. Prove that the background turn can call that normally configured MCP
-and complete the action automatically. Record only the authentication category
-and observed result. Do not capture credentials, and do not claim that
-programmatic usage consumes a particular subscription allowance.
 
 The deterministic Windows lanes cover state, startup, packaging, and mock
 delivery. A support claim for an individual real-agent mode on Windows still

@@ -29,6 +29,8 @@ const CODEX_CONFIRMATION =
   "run-live-qualification-with-real-codex-and-two-disposable-mailosaur-identities";
 const CLAUDE_CONFIRMATION =
   "run-live-qualification-with-real-claude-and-two-disposable-mailosaur-identities";
+const CODEX_CLAUDE_CONFIRMATION =
+  "run-live-qualification-with-real-codex-and-real-claude-and-two-disposable-mailosaur-identities";
 const HERMES_DIRECT_CONFIRMATION =
   "run-live-qualification-with-real-hermes-direct-and-two-disposable-mailosaur-identities";
 const HERMES_WEBHOOK_CONFIRMATION =
@@ -42,6 +44,7 @@ const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" }
 const CLAUDE_CLIENT_INFO = { name: "claude-code", version: "qualification" };
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
 const CLAUDE_COMMAND = "claude";
+const CLAUDE_USER_MCP_PORT = 8787;
 const HERMES_ACP_COMMAND = "hermes-acp";
 const OPENCLAW_ACP_COMMAND = "openclaw";
 const OPENCLAW_WEBHOOK_PATH = "/hooks/agent";
@@ -475,11 +478,8 @@ function hermesEnvironment(home, extra = {}) {
 
 function claudeEnvironment(home) {
   return {
+    ...process.env,
     HOME: home,
-    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
-    ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
-    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
-    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
   };
 }
 
@@ -499,20 +499,24 @@ async function runClaudeConfiguration(home, arguments_) {
   assert(code === 0, "claude_mcp_configuration");
 }
 
-async function configureClaudeMcp(home, endpoint) {
-  await runClaudeConfiguration(home, ["mcp", "remove", "ambassador", "--scope", "user"]).catch(
-    () => undefined,
-  );
-  await runClaudeConfiguration(home, [
-    "mcp",
-    "add",
-    "--transport",
-    "http",
-    "--scope",
-    "user",
-    "ambassador",
-    endpoint,
-  ]);
+async function prepareClaudeMcp(home, endpoint, usesOrdinaryHome) {
+  if (usesOrdinaryHome) {
+    assert(endpoint === `http://127.0.0.1:${CLAUDE_USER_MCP_PORT}/mcp`, "claude_mcp_configuration");
+  } else {
+    await runClaudeConfiguration(home, ["mcp", "remove", "ambassador", "--scope", "user"]).catch(
+      () => undefined,
+    );
+    await runClaudeConfiguration(home, [
+      "mcp",
+      "add",
+      "--transport",
+      "http",
+      "--scope",
+      "user",
+      "ambassador",
+      endpoint,
+    ]);
+  }
   await runClaudeConfiguration(home, ["mcp", "get", "ambassador"]);
 }
 
@@ -523,22 +527,25 @@ async function validateClaudeHome(configuredHome) {
     process.env.HOME === undefined
       ? undefined
       : await realpath(process.env.HOME).catch(() => undefined);
-  assert(home !== undefined && home !== ordinaryHome, "claude_isolation");
+  assert(home !== undefined, "claude_isolation");
+  const usesOrdinaryHome = ordinaryHome !== undefined && home === ordinaryHome;
   const rootMetadata = await lstat(home).catch(() => undefined);
   assert(
     rootMetadata?.isDirectory() === true &&
       !rootMetadata.isSymbolicLink() &&
-      (rootMetadata.mode & 0o077) === 0,
+      (usesOrdinaryHome || (rootMetadata.mode & 0o077) === 0),
     "claude_isolation",
   );
   for (const relativePath of [".claude.json", ".claude/settings.json"]) {
     const metadata = await lstat(join(home, relativePath)).catch(() => undefined);
     assert(
-      metadata?.isFile() === true && !metadata.isSymbolicLink() && (metadata.mode & 0o077) === 0,
+      metadata?.isFile() === true &&
+        !metadata.isSymbolicLink() &&
+        (usesOrdinaryHome || (metadata.mode & 0o077) === 0),
       "claude_isolation",
     );
   }
-  return home;
+  return { home, usesOrdinaryHome };
 }
 
 async function validateHermesHome(configuredHome) {
@@ -922,6 +929,7 @@ async function startGateway(
   extraEnvironment = {},
   workingDirectory = repositoryRoot,
   webhookFetch,
+  localMcpPort = 0,
 ) {
   const controller = new AbortController();
   let stdout = "";
@@ -949,7 +957,7 @@ async function startGateway(
     testOverrides: {
       centralOrigin: LIVE_ORIGIN,
       stateRoot,
-      localMcpPort: 0,
+      localMcpPort,
       centralFetch,
       ...(webhookFetch === undefined ? {} : { webhookFetch }),
       ...(deliveryTargetFactory === undefined ? {} : { deliveryTargetFactory }),
@@ -1189,6 +1197,7 @@ async function main() {
     [
       "mock",
       "codex",
+      "codex-claude",
       "claude",
       "hermes-direct",
       "hermes-webhook",
@@ -1197,8 +1206,10 @@ async function main() {
     ].includes(directAgent),
     "direct_agent",
   );
+  const realCodexClaude = directAgent === "codex-claude";
   const realCodex = directAgent === "codex";
-  const realClaude = directAgent === "claude";
+  const realClaude = directAgent === "claude" || realCodexClaude;
+  const anyRealCodex = realCodex || realCodexClaude;
   const realHermesDirect = directAgent === "hermes-direct";
   const realHermesWebhook = directAgent === "hermes-webhook";
   const realHermes = realHermesDirect || realHermesWebhook;
@@ -1206,23 +1217,26 @@ async function main() {
   const realOpenClawWebhook = directAgent === "openclaw-webhook";
   const realOpenClaw = realOpenClawDirect || realOpenClawWebhook;
   const realWebhook = realHermesWebhook || realOpenClawWebhook;
-  const realDirect = realCodex || realClaude || realHermesDirect || realOpenClawDirect;
+  const realDirect = anyRealCodex || realClaude || realHermesDirect || realOpenClawDirect;
   const realDirectOnly = realCodex || realClaude;
   const realTarget = realDirect || realWebhook;
   let targetVersionProbe = { status: "not_applicable", reported_version: null };
-  const confirmation = realCodex
-    ? CODEX_CONFIRMATION
-    : realClaude
-      ? CLAUDE_CONFIRMATION
-      : realHermesDirect
-        ? HERMES_DIRECT_CONFIRMATION
-        : realHermesWebhook
-          ? HERMES_WEBHOOK_CONFIRMATION
-          : realOpenClawDirect
-            ? OPENCLAW_DIRECT_CONFIRMATION
-            : realOpenClawWebhook
-              ? OPENCLAW_WEBHOOK_CONFIRMATION
-              : MOCK_CONFIRMATION;
+  let requesterVersionProbe = { status: "not_applicable", reported_version: null };
+  const confirmation = realCodexClaude
+    ? CODEX_CLAUDE_CONFIRMATION
+    : realCodex
+      ? CODEX_CONFIRMATION
+      : realClaude
+        ? CLAUDE_CONFIRMATION
+        : realHermesDirect
+          ? HERMES_DIRECT_CONFIRMATION
+          : realHermesWebhook
+            ? HERMES_WEBHOOK_CONFIRMATION
+            : realOpenClawDirect
+              ? OPENCLAW_DIRECT_CONFIRMATION
+              : realOpenClawWebhook
+                ? OPENCLAW_WEBHOOK_CONFIRMATION
+                : MOCK_CONFIRMATION;
   if (process.env.AMBASSADOR_CONFIRM_LIVE_QUALIFICATION !== confirmation) {
     process.stderr.write("live qualification: explicit_confirmation_required\n");
     return 2;
@@ -1232,7 +1246,7 @@ async function main() {
   assert(cliPath !== undefined && tarballPath !== undefined, "package_input");
 
   let codexHome;
-  if (realCodex) {
+  if (anyRealCodex) {
     const configuredHome = process.env.AMBASSADOR_CODEX_QUALIFICATION_HOME;
     assert(configuredHome !== undefined && isAbsolute(configuredHome), "codex_isolation");
     codexHome = await realpath(configuredHome).catch(() => undefined);
@@ -1244,14 +1258,17 @@ async function main() {
     const configuredAuthPath = join(codexHome, ".codex", "auth.json");
     const codexAuthPath = await realpath(configuredAuthPath).catch(() => undefined);
     assert(codexAuthPath === configuredAuthPath, "codex_isolation");
-    targetVersionProbe = await observeAgentVersion("codex", {
+    const codexVersionProbe = await observeAgentVersion("codex", {
       HOME: codexHome,
       ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
     });
+    if (realCodexClaude) requesterVersionProbe = codexVersionProbe;
+    else targetVersionProbe = codexVersionProbe;
   }
-  const claudeHome = realClaude
+  const claudeQualification = realClaude
     ? await validateClaudeHome(process.env.AMBASSADOR_CLAUDE_QUALIFICATION_HOME)
     : undefined;
+  const claudeHome = claudeQualification?.home;
   if (realClaude && claudeHome !== undefined) {
     targetVersionProbe = await observeAgentVersion("claude", claudeEnvironment(claudeHome));
   }
@@ -1300,6 +1317,7 @@ async function main() {
   const centralRoutes = new Set();
   const centralObservations = [];
   const directMessages = [];
+  const requesterDirectMessages = [];
   const routeCounts = [new Map(), new Map()];
   const successfulAckCounts = [0, 0];
   const acknowledgedByGateway = [new Set(), new Set()];
@@ -1482,9 +1500,11 @@ async function main() {
     phase = "state_setup";
     const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-live-qualification-"));
     roots.push(join(qualificationRoot, "identity-a"), join(qualificationRoot, "identity-b"));
+    const requesterWorkingDirectory = join(qualificationRoot, "requester-work");
     const targetWorkingDirectory = join(qualificationRoot, "target-work");
     await Promise.all([
       ...roots.map((root) => mkdir(root, { recursive: true })),
+      mkdir(requesterWorkingDirectory, { recursive: true }),
       mkdir(targetWorkingDirectory, { recursive: true }),
     ]);
     if (realTarget) {
@@ -1512,16 +1532,30 @@ async function main() {
     }
 
     const clientInfoFor = (index) =>
-      index !== 1
-        ? OPENCLAW_CLIENT_INFO
-        : realCodex
+      realCodexClaude
+        ? index === 0
           ? CODEX_CLIENT_INFO
-          : realClaude
-            ? CLAUDE_CLIENT_INFO
-            : realHermes
-              ? HERMES_CLIENT_INFO
-              : OPENCLAW_CLIENT_INFO;
+          : CLAUDE_CLIENT_INFO
+        : index !== 1
+          ? OPENCLAW_CLIENT_INFO
+          : realCodex
+            ? CODEX_CLIENT_INFO
+            : realClaude
+              ? CLAUDE_CLIENT_INFO
+              : realHermes
+                ? HERMES_CLIENT_INFO
+                : OPENCLAW_CLIENT_INFO;
     const environmentFor = (index) => {
+      if (realCodexClaude && index === 0) {
+        assert(codexHome !== undefined, "codex_isolation");
+        return {
+          HOME: codexHome,
+          ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+          ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+          ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+          ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+        };
+      }
       if (index !== 1 || !realTarget) return {};
       if (realClaude) {
         assert(claudeHome !== undefined, "claude_isolation");
@@ -1536,8 +1570,12 @@ async function main() {
         ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
       };
     };
+    const localMcpPortFor = (index) =>
+      realClaude && index === 1 && claudeQualification?.usesOrdinaryHome === true
+        ? CLAUDE_USER_MCP_PORT
+        : 0;
     const deliveryTargetFactoryFor = (index) => {
-      if (index === 0 || realWebhook) return undefined;
+      if ((index === 0 && !realCodexClaude) || realWebhook) return undefined;
       return ({ capability, endpoint, profile }) => {
         const selectedCapability = realDirect
           ? capability.direct
@@ -1562,6 +1600,7 @@ async function main() {
           async deliver(message, signal) {
             const result = await target.deliver(message, signal);
             if (!realDirect) directMessages.push(message);
+            if (realCodexClaude && index === 0) requesterDirectMessages.push(message);
             localCompletedByGateway[index].add(message.id);
             return result;
           },
@@ -1571,6 +1610,12 @@ async function main() {
         };
       };
     };
+    const workingDirectoryFor = (index) =>
+      realCodexClaude && index === 0
+        ? requesterWorkingDirectory
+        : realTarget && index === 1
+          ? targetWorkingDirectory
+          : repositoryRoot;
 
     for (let index = 0; index < 2; index += 1) {
       phase = `webhook_setup_${index + 1}`;
@@ -1590,14 +1635,19 @@ async function main() {
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
-          realTarget && index === 1 ? targetWorkingDirectory : repositoryRoot,
+          workingDirectoryFor(index),
           webhookFetchFor(index),
+          localMcpPortFor(index),
         ),
       );
       if (realClaude && index === 1) {
         assert(claudeHome !== undefined, "claude_isolation");
         phase = "claude_mcp_configuration";
-        await configureClaudeMcp(claudeHome, gateways[index].client.endpoint);
+        await prepareClaudeMcp(
+          claudeHome,
+          gateways[index].client.endpoint,
+          claudeQualification?.usesOrdinaryHome === true,
+        );
       }
       if (realHermesWebhook && index === 1) {
         assert(hermesHome !== undefined, "hermes_isolation");
@@ -1656,7 +1706,7 @@ async function main() {
         "bootstrap_catalog",
       );
       const initial = await client.call("register_agent", { email: addresses[index] });
-      if (index === 0 || !realDirectOnly) {
+      if ((index === 0 && !realCodexClaude) || !realDirectOnly) {
         assert(initial.status === "input_required" && initial.default === "direct", "registration");
         await client.call("register_agent", {
           email: addresses[index],
@@ -1718,10 +1768,20 @@ async function main() {
           deliveryTargetFactoryFor(index),
           clientInfoFor(index),
           environmentFor(index),
-          realTarget && index === 1 ? targetWorkingDirectory : repositoryRoot,
+          workingDirectoryFor(index),
           webhookFetchFor(index),
+          localMcpPortFor(index),
         ),
       );
+      if (realClaude && index === 1) {
+        assert(claudeHome !== undefined, "claude_isolation");
+        phase = "claude_mcp_configuration";
+        await prepareClaudeMcp(
+          claudeHome,
+          gateways[index].client.endpoint,
+          claudeQualification?.usesOrdinaryHome === true,
+        );
+      }
       const names = (await gateways[index].client.listTools()).map((tool) => tool.name);
       assert(
         JSON.stringify(names) ===
@@ -1888,8 +1948,18 @@ async function main() {
       assert(permissionStatus === "granted", "permission_decision");
     }
     if (realTarget) assert(targetPermissionDecisionObserved, "target_permission_decision");
-    phase = "permission_response_webhook";
-    const responseMessage = await webhooks[0].wait("permission_response_webhook_timeout");
+    phase = realCodexClaude ? "permission_response_codex" : "permission_response_webhook";
+    const responseMessage = realCodexClaude
+      ? await waitForDelivered(
+          requesterDirectMessages,
+          (message) =>
+            isRecord(message) &&
+            isRecord(message.payload) &&
+            message.payload.type === "permission_response" &&
+            message.payload.permission_id === requested.permission_id,
+          "permission_response_codex_timeout",
+        )
+      : await webhooks[0].wait("permission_response_webhook_timeout");
     assert(
       isRecord(responseMessage) &&
         typeof responseMessage.id === "string" &&
@@ -1899,6 +1969,12 @@ async function main() {
         responseMessage.payload.decision === "granted",
       "permission_response",
     );
+    if (realCodexClaude) {
+      await waitForObservation(
+        () => acknowledgedByGateway[0].has(responseMessage.id),
+        "permission_response_ack_timeout",
+      );
+    }
 
     phase = "action";
     const called = await gateways[0].client.call("call_action", {
@@ -1942,8 +2018,18 @@ async function main() {
       });
     }
 
-    phase = "action_response_webhook";
-    const actionResponse = await webhooks[0].wait("action_response_webhook_timeout");
+    phase = realCodexClaude ? "action_response_codex" : "action_response_webhook";
+    const actionResponse = realCodexClaude
+      ? await waitForDelivered(
+          requesterDirectMessages,
+          (message) =>
+            isRecord(message) &&
+            isRecord(message.payload) &&
+            message.payload.type === "action_response" &&
+            message.payload.call_id === called.call_id,
+          "action_response_codex_timeout",
+        )
+      : await webhooks[0].wait("action_response_webhook_timeout");
     assert(
       isRecord(actionResponse) &&
         typeof actionResponse.id === "string" &&
@@ -2016,19 +2102,21 @@ async function main() {
     const schemaDigests = Object.fromEntries(
       catalog.map((action) => [action.name, schemaDigest(action.input_schema)]),
     );
-    const qualification = realCodex
-      ? "ambassador-live-codex"
-      : realClaude
-        ? "ambassador-live-claude"
-        : realHermesDirect
-          ? "ambassador-live-hermes-direct"
-          : realHermesWebhook
-            ? "ambassador-live-hermes-webhook"
-            : realOpenClawDirect
-              ? "ambassador-live-openclaw-direct"
-              : realOpenClawWebhook
-                ? "ambassador-live-openclaw-webhook"
-                : "ambassador-live";
+    const qualification = realCodexClaude
+      ? "ambassador-live-codex-claude"
+      : realCodex
+        ? "ambassador-live-codex"
+        : realClaude
+          ? "ambassador-live-claude"
+          : realHermesDirect
+            ? "ambassador-live-hermes-direct"
+            : realHermesWebhook
+              ? "ambassador-live-hermes-webhook"
+              : realOpenClawDirect
+                ? "ambassador-live-openclaw-direct"
+                : realOpenClawWebhook
+                  ? "ambassador-live-openclaw-webhook"
+                  : "ambassador-live";
     const targetAgent = realCodex
       ? "codex-acp"
       : realClaude
@@ -2053,6 +2141,8 @@ async function main() {
         .digest("hex"),
       target_agent: targetAgent,
       target_version_probe: targetVersionProbe,
+      requester_agent: realCodexClaude ? "codex-acp" : "controlled-webhook",
+      requester_version_probe: requesterVersionProbe,
       target_delivery_mode: realWebhook ? "webhook" : "direct",
       results: {
         registration: "passed",
@@ -2063,7 +2153,8 @@ async function main() {
         dpop_negative_matrix: "passed",
         permission_request_decision: "passed",
         permission_listing: permissionListing,
-        webhook_delivery_ack: "passed",
+        webhook_delivery_ack: realCodexClaude ? "not_applicable" : "passed",
+        codex_response_delivery: realCodexClaude ? "passed" : "not_applicable",
         target_delivery_ack: "passed",
         acknowledgement_order: "passed",
         action_result_round_trip: "passed",

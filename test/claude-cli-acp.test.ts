@@ -69,13 +69,14 @@ test("Claude ACP bridge loads normal configured MCP tools for trusted action del
   assert.equal(promptCall.args.includes("--strict-mcp-config"), false);
   assert.equal(promptCall.args.includes("--mcp-config"), false);
   assert.equal(promptCall.args.includes("--no-session-persistence"), true);
+  assert.equal(promptCall.args.includes("--permission-mode"), false);
+  assert.equal(promptCall.args.includes("dontAsk"), false);
+  assert.equal(promptCall.args.includes("--dangerously-skip-permissions"), true);
   assert.equal(promptCall.args.includes("--permission-prompts"), true);
   assert.equal(promptCall.args.includes("none"), true);
   assert.equal(promptCall.args.includes("--tools"), true);
   assert.equal(promptCall.args.includes(""), true);
-  const allowedToolsIndex = promptCall.args.indexOf("--allowedTools");
-  assert.notEqual(allowedToolsIndex, -1);
-  assert.equal(promptCall.args[allowedToolsIndex + 1], "mcp__*");
+  assert.equal(promptCall.args.includes("--allowedTools"), false);
   assert.match(promptCall.input, /untrusted Embassys message/u);
   assert.match(promptCall.input, /private prompt marker/u);
 });

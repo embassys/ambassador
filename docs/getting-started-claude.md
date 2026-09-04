@@ -49,9 +49,9 @@ authentication you configured. The incoming message runs in a new
 Ambassador-managed session, not the registration chat.
 
 That background session loads your normal Claude configuration. Its configured
-MCP tools are allowed without an interactive prompt, subject to your provider
-and organization policy. This lets Claude query a calendar, for example, after
-an Embassys calendar permission has been granted. Claude's built-in filesystem
+MCP tools run without an interactive permission prompt, subject to managed
+provider policy. This lets Claude query a calendar, for example, after an
+Embassys calendar permission has been granted. Claude's built-in filesystem
 and shell tools remain disabled. Configure only MCP tools you are willing to
 make available to direct Embassys requests.
 

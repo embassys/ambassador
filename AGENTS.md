@@ -54,8 +54,9 @@ scope on your own.
   credentials.
 - Under ADR 0049, the Claude bridge uses normal provider configuration rather
   than safe or strict MCP isolation. It disables Claude's built-in tools but
-  allows configured MCP tools for the fixed Embassys delivery prompt, subject
-  to provider and managed deny policy.
+  bypasses interactive permission checks for configured MCP tools during the
+  fixed Embassys delivery prompt. Provider-managed deny policy may still
+  apply.
   Claude must therefore have Ambassador MCP configured normally. Do not add an
   Ambassador-imposed safe mode to another direct profile without a new
   approved decision.
