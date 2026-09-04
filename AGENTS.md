@@ -25,11 +25,16 @@ scope on your own.
   binary is `ambassador`. Do not keep the old package or binary as aliases.
 - One foreground Ambassador process owns one enrolled central identity and one
   local delivery profile.
-- `start` accepts no options. Do not add delivery-mode, agent, webhook URL,
-  central URL, configuration path, token, or secret-value flags.
+- `start` accepts only the optional `--verbose` diagnostic flag. Do not add
+  delivery-mode, agent, webhook URL, central URL, configuration path, token,
+  or secret-value flags.
 - `clean` accepts no options. It clears local Ambassador enrollment and
   delivery state only after proving the foreground process is stopped. It does
   not call central or change agent/provider configuration.
+- Session commands are `sessions list`, `sessions show <session-id>` with an
+  optional `--verbose`, `sessions delete <session-id>`, and `sessions forget
+  <session-id>`. They require the foreground process to be stopped. Keep
+  provider history out of local state.
 - Resolve delivery during MCP registration through a fixed capability
   registry. The two modes are `webhook` and `direct`. Do not add a third
   connector or polling mode.
@@ -47,19 +52,9 @@ scope on your own.
 - Reject an unknown, ambiguous, or incomplete profile before creating local or
   central registration state. Do not offer a generic webhook fallback. Keep the
   fixed Codex and Claude Code commands and ACP agent names approved in ADR
-  0038; do not substitute adapters or accept arbitrary agent names. Under ADR
-  0048, Claude Code alone inherits the Ambassador process environment so the
-  unmodified official CLI can apply its own authentication policy. Ambassador
-  does not initiate login or inspect, store, log, or return provider
-  credentials.
-- Under ADR 0049, the Claude bridge uses normal provider configuration rather
-  than safe or strict MCP isolation. It disables Claude's built-in tools but
-  bypasses interactive permission checks for configured MCP tools during the
-  fixed Embassys delivery prompt. Provider-managed deny policy may still
-  apply.
-  Claude must therefore have Ambassador MCP configured normally. Do not add an
-  Ambassador-imposed safe mode to another direct profile without a new
-  approved decision.
+  0050; do not substitute adapters or accept arbitrary agent names. Provider
+  agents apply their own authentication policy. Ambassador does not initiate
+  login or inspect, store, log, or return provider credentials.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts only a URL after the owner creates Ambassador's
@@ -80,10 +75,17 @@ scope on your own.
   cutover. Expose the exact central `submit_action_result` operation for the
   target of an action call and the local `list_pending_action_calls` view from
   ADR 0046. Do not treat either as a general chat or delivery-control tool.
-- Direct-agent work is a gateway-managed ACP session. It is not the exact chat
-  in which registration happened. Configure Ambassador MCP in that session
-  when the agent supports session MCP injection; otherwise require normal
-  provider configuration.
+- Direct-agent work is a persistent gateway-managed ACP session. It is not the
+  exact chat in which registration happened. All supported agents load
+  Ambassador MCP and other tools from normal provider configuration; send an
+  empty `mcpServers` array through ACP.
+- Keep provider built-in tools enabled and do not request safe mode, restricted
+  mode, or permission bypass. When ACP requests tool permission, choose
+  `allow_once` when offered, otherwise choose the first positive option.
+- Store only bounded ACP session metadata. Retire non-action sessions after a
+  normal turn and action sessions after central accepts their correlated
+  result. Delete or forget retired sessions after 30 days as defined by ADR
+  0050.
 - Keep the notification journal ID-only. The sole local body-persistence
   exception is ADR 0046's encrypted pending-action inbox: capture only the
   validated action-call fields and remove them after a successful
@@ -108,6 +110,10 @@ scope on your own.
   encrypted credential. Never put either value in MCP arguments or results,
   URLs, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts,
   or support bundles.
+- Verbose diagnostics are console-only and may include bounded message, MCP,
+  and REST data after mandatory credential redaction. Never print
+  authorization, DPoP material, nonces, tokens, verification codes, private
+  keys, cookies, or webhook secrets.
 - Do not add old-client support, central MCP fallbacks, speculative versioned
   routes, credential migration, activation, token reissue, leases, general
   conversations or replies, or outcome lookup unless the current server adds
@@ -124,8 +130,10 @@ scope on your own.
   OpenClaw, Hermes, Codex, and Claude Code tests are explicit local
   qualification, not CI.
 - Do not select or install a framework, library, runtime, package manager,
-  database driver, or build tool without explicit user approval. ACP v1 and
-  exact `@agentclientprotocol/sdk` 1.4.0 are approved by ADR 0038.
+  database driver, or build tool without explicit user approval. ACP v1,
+  exact `@agentclientprotocol/sdk` 1.4.0, and the public Codex and Claude ACP
+  adapters declared through unpinned npm wildcards are approved by ADRs 0038
+  and 0050.
 - Get user approval for any further CLI change before writing CLI tests or
   code. Get user approval before adding publication or installation tooling.
 - Record approved architecture and dependency changes under `docs/adr/`.

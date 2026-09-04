@@ -5,28 +5,60 @@ behavior.
 
 ## Clean Codex-to-Claude live qualification
 
-On 2026-09-04, one fresh packed candidate completed a single two-real-agent
-flow against the deployed service. Codex ACP 1.8.0 was the direct requester
-endpoint and Claude Code 2.1.260 was the direct target endpoint. The candidate
-SHA-256 was
-`ea7a0252b038037253fca249188f2715e9f1ef941f15794d6f0d6cee21a3e2c5`,
-and the runner SHA-256 was
-`d6a5bde92e43a571cc663db318e53a29fdfe1e8783919996df526c23cf0ea372`.
+On 2026-09-04, the completed ADR 0050 candidate passed a clean packed-artifact
+Codex-to-Claude flow against the deployed service. The tarball SHA-256 was
+`26e821a951afd5d1c9a9d4e54ba6af333f6f0cb011b33373b628f4dac870d237`,
+and the exact runner SHA-256 was
+`fcefba2f0574da7b8189fbc52c522f853b75fbd6e96cdef4f9547bb3703b102b`.
+The clean install resolved the current public adapters at
+`@agentclientprotocol/codex-acp` 1.9.0 and
+`@agentclientprotocol/claude-agent-acp` 0.74.0. Claude Code 2.1.260 was
+observed behind the Claude adapter. A separate `codex-acp` 1.8.0 command on
+the host was only a diagnostic probe; delivery used the package-owned 1.9.0
+adapter.
+
+The runner explicitly removed `OPENAI_API_KEY` and `CODEX_API_KEY` for this
+qualification, so the Codex side proves native subscription authentication.
+The fixed Codex profile also preserves either variable when a user deliberately
+configures API-key authentication; Claude inherits its normal provider
+environment and therefore supports both provider authentication choices too.
 
 The runner registered and verified two new disposable identities, restarted
 both gateways from encrypted state, and passed the DPoP positive and negative
-matrix. It initiated a synthetic `get_phone_number` request from the Codex
-identity. Claude granted the permission and submitted exactly one correlated
-result. Codex then accepted the permission response and action response through
-its real direct-delivery path. Both gateways acknowledged central only after
-successful local completion. The live six-action catalog matched the recorded
-schemas; no DPoP nonce or central MCP request was observed. Artifact scanning
-and Mailosaur cleanup passed.
+matrix. The deployed server differed from its public source revision
+`ac3f7a6e33829eb80301c7944f611d29cc2499b5`: `request_permission` returned
+the bounded `already_granted` and `decision` fields, emailed the human grantor,
+and did not queue a `permission_request` to Claude. The runner proved the
+pending-permission projection, applied `accept` through the disposable email
+decision flow, and observed the current `permission_outcome` notification with
+`granted: true`.
+
+Codex received that outcome through its normal provider-configured Ambassador
+MCP and issued one valid `call_action` with zero rejected attempts. Claude
+received the resulting `action_call`, submitted exactly one correlated
+synthetic phone result, and Codex received the successful `action_response`.
+Each gateway acknowledged central only after successful local completion. The
+live six-action catalog and schema digests matched the fixtures; no DPoP nonce
+or central MCP request was observed.
+
+The same run proved persistent per-message sessions, result-based retirement,
+`sessions list`, normal and verbose `sessions show`, `sessions delete`,
+`sessions forget`, stable repeated `webhook-secret`, redacted `start
+--verbose`, ordinary `start`, and `clean`. Artifact scanning, mail cleanup,
+temporary-state cleanup, and credential redaction passed.
+
+That live artifact used 0.2.16 package metadata before the separate release
+approval. The final 0.2.17 release candidate changes only the package version;
+its tarball SHA-256 is
+`b14b7dd89934e0e77fd698a450a3c0bc71fe063dd657793c798094273e9d37e7`.
+The clean-installed 0.2.17 artifact passed the packaged REST enrollment,
+delivery, acknowledgement, cleanup, and artifact-scan lane.
 
 This is a combined direct-delivery qualification, not an interactive chat
-transcript: the controlled runner invoked `request_permission` and
-`call_action`, while the real Codex and Claude processes handled their
-respective inbound messages.
+transcript. The controlled runner invoked `request_permission` and acted as the
+human who clicked the disposable email decision. Codex continued the granted
+request, while Claude handled the inbound action and Codex handled both
+correlated central responses.
 
 ## ADR 0049 live Claude and Codex repeat
 
@@ -572,15 +604,16 @@ message, payload, secret, signature material, or request headers.
 The mock is a small NDJSON ACP v1 peer controlled by the test. It validates:
 
 - initialize and capability negotiation;
-- new-session and supported resume behavior;
-- Ambassador MCP session configuration;
+- new-session, retry resume, load, close, and delete behavior;
+- an empty ACP `mcpServers` array with tools loaded from provider configuration;
 - one complete-message prompt with fixed untrusted-input instructions;
 - target-side `submit_action_result` and correlated `action_response` delivery;
 - normal terminal completion and acknowledgement order;
 - pre-dispatch startup failure;
-- permission request denial or bounded handling;
+- `allow_once` permission selection and positive fallback;
 - malformed output, overflow, timeout, cancellation, child exit, and cleanup;
-  and
+- session metadata bounds, non-action and action-result retirement, 30-day
+  cleanup, every session command, and verbose redaction; and
 - no automatic replay after an uncertain prompt dispatch.
 
 The mock must run without a shell and expose deterministic barriers so tests can
@@ -628,7 +661,8 @@ The required matrix is:
 For each row:
 
 1. Create an isolated provider profile and bounded working directory.
-2. Start the packed Ambassador candidate with no CLI options.
+2. Start the packed Ambassador candidate with `start --verbose` and verify
+   redaction; repeat the normal `start` path where needed.
 3. Configure Ambassador MCP through the provider's supported mechanism.
 4. Register a synthetic fixture identity and prove the real MCP client's exact
    name selects the expected fixed profile regardless of its reported version.
@@ -641,25 +675,26 @@ For each row:
 8. Prove the requester receives the resulting `action_response` before both
    delivered messages are acknowledged.
 9. Exercise one bounded failure and confirm no unsafe replay.
-10. Stop all processes and scan the isolated state and output.
+10. Stop the gateway and exercise `sessions list`, both forms of `sessions
+    show`, `sessions delete`, and `sessions forget` against provider-created
+    sessions.
+11. Scan the isolated state and output.
 
 OpenClaw webhook qualification enables the built-in `/hooks/agent` endpoint in
 the isolated configuration copy. Ambassador sends the native request directly;
 no plugin or receiver mapping is installed. Direct qualification uses
-OpenClaw's ACP command and its preconfigured Ambassador MCP entry when session
-MCP injection is unavailable.
+OpenClaw's ACP command and its preconfigured Ambassador MCP entry.
 
 Hermes webhook qualification uses its authenticated generic webhook path.
-Direct qualification uses its fixed ACP command and session MCP configuration.
+Direct qualification uses its fixed ACP command and provider MCP configuration.
 
-Codex direct qualification uses Ambassador's package-owned ACP adapter. Claude
-Code direct qualification uses Ambassador's built-in ACP bridge and the
-installed official `claude` command with its native authentication. Codex
-receives Ambassador MCP through ACP session configuration. Claude uses its
-normal provider configuration. A Keychain-backed Claude subscription can be
-qualified against the ordinary user home without modifying that configuration;
-the documented Ambassador entry must already use port 8787. The runner records
-installed provider versions as evidence but does not use them as allowlists.
+Codex and Claude Code direct qualification use Ambassador's package-owned
+public ACP adapters. Both load Ambassador MCP and other tools from normal
+provider configuration; all ACP session requests carry an empty `mcpServers`
+array. A Keychain-backed Claude subscription can be qualified against the
+ordinary user home without modifying that configuration; the documented
+Ambassador entry must already use port 8787. The runner records installed
+provider and adapter versions as evidence but does not use them as allowlists.
 
 On 2026-09-02, isolated installs of the three entry points approved at that
 time passed ACP v1 initialization and returned the exact `agentInfo` identities
@@ -716,7 +751,8 @@ installs, updates, or pulls an agent. It records:
 - provider and ACP adapter versions;
 - fixture revision;
 - case names and pass/fail status; and
-- whether session MCP injection or provider configuration was used.
+- confirmation that provider configuration supplied MCP tools and ACP received
+  no additional server definition.
 
 The installed-command version probe is observational. Run it without provider
 credentials or model work:
@@ -847,15 +883,13 @@ pnpm run qualify:agents
 Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, observes the
 installed provider versions, loads the code from the exact candidate archive,
-runs the delivery cases, and prints one safe JSON report. Configure OpenClaw's
-provider-side MCP entry for `http://127.0.0.1:8787/mcp` without authentication
-before starting the runner. The real-Claude runner configures the same endpoint
-as a user-scope MCP entry in its isolated provider home. Hermes and Codex
-receive it by ACP session injection. Each direct case must call the
-qualification `get_my_permissions` tool, which proves the real MCP client's
-exact name match. Missing, unauthenticated, or failing agents make the delivery
-case fail; a version-command observation does not. The runner never invokes an
-installer or updater.
+runs the delivery cases, and prints one safe JSON report. Configure each
+provider's Ambassador MCP entry for `http://127.0.0.1:8787/mcp` without
+authentication before starting the runner. Each direct case must call the
+qualification `get_my_permissions` tool through normal provider configuration,
+which proves the real MCP client's exact name match. Missing, unauthenticated,
+or failing agents make the delivery case fail; a version-command observation
+does not. The runner never invokes an installer or updater.
 
 The reviewed OpenClaw 2026.8.1 and Hermes 0.21.0 images may provide their exact
 executables. Pin `ghcr.io/openclaw/openclaw:2026.8.1` to manifest digest

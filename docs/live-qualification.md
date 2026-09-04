@@ -38,15 +38,21 @@ exact known client and ACP agent names and then tries the fixed ACP v1 contract.
    nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
 7. Validate the live action catalog against the recorded fixture schemas.
-8. Request and decide one synthetic `get_phone_number` permission.
+8. Request one synthetic `get_phone_number` permission, prove that the
+   grantor's agent is not woken, and apply the human decision from the
+   disposable permission email.
 9. Deliver the action request to the direct target.
 10. Submit one correlated synthetic result from the target and deliver the
     resulting `action_response` to the selected requester endpoint.
 11. Prove each local acceptance or completion precedes its central
     acknowledgement.
-12. Record the consuming-poll restart-loss and non-idempotent result-submission
+12. Prove one provider session per message, action-result retirement,
+    `sessions list`, normal and verbose `sessions show`, `sessions delete`,
+    `sessions forget`, stable repeated `webhook-secret`, and redacted
+    `start --verbose` output.
+13. Record the consuming-poll restart-loss and non-idempotent result-submission
     limitations.
-13. Stop all processes, delete mail and temporary state, and scan artifacts.
+14. Stop all processes, delete mail and temporary state, and scan artifacts.
 
 Use the mock webhook receiver and either the mock ACP agent or the fixed real
 Codex mode for this live REST test. Real-agent qualification for all four
@@ -98,7 +104,7 @@ being qualified:
   configuration.
 
 Do not print a credential or save one in the repository. Use the candidate's
-built-in Claude CLI bridge, then set:
+package-owned public Claude ACP adapter, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude
@@ -111,16 +117,17 @@ The runner rejects non-owner-only files in an isolated copy and rejects command
 overrides. It inherits the same Claude environment as production while
 overriding only `HOME` when a copy is used. It registers with exact MCP client
 name `claude-code` and a deliberately non-release diagnostic version.
-Ambassador launches its compiled-in bridge and only the fixed `claude` command
-is started. The CLI owns authentication. ACP requires exact agent name
-`@embassys/claude-cli-acp`. Claude loads normal provider configuration, finds
-Ambassador through that configuration, keeps built-in tools disabled, and may
-use configured MCP tools without an interactive prompt. The controlled
-qualification policy directs the background turn to grant the synthetic
-permission and submit the synthetic action result through Ambassador MCP.
-Record the authentication category, not a credential value. Delete an isolated
-home after every attempt. The runner never deletes or modifies the ordinary
-home.
+Ambassador launches only the fixed package-owned `claude-agent-acp` entrypoint.
+ACP requires exact agent name `@agentclientprotocol/claude-agent-acp`. The
+adapter and Claude Code own authentication. Claude loads normal provider
+configuration and keeps its built-in tools. Ambassador requests no safe mode,
+tool restriction, or permission bypass; it selects `allow_once` when ACP asks
+for approval. The runner applies the permission through the disposable human
+decision email; Claude is not invoked for that step. The controlled
+qualification policy directs Claude only to submit the synthetic action result
+through Ambassador MCP. Record the authentication category, not a credential
+value. Delete an isolated home after every attempt. The runner never deletes
+or modifies the ordinary home.
 
 For the combined Codex-to-Claude mode, prepare the Codex and Claude homes as
 described above, then set:
@@ -134,8 +141,9 @@ pnpm run qualify:live
 ```
 
 This mode registers both identities as direct-only profiles. The controlled
-runner initiates the permission and action calls, Claude handles the inbound
-request and action, and Codex handles both correlated responses. It proves the
+runner initiates the permission request, applies the grant through the
+disposable human decision email, and initiates the action call. Claude handles
+the inbound action and Codex handles both correlated responses. It proves the
 two real direct-delivery endpoints in one central exchange; it does not claim
 that a user typed the initiating calls in an interactive Codex chat.
 

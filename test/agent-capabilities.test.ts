@@ -65,7 +65,7 @@ test("records all reviewed production agent contracts exactly", () => {
         command: "hermes-acp",
         args: [],
         agentInfo: { name: "hermes-agent" },
-        mcp: "session",
+        mcp: "provider_config",
         environment: [
           "APPDATA",
           "HOME",
@@ -99,7 +99,7 @@ test("records all reviewed production agent contracts exactly", () => {
         command: "codex-acp",
         args: [],
         agentInfo: { name: "@agentclientprotocol/codex-acp" },
-        mcp: "session",
+        mcp: "provider_config",
         environment: [
           "APPDATA",
           "CODEX_API_KEY",
@@ -138,12 +138,16 @@ test("records all reviewed production agent contracts exactly", () => {
       aliases: ["claude-code"],
       modes: ["direct"],
       direct: {
-        command: "claude",
+        command: "claude-agent-acp",
         args: [],
-        agentInfo: { name: "@embassys/claude-cli-acp" },
+        agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
         mcp: "provider_config",
         environment: "inherit",
-        builtInAdapter: "claude-cli",
+        bundledNodePackage: {
+          packageName: "@agentclientprotocol/claude-agent-acp",
+          binName: "claude-agent-acp",
+          entrypoint: "dist/index.js",
+        },
       },
       qualificationCases: ["claude-direct"],
     },
@@ -155,13 +159,27 @@ test("Hermes ACP support fixes the agent name without pinning a version", () => 
   assert.deepEqual(hermes?.direct?.agentInfo, { name: "hermes-agent" });
 });
 
-test("Claude direct delivery leaves every native authentication method to the installed CLI", () => {
+test("Claude direct delivery uses the package-owned current adapter", () => {
   const claude = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "claude");
-  assert.equal(claude?.direct?.command, "claude");
-  assert.equal(claude?.direct?.builtInAdapter, "claude-cli");
-  assert.deepEqual(claude?.direct?.agentInfo, { name: "@embassys/claude-cli-acp" });
+  assert.equal(claude?.direct?.command, "claude-agent-acp");
+  assert.deepEqual(claude?.direct?.agentInfo, {
+    name: "@agentclientprotocol/claude-agent-acp",
+  });
   assert.equal(claude?.direct?.mcp, "provider_config");
   assert.equal(claude?.direct?.environment, "inherit");
+  assert.deepEqual(claude?.direct?.bundledNodePackage, {
+    packageName: "@agentclientprotocol/claude-agent-acp",
+    binName: "claude-agent-acp",
+    entrypoint: "dist/index.js",
+  });
+});
+
+test("Codex direct delivery preserves native login and optional API-key authentication", () => {
+  const codex = PRODUCTION_AGENT_CAPABILITIES.find((profile) => profile.kind === "codex");
+  assert.ok(Array.isArray(codex?.direct?.environment));
+  assert.ok(codex.direct.environment.includes("HOME"));
+  assert.ok(codex.direct.environment.includes("OPENAI_API_KEY"));
+  assert.ok(codex.direct.environment.includes("CODEX_API_KEY"));
 });
 
 test("matches exact client names and rejects unknown, ambiguous, disabled, and incomplete profiles", () => {

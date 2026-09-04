@@ -41,9 +41,19 @@ Later, you can ask:
 ## Direct delivery
 
 Ambassador launches the installed `hermes-acp` command for incoming messages
-and injects its MCP endpoint into that new session. The incoming message does
-not return to the registration chat. Ambassador does not disable Hermes's
-normally configured tools.
+and loads tools from normal Hermes configuration. It passes no extra MCP
+servers. The incoming message does not return to the registration chat.
+Ambassador does not disable built-in tools or request permission bypass. It
+automatically approves an ACP tool request once when possible. Configure only
+tools you are willing to make available to unattended direct requests.
+
+## Inspect sessions
+
+- Stop Ambassador first.
+- Use `sessions list`, `sessions show <session-id>`, and optionally
+  `sessions show <session-id> --verbose` with the Ambassador `npx` command.
+- Use `sessions delete <session-id>` for provider and local deletion, or
+  `sessions forget <session-id>` for local metadata only.
 
 ## Optional webhook delivery
 
