@@ -23,11 +23,13 @@ export interface McpTool {
 
 export class McpCallError extends Error {
   readonly code: number;
+  readonly data: unknown;
 
-  constructor(method: string, code: number) {
+  constructor(method: string, code: number, data?: unknown) {
     super(`MCP ${method} failed with code ${code}`);
     this.name = "McpCallError";
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -176,7 +178,7 @@ export class TestMcpClient {
     this.#sessionId = response.headers.get("mcp-session-id") ?? this.#sessionId;
     assert.equal(parsed.id, id);
     if (parsed.error !== undefined) {
-      throw new McpCallError(method, parsed.error.code);
+      throw new McpCallError(method, parsed.error.code, parsed.error.data);
     }
     return parsed;
   }

@@ -145,11 +145,15 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   assert.deepEqual(
     (await client.listTools()).map(({ name }) => name),
     [
+      "register_agent",
+      "verify_email",
+      "resend_verification",
       "list_action_types",
       "request_permission",
       "list_pending_permission_requests",
       "respond_to_permission",
       "call_action",
+      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],

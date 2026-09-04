@@ -1,6 +1,6 @@
 # 0007 SQLite
 
-Status: accepted
+Status: accepted; amended by ADR 0046
 
 Date: 2026-08-23
 
@@ -20,10 +20,11 @@ Use `better-sqlite3` 13.0.3 with `@types/better-sqlite3` 9.6.0 and no ORM.
 
 Open one connection and keep transactions short. Enable WAL, `synchronous=FULL`, foreign keys, a busy timeout, and defensive schema constraints. Use prepared statements for every value.
 
-SQLite stores notification IDs and delivery state only. It never stores the
-local token, webhook secret, central JWT, delivery profile, registration data,
-MCP arguments, MCP results, message content, provider output, or permission
-data.
+The notification journal stores notification IDs and delivery state only.
+ADR 0046 adds a separate SQLite inbox whose action-call fields are encrypted
+before storage. SQLite never stores the local token, webhook secret, central
+JWT, delivery profile, registration data, MCP arguments, MCP results, other
+message content, provider output, or permission data.
 
 Database work stays synchronous and serialized. The Ambassador workload is
 small, so this is simpler than moving each short transaction to a worker.

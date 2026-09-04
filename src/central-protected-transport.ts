@@ -140,10 +140,16 @@ export class CentralProtectedTransport {
     }
   }
 
-  async fetch(url: string | URL, init: RequestInit = {}): Promise<Response> {
+  async fetch(
+    url: string | URL,
+    init: RequestInit = {},
+    deadlineMs: number = this.#deadlineMs,
+  ): Promise<Response> {
     const target = requestTarget(url);
     const method = requestMethod(init.method);
     if (
+      !Number.isSafeInteger(deadlineMs) ||
+      deadlineMs < 1 ||
       isUnrepeatableBody(init.body) ||
       (init.credentials !== undefined && init.credentials !== "omit")
     ) {
@@ -196,7 +202,7 @@ export class CentralProtectedTransport {
       }
       let deadline: AbortSignal;
       try {
-        deadline = this.#deadlineSignal(this.#deadlineMs);
+        deadline = this.#deadlineSignal(deadlineMs);
       } catch {
         throw failure("central_protected_request_invalid");
       }

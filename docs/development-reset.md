@@ -12,9 +12,10 @@ service or delete a registered central identity.
 
    The command refuses to run while Ambassador owns the process lock. It
    removes the encrypted central credential and key, encrypted webhook secret
-   and key, delivery profile, ID-only notification journal, and interrupted
-   state writes. It retains only the empty owner-only state directory and its
-   singleton lock. The next `ambassador start` exposes the enrollment tools.
+   and key, delivery profile, encrypted pending-action inbox, ID-only
+   notification journal, and interrupted state writes. It retains only the
+   empty owner-only state directory and its singleton lock. The next
+   `ambassador start` exposes the enrollment tools.
 
 3. If the command cannot validate the local lock artifact, inspect and remove
    the complete Ambassador state directory manually:

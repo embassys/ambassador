@@ -37,7 +37,7 @@ the ADR ledger.
 
 | Path | Contents |
 | --- | --- |
-| `src/` | Ambassador CLI, local MCP, REST client, credential custody, delivery modes, and journal |
+| `src/` | Ambassador CLI, local MCP, REST client, credential custody, delivery modes, journal, and encrypted pending-action inbox |
 | `test/` | Unit, integration, security, artifact, and qualification tests |
 | `test/fixtures/` | Independent central fixture, mock webhook receiver, and mock ACP agent |
 | `docs/adr/` | Accepted decisions and the historical ledger |

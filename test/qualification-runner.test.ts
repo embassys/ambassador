@@ -22,7 +22,8 @@ test("real-agent runner loads the packed candidate without installing agents", a
   assert.match(combined, /openclaw/u);
   assert.match(combined, /hermes/u);
   assert.match(combined, /codex-acp/u);
-  assert.match(combined, /claude-agent-acp/u);
+  assert.match(combined, /claude/u);
+  assert.doesNotMatch(combined, /claude-agent-acp/u);
   assert.doesNotMatch(combined, /agy_acp_server|antigravity-client|gemini-cli-mcp-client/u);
   assert.match(source, /version_probe/u);
   assert.doesNotMatch(
@@ -124,7 +125,7 @@ test("live runner has a fixed, separately confirmed real-Claude mode", async () 
     source,
     /const CLAUDE_CLIENT_INFO = \{ name: "claude-code", version: "qualification" \}/u,
   );
-  assert.match(source, /claude-agent-acp/u);
+  assert.match(source, /@embassys\/claude-cli-acp/u);
   assert.match(source, /\.claude\.json/u);
   assert.match(source, /target_version_probe/u);
   assert.match(source, /claude_permission_decision/u);

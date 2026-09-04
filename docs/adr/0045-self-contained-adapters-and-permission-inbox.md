@@ -1,6 +1,6 @@
 # 0045 Self-contained adapters and permission inbox
 
-Status: accepted
+Status: accepted; Claude adapter selection superseded by ADR 0047
 
 Date: 2026-09-03
 
@@ -54,8 +54,14 @@ cross-platform checks cover the adapters.
 The permission inbox is a filtered current view, not a notification guarantee.
 It remains available after an incoming notification was acknowledged because
 central permission state is authoritative until the user decides it.
+It does not list action calls that need a result; ADR 0046 defines that separate
+encrypted local inbox.
 
 ## Approval
 
 The user approved embedding the adapters, the setup and diagnostic changes,
 the pending-request tool, and a follow-up release on 2026-09-03.
+
+ADR 0047 later replaced only the Claude adapter and authentication details.
+The Codex dependency, setup guidance, diagnostics, tool descriptions, and
+pending-permission decision remain current.

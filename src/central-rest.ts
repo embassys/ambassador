@@ -13,6 +13,8 @@ import { validateNotificationId } from "./notification-journal.js";
 
 const MAX_NORMALIZED_RESULT_BYTES = 512 * 1024;
 const MAX_MESSAGES = 256;
+const ORDINARY_DEADLINE_MS = 30_000;
+const POLL_RESPONSE_MARGIN_MS = 10_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -102,7 +104,7 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "list_pending_permission_requests",
     description:
-      "Use this Embassys Ambassador tool when the user asks which actions or permission requests are waiting for my response or the user's approval. List only pending requests that this enrolled identity can grant or deny.",
+      "Use this Embassys Ambassador tool when the user asks which permission requests are waiting for their approval. List only pending requests that this enrolled identity can grant or deny.",
     inputSchema: objectSchema({}),
   },
   {
@@ -131,9 +133,15 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     ),
   },
   {
+    name: "list_pending_action_calls",
+    description:
+      "Use this Embassys Ambassador tool when the user asks which actions are waiting for their answer or result. List locally encrypted action calls that this identity received but has not completed.",
+    inputSchema: objectSchema({}),
+  },
+  {
     name: "submit_action_result",
     description:
-      "Use this Embassys Ambassador tool only as the target of a received action call. Return one correlated success or error result using that call ID; this is not a general chat reply tool.",
+      "Use this Embassys Ambassador tool after the user or agent has an answer for one received action call. Return one correlated success or error result using that call ID; this is not a general chat reply tool.",
     inputSchema: objectSchema(
       {
         call_id: { type: "string", format: "uuid" },
@@ -465,6 +473,7 @@ export class CentralRestClient {
       `/api/poll_messages?timeout=${timeout}`,
       undefined,
       signal,
+      Math.max(ORDINARY_DEADLINE_MS, timeout * 1_000 + POLL_RESPONSE_MARGIN_MS),
     );
     if (!exactKeys(result, ["messages"]) || !Array.isArray(result.messages)) {
       throw failure("central_response_invalid");
@@ -521,16 +530,21 @@ export class CentralRestClient {
     path: string,
     body: Record<string, unknown> | undefined,
     signal?: AbortSignal,
+    deadlineMs?: number,
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await this.#transport.fetch(new URL(path, this.#origin), {
-        method,
-        ...(body === undefined
-          ? {}
-          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-        ...(signal === undefined ? {} : { signal }),
-      });
+      response = await this.#transport.fetch(
+        new URL(path, this.#origin),
+        {
+          method,
+          ...(body === undefined
+            ? {}
+            : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        deadlineMs,
+      );
     } catch (error) {
       if (error instanceof CentralProtectedTransportError) {
         if (error.code === "central_protected_authentication_failed") {

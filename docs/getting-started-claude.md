@@ -33,19 +33,23 @@ claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mc
 - Give Claude Code the six-digit code sent to that address.
 - Claude Code uses direct delivery automatically.
 
-To review unanswered requests later, say: **Which Embassys permission requests
-are waiting for my response?** After Claude lists them, tell it which request
-to grant or deny.
+Later, you can ask:
+
+- **Which Embassys permission requests are waiting for my approval?** Then tell
+  Claude Code which one to grant or deny.
+- **Which Embassys actions are waiting for my answer?** Then give Claude Code
+  the requested value so it can submit the result.
 
 ## Incoming messages
 
-Ambassador includes the approved Claude Agent ACP adapter and launches it when
-a central message arrives. You do not install `claude-agent-acp` separately.
-The incoming message runs in a new Ambassador-managed session, not the
-registration chat.
+Ambassador includes its Claude bridge and launches your installed `claude`
+command when a central message arrives. You do not install an ACP adapter or
+set an Anthropic API key. The incoming message runs in a new
+Ambassador-managed session, not the registration chat.
 
-If startup or ACP initialization fails, Ambassador prints a bounded reason.
-Confirm Claude Code is signed in, update Ambassador, and restart it. For a
+If startup or ACP initialization fails, Ambassador leaves MCP available and
+prints a bounded reason while incoming delivery is paused. Confirm `claude auth
+status` reports a `claude.ai` login, update Ambassador, and restart it. For a
 clean local registration test, see
 [Reset local test state](development-reset.md).
 

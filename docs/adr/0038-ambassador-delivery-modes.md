@@ -1,6 +1,7 @@
 # 0038 Ambassador delivery modes
 
-Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, and 0045
+Status: accepted; amended by ADRs 0039, 0040, 0041, 0042, 0043, 0045, 0046,
+and 0047
 
 Date: 2026-09-02
 
@@ -159,7 +160,7 @@ The enabled direct profiles are:
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | ACP session injection |
 | Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | ACP session injection |
-| Claude Code | `claude-code` | `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | ACP session injection |
+| Claude Code | `claude-code` | Ambassador's built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | ACP session injection |
 
 Under ADR 0045, Ambassador installs the Apache-2.0 `codex-acp` adapter as an
 exact production dependency. It starts Codex App Server, translates ACP v1,
@@ -171,11 +172,12 @@ environment. It may pass the reviewed Codex and OpenAI API-key variables,
 along with the common provider environment, so the agent can use its own
 authentication.
 
-Under ADR 0045, Ambassador likewise installs the Apache-2.0
-`claude-agent-acp` adapter as an exact production dependency and validates its
-fixed entrypoint before launch. Ambassador passes only the reviewed Anthropic
-authentication variables and the common provider environment. It does not
-pass a Claude executable override.
+ADR 0047 replaces the Claude dependency selected in ADR 0045. Ambassador
+launches its own bounded ACP v1 bridge, which in turn launches the fixed
+official `claude` command in headless, non-persistent mode with the injected
+Ambassador MCP endpoint. The bridge requires the user's normal `claude.ai`
+login and neither accepts nor forwards Anthropic API-key or token environment
+variables.
 
 Gemini CLI and Antigravity are unsupported client names under ADR 0043. A
 future profile requires a separately accepted fixed launch contract and live
@@ -203,9 +205,11 @@ happened and the terminal result is lost, the outcome is uncertain and the
 message is not automatically submitted again.
 
 For an `action_call`, the agent uses the Ambassador `submit_action_result` MCP
-tool before finishing. It supplies the received `call_id`, one structured
-result, and `success` or `error`. Central authorizes the original target,
-updates the call, and sends an `action_response` to the original caller.
+tool when it can provide the result without guessing. It supplies the received
+`call_id`, one structured result, and `success` or `error`. Central authorizes
+the original target, updates the call, and sends an `action_response` to the
+original caller. ADR 0046 lets the agent leave a call pending when user input
+is unavailable and makes that call available in a later MCP session.
 
 Ambassador does not turn free-form provider output into the result. It discards
 that output after bounded processing. The result operation is not a general
@@ -216,7 +220,8 @@ chat reply and cannot be used without an action call.
 MCP remains the agent-to-Ambassador business tool channel. After enrollment,
 the target catalog keeps action listing, permission request and decision,
 action call, action-result submission, permission listing, and a local
-projection of pending requests the enrolled identity can decide.
+projection of pending requests the enrolled identity can decide. ADR 0046 adds
+a separate encrypted local projection of unanswered action calls.
 
 Remove local "poll_messages" and "ack_message" after automatic delivery owns
 those operations. Do not present `submit_action_result` as a general reply or
@@ -224,16 +229,19 @@ completion tool.
 
 ### Custody and restart behavior
 
-Keep central message bodies in bounded memory. Keep the journal ID-only. The
-delivery profile may contain only nonsecret mode, endpoint, agent kind,
-canonical direct working directory, and safe opaque session metadata. ADR 0042
-stores webhook authentication separately as an encrypted secret and wrapping
-key.
+Keep central message bodies in bounded delivery memory and keep the
+notification journal ID-only. ADR 0046 makes one narrow exception: validated
+unanswered action-call fields persist in a separate encrypted local inbox until
+their result succeeds. The delivery profile may contain only nonsecret mode,
+endpoint, agent kind, canonical direct working directory, and safe opaque
+session metadata. ADR 0042 stores webhook authentication separately as an
+encrypted secret and wrapping key.
 
 The server consumes messages when polling returns them and cannot retrieve or
 redeliver a delivered body. A process crash can therefore lose an in-memory
 message. This accepted development limitation does not justify storing message
-bodies locally.
+bodies locally beyond ADR 0046's narrow action-call exception or using that
+inbox as a redelivery queue.
 
 ### Qualification
 
@@ -327,8 +335,10 @@ contract.
 - **Accept a webhook format or agent ID from registration input.** Rejected
   because webhook mapping belongs in the same fixed capability registry as the
   direct invocation contract.
-- **Persist message bodies for restart recovery.** Rejected because server-side
-  retrieval or redelivery is the proper reliability boundary.
+- **Persist every message body for restart recovery.** Rejected because
+  server-side retrieval or redelivery is the proper delivery-reliability
+  boundary. ADR 0046 later approved only encrypted unanswered action calls so
+  the user can supply a result asynchronously.
 
 ## Approval
 

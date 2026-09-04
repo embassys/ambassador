@@ -89,6 +89,7 @@ test("sends an OpenClaw native agent hook request without the removed plugin con
   assert.equal(typeof body.message, "string");
   assert.match(String(body.message), /untrusted Embassys message/u);
   assert.match(String(body.message), /submit_action_result/u);
+  assert.match(String(body.message), /leave the call pending/u);
   assert.equal(String(body.message).includes(JSON.stringify(MESSAGE)), true);
 });
 

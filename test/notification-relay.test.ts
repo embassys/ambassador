@@ -64,6 +64,10 @@ test("delivers the complete message, records custody, then acknowledges", async 
     journal: item.journal,
     deliveryTarget: target,
     receiveMessages: async (signal) => (++polls === 1 ? [MESSAGE, MESSAGE] : pending(signal)),
+    captureMessage: async (message) => {
+      events.push(`capture:${message.id}`);
+      assert.equal(item.journal.get("message-1")?.deliveryState, "pending");
+    },
     acknowledgeMessage: async (id) => {
       events.push(`ack:${id}`);
       assert.equal(item.journal.get(id)?.deliveryState, "acknowledging");
@@ -72,12 +76,40 @@ test("delivers the complete message, records custody, then acknowledges", async 
   });
   const controller = new AbortController();
   const running = relay.run(controller.signal);
-  await waitFor(() => events.length === 2);
-  assert.deepEqual(events, ["deliver:private message body", "ack:message-1"]);
+  await waitFor(() => events.length === 3);
+  assert.deepEqual(events, ["capture:message-1", "deliver:private message body", "ack:message-1"]);
   assert.equal(item.journal.count(), 0);
   assert.equal(readFileSync(item.path).includes(Buffer.from("private message body")), false);
   controller.abort();
   await running;
+});
+
+test("stops before delivery or acknowledgement when durable capture fails", async (t) => {
+  const item = journal(t);
+  let delivered = 0;
+  let acknowledged = 0;
+  const relay = new NotificationRelay({
+    journal: item.journal,
+    deliveryTarget: {
+      async deliver() {
+        delivered += 1;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+    receiveMessages: async () => [MESSAGE],
+    captureMessage: async () => {
+      throw new Error("capture failed");
+    },
+    acknowledgeMessage: async () => {
+      acknowledged += 1;
+    },
+    retryDelayMs: 1,
+  });
+
+  await assert.rejects(relay.run(new AbortController().signal), NotificationRelayError);
+  assert.equal(delivered, 0);
+  assert.equal(acknowledged, 0);
 });
 
 test("delivers ID-less messages once without acknowledgement", async (t) => {

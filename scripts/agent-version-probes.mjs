@@ -6,7 +6,7 @@ export const AGENT_VERSION_PROBES = new Map([
   ["openclaw", { command: "openclaw", args: ["--version"] }],
   ["hermes", { command: "hermes", args: ["--version"] }],
   ["codex", { command: "codex-acp", args: ["--version"] }],
-  ["claude", { command: "claude-agent-acp", args: ["--version"] }],
+  ["claude", { command: "claude", args: ["--version"] }],
 ]);
 
 function probeEnvironment(environment) {
