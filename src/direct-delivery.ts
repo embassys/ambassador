@@ -268,6 +268,27 @@ async function cleanupChild(
 ): Promise<boolean> {
   if (childExited(child)) return true;
   child.stdin?.end();
+  if (platform === "win32" && child.pid !== undefined) {
+    const startedAt = Date.now();
+    try {
+      const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        shell: false,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          killer.once("error", () => resolve());
+          killer.once("close", () => resolve());
+        }),
+        delay(Math.max(1, Math.floor(milliseconds / 2))),
+      ]);
+    } catch {
+      // Fall through to the direct child termination below.
+    }
+    if (!childExited(child)) child.kill("SIGKILL");
+    return await waitForChild(child, Math.max(1, milliseconds - (Date.now() - startedAt)));
+  }
   signalChild(child, "SIGTERM", platform);
   const graceful = Math.max(1, Math.floor(milliseconds / 2));
   if (await waitForChild(child, graceful)) return true;

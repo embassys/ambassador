@@ -264,9 +264,11 @@ test("lists, shows, deletes, and forgets persisted ACP sessions while stopped", 
 
 test("session commands refuse to run while Ambassador owns the process lock", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-sessions-running-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
-  t.after(() => lock.release());
+  t.after(async () => {
+    await lock.release();
+    await rm(root, { recursive: true, force: true });
+  });
   const output = captureIo();
   assert.equal(
     await runCli(["sessions", "list"], {
