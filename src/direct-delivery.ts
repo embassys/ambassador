@@ -540,7 +540,15 @@ export class DirectDeliveryTarget {
         .onNotification(acp.methods.client.session.update, (context) => {
           observedBytes += Buffer.byteLength(JSON.stringify(context.params), "utf8");
           if (observedBytes > this.#maximumOutputBytes) throw new OutputLimitExceeded();
-          this.#log("acp.update", context.params);
+          const commandCount = availableCommandCount(context.params.update);
+          if (commandCount !== undefined) {
+            this.#log("acp.commands.available", {
+              session_id: context.params.sessionId,
+              count: commandCount,
+            });
+          } else {
+            this.#log("acp.update", context.params);
+          }
         });
       connection = client.connect(stream);
       const initializeSignal = stageSignal(outerSignal, this.#initializationDeadlineMs);
@@ -738,6 +746,10 @@ function historyText(
   return undefined;
 }
 
+function availableCommandCount(update: acp.SessionUpdate): number | undefined {
+  return "availableCommands" in update ? update.availableCommands.length : undefined;
+}
+
 export class AcpSessionController {
   readonly #capability: DirectAgentCapability;
   readonly #environment: Record<string, string>;
@@ -769,7 +781,12 @@ export class AcpSessionController {
       record,
       (client) =>
         client.onNotification(acp.methods.client.session.update, (context) => {
-          if (context.params.sessionId === record.session_id) updates.push(context.params.update);
+          if (
+            context.params.sessionId === record.session_id &&
+            availableCommandCount(context.params.update) === undefined
+          ) {
+            updates.push(context.params.update);
+          }
         }),
       async (connection, initialized, operationSignal) => {
         if (initialized.agentCapabilities?.loadSession !== true) {

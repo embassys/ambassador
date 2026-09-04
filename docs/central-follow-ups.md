@@ -7,6 +7,11 @@ branches.
 
 ## Security and operations
 
+- Accept standard `+tag` aliases in email local parts. The current Pydantic
+  pattern rejects addresses such as `name+agent@example.com` with `422` before
+  registration or email delivery. Apply the same corrected validation to
+  registration, resend, verification, permission, action, and invitation
+  models.
 - Restore a finite verification-code expiry and compare timezone-compatible
   timestamps.
 - Fail registration when the verification email cannot be sent, or return a
@@ -81,6 +86,12 @@ original target, records `completed` or `failed`, and queues an
 output schema, idempotency key, or outcome lookup. A client that loses the
 successful response cannot recover its message ID by repeating the request,
 because a later submission returns `409`.
+
+Add a `result_schema` to each `list_action_types` entry and validate
+`submit_action_result.result` against it. The existing `input_schema` describes
+the payload sent by the caller, not the answer expected from the target. Until
+central publishes a result schema, Ambassador can request only a generic JSON
+object and cannot tell the user the exact fields for an arbitrary action.
 
 Define result size and nesting limits. Serialize competing submissions so two
 requests cannot both observe `pending`, and add an idempotent recovery contract

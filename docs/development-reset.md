@@ -11,9 +11,10 @@ service or delete a registered central identity.
    ```
 
    The command refuses to run while Ambassador owns the process lock. It
-   removes the encrypted central credential and key, encrypted webhook secret
-   and key, delivery profile, encrypted pending-action inbox, ID-only
-   notification journal, ACP session metadata, and interrupted state writes.
+   removes the encrypted central credential and key, encrypted webhook and
+   local-control secrets and keys, delivery profile, encrypted action-call and
+   action-result inboxes, ID-only notification journal, ACP session metadata,
+   and interrupted state writes.
    It does not delete provider-owned session history. It retains only the empty
    owner-only state directory and its singleton lock. The next `ambassador
    start` exposes the enrollment tools.

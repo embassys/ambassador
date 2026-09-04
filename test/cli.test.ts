@@ -26,6 +26,14 @@ import { startFakeCentral } from "./support/fake-central.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 
 const NOW_SECONDS = 1_788_220_800;
+const TEST_LOCAL_CONTROL_SECRET_STORE = {
+  async load() {
+    return "0123456789abcdef".repeat(4);
+  },
+  async createOrLoad() {
+    return "0123456789abcdef".repeat(4);
+  },
+};
 
 function captureIo() {
   let stdout = "";
@@ -109,6 +117,7 @@ test("starts and serves MCP with no options or environment variables", async (t)
       centralOrigin: "http://127.0.0.1:1",
       stateRoot: root,
       localMcpPort: 0,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
     },
   });
 
@@ -138,10 +147,9 @@ test("starts and serves MCP with no options or environment variables", async (t)
       "resend_verification",
       "list_action_types",
       "request_permission",
-      "list_pending_permission_requests",
+      "get_inbox",
       "respond_to_permission",
       "call_action",
-      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],
@@ -174,6 +182,7 @@ test("starts with bounded redacted verbose diagnostics", async (t) => {
       centralOrigin: central.apiUrl,
       stateRoot: root,
       localMcpPort: 0,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
     },
   });
 
@@ -187,10 +196,24 @@ test("starts with bounded redacted verbose diagnostics", async (t) => {
   const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "codex-mcp-client", version: "qualification" });
   await client.callTool("register_agent", { email: "verbose@fixture.test" });
+  await assert.rejects(
+    client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
+    (error: unknown) =>
+      error instanceof McpCallError &&
+      error.serverMessage.includes("does not accept '+' email aliases") &&
+      (error.data as { code?: unknown; source?: unknown } | undefined)?.code ===
+        "unsupported_email_format" &&
+      (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
+        "central_enrollment",
+  );
   assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
   assert.match(output.stderr(), /mcp\.tool\.request/u);
   assert.match(output.stderr(), /central\.request/u);
   assert.match(output.stderr(), /central\.response/u);
+  assert.match(output.stderr(), /mcp\.tool\.error/u);
+  assert.match(output.stderr(), /"source":"central_enrollment"/u);
+  assert.match(output.stderr(), /"error_code":"unsupported_email_format"/u);
+  assert.match(output.stderr(), /"status":422/u);
   assert.doesNotMatch(output.stderr(), /Bearer\s+(?!\[redacted\])/u);
   controller.abort();
   assert.equal(await running, 0);
@@ -262,6 +285,96 @@ test("lists, shows, deletes, and forgets persisted ACP sessions while stopped", 
   assert.equal(output.stderr(), "");
 });
 
+test("lists and shows sessions through the running Ambassador process", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-sessions-live-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const seed = new AcpSessionStore(join(root, "acp-sessions.sqlite"));
+  seed.create({
+    session_id: "session-live-show",
+    agent_kind: "codex",
+    working_directory: root,
+    status: "active",
+    created_at_ms: 1,
+    last_used_at_ms: 1,
+  });
+  seed.retire("session-live-show", 2);
+  seed.close();
+
+  const secret = "0123456789abcdef".repeat(4);
+  const localControlSecretStore = {
+    async load() {
+      return secret;
+    },
+    async createOrLoad() {
+      return secret;
+    },
+  };
+  const shown: Array<{ id: string; verbose: boolean }> = [];
+  const controller = new AbortController();
+  const startOutput = captureIo();
+  const running = runCli(["start"], {
+    io: startOutput.io,
+    env: {},
+    cwd: root,
+    signal: controller.signal,
+    testOverrides: {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+      localMcpPort: 0,
+      localControlSecretStore,
+      acpSessionControllerFactory: () => ({
+        async show(record: { session_id: string }, verbose: boolean) {
+          shown.push({ id: record.session_id, verbose });
+          return verbose ? [JSON.stringify({ sessionUpdate: "tool_call" })] : ["agent: answer"];
+        },
+        async delete() {
+          return "deleted" as const;
+        },
+      }),
+    },
+  });
+
+  let endpoint: string | undefined;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(startOutput.stdout())?.[1];
+    if (endpoint !== undefined) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(endpoint !== undefined);
+  assert.equal(startOutput.stdout().includes(secret), false);
+
+  const commandOutput = captureIo();
+  const commandContext = {
+    io: commandOutput.io,
+    env: {},
+    cwd: root,
+    testOverrides: {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+      localControlMcpEndpoint: endpoint,
+      localControlSecretStore,
+    },
+  };
+  assert.equal(await runCli(["sessions", "list"], commandContext), 0);
+  assert.match(commandOutput.stdout(), /"session_id":"session-live-show"/u);
+  assert.equal(await runCli(["sessions", "show", "session-live-show"], commandContext), 0);
+  assert.equal(
+    await runCli(["sessions", "show", "session-live-show", "--verbose"], commandContext),
+    0,
+  );
+  assert.deepEqual(shown, [
+    { id: "session-live-show", verbose: false },
+    { id: "session-live-show", verbose: true },
+  ]);
+  assert.match(commandOutput.stdout(), /agent: answer/u);
+  assert.match(commandOutput.stdout(), /sessionUpdate/u);
+  assert.equal(await runCli(["sessions", "delete", "session-live-show"], commandContext), 7);
+  assert.equal(commandOutput.stderr(), "Ambassador is already running\n");
+
+  controller.abort();
+  assert.equal(await running, 0);
+});
+
 test("session commands refuse to run while Ambassador owns the process lock", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-sessions-running-"));
   const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
@@ -305,6 +418,7 @@ test("explains when the local MCP port is already in use", async (t) => {
         centralOrigin: "http://127.0.0.1:1",
         stateRoot: root,
         localMcpPort: address.port,
+        localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
       },
     }),
     7,
@@ -332,6 +446,7 @@ test("explains invalid local state and gives the supported reset command", async
         centralOrigin: "http://127.0.0.1:1",
         stateRoot: root,
         localMcpPort: 0,
+        localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
       },
     }),
     7,
@@ -382,6 +497,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
         },
       },
       localMcpPort: 0,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
       nowSeconds: () => NOW_SECONDS,
       deliveryTargetFactory: () => ({
         async deliver() {
@@ -447,6 +563,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
         },
       },
       localMcpPort: 0,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
       nowSeconds: () => NOW_SECONDS,
       deliveryTargetFactory: () => ({
         async deliver() {
@@ -483,11 +600,16 @@ test("cleans all local registration and delivery residue and leaves provider fil
     "central-credential.key",
     "webhook-secret.json",
     "webhook-secret.key",
+    "local-control-secret.json",
+    "local-control-secret.key",
     "delivery-profile.json",
     "notifications.sqlite",
     "pending-actions.sqlite",
     "pending-actions.sqlite-wal",
     "pending-actions.sqlite-shm",
+    "action-results.sqlite",
+    "action-results.sqlite-wal",
+    "action-results.sqlite-shm",
     "acp-sessions.sqlite",
     "acp-sessions.sqlite-wal",
     "acp-sessions.sqlite-shm",

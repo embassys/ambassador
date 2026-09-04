@@ -14,6 +14,7 @@ import {
   DirectDeliveryError,
   DirectDeliveryTarget,
 } from "../src/direct-delivery.js";
+import type { VerboseLogger } from "../src/verbose-log.js";
 
 const MESSAGE: CentralMessage = {
   id: "message-1",
@@ -46,6 +47,7 @@ async function target(
     maximumStartupAttempts?: number;
     environment?: DirectAgentCapability["environment"];
     sourceEnvironment?: NodeJS.ProcessEnv;
+    log?: VerboseLogger;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
@@ -85,6 +87,7 @@ async function target(
     cleanupDeadlineMs: 500,
     maximumOutputBytes: options.maximumOutputBytes ?? 16 * 1024,
     maximumStartupAttempts: options.maximumStartupAttempts ?? 2,
+    ...(options.log === undefined ? {} : { log: options.log }),
     ...(options.platform === undefined ? {} : { platform: options.platform }),
     spawnProcess: (...arguments_) => {
       spawnCount += 1;
@@ -210,6 +213,39 @@ test("initializes ACP v1 with provider MCP setup and completes one persistent pr
       assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
     });
   }
+});
+
+test("verbose ACP logging omits the available command catalog", async (t) => {
+  const events: Array<{ event: string; data: unknown }> = [];
+  const value = await target(t, "commands-session-mcp", {
+    log(event, data) {
+      events.push({ event, data });
+    },
+  });
+
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+
+  assert.deepEqual(
+    events.find(({ event }) => event === "acp.commands.available"),
+    {
+      event: "acp.commands.available",
+      data: { session_id: "mock-session", count: 1 },
+    },
+  );
+  const serialized = JSON.stringify(events);
+  assert.doesNotMatch(serialized, /availableCommands/u);
+  assert.doesNotMatch(serialized, /private command description/u);
+
+  const record = value.sessionStore.get("mock-session");
+  assert.ok(record !== undefined);
+  const controller = new AcpSessionController({
+    capability: value.capability,
+    environment: process.env,
+    deadlineMs: 2_000,
+    cleanupDeadlineMs: 500,
+  });
+  const history = await controller.show(record, true, new AbortController().signal);
+  assert.doesNotMatch(history.join("\n"), /availableCommands|private history command/iu);
 });
 
 test("runs a native executable through the Windows direct-delivery path", async (t) => {

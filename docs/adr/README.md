@@ -13,13 +13,17 @@ the unmodified Claude CLI and its provider. ADR 0049 lets direct agents use
 their normally configured tools during templated delivery. ADR 0050 unifies
 direct-agent permissions and MCP setup, adds persistent inspectable sessions,
 and replaces the built-in Claude bridge with the current public ACP adapter.
+ADR 0051 adds the encrypted received-action-result inbox and removes ACP
+available-command details from verbose logs. ADR 0052 combines permissions,
+unanswered calls, and unread results in one agent-facing inbox. ADR 0053 lets
+the owner inspect sessions through the foreground process.
 
 ## Current decisions
 
 | ADR | Decision |
 | --- | --- |
 | [0006](0006-toolchain.md) | Repository toolchain |
-| [0007](0007-sqlite.md) | SQLite for the ID-only journal and encrypted pending-action inbox |
+| [0007](0007-sqlite.md) | SQLite for the ID-only journal and encrypted action inboxes |
 | [0012](0012-http-deadlines.md) | HTTP and delivery deadlines |
 | [0014](0014-lock-handoff-timeout.md) | Process lock handoff |
 | [0015](0015-npm-distribution.md) | Ambassador npm distribution and release qualification |
@@ -40,6 +44,9 @@ and replaces the built-in Claude bridge with the current public ACP adapter.
 | [0048](0048-claude-native-authentication.md) | Claude CLI owns authentication |
 | [0049](0049-provider-configured-tools-in-direct-delivery.md) | Provider-configured tools in direct delivery |
 | [0050](0050-persistent-observable-acp-sessions.md) | Persistent, observable ACP sessions with one direct-delivery policy |
+| [0051](0051-encrypted-action-result-inbox.md) | Encrypted local inbox for received action results |
+| [0052](0052-unified-agent-inbox.md) | Unified agent inbox for pending work and unread results |
+| [0053](0053-live-session-inspection.md) | Inspect ACP sessions while Ambassador runs |
 
 ## Historical ledger
 

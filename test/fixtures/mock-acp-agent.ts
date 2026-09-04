@@ -75,6 +75,21 @@ const app = acp
         content: { type: "text", text: "stored answer" },
       },
     });
+    if (scenario.startsWith("commands")) {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            {
+              name: "private-history-command",
+              description: "private history command description",
+              input: null,
+            },
+          ],
+        },
+      });
+    }
     return {};
   })
   .onRequest(acp.methods.agent.session.close, () => ({}))
@@ -116,6 +131,21 @@ const app = acp
       if (response.outcome.outcome !== "selected" || response.outcome.optionId !== "allow") {
         throw new Error("permission was not approved once");
       }
+    }
+    if (scenario.startsWith("commands")) {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            {
+              name: "private-command",
+              description: "private command description",
+              input: null,
+            },
+          ],
+        },
+      });
     }
     if (scenario.startsWith("overflow")) {
       await context.client.notify(acp.methods.client.session.update, {

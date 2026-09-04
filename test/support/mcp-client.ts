@@ -24,11 +24,13 @@ export interface McpTool {
 export class McpCallError extends Error {
   readonly code: number;
   readonly data: unknown;
+  readonly serverMessage: string;
 
-  constructor(method: string, code: number, data?: unknown) {
-    super(`MCP ${method} failed with code ${code}`);
+  constructor(method: string, code: number, serverMessage: string, data?: unknown) {
+    super(`MCP ${method} failed with code ${code}: ${serverMessage}`);
     this.name = "McpCallError";
     this.code = code;
+    this.serverMessage = serverMessage;
     this.data = data;
   }
 }
@@ -56,6 +58,7 @@ export class TestMcpClient {
   #nextId = 1;
   #sessionId: string | undefined;
   serverCapabilities: Record<string, unknown> = {};
+  serverInstructions: string | undefined;
 
   constructor(endpoint: string, options: { forbiddenResponseValues?: string[] } = {}) {
     this.#endpoint = endpoint;
@@ -69,13 +72,15 @@ export class TestMcpClient {
       clientInfo,
     });
     assert.ok(response.result !== undefined, "initialize did not return a result");
-    const result = response.result as { capabilities?: unknown };
+    const result = response.result as { capabilities?: unknown; instructions?: unknown };
     assert.ok(
       result.capabilities !== null &&
         typeof result.capabilities === "object" &&
         !Array.isArray(result.capabilities),
     );
     this.serverCapabilities = result.capabilities as Record<string, unknown>;
+    this.serverInstructions =
+      typeof result.instructions === "string" ? result.instructions : undefined;
 
     await this.#post({ jsonrpc: "2.0", method: "notifications/initialized" }, [200, 202, 204]);
   }
@@ -178,7 +183,7 @@ export class TestMcpClient {
     this.#sessionId = response.headers.get("mcp-session-id") ?? this.#sessionId;
     assert.equal(parsed.id, id);
     if (parsed.error !== undefined) {
-      throw new McpCallError(method, parsed.error.code, parsed.error.data);
+      throw new McpCallError(method, parsed.error.code, parsed.error.message, parsed.error.data);
     }
     return parsed;
   }

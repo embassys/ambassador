@@ -23,6 +23,7 @@ test("I02-E01 bootstrap catalog contains only current enrollment tools", () => {
   assert.ok(registration);
   assert.match(registration.description ?? "", /Embassys Ambassador/iu);
   assert.match(registration.description ?? "", /register me/iu);
+  assert.match(registration.description ?? "", /do not ask.*website/iu);
   assert.deepEqual((registration.inputSchema.properties as Record<string, unknown>).delivery, {
     oneOf: [
       {
@@ -128,6 +129,29 @@ test("I02-E03 invalid bootstrap arguments stop before dispatch", async (t) => {
       error.code === "central_enrollment_contract_failed",
   );
   assert.deepEqual(central.requests(), []);
+});
+
+test("plus-addressed email reaches central and reports the current rejection precisely", async () => {
+  const requests: unknown[] = [];
+  const client = new CentralEnrollmentClient({
+    centralOrigin: "https://central.invalid",
+    fetch: async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)) as unknown);
+      return new Response(
+        JSON.stringify({
+          detail: "email does not match the current server pattern",
+        }),
+        { status: 422, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  await assert.rejects(
+    client.register({ email: "person+claude@example.test" }),
+    (error: unknown) =>
+      error instanceof CentralEnrollmentError && error.code === "unsupported_email_format",
+  );
+  assert.deepEqual(requests, [{ email: "person+claude@example.test" }]);
 });
 
 test("I02-E04 redirects and uncertain verification outcomes are never retried", async () => {

@@ -9,8 +9,10 @@ Before starting any task, read these files in order:
 3. `docs/protocol.md`
 4. `docs/implementation-plan.md`
 5. Relevant accepted records under `docs/adr/`, especially ADR 0037 for the
-   central REST contract, ADR 0038 for local delivery, and ADR 0039 for local
-   startup and trust
+   central REST contract, ADR 0038 for local delivery, ADR 0039 for local
+   startup and trust, ADR 0046 for pending actions, ADR 0050 for ACP sessions,
+   ADR 0051 for received action results, ADR 0052 for the unified inbox, and
+   ADR 0053 for live session inspection
 
 The architecture and protocol describe the accepted target. The implementation
 plan says which parts are not built yet. During the delivery cutover, replace
@@ -33,8 +35,9 @@ scope on your own.
   not call central or change agent/provider configuration.
 - Session commands are `sessions list`, `sessions show <session-id>` with an
   optional `--verbose`, `sessions delete <session-id>`, and `sessions forget
-  <session-id>`. They require the foreground process to be stopped. Keep
-  provider history out of local state.
+  <session-id>`. `list` and `show` work through the authenticated private
+  control route while the foreground process runs. `delete` and `forget`
+  require it to be stopped. Keep provider history out of local state.
 - Resolve delivery during MCP registration through a fixed capability
   registry. The two modes are `webhook` and `direct`. Do not add a third
   connector or polling mode.
@@ -73,8 +76,9 @@ scope on your own.
 - MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
   control through local `poll_messages` or `ack_message` tools after the
   cutover. Expose the exact central `submit_action_result` operation for the
-  target of an action call and the local `list_pending_action_calls` view from
-  ADR 0046. Do not treat either as a general chat or delivery-control tool.
+  target of an action call. Expose pending permission decisions, unanswered
+  action calls, and unread action results through the local `get_inbox` view
+  from ADR 0052. Do not treat it as general chat or delivery control.
 - Direct-agent work is a persistent gateway-managed ACP session. It is not the
   exact chat in which registration happened. All supported agents load
   Ambassador MCP and other tools from normal provider configuration; send an
@@ -86,11 +90,10 @@ scope on your own.
   normal turn and action sessions after central accepts their correlated
   result. Delete or forget retired sessions after 30 days as defined by ADR
   0050.
-- Keep the notification journal ID-only. The sole local body-persistence
-  exception is ADR 0046's encrypted pending-action inbox: capture only the
-  validated action-call fields and remove them after a successful
-  `submit_action_result`. Keep every other central message body in bounded
-  memory; do not invent server redelivery.
+- Keep the notification journal ID-only. The only local body-persistence
+  exceptions are ADR 0046's encrypted pending-action inbox and ADR 0051's
+  encrypted received-result inbox. Keep every other central message body in
+  bounded memory; do not invent server redelivery.
 - The gateway follows the current
   [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST service
   at `https://mcp.embassys.ai`. Review current server code and live behavior
@@ -116,12 +119,14 @@ scope on your own.
   keys, cookies, or webhook secrets.
 - Do not add old-client support, central MCP fallbacks, speculative versioned
   routes, credential migration, activation, token reissue, leases, general
-  conversations or replies, or outcome lookup unless the current server adds
-  the behavior and the user accepts the client change.
-- The local MCP listener always binds to `127.0.0.1` and validates `Host` and
-  `Origin` before parsing a request. It trusts the owner's local-machine
-  boundary, does not use bearer authentication, and rejects supplied
-  `Authorization` headers.
+  conversations or replies, or central outcome lookup unless the current
+  server adds the behavior and the user accepts the client change.
+- The local listener always binds to `127.0.0.1` and validates `Host` and
+  `Origin` before parsing a request. The `/mcp` route trusts the owner's
+  local-machine boundary, does not use bearer authentication, and rejects
+  supplied `Authorization` headers. ADR 0053's non-MCP control route accepts
+  only bounded session reads, rejects every Origin, and requires Ambassador's
+  generated encrypted internal bearer secret.
 - Generate the central credential's encryption material internally and keep it
   in a separate owner-only state file. Never send it to an agent or accept it
   through CLI, MCP, or the environment.

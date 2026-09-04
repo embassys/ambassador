@@ -41,10 +41,9 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
     [
       "list_action_types",
       "request_permission",
-      "list_pending_permission_requests",
+      "get_inbox",
       "respond_to_permission",
       "call_action",
-      "list_pending_action_calls",
       "submit_action_result",
       "get_my_permissions",
     ],
@@ -52,14 +51,8 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
   const serialized = JSON.stringify(REST_AUTHENTICATED_TOOLS);
   assert.match(serialized, /Embassys Ambassador/iu);
   assert.match(
-    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "list_pending_permission_requests")
-      ?.description ?? "",
-    /permission requests are waiting for their approval/iu,
-  );
-  assert.match(
-    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "list_pending_action_calls")
-      ?.description ?? "",
-    /actions are waiting for their answer or result/iu,
+    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "get_inbox")?.description ?? "",
+    /permission requests.*action calls.*unread.*action results/iu,
   );
   for (const removed of [
     "poll_messages",
@@ -70,6 +63,9 @@ test("post-enrollment catalog exposes the current agent-facing tools with discov
     "outcome",
     "reissue",
     "activation",
+    "list_pending_permission_requests",
+    "list_pending_action_calls",
+    "list_action_results",
   ]) {
     assert.equal(serialized.includes(removed), false);
   }
