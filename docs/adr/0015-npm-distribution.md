@@ -152,6 +152,14 @@ the qualified candidate file tree, then passed clean-install, installed-CLI,
 artifact-scan, and signature checks. Its digests and results are recorded in
 the qualification document.
 
+Later on 2026-09-04, the user approved version 0.2.16 for ADRs 0048 and 0049.
+This release leaves Claude authentication to the unmodified official CLI and
+allows its normally configured MCP tools during the fixed unattended delivery
+prompt. It also adds the combined real Codex-to-Claude qualification path. The
+candidate passed the full repository suite and a clean live exchange with two
+new identities. Publication still requires all pull-request and main-branch
+release gates.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -191,7 +199,7 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
-0.2.12, 0.2.13, 0.2.14, and 0.2.15 releases described above. Later
+0.2.12, 0.2.13, 0.2.14, 0.2.15, and 0.2.16 releases described above. Later
 publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned
