@@ -148,22 +148,7 @@ test("runs a native executable through the Windows direct-delivery path", async 
 });
 
 test("a fixed inherit profile preserves the user's native agent authentication environment", async (t) => {
-  const value = await target(t, "success-session-mcp", {
-    environment: "inherit",
-    sourceEnvironment: {
-      HOME: process.env.HOME,
-      PATH: process.env.PATH,
-      ANTHROPIC_API_KEY: "synthetic-api-key",
-      CLAUDE_CODE_OAUTH_TOKEN: "synthetic-oauth-token",
-      CLAUDE_CODE_USE_BEDROCK: "1",
-      AWS_PROFILE: "synthetic-profile",
-      AMBASSADOR_UNRELATED_MARKER: "preserved",
-    },
-  });
-  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
-    status: "completed",
-  });
-  assert.deepEqual(value.spawnOptions()?.env, {
+  const sourceEnvironment: NodeJS.ProcessEnv = {
     HOME: process.env.HOME,
     PATH: process.env.PATH,
     ANTHROPIC_API_KEY: "synthetic-api-key",
@@ -171,7 +156,20 @@ test("a fixed inherit profile preserves the user's native agent authentication e
     CLAUDE_CODE_USE_BEDROCK: "1",
     AWS_PROFILE: "synthetic-profile",
     AMBASSADOR_UNRELATED_MARKER: "preserved",
+  };
+  const value = await target(t, "success-session-mcp", {
+    environment: "inherit",
+    sourceEnvironment,
   });
+  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+    status: "completed",
+  });
+  assert.deepEqual(
+    value.spawnOptions()?.env,
+    Object.fromEntries(
+      Object.entries(sourceEnvironment).filter(([, value]) => value !== undefined),
+    ),
+  );
 });
 
 test("inherited agent environments remain bounded and valid", async (t) => {
