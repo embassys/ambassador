@@ -68,15 +68,44 @@ interface IdentityRecord {
   thumbprint?: string;
 }
 
+type PermissionDecision = "accept" | "deny" | "allow_once" | "allow_always";
+
 interface PermissionRecord {
   readonly id: string;
   readonly grantorEmail: string;
   readonly granteeEmail: string;
   readonly actionType: string;
   readonly scope: Record<string, unknown>;
+  readonly decisionOptions: "accept_deny" | "once_always";
+  readonly reason?: string;
   status: "pending" | "granted" | "denied";
+  decision?: PermissionDecision;
+  usesRemaining?: number | null;
   readonly createdAt: string;
   decidedAt?: string;
+}
+
+interface PermissionDecisionTokenRecord {
+  readonly permissionId: string;
+  readonly expiresAt: number;
+  usedAt?: number;
+}
+
+interface HumanInputRecord {
+  readonly id: string;
+  readonly agentEmail: string;
+  readonly actionType: string;
+  readonly prompt: string;
+  readonly inputType: "buttons";
+  readonly options: readonly { readonly label: string; readonly value: string }[];
+  readonly messageId: string;
+  status: "pending" | "answered";
+}
+
+interface HumanInputTokenRecord {
+  readonly requestId: string;
+  readonly expiresAt: number;
+  usedAt?: number;
 }
 
 interface ActionCallRecord {
@@ -115,6 +144,12 @@ interface FixtureState {
   readonly identities: Map<string, IdentityRecord>;
   readonly tokens: Map<string, string>;
   readonly permissions: Map<string, PermissionRecord>;
+  readonly permissionDecisionTokens: Map<string, PermissionDecisionTokenRecord>;
+  readonly permissionTokensById: Map<string, string>;
+  readonly humanInputs: Map<string, HumanInputRecord>;
+  readonly humanInputTokens: Map<string, HumanInputTokenRecord>;
+  readonly humanInputTokensById: Map<string, string>;
+  readonly humanInputActionTypes: Map<string, FixtureActionType>;
   readonly actionCalls: Map<string, ActionCallRecord>;
   readonly messages: Map<string, MessageRecord>;
   readonly replay: Set<string>;
@@ -151,6 +186,13 @@ export interface FakeCentral {
   readonly apiUrl: string;
   readonly actions: readonly FixtureActionType[];
   verificationCode(email: string): string;
+  permissionDecisionToken(permissionId: string): string;
+  permissionOutcomeMessageId(permissionId: string): string | undefined;
+  humanInputResponseToken(requestId: string): string;
+  humanInputResponseMessageId(requestId: string): string | undefined;
+  pendingHumanInputRequest(
+    email: string,
+  ): { readonly requestId: string; readonly messageId: string } | undefined;
   seedClient(email: string): FixtureClient;
   clientForVerifiedEmail(email: string): FixtureClient;
   setNonce(email: string, nonce?: string): string | undefined;
@@ -450,8 +492,8 @@ function currentTimestamp(state: FixtureState): string {
   return new Date(state.nowSeconds * 1_000).toISOString();
 }
 
-function actionByName(name: string): FixtureActionType | undefined {
-  return ACTIONS.find((action) => action.name === name);
+function actionByName(state: FixtureState, name: string): FixtureActionType | undefined {
+  return ACTIONS.find((action) => action.name === name) ?? state.humanInputActionTypes.get(name);
 }
 
 function payloadMatchesAction(
@@ -589,8 +631,8 @@ function queueMessage(
   const sender = state.identities.get(senderEmail);
   if (recipient === undefined || sender === undefined)
     throw new Error("fixture identity is missing");
-  const action = actionType === undefined ? undefined : actionByName(actionType);
-  const id = nextId(state, "message");
+  const action = actionType === undefined ? undefined : actionByName(state, actionType);
+  const id = nextUuid(state);
   state.messages.set(id, {
     recipientEmail,
     state: "queued",
@@ -633,11 +675,14 @@ async function route(
     return;
   }
   state.observations.push(requestObservation(request, body));
-  if (containsForbiddenName(body)) {
+  const target = new URL(request.url ?? "/", origin);
+  const isHumanDecision = target.pathname === "/api/human_input_response";
+  const isPermissionDecision =
+    target.pathname === "/permission/decide" || target.pathname === "/api/permission_decision";
+  if (!isPermissionDecision && !isHumanDecision && containsForbiddenName(body)) {
     detail(response, 422, "Invalid request");
     return;
   }
-  const target = new URL(request.url ?? "/", origin);
 
   if (request.method === "POST" && target.pathname === "/api/register_agent") {
     if (
@@ -731,6 +776,146 @@ async function route(
     return;
   }
 
+  if (request.method === "GET" && target.pathname === "/permission/decide") {
+    const token = target.searchParams.get("token");
+    const choice = target.searchParams.get("choice");
+    const decisionToken = token === null ? undefined : state.permissionDecisionTokens.get(token);
+    const permission =
+      decisionToken === undefined ? undefined : state.permissions.get(decisionToken.permissionId);
+    const offered =
+      permission?.decisionOptions === "once_always"
+        ? ["allow_once", "allow_always", "deny"]
+        : ["accept", "deny"];
+    if (
+      decisionToken === undefined ||
+      permission === undefined ||
+      decisionToken.usedAt !== undefined ||
+      decisionToken.expiresAt <= state.nowSeconds ||
+      permission.status !== "pending"
+    ) {
+      detail(response, 410, "This decision link is not valid");
+      return;
+    }
+    if (choice === null || !offered.includes(choice)) {
+      detail(response, 400, "Decision was not offered");
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end("<!doctype html><title>Confirm permission decision</title>");
+    return;
+  }
+
+  if (request.method === "POST" && target.pathname === "/api/permission_decision") {
+    if (!exactKeys(body, ["token", "decision"]) || typeof body.token !== "string") {
+      detail(response, 422, "Invalid permission decision");
+      return;
+    }
+    const decisionToken = state.permissionDecisionTokens.get(body.token);
+    const permission =
+      decisionToken === undefined ? undefined : state.permissions.get(decisionToken.permissionId);
+    const offered =
+      permission?.decisionOptions === "once_always"
+        ? ["allow_once", "allow_always", "deny"]
+        : ["accept", "deny"];
+    if (
+      decisionToken === undefined ||
+      permission === undefined ||
+      decisionToken.usedAt !== undefined ||
+      decisionToken.expiresAt <= state.nowSeconds ||
+      permission.status !== "pending"
+    ) {
+      detail(response, 410, "This decision link is not valid");
+      return;
+    }
+    if (typeof body.decision !== "string" || !offered.includes(body.decision)) {
+      detail(response, 400, "Decision was not offered");
+      return;
+    }
+    const decision = body.decision as PermissionDecision;
+    decisionToken.usedAt = state.nowSeconds;
+    permission.decision = decision;
+    permission.status = decision === "deny" ? "denied" : "granted";
+    permission.usesRemaining = decision === "allow_once" ? 1 : null;
+    permission.decidedAt = currentTimestamp(state);
+    queueMessage(
+      state,
+      permission.granteeEmail,
+      permission.grantorEmail,
+      {
+        type: "permission_outcome",
+        permission_id: permission.id,
+        action_type: permission.actionType,
+        decision,
+        status: permission.status,
+        granted: permission.status === "granted",
+        single_use: decision === "allow_once",
+        grantor_email: permission.grantorEmail,
+      },
+      permission.actionType,
+    );
+    safeJson(response, 200, {
+      permission_id: permission.id,
+      decision,
+      status: permission.status,
+      granted: permission.status === "granted",
+    });
+    return;
+  }
+
+  if (request.method === "POST" && target.pathname === "/api/human_input_response") {
+    if (
+      !exactKeys(body, ["token", "value"]) ||
+      typeof body.token !== "string" ||
+      typeof body.value !== "string"
+    ) {
+      detail(response, 422, "Invalid human input response");
+      return;
+    }
+    const responseToken = state.humanInputTokens.get(body.token);
+    const input =
+      responseToken === undefined ? undefined : state.humanInputs.get(responseToken.requestId);
+    if (
+      responseToken === undefined ||
+      input === undefined ||
+      responseToken.usedAt !== undefined ||
+      responseToken.expiresAt <= state.nowSeconds ||
+      input.status !== "pending"
+    ) {
+      detail(response, 410, "This link is no longer usable");
+      return;
+    }
+    if (!input.options.some(({ value }) => value === body.value)) {
+      detail(response, 400, "Answer was not offered");
+      return;
+    }
+    responseToken.usedAt = state.nowSeconds;
+    input.status = "answered";
+    queueMessage(
+      state,
+      input.agentEmail,
+      input.agentEmail,
+      {
+        type: "human_input_response",
+        request_id: input.id,
+        action_type: input.actionType,
+        input_type: input.inputType,
+        value: body.value,
+        text: null,
+        prompt: input.prompt,
+        message_id: input.messageId,
+      },
+      input.actionType,
+    );
+    safeJson(response, 200, {
+      request_id: input.id,
+      status: "answered",
+      input_type: input.inputType,
+      value: body.value,
+      text: null,
+    });
+    return;
+  }
+
   if (!target.pathname.startsWith("/api/")) {
     detail(response, 404, "Not found");
     return;
@@ -739,88 +924,216 @@ async function route(
   if (identity === undefined) return;
 
   if (request.method === "GET" && target.pathname === "/api/list_action_types") {
-    safeJson(response, 200, ACTIONS);
+    safeJson(response, 200, [...ACTIONS, ...state.humanInputActionTypes.values()]);
+    return;
+  }
+
+  if (request.method === "POST" && target.pathname === "/api/get_human_input") {
+    if (
+      !exactKeys(body, ["permission_type", "request", "input_type", "options", "message_id"]) ||
+      typeof body.permission_type !== "string" ||
+      body.permission_type.length < 1 ||
+      body.permission_type.length > 128 ||
+      typeof body.request !== "string" ||
+      body.request.length < 1 ||
+      body.request.length > 2_000 ||
+      body.input_type !== "buttons" ||
+      !Array.isArray(body.options) ||
+      body.options.length < 1 ||
+      body.options.length > 10 ||
+      typeof body.message_id !== "string"
+    ) {
+      detail(response, 422, "Invalid human input request");
+      return;
+    }
+    const options: Array<{ label: string; value: string }> = [];
+    for (const option of body.options) {
+      if (
+        !exactKeys(option, ["label", "value"]) ||
+        typeof option.label !== "string" ||
+        option.label.length < 1 ||
+        option.label.length > 64 ||
+        typeof option.value !== "string" ||
+        option.value.length < 1 ||
+        option.value.length > 64
+      ) {
+        detail(response, 422, "Invalid human input request");
+        return;
+      }
+      options.push({ label: option.label, value: option.value });
+    }
+    if (new Set(options.map(({ value }) => value)).size !== options.length) {
+      detail(response, 422, "Invalid human input request");
+      return;
+    }
+    const source = state.messages.get(body.message_id);
+    const sender = [...state.identities.values()].find(
+      (candidate) => candidate.id === source?.message.sender_agent_id,
+    );
+    if (
+      source === undefined ||
+      (source.recipientEmail !== identity.email && sender?.email !== identity.email)
+    ) {
+      detail(response, source === undefined ? 404 : 403, "Message unavailable");
+      return;
+    }
+    const actionType = body.permission_type;
+    if (!state.humanInputActionTypes.has(actionType)) {
+      state.humanInputActionTypes.set(actionType, {
+        id: nextId(state, "action.human_input"),
+        name: actionType,
+        description: `Auto-created from a human input request by ${identity.email}`,
+        input_schema: {},
+      });
+    }
+    const requestId = nextUuid(state);
+    const input: HumanInputRecord = {
+      id: requestId,
+      agentEmail: identity.email,
+      actionType,
+      prompt: body.request,
+      inputType: "buttons",
+      options,
+      messageId: body.message_id,
+      status: "pending",
+    };
+    state.humanInputs.set(requestId, input);
+    const token = randomBytes(32).toString("base64url");
+    state.humanInputTokens.set(token, {
+      requestId,
+      expiresAt: state.nowSeconds + 72 * 60 * 60,
+    });
+    state.humanInputTokensById.set(requestId, token);
+    safeJson(response, 200, {
+      request_id: requestId,
+      status: "pending",
+      input_type: "buttons",
+      message: `Question emailed to ${identity.email}`,
+      options,
+    });
     return;
   }
 
   if (request.method === "POST" && target.pathname === "/api/request_permission") {
     if (
-      !exactKeys(body, ["target_email", "action_type"], ["scope"]) ||
-      typeof body.target_email !== "string" ||
-      typeof body.action_type !== "string" ||
-      (body.scope !== undefined && !isRecord(body.scope))
+      !exactKeys(
+        body,
+        [],
+        [
+          "target_email",
+          "message_id",
+          "action_type",
+          "permission_type",
+          "decision_options",
+          "reason",
+          "scope",
+        ],
+      ) ||
+      (body.target_email === undefined && body.message_id === undefined) ||
+      (body.action_type === undefined) === (body.permission_type === undefined) ||
+      (body.target_email !== undefined && typeof body.target_email !== "string") ||
+      (body.message_id !== undefined && typeof body.message_id !== "string") ||
+      (body.action_type !== undefined && typeof body.action_type !== "string") ||
+      (body.permission_type !== undefined && typeof body.permission_type !== "string") ||
+      (body.decision_options !== undefined &&
+        body.decision_options !== "accept_deny" &&
+        body.decision_options !== "once_always") ||
+      (body.reason !== undefined &&
+        (typeof body.reason !== "string" || body.reason.length > 500)) ||
+      (body.scope !== undefined && body.scope !== null && !isRecord(body.scope))
     ) {
       detail(response, 422, "Invalid permission request");
       return;
     }
-    const targetIdentity = state.identities.get(body.target_email);
-    if (targetIdentity?.verified !== true || actionByName(body.action_type) === undefined) {
+    let targetEmail = body.target_email as string | undefined;
+    if (body.message_id !== undefined) {
+      const messageRecord = state.messages.get(body.message_id as string);
+      const sender = [...state.identities.values()].find(
+        (candidate) => candidate.id === messageRecord?.message.sender_agent_id,
+      );
+      let derivedTarget: string | undefined;
+      if (messageRecord?.recipientEmail === identity.email) derivedTarget = sender?.email;
+      else if (sender?.email === identity.email) derivedTarget = messageRecord?.recipientEmail;
+      else {
+        detail(response, 403, "Not a party to message");
+        return;
+      }
+      if (targetEmail !== undefined && targetEmail !== derivedTarget) {
+        detail(response, 422, "Target does not match message");
+        return;
+      }
+      targetEmail = derivedTarget;
+    }
+    if (targetEmail === undefined) {
+      detail(response, 404, "Message party not found");
+      return;
+    }
+    const actionType = (body.action_type ?? body.permission_type) as string;
+    const targetIdentity = state.identities.get(targetEmail);
+    if (targetIdentity?.verified !== true) {
       detail(response, 404, "Target or action not found");
+      return;
+    }
+    if (targetEmail === identity.email) {
+      detail(response, 400, "Cannot request permission from yourself");
       return;
     }
     let permission = [...state.permissions.values()].find(
       (candidate) =>
-        candidate.grantorEmail === body.target_email &&
+        candidate.grantorEmail === targetEmail &&
         candidate.granteeEmail === identity.email &&
-        candidate.actionType === body.action_type,
+        candidate.actionType === actionType &&
+        (candidate.status === "pending" ||
+          (candidate.status === "granted" &&
+            (candidate.usesRemaining === null || (candidate.usesRemaining ?? 0) > 0))),
     );
     if (permission === undefined) {
-      permission = {
-        id: nextId(state, "permission"),
-        grantorEmail: body.target_email,
+      const created: PermissionRecord = {
+        id: nextUuid(state),
+        grantorEmail: targetEmail,
         granteeEmail: identity.email,
-        actionType: body.action_type,
-        scope: body.scope ?? {},
+        actionType,
+        scope: (body.scope ?? {}) as Record<string, unknown>,
+        decisionOptions: (body.decision_options ??
+          "accept_deny") as PermissionRecord["decisionOptions"],
+        ...(body.reason === undefined ? {} : { reason: body.reason as string }),
         status: "pending",
         createdAt: currentTimestamp(state),
       };
-      state.permissions.set(permission.id, permission);
+      permission = created;
+      state.permissions.set(created.id, created);
+      const token = randomBytes(32).toString("base64url");
+      state.permissionDecisionTokens.set(token, {
+        permissionId: created.id,
+        expiresAt: state.nowSeconds + 72 * 60 * 60,
+      });
+      state.permissionTokensById.set(created.id, token);
+    } else if (permission.status === "granted") {
+      queueMessage(
+        state,
+        permission.grantorEmail,
+        identity.email,
+        {
+          type: "permission_already_granted",
+          permission_id: permission.id,
+          action_type: permission.actionType,
+          requester_email: identity.email,
+          decision: permission.decision,
+          scope: permission.scope,
+          reason: body.reason ?? null,
+        },
+        permission.actionType,
+      );
     }
     safeJson(response, 200, {
       permission_id: permission.id,
       status: permission.status,
-      message: "Permission request sent to target agent",
+      message:
+        permission.status === "pending"
+          ? `Approval request emailed to ${targetEmail}`
+          : "Permission was already granted; no approval email was sent.",
       already_granted: permission.status === "granted",
-      decision: permission.status === "pending" ? null : permission.status,
-    });
-    return;
-  }
-
-  if (request.method === "POST" && target.pathname === "/api/respond_to_permission") {
-    if (
-      !exactKeys(body, ["permission_id", "decision"]) ||
-      typeof body.permission_id !== "string" ||
-      (body.decision !== "granted" && body.decision !== "denied")
-    ) {
-      detail(response, 422, "Invalid permission response");
-      return;
-    }
-    const permission = state.permissions.get(body.permission_id);
-    if (
-      permission === undefined ||
-      permission.grantorEmail !== identity.email ||
-      permission.status !== "pending"
-    ) {
-      detail(response, 404, "Permission not found");
-      return;
-    }
-    permission.status = body.decision;
-    permission.decidedAt = currentTimestamp(state);
-    queueMessage(
-      state,
-      permission.granteeEmail,
-      identity.email,
-      {
-        type: "permission_response",
-        permission_id: permission.id,
-        decision: permission.status,
-      },
-      permission.actionType,
-    );
-    safeJson(response, 200, {
-      permission_id: permission.id,
-      status: permission.status,
-      decided_at: permission.decidedAt,
+      decision: permission.decision ?? null,
     });
     return;
   }
@@ -835,13 +1148,14 @@ async function route(
       detail(response, 422, "Invalid action call");
       return;
     }
-    const action = actionByName(body.action_type);
+    const action = actionByName(state, body.action_type);
     const permission = [...state.permissions.values()].find(
       (candidate) =>
         candidate.grantorEmail === body.target_email &&
         candidate.granteeEmail === identity.email &&
         candidate.actionType === body.action_type &&
-        candidate.status === "granted",
+        candidate.status === "granted" &&
+        (candidate.usesRemaining === null || (candidate.usesRemaining ?? 0) > 0),
     );
     if (
       action === undefined ||
@@ -850,6 +1164,9 @@ async function route(
     ) {
       detail(response, 403, "Action not permitted");
       return;
+    }
+    if (permission.usesRemaining !== null && permission.usesRemaining !== undefined) {
+      permission.usesRemaining -= 1;
     }
     const callId = nextUuid(state);
     state.actionCalls.set(callId, {
@@ -1023,6 +1340,12 @@ export async function startFakeCentral(t?: TestContext): Promise<FakeCentral> {
     identities: new Map(),
     tokens: new Map(),
     permissions: new Map(),
+    permissionDecisionTokens: new Map(),
+    permissionTokensById: new Map(),
+    humanInputs: new Map(),
+    humanInputTokens: new Map(),
+    humanInputTokensById: new Map(),
+    humanInputActionTypes: new Map(),
     actionCalls: new Map(),
     messages: new Map(),
     replay: new Set(),
@@ -1085,6 +1408,36 @@ export async function startFakeCentral(t?: TestContext): Promise<FakeCentral> {
       const identity = state.identities.get(email);
       if (identity === undefined) throw new Error("fixture identity is missing");
       return identity.code;
+    },
+    permissionDecisionToken(permissionId: string): string {
+      const token = state.permissionTokensById.get(permissionId);
+      if (token === undefined) throw new Error("fixture permission decision token is missing");
+      return token;
+    },
+    permissionOutcomeMessageId(permissionId: string): string | undefined {
+      return [...state.messages.values()].find(
+        ({ message }) =>
+          message.payload.type === "permission_outcome" &&
+          message.payload.permission_id === permissionId,
+      )?.message.id;
+    },
+    humanInputResponseToken(requestId: string): string {
+      const token = state.humanInputTokensById.get(requestId);
+      if (token === undefined) throw new Error("fixture human input token is missing");
+      return token;
+    },
+    humanInputResponseMessageId(requestId: string): string | undefined {
+      return [...state.messages.values()].find(
+        ({ message }) =>
+          message.payload.type === "human_input_response" &&
+          message.payload.request_id === requestId,
+      )?.message.id;
+    },
+    pendingHumanInputRequest(email: string) {
+      const input = [...state.humanInputs.values()].find(
+        (candidate) => candidate.agentEmail === email && candidate.status === "pending",
+      );
+      return input === undefined ? undefined : { requestId: input.id, messageId: input.messageId };
     },
     seedClient,
     clientForVerifiedEmail(email: string): FixtureClient {

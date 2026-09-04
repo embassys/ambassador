@@ -91,14 +91,38 @@ class ResendRequest(StrictModel):
 
 
 class PermissionRequest(StrictModel):
-    target_email: str
-    action_type: str = Field(min_length=1, max_length=128)
+    target_email: str | None = None
+    message_id: str | None = None
+    action_type: str | None = Field(default=None, min_length=1, max_length=128)
+    permission_type: str | None = Field(default=None, min_length=1, max_length=128)
+    decision_options: Literal["accept_deny", "once_always"] = "accept_deny"
+    reason: str | None = Field(default=None, max_length=500)
     scope: dict[str, Any] | None = None
 
 
-class PermissionResponse(StrictModel):
-    permission_id: str
-    decision: Literal["granted", "denied"]
+class PermissionDecisionRequest(StrictModel):
+    token: str
+    decision: Literal["accept", "deny", "allow_once", "allow_always"]
+
+
+class HumanInputOption(StrictModel):
+    label: str = Field(min_length=1, max_length=64)
+    value: str = Field(min_length=1, max_length=64)
+
+
+class HumanInputRequest(StrictModel):
+    permission_type: str | None = Field(default=None, min_length=1, max_length=128)
+    action_type: str | None = Field(default=None, min_length=1, max_length=128)
+    request: str = Field(min_length=1, max_length=2000)
+    input_type: Literal["buttons", "text"] = "text"
+    options: list[str | HumanInputOption] | None = Field(default=None, max_length=10)
+    message_id: str | None = None
+
+
+class HumanInputResponseRequest(StrictModel):
+    token: str = Field(min_length=16, max_length=512)
+    value: str | None = Field(default=None, max_length=64)
+    text: str | None = Field(default=None, max_length=4000)
 
 
 class ActionCall(StrictModel):
@@ -134,7 +158,11 @@ class Permission:
     grantee_email: str
     action_type: str
     scope: dict[str, Any]
+    decision_options: Literal["accept_deny", "once_always"] = "accept_deny"
+    reason: str | None = None
     status: Literal["pending", "granted", "denied"] = "pending"
+    decision: Literal["accept", "deny", "allow_once", "allow_always"] | None = None
+    uses_remaining: int | None = None
     created_at: str = ""
     decided_at: str | None = None
 
@@ -147,6 +175,20 @@ class ActionCallRecord:
     action_type: str
     status: Literal["pending", "completed", "failed"] = "pending"
     result: dict[str, Any] | None = None
+
+
+@dataclass
+class HumanInput:
+    id: str
+    agent_email: str
+    action_type: str
+    prompt: str
+    input_type: Literal["buttons", "text"]
+    options: list[dict[str, str]] | None
+    message_id: str | None
+    status: Literal["pending", "answered"] = "pending"
+    response_value: str | None = None
+    response_text: str | None = None
 
 
 @dataclass
@@ -167,6 +209,12 @@ class FixtureState:
     identities: dict[str, Identity] = field(default_factory=dict)
     tokens: dict[str, str] = field(default_factory=dict)
     permissions: dict[str, Permission] = field(default_factory=dict)
+    permission_decision_tokens: dict[str, tuple[str, int, bool]] = field(default_factory=dict)
+    permission_tokens_by_id: dict[str, str] = field(default_factory=dict)
+    human_inputs: dict[str, HumanInput] = field(default_factory=dict)
+    human_input_tokens: dict[str, tuple[str, int, bool]] = field(default_factory=dict)
+    human_input_tokens_by_id: dict[str, str] = field(default_factory=dict)
+    human_input_actions: dict[str, dict[str, Any]] = field(default_factory=dict)
     action_calls: dict[str, ActionCallRecord] = field(default_factory=dict)
     messages: dict[str, Message] = field(default_factory=dict)
     replay: set[tuple[str, str]] = field(default_factory=set)
@@ -415,7 +463,7 @@ def validate_dpop(request: Request) -> Identity:
 
 
 def find_action(name: str) -> dict[str, Any] | None:
-    return next((action for action in ACTIONS if action["name"] == name), None)
+    return next((action for action in ACTIONS if action["name"] == name), None) or state.human_input_actions.get(name)
 
 
 def queue_message(
@@ -427,7 +475,7 @@ def queue_message(
     recipient = state.identities[recipient_email]
     sender = state.identities[sender_email]
     action = find_action(action_type) if action_type is not None else None
-    message_id = state.next_id("message")
+    message_id = str(uuid4())
     state.messages[message_id] = Message(
         id=message_id,
         recipient_email=recipient.email,
@@ -470,6 +518,19 @@ async def verification_code(
     if identity is None:
         raise HTTPException(status_code=404, detail="Not found")
     return {"code": identity.code}
+
+
+@app.get("/__test__/permission-token/{permission_id}")
+async def permission_token(
+    permission_id: str,
+    x_a2a_test_control: str | None = Header(default=None),
+) -> dict[str, str]:
+    if x_a2a_test_control != CONTROL_TOKEN:
+        raise HTTPException(status_code=404, detail="Not found")
+    token = state.permission_tokens_by_id.get(permission_id)
+    if token is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"token": token}
 
 
 @app.post("/api/register_agent")
@@ -525,71 +586,310 @@ async def verify_email(input: VerifyRequest, response: Response) -> dict[str, st
 @app.get("/api/list_action_types")
 async def list_action_types(request: Request) -> list[dict[str, Any]]:
     validate_dpop(request)
-    return ACTIONS
+    return [*ACTIONS, *state.human_input_actions.values()]
+
+
+@app.post("/api/get_human_input")
+async def get_human_input(input: HumanInputRequest, request: Request) -> dict[str, Any]:
+    identity = validate_dpop(request)
+    if input.permission_type is None and input.action_type is None:
+        raise HTTPException(status_code=422, detail="Choose one human input type")
+    if (
+        input.permission_type is not None
+        and input.action_type is not None
+        and input.permission_type != input.action_type
+    ):
+        raise HTTPException(status_code=422, detail="Human input types do not match")
+    action_type = input.permission_type or input.action_type
+    assert action_type is not None
+    options = [
+        {"label": value, "value": value}
+        if isinstance(value, str)
+        else {"label": value.label, "value": value.value}
+        for value in (input.options or [])
+    ]
+    if input.input_type == "buttons" and not options:
+        raise HTTPException(status_code=422, detail="Buttons require options")
+    if input.input_type == "text" and options:
+        raise HTTPException(status_code=422, detail="Text input rejects options")
+    if len({value["value"] for value in options}) != len(options):
+        raise HTTPException(status_code=422, detail="Option values must be unique")
+    source_message_id = None
+    if input.message_id is not None:
+        try:
+            source_message_id = str(UUID(input.message_id))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="message_id must be a UUID") from None
+        source = state.messages.get(source_message_id)
+        sender = next(
+            (
+                value
+                for value in state.identities.values()
+                if value.id == getattr(source, "sender_agent_id", None)
+            ),
+            None,
+        )
+        if source is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if source.recipient_email != identity.email and getattr(sender, "email", None) != identity.email:
+            raise HTTPException(status_code=403, detail="Not a party to message")
+    if find_action(action_type) is None:
+        state.human_input_actions[action_type] = {
+            "id": state.next_id("action.human_input"),
+            "name": action_type,
+            "description": f"Auto-created from a human input request by {identity.email}",
+            "input_schema": {},
+        }
+    request_id = str(uuid4())
+    state.human_inputs[request_id] = HumanInput(
+        id=request_id,
+        agent_email=identity.email,
+        action_type=action_type,
+        prompt=input.request,
+        input_type=input.input_type,
+        options=options or None,
+        message_id=source_message_id,
+    )
+    token = secrets.token_urlsafe(32)
+    state.human_input_tokens[token] = (request_id, state.now + 72 * 60 * 60, False)
+    state.human_input_tokens_by_id[request_id] = token
+    return {
+        "request_id": request_id,
+        "status": "pending",
+        "input_type": input.input_type,
+        "message": f"Question emailed to {identity.email}",
+        "options": options or None,
+    }
+
+
+@app.post("/api/human_input_response")
+async def human_input_response(input: HumanInputResponseRequest) -> dict[str, Any]:
+    record = state.human_input_tokens.get(input.token)
+    human_input = None if record is None else state.human_inputs.get(record[0])
+    if (
+        record is None
+        or human_input is None
+        or record[2]
+        or record[1] <= state.now
+        or human_input.status != "pending"
+    ):
+        raise HTTPException(status_code=410, detail="This link is no longer usable")
+    if (input.value is None) == (input.text is None):
+        raise HTTPException(status_code=422, detail="Supply exactly one answer")
+    if human_input.input_type == "buttons":
+        offered = {value["value"] for value in human_input.options or []}
+        if input.value not in offered or input.text is not None:
+            raise HTTPException(status_code=400, detail="Answer was not offered")
+    elif input.text is None or input.value is not None:
+        raise HTTPException(status_code=400, detail="A text answer is required")
+    state.human_input_tokens[input.token] = (record[0], record[1], True)
+    human_input.status = "answered"
+    human_input.response_value = input.value
+    human_input.response_text = input.text
+    queue_message(
+        human_input.agent_email,
+        human_input.agent_email,
+        {
+            "type": "human_input_response",
+            "request_id": human_input.id,
+            "action_type": human_input.action_type,
+            "input_type": human_input.input_type,
+            "value": input.value,
+            "text": input.text,
+            "prompt": human_input.prompt,
+            "message_id": human_input.message_id,
+        },
+        human_input.action_type,
+    )
+    return {
+        "request_id": human_input.id,
+        "status": "answered",
+        "input_type": human_input.input_type,
+        "value": input.value,
+        "text": input.text,
+    }
+
+
+@app.get("/api/get_human_input_status")
+async def get_human_input_status(request_id: str, request: Request) -> dict[str, Any]:
+    identity = validate_dpop(request)
+    try:
+        request_id = str(UUID(request_id))
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="request_id must be a UUID") from None
+    human_input = state.human_inputs.get(request_id)
+    if human_input is None or human_input.agent_email != identity.email:
+        raise HTTPException(status_code=404, detail="Human input request not found")
+    return {
+        "request_id": human_input.id,
+        "status": human_input.status,
+        "input_type": human_input.input_type,
+        "prompt": human_input.prompt,
+        "action_type": human_input.action_type,
+        "options": human_input.options,
+        "response_value": human_input.response_value,
+        "response_text": human_input.response_text,
+        "responded_at": state.timestamp() if human_input.status == "answered" else None,
+        "created_at": None,
+    }
 
 
 @app.post("/api/request_permission")
 async def request_permission(input: PermissionRequest, request: Request) -> dict[str, Any]:
     identity = validate_dpop(request)
-    target_email = validate_email(input.target_email)
+    if input.target_email is None and input.message_id is None:
+        raise HTTPException(status_code=422, detail="Choose a target selector")
+    if (input.action_type is None) == (input.permission_type is None):
+        raise HTTPException(status_code=422, detail="Choose one permission name")
+    target_email = validate_email(input.target_email) if input.target_email is not None else None
+    if input.message_id is not None:
+        message = state.messages.get(input.message_id or "")
+        sender = next(
+            (value for value in state.identities.values() if value.id == getattr(message, "sender_agent_id", None)),
+            None,
+        )
+        if message is None:
+            raise HTTPException(status_code=400, detail="Invalid message_id")
+        if message.recipient_email == identity.email and sender is not None:
+            derived_target_email = sender.email
+        elif sender is not None and sender.email == identity.email:
+            derived_target_email = message.recipient_email
+        else:
+            raise HTTPException(status_code=403, detail="Not a party to message")
+        if target_email is not None and target_email != derived_target_email:
+            raise HTTPException(status_code=422, detail="Target does not match message")
+        target_email = derived_target_email
+    assert target_email is not None
+    action_type = input.action_type or input.permission_type
+    assert action_type is not None
+    if target_email == identity.email:
+        raise HTTPException(status_code=400, detail="Cannot request permission from yourself")
     target = state.identities.get(target_email)
-    if target is None or not target.verified or find_action(input.action_type) is None:
-        raise HTTPException(status_code=404, detail="Target or action not found")
+    if target is None or not target.verified:
+        raise HTTPException(status_code=404, detail="Target not found")
     permission = next(
         (
             value
             for value in state.permissions.values()
             if value.grantor_email == target_email
             and value.grantee_email == identity.email
-            and value.action_type == input.action_type
+            and value.action_type == action_type
+            and (
+                value.status == "pending"
+                or (
+                    value.status == "granted"
+                    and (value.uses_remaining is None or value.uses_remaining > 0)
+                )
+            )
         ),
         None,
     )
     if permission is None:
         permission = Permission(
-            id=state.next_id("permission"),
+            id=str(uuid4()),
             grantor_email=target_email,
             grantee_email=identity.email,
-            action_type=input.action_type,
+            action_type=action_type,
             scope=input.scope or {},
+            decision_options=input.decision_options,
+            reason=input.reason,
             created_at=state.timestamp(),
         )
         state.permissions[permission.id] = permission
+        token = secrets.token_urlsafe(32)
+        state.permission_decision_tokens[token] = (
+            permission.id,
+            state.now + 72 * 60 * 60,
+            False,
+        )
+        state.permission_tokens_by_id[permission.id] = token
+    elif permission.status == "granted":
+        queue_message(
+            permission.grantor_email,
+            identity.email,
+            {
+                "type": "permission_already_granted",
+                "permission_id": permission.id,
+                "action_type": permission.action_type,
+                "requester_email": identity.email,
+                "decision": permission.decision,
+                "scope": permission.scope,
+                "reason": input.reason,
+            },
+            permission.action_type,
+        )
     return {
         "permission_id": permission.id,
         "status": permission.status,
-        "message": "Permission request sent to target agent",
+        "message": (
+            f"Approval request emailed to {target_email}"
+            if permission.status == "pending"
+            else "Permission was already granted; no approval email was sent."
+        ),
         "already_granted": permission.status == "granted",
-        "decision": None if permission.status == "pending" else permission.status,
+        "decision": permission.decision,
     }
 
 
-@app.post("/api/respond_to_permission")
-async def respond_to_permission(input: PermissionResponse, request: Request) -> dict[str, str]:
-    identity = validate_dpop(request)
-    permission = state.permissions.get(input.permission_id)
-    if (
-        permission is None
-        or permission.grantor_email != identity.email
-        or permission.status != "pending"
-    ):
-        raise HTTPException(status_code=404, detail="Permission not found")
-    permission.status = input.decision
+def apply_permission_decision(token: str, decision: str) -> Permission:
+    record = state.permission_decision_tokens.get(token)
+    permission = None if record is None else state.permissions.get(record[0])
+    if record is None or permission is None or record[2] or record[1] <= state.now or permission.status != "pending":
+        raise HTTPException(status_code=410, detail="This decision link is not valid")
+    offered = (
+        {"allow_once", "allow_always", "deny"}
+        if permission.decision_options == "once_always"
+        else {"accept", "deny"}
+    )
+    if decision not in offered:
+        raise HTTPException(status_code=400, detail="Decision was not offered")
+    state.permission_decision_tokens[token] = (record[0], record[1], True)
+    permission.decision = decision  # type: ignore[assignment]
+    permission.status = "denied" if decision == "deny" else "granted"
+    permission.uses_remaining = 1 if decision == "allow_once" else None
     permission.decided_at = state.timestamp()
     queue_message(
         permission.grantee_email,
-        identity.email,
+        permission.grantor_email,
         {
-            "type": "permission_response",
+            "type": "permission_outcome",
             "permission_id": permission.id,
-            "decision": permission.status,
+            "action_type": permission.action_type,
+            "decision": permission.decision,
+            "status": permission.status,
+            "granted": permission.status == "granted",
+            "single_use": permission.decision == "allow_once",
+            "grantor_email": permission.grantor_email,
         },
         permission.action_type,
     )
+    return permission
+
+
+@app.get("/permission/decide")
+async def confirm_permission_decision(token: str, choice: str) -> Response:
+    record = state.permission_decision_tokens.get(token)
+    permission = None if record is None else state.permissions.get(record[0])
+    if record is None or permission is None or record[2] or record[1] <= state.now or permission.status != "pending":
+        raise HTTPException(status_code=410, detail="This decision link is not valid")
+    offered = (
+        {"allow_once", "allow_always", "deny"}
+        if permission.decision_options == "once_always"
+        else {"accept", "deny"}
+    )
+    if choice not in offered:
+        raise HTTPException(status_code=400, detail="Decision was not offered")
+    return Response("<!doctype html><title>Confirm permission decision</title>", media_type="text/html")
+
+
+@app.post("/api/permission_decision")
+async def permission_decision(input: PermissionDecisionRequest) -> dict[str, Any]:
+    permission = apply_permission_decision(input.token, input.decision)
     return {
         "permission_id": permission.id,
+        "decision": permission.decision,
         "status": permission.status,
-        "decided_at": permission.decided_at,
+        "granted": permission.status == "granted",
     }
 
 
@@ -606,6 +906,7 @@ async def call_action(input: ActionCall, request: Request) -> dict[str, str]:
             and value.grantee_email == identity.email
             and value.action_type == input.action_type
             and value.status == "granted"
+            and (value.uses_remaining is None or value.uses_remaining > 0)
         ),
         None,
     )
@@ -616,6 +917,8 @@ async def call_action(input: ActionCall, request: Request) -> dict[str, str]:
         or any(not isinstance(input.payload.get(name), str) for name in required)
     ):
         raise HTTPException(status_code=403, detail="Action not permitted")
+    if permission.uses_remaining is not None:
+        permission.uses_remaining -= 1
     call_id = str(uuid4())
     state.action_calls[call_id] = ActionCallRecord(
         id=call_id,

@@ -2,18 +2,14 @@ import { AcpSessionStore, AcpSessionStoreError } from "./acp-session-store.js";
 import { ActionResultInbox, ActionResultInboxError } from "./action-result-inbox.js";
 import type { AgentCapability } from "./agent-capabilities.js";
 import { capabilityForKind } from "./agent-capabilities.js";
+import { CentralAgentPermissionCoordinator } from "./central-agent-permission.js";
 import {
   CentralEnrollmentClient,
   CentralEnrollmentError,
   REST_BOOTSTRAP_TOOLS,
 } from "./central-enrollment.js";
 import { CentralProtectedTransport } from "./central-protected-transport.js";
-import {
-  type CentralPermission,
-  CentralRestClient,
-  CentralRestError,
-  REST_AUTHENTICATED_TOOLS,
-} from "./central-rest.js";
+import { CentralRestClient, CentralRestError, REST_AUTHENTICATED_TOOLS } from "./central-rest.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 import {
   type DeliveryProfile,
@@ -22,6 +18,7 @@ import {
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
 import {
+  type AcpPermissionApproval,
   AcpSessionController,
   DirectDeliveryError,
   DirectDeliveryTarget,
@@ -72,6 +69,7 @@ export interface DeliveryTargetContext {
   readonly capability: AgentCapability;
   readonly endpoint: string;
   readonly sessionStore?: AcpSessionStore;
+  readonly approvePermission: AcpPermissionApproval;
 }
 
 export interface GatewayApplicationOptions {
@@ -99,6 +97,7 @@ export interface GatewayApplicationOptions {
     capability: NonNullable<AgentCapability["direct"]>,
   ) => Pick<AcpSessionController, "delete" | "show">;
   readonly localMcpPort?: number;
+  readonly centralAgentPermissionPollIntervalMs?: number;
   readonly nowSeconds?: () => number;
   readonly signal?: AbortSignal;
   readonly onRuntimeNotice?: (notice: GatewayError) => void;
@@ -113,28 +112,6 @@ export interface RunningGatewayApplication {
 
 function safeFailure(): Error {
   return new Error("Ambassador operation failed");
-}
-
-function permissionInboxItem(permission: CentralPermission): Record<string, unknown> {
-  return {
-    kind: "permission_request",
-    permission_id: permission.id,
-    requester_email: permission.grantee_email,
-    action_type: permission.action_type,
-    ...(permission.scope === undefined || permission.scope === null
-      ? {}
-      : { scope: permission.scope }),
-    ...(permission.created_at === undefined || permission.created_at === null
-      ? {}
-      : { created_at: permission.created_at }),
-    response: {
-      tool: "respond_to_permission",
-      required: {
-        permission_id: permission.id,
-        decision: ["granted", "denied"],
-      },
-    },
-  };
 }
 
 function startupFailure(error: unknown): GatewayError {
@@ -466,6 +443,7 @@ export async function openGatewayApplication(
       workingDirectory: context.profile.working_directory,
       environment: options.environment,
       sessionStore,
+      approvePermission: context.approvePermission,
       nowMs: () => Math.floor(nowSeconds() * 1_000),
       log,
     });
@@ -499,16 +477,33 @@ export async function openGatewayApplication(
       const nextActionResultInbox =
         actionResultInbox ?? new ActionResultInbox(options.actionResultPath, identity.credential());
       actionResultInbox = nextActionResultInbox;
-      const target = await createDeliveryTarget({
+      const permissionCoordinator = new CentralAgentPermissionCoordinator({
+        transport: nextRest,
+        log,
+        ...(options.centralAgentPermissionPollIntervalMs === undefined
+          ? {}
+          : { pollIntervalMs: options.centralAgentPermissionPollIntervalMs }),
+      });
+      const baseTarget = await createDeliveryTarget({
         ...profile,
         endpoint: local.endpoint,
         ...(acpSessionStore === undefined ? {} : { sessionStore: acpSessionStore }),
+        approvePermission: permissionCoordinator.approve,
       });
+      const target: DeliveryTarget = {
+        deliver: async (message, signal) =>
+          permissionCoordinator.consumeInternalMessage(message)
+            ? { status: "completed" }
+            : await baseTarget.deliver(message, signal),
+        close: async () => await baseTarget.close(),
+      };
       const nextRelay = new NotificationRelay({
         journal,
         deliveryTarget: target,
         receiveMessages: async (signal) => {
           try {
+            const buffered = permissionCoordinator.takeBufferedMessages();
+            if (buffered.length > 0) return buffered;
             return (await nextRest.pollRemoteMessages(CENTRAL_POLL_SECONDS, signal)).messages;
           } catch (error) {
             if (
@@ -653,13 +648,6 @@ export async function openGatewayApplication(
             break;
           case "get_inbox": {
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
-            const enrolledEmail = identity.credential().token.email;
-            const permissions = (await requireRest().getMyPermissions(signal))
-              .filter(
-                (permission) =>
-                  permission.status === "pending" && permission.grantor_email === enrolledEmail,
-              )
-              .map(permissionInboxItem);
             const actionCalls = requirePendingActionInbox()
               .list()
               .map((action) => ({
@@ -677,16 +665,13 @@ export async function openGatewayApplication(
             const actionResults = requireActionResultInbox()
               .list()
               .map((actionResult) => ({ kind: "action_result", ...actionResult }));
-            const items = [...permissions, ...actionCalls, ...actionResults];
+            const items = [...actionCalls, ...actionResults];
             result = { count: items.length, items };
             assertSafeUpstreamResult(result, identity.credential().record.access_token);
             const consumedResults = requireActionResultInbox().takeAll();
             if (consumedResults.length !== actionResults.length) throw safeFailure();
             break;
           }
-          case "respond_to_permission":
-            result = await requireRest().respondToPermission(arguments_, signal);
-            break;
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;

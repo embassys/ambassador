@@ -18,6 +18,9 @@ const POLL_RESPONSE_MARGIN_MS = 10_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+export const ACP_TOOL_HUMAN_INPUT_TYPE = "ambassador_acp_tool_execution";
+const INTERNAL_ACP_PERMISSION_TYPE =
+  /^(?:ambassador_acp_tool_execution|acp_tool_execution_[a-f0-9]{32})$/u;
 const FORBIDDEN_ARGUMENT_NAMES = new Set([
   "access_token",
   "authorization",
@@ -69,6 +72,35 @@ export interface CentralPermission {
   readonly expires_at?: string | null;
 }
 
+export interface CentralPermissionRequestResult extends Record<string, unknown> {
+  readonly permission_id: string;
+  readonly status: "pending" | "granted" | "denied";
+  readonly message: string;
+  readonly decision?: "accept" | "deny" | "allow_once" | "allow_always" | null;
+  readonly already_granted?: boolean;
+}
+
+export interface CentralHumanInputOption {
+  readonly label: string;
+  readonly value: string;
+}
+
+export interface CentralHumanInputRequest {
+  readonly permission_type: string;
+  readonly request: string;
+  readonly input_type: "buttons";
+  readonly options: readonly CentralHumanInputOption[];
+  readonly message_id: string;
+}
+
+export interface CentralHumanInputRequestResult extends Record<string, unknown> {
+  readonly request_id: string;
+  readonly status: "pending";
+  readonly input_type: "buttons";
+  readonly message: string;
+  readonly options: readonly CentralHumanInputOption[];
+}
+
 export interface CentralRestClientOptions {
   readonly centralOrigin: string;
   readonly transport: CentralProtectedTransport;
@@ -91,33 +123,53 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "request_permission",
     description:
-      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Send that identity a permission request; do not treat a pending request as granted.",
-    inputSchema: objectSchema(
-      {
-        target_email: { type: "string", minLength: 3, maxLength: 254 },
+      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Embassys emails that identity's human owner, who decides asynchronously; their agent does not approve the request. Supply target_email, message_id, or both when they identify the same grantor; message_id takes precedence. Use exactly one permission name. Check already_granted before waiting for email approval.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target_email: {
+          type: "string",
+          minLength: 3,
+          maxLength: 254,
+          description: "Email of the identity whose human owner will decide.",
+        },
+        message_id: {
+          type: "string",
+          format: "uuid",
+          description: "Message from which Embassys should infer the other identity.",
+        },
         action_type: { type: "string", minLength: 1, maxLength: 128 },
-        scope: { type: "object" },
+        permission_type: {
+          type: "string",
+          minLength: 1,
+          maxLength: 128,
+          description: "Alias for action_type; use exactly one of them.",
+        },
+        decision_options: {
+          type: "string",
+          enum: ["accept_deny", "once_always"],
+          default: "accept_deny",
+          description: "Buttons offered to the human in the approval email.",
+        },
+        reason: {
+          type: "string",
+          maxLength: 500,
+          description: "Human-readable reason shown in the approval email.",
+        },
+        scope: { anyOf: [{ type: "object" }, { type: "null" }] },
       },
-      ["target_email", "action_type"],
-    ),
+      allOf: [
+        { anyOf: [{ required: ["target_email"] }, { required: ["message_id"] }] },
+        { oneOf: [{ required: ["action_type"] }, { required: ["permission_type"] }] },
+      ],
+      additionalProperties: false,
+    },
   },
   {
     name: "get_inbox",
     description:
-      "Use this Embassys Ambassador tool when the user asks what needs their attention, what they need to answer, or whether an answer came back. It returns pending permission requests, unanswered action calls, and unread action results. Pending requests stay until answered; returned action results are marked read and removed from the inbox.",
+      "Use this Embassys Ambassador tool when the user asks what needs their attention, what action request they need to answer, or whether an action result came back. It returns unanswered action calls and unread action results. Embassys permission requests are decided by the human through email and do not appear here. Returned action results are marked read and removed from the inbox.",
     inputSchema: objectSchema({}),
-  },
-  {
-    name: "respond_to_permission",
-    description:
-      "Use this Embassys Ambassador tool after the user explicitly chooses grant or deny for one pending permission request. Send exactly that decision for the selected permission ID.",
-    inputSchema: objectSchema(
-      {
-        permission_id: { type: "string", minLength: 1, maxLength: 128 },
-        decision: { type: "string", enum: ["granted", "denied"] },
-      },
-      ["permission_id", "decision"],
-    ),
   },
   {
     name: "call_action",
@@ -213,6 +265,35 @@ function requestEmail(value: unknown): string {
 function requestName(value: unknown): string {
   if (typeof value !== "string" || !NAME.test(value)) throw failure("invalid_arguments");
   return value;
+}
+
+function requestPermissionName(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 128) {
+    throw failure("invalid_arguments");
+  }
+  return value;
+}
+
+function requestHumanInputText(value: unknown, maximumLength: number): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > maximumLength) {
+    throw failure("invalid_arguments");
+  }
+  return value;
+}
+
+function humanInputOption(value: unknown): CentralHumanInputOption {
+  if (
+    !exactKeys(value, ["label", "value"]) ||
+    typeof value.label !== "string" ||
+    value.label.length < 1 ||
+    value.label.length > 64 ||
+    typeof value.value !== "string" ||
+    value.value.length < 1 ||
+    value.value.length > 64
+  ) {
+    throw failure("central_response_invalid");
+  }
+  return { label: value.label, value: value.value };
 }
 
 function requestUuid(value: unknown): string {
@@ -330,7 +411,16 @@ export class CentralRestClient {
   async listActionTypes(signal?: AbortSignal): Promise<CentralActionType[]> {
     const result = await this.#request("GET", "/api/list_action_types", undefined, signal);
     if (!Array.isArray(result) || result.length > 128) throw failure("central_response_invalid");
-    const actions = result.map(actionType);
+    const actions = result
+      .filter(
+        (value) =>
+          !(
+            isCentralRecord(value) &&
+            typeof value.name === "string" &&
+            INTERNAL_ACP_PERMISSION_TYPE.test(value.name)
+          ),
+      )
+      .map(actionType);
     if (new Set(actions.map((action) => action.name)).size !== actions.length) {
       throw failure("central_response_invalid");
     }
@@ -341,14 +431,48 @@ export class CentralRestClient {
   async requestPermission(
     arguments_: unknown,
     signal?: AbortSignal,
-  ): Promise<Record<string, unknown>> {
-    if (!exactKeys(arguments_, ["target_email", "action_type"], ["scope"])) {
+  ): Promise<CentralPermissionRequestResult> {
+    if (
+      !exactKeys(
+        arguments_,
+        [],
+        [
+          "target_email",
+          "message_id",
+          "action_type",
+          "permission_type",
+          "decision_options",
+          "reason",
+          "scope",
+        ],
+      ) ||
+      (arguments_.target_email === undefined && arguments_.message_id === undefined) ||
+      (arguments_.action_type === undefined) === (arguments_.permission_type === undefined) ||
+      (arguments_.decision_options !== undefined &&
+        arguments_.decision_options !== "accept_deny" &&
+        arguments_.decision_options !== "once_always") ||
+      (arguments_.reason !== undefined &&
+        (typeof arguments_.reason !== "string" || arguments_.reason.length > 500))
+    ) {
       throw failure("invalid_arguments");
     }
     const body = {
-      target_email: requestEmail(arguments_.target_email),
-      action_type: requestName(arguments_.action_type),
-      ...(arguments_.scope === undefined ? {} : { scope: requestObject(arguments_.scope) }),
+      ...(arguments_.target_email === undefined
+        ? {}
+        : { target_email: requestEmail(arguments_.target_email) }),
+      ...(arguments_.message_id === undefined
+        ? {}
+        : { message_id: requestUuid(arguments_.message_id) }),
+      ...(arguments_.action_type === undefined
+        ? { permission_type: requestPermissionName(arguments_.permission_type) }
+        : { action_type: requestPermissionName(arguments_.action_type) }),
+      ...(arguments_.decision_options === undefined
+        ? {}
+        : { decision_options: arguments_.decision_options }),
+      ...(arguments_.reason === undefined ? {} : { reason: arguments_.reason }),
+      ...(arguments_.scope === undefined
+        ? {}
+        : { scope: arguments_.scope === null ? null : requestObject(arguments_.scope) }),
     };
     const result = await this.#request("POST", "/api/request_permission", body, signal);
     if (
@@ -361,41 +485,77 @@ export class CentralRestClient {
       (result.already_granted !== undefined && typeof result.already_granted !== "boolean") ||
       (result.decision !== undefined &&
         result.decision !== null &&
-        result.decision !== "granted" &&
-        result.decision !== "denied")
+        result.decision !== "accept" &&
+        result.decision !== "deny" &&
+        result.decision !== "allow_once" &&
+        result.decision !== "allow_always")
     ) {
       throw failure("central_response_invalid");
     }
-    return result;
+    return result as CentralPermissionRequestResult;
   }
 
-  async respondToPermission(
-    arguments_: unknown,
+  async requestHumanInput(
+    arguments_: CentralHumanInputRequest,
     signal?: AbortSignal,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<CentralHumanInputRequestResult> {
     if (
-      !exactKeys(arguments_, ["permission_id", "decision"]) ||
-      (arguments_.decision !== "granted" && arguments_.decision !== "denied")
+      !exactKeys(arguments_, [
+        "permission_type",
+        "request",
+        "input_type",
+        "options",
+        "message_id",
+      ]) ||
+      arguments_.input_type !== "buttons" ||
+      !Array.isArray(arguments_.options) ||
+      arguments_.options.length < 1 ||
+      arguments_.options.length > 10
     ) {
       throw failure("invalid_arguments");
     }
-    const permissionId = requestName(arguments_.permission_id);
-    const result = await this.#request(
-      "POST",
-      "/api/respond_to_permission",
-      { permission_id: permissionId, decision: arguments_.decision },
-      signal,
-    );
+    const options = arguments_.options.map((option) => {
+      try {
+        return humanInputOption(option);
+      } catch {
+        throw failure("invalid_arguments");
+      }
+    });
+    if (new Set(options.map(({ value }) => value)).size !== options.length) {
+      throw failure("invalid_arguments");
+    }
+    const body = {
+      permission_type: requestPermissionName(arguments_.permission_type),
+      request: requestHumanInputText(arguments_.request, 2_000),
+      input_type: "buttons" as const,
+      options,
+      message_id: requestUuid(arguments_.message_id),
+    };
+    const result = await this.#request("POST", "/api/get_human_input", body, signal);
     if (
-      !exactKeys(result, ["permission_id", "status", "decided_at"]) ||
-      result.permission_id !== permissionId ||
-      result.status !== arguments_.decision ||
-      typeof result.decided_at !== "string" ||
-      result.decided_at.length > 128
+      !exactKeys(result, ["request_id", "status", "input_type", "message", "options"]) ||
+      typeof result.request_id !== "string" ||
+      !UUID.test(result.request_id) ||
+      result.status !== "pending" ||
+      result.input_type !== "buttons" ||
+      typeof result.message !== "string" ||
+      result.message.length > 512 ||
+      !Array.isArray(result.options) ||
+      result.options.length !== options.length
     ) {
       throw failure("central_response_invalid");
     }
-    return result;
+    const normalizedOptions = result.options.map(humanInputOption);
+    if (JSON.stringify(normalizedOptions) !== JSON.stringify(options)) {
+      throw failure("central_response_invalid");
+    }
+    return {
+      request_id: result.request_id,
+      status: "pending",
+      input_type: "buttons",
+      message: result.message,
+      options: normalizedOptions,
+    };
   }
 
   async callAction(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {

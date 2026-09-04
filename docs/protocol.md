@@ -160,7 +160,6 @@ After a credential is durably stored, expose exactly these agent-facing tools:
 - `list_action_types`
 - `request_permission`
 - `get_inbox`
-- `respond_to_permission`
 - `call_action`
 - `submit_action_result`
 - `get_my_permissions`
@@ -177,18 +176,20 @@ definitions do not become additional local tools.
 `get_inbox` is the single agent-facing view of work and unread results. It
 accepts no arguments and returns:
 
-- pending permissions from `GET /api/get_my_permissions` whose
-  `grantor_email` is the enrolled identity;
 - encrypted local action calls that still need a result; and
 - encrypted local action results that have not appeared in a previous inbox
   response.
 
-Each permission or action-call item includes the tool and fields needed for
-its response. Permissions remain until `respond_to_permission` succeeds.
+Each action-call item includes the tool and fields needed for its response.
 Action calls remain until `submit_action_result` succeeds. Ambassador removes
 received action results after returning them through `get_inbox`, so the
 default view contains unread results only. The tool adds no central route,
 does not poll central on demand, and is not a general message inbox.
+
+Permission decisions do not appear in `get_inbox`. Central emails the
+grantor's human, queues no request to the grantor's agent, and later delivers a
+`permission_outcome` to the requester. `get_my_permissions` remains the
+agent-facing audit and status view.
 
 Central action definitions currently describe request payloads through
 `input_schema` but do not publish a result schema. Ambassador therefore tells
@@ -432,8 +433,8 @@ The current protected routes are:
 | Operation | Method and path | Input |
 | --- | --- | --- |
 | List actions | `GET /api/list_action_types` | none |
-| Request permission | `POST /api/request_permission` | `target_email`, `action_type`, optional `scope` |
-| Respond to permission | `POST /api/respond_to_permission` | `permission_id`, `decision` |
+| Request permission | `POST /api/request_permission` | `target_email`, `message_id`, or both when consistent; exactly one of `action_type` / `permission_type`; optional `decision_options`, `reason`, and `scope` |
+| Ask the local agent's owner | `POST /api/get_human_input` | internal only; fixed `permission_type`, bounded question, `buttons`, allow-once and deny options, triggering `message_id` |
 | Call action | `POST /api/call_action` | `target_email`, `action_type`, `payload` |
 | Submit action result | `POST /api/submit_action_result` | `call_id`, `result`, `status` |
 | List permissions | `GET /api/get_my_permissions` | none |
@@ -442,15 +443,25 @@ The current protected routes are:
 
 The permission-request response always includes `permission_id`, `status`, and
 `message`. The current deployment may also include `already_granted` and
-`decision`; Ambassador validates and returns those fields when present. For a
-new request, central emails the grantor a read-only confirmation page whose
-form submits the decision. It queues no `permission_request` message to the
-grantor's agent. After the human decides, central queues a
+`decision`; Ambassador validates and returns those fields when present.
+When `message_id` is supplied, central derives the grantor from that message
+and gives it precedence over `target_email`; a supplied email must agree.
+`decision_options` is `accept_deny` by default or `once_always` when the human
+should choose between one use and a standing grant. `reason` is bounded to 500
+characters and appears in the email. For a new request, central emails the
+grantor a read-only confirmation page whose form submits the decision. It
+queues no `permission_request` message to the grantor's agent. After the human
+decides, central queues a
 `permission_outcome` to the requester. A granted outcome tells the receiving
 agent to continue once through `call_action`, mapping `grantor_email` to
 `target_email` and using the outcome's action type. Ambassador does not handle
 the email token or call central's unauthenticated decision endpoint during
 normal use.
+
+An `allow_once` grant permits one action call. `allow_always` and the simpler
+`accept` decision are standing grants. If central returns
+`already_granted: true`, the requester can proceed immediately and no new
+approval email was sent.
 
 `call_action` delivers a request after central confirms permission. It does
 not execute the action. Its `call_id` correlates the one permitted result.
@@ -472,9 +483,10 @@ Ambassador holds one 30-second central long poll. The response has a
 `messages` array. Current central messages contain `id`,
 `sender_agent_id`, optional `action_type_id`, `payload`, and
 `created_at`. New permission requests do not appear in this queue. Current
-delivered payloads include `permission_outcome`, `action_call`, and
-`action_response`; Ambassador still validates any bounded payload object
-before local delivery.
+delivered payloads include `permission_outcome`, `human_input_response`,
+`action_call`, and `action_response`; Ambassador still validates any bounded
+payload object before local delivery. The human-input response is internal ACP
+control and is not sent to the provider as a business prompt.
 
 Central marks selected rows delivered in the same database statement that
 returns them. Before accepting a batch, Ambassador enforces its response,
@@ -611,11 +623,20 @@ session for each central message. It requires `session/resume` or
 message may resume its stored session. A new central message always receives a
 new session.
 
-Ambassador has no interactive approval UI during background delivery. It
-selects `allow_once` for an ACP permission request when the agent offers it. If
-not, it selects the first advertised `allow_always` option. If neither positive
-option exists, it cancels the request. This temporary development policy gives
-the background agent broad access to its configured tools.
+Ambassador has no interactive approval UI during background delivery. For an
+ACP permission request, it submits one human approval request correlated by the
+triggering central `message_id` to `POST /api/get_human_input`. Central always
+emails the authenticated agent's own owner. Ambassador repeatedly calls
+`poll_messages?timeout=0` until the matching `human_input_response` arrives; it
+does not use `get_human_input_status`.
+Normal prompt and outer delivery deadlines pause during that human wait.
+Approval selects `allow_once` when offered, then another advertised positive
+option; denial selects an advertised rejection option. A missing option of the
+required polarity cancels the ACP request.
+
+Messages consumed by the approval poll remain in a bounded in-memory queue for
+the normal relay. The correlated response is handled internally and is not sent
+to the provider as another prompt. Unrelated messages keep their arrival order.
 
 The local MCP server advertises the same complete tool catalog before and
 after enrollment. Protected tools return `not_enrolled` until verification;

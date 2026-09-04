@@ -148,7 +148,6 @@ test("starts and serves MCP with no options or environment variables", async (t)
       "list_action_types",
       "request_permission",
       "get_inbox",
-      "respond_to_permission",
       "call_action",
       "submit_action_result",
       "get_my_permissions",
@@ -475,7 +474,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
   await new DeliveryProfileStore(join(root, "delivery-profile.json")).save(profile);
   const serializedCredential = serializeCentralCredential(verified.credential);
 
-  central.queueMessage(email, { type: "permission_request" });
+  central.queueMessage(email, { type: "fixture_delivery" });
   const output = captureIo();
   let deliveryAttempts = 0;
   const controller = new AbortController();
@@ -541,7 +540,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
   await new DeliveryProfileStore(join(root, "delivery-profile.json")).save(profile);
   const serializedCredential = serializeCentralCredential(verified.credential);
 
-  central.queueMessage(email, { type: "permission_request" });
+  central.queueMessage(email, { type: "fixture_delivery" });
   const output = captureIo();
   let deliveryAttempts = 0;
   const controller = new AbortController();

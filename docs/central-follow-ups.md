@@ -7,6 +7,13 @@ branches.
 
 ## Security and operations
 
+- Reserve `ambassador_acp_tool_execution` as a reviewed internal human-input
+  type or keep unverified internal types out of the public action catalog.
+  `get_human_input` currently auto-creates the name with an empty schema.
+  Ambassador filters that exact fixed name and legacy
+  `acp_tool_execution_<32 hex>` rows left by pre-cutover live runs before it
+  validates public actions. Central should remove those legacy rows after
+  confirming no permissions reference them.
 - Accept standard `+tag` aliases in email local parts. The current Pydantic
   pattern rejects addresses such as `name+agent@example.com` with `422` before
   registration or email delivery. Apply the same corrected validation to
@@ -22,8 +29,8 @@ branches.
 - Use shared rate-limit state if the service runs more than one process.
 - Add route tests for permission listing, invitation behavior, and expiring
   permissions.
-- Remove or repair the duplicate grant and deny routes so one permission
-  decision path remains.
+- Remove the legacy protected respond, grant, and deny routes from the service
+  and OpenAPI once server consumers use the email-only human decision path.
 - Either connect invitation creation to first contact or remove the automatic
   invitation claim from server documentation.
 
@@ -50,7 +57,7 @@ both incoming messages, made both required MCP calls, and received both
 acknowledgements. A clean rerun passed.
 
 At reviewed server revision
-`ac3f7a6e33829eb80301c7944f611d29cc2499b5`, `poll_messages` changes matching
+`708f205bfaee5010eb86fcfae55967fb5d02071c`, `poll_messages` changes matching
 rows from `queued` to `delivered` before it returns the HTTP response. An
 aborted or lost response therefore strands the row without a lease or
 redelivery path. The service runs four workers and keeps long-poll waiters in

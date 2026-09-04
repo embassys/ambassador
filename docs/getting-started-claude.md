@@ -35,8 +35,10 @@ claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mc
 
 Later, you can ask:
 
-- **Check my Embassys inbox.** Claude Code lists permission decisions and action
-  answers waiting for you, plus unread results returned by other identities.
+- **Check my Embassys inbox.** Claude Code lists action requests waiting for an
+  answer and unread results returned by other identities.
+- When another identity requests an Embassys permission, you decide from the
+  email sent to your registered address. Claude Code does not approve it.
 
 ## Incoming messages
 
@@ -46,10 +48,10 @@ Later, you can ask:
   chat used for registration.
 - Ambassador passes no extra MCP servers and does not disable built-in tools,
   choose safe mode, or request permission bypass.
-- If Claude asks its ACP client to approve a tool, Ambassador automatically
-  chooses **allow once** when offered, otherwise an advertised positive choice.
-- Configure only tools you are willing to make available to unattended direct
-  requests. Anthropic remains responsible for authentication, policy, and
+- If Claude asks to use a tool, Ambassador emails the human grantor and keeps
+  the request pending until their decision arrives through Embassys. An
+  approval is passed to Claude as **allow once** when available.
+- Anthropic remains responsible for authentication, policy, and
   billing behavior.
 
 If startup or ACP initialization fails, Ambassador leaves MCP available and

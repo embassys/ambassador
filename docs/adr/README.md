@@ -5,7 +5,8 @@ for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
 0041 for agent-version handling, ADR 0042 for webhook-secret ownership and the
 OpenClaw receiver, ADR 0043 for the current four-profile registry, and ADR 0044
 for local cleanup. ADR 0045 records self-contained Codex and Claude adapters,
-startup guidance and diagnostics, and the pending permission inbox.
+startup guidance and diagnostics, including the now-superseded pending
+permission inbox.
 ADR 0046 records the encrypted local inbox for unanswered action calls. ADR
 0047 replaces the Claude adapter and records the stable tool catalog and
 resilient local-delivery behavior. ADR 0048 leaves authentication entirely to
@@ -14,9 +15,12 @@ their normally configured tools during templated delivery. ADR 0050 unifies
 direct-agent permissions and MCP setup, adds persistent inspectable sessions,
 and replaces the built-in Claude bridge with the current public ACP adapter.
 ADR 0051 adds the encrypted received-action-result inbox and removes ACP
-available-command details from verbose logs. ADR 0052 combines permissions,
-unanswered calls, and unread results in one agent-facing inbox. ADR 0053 lets
-the owner inspect sessions through the foreground process.
+available-command details from verbose logs. ADR 0052 introduced one
+agent-facing inbox. ADR 0053 lets the owner inspect sessions through the
+foreground process. ADR 0054 makes Embassys permission decisions email-only
+and leaves the inbox for unanswered calls and unread results.
+ADR 0055 replaces automatic ACP tool approval with a human email decision
+correlated through central polling.
 
 ## Current decisions
 
@@ -47,6 +51,8 @@ the owner inspect sessions through the foreground process.
 | [0051](0051-encrypted-action-result-inbox.md) | Encrypted local inbox for received action results |
 | [0052](0052-unified-agent-inbox.md) | Unified agent inbox for pending work and unread results |
 | [0053](0053-live-session-inspection.md) | Inspect ACP sessions while Ambassador runs |
+| [0054](0054-email-only-embassys-permission-decisions.md) | Email-only human decisions for Embassys permissions |
+| [0055](0055-email-mediated-acp-tool-permission.md) | Email-mediated human decisions for ACP tool execution |
 
 ## Historical ledger
 

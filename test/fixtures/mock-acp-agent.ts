@@ -128,8 +128,9 @@ const app = acp
           { optionId: "deny", name: "Deny", kind: "reject_once" },
         ],
       });
-      if (response.outcome.outcome !== "selected" || response.outcome.optionId !== "allow") {
-        throw new Error("permission was not approved once");
+      const expected = scenario.startsWith("permission-denied") ? "deny" : "allow";
+      if (response.outcome.outcome !== "selected" || response.outcome.optionId !== expected) {
+        throw new Error("permission decision did not match the fixture");
       }
     }
     if (scenario.startsWith("commands")) {

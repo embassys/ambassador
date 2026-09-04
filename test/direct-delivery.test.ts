@@ -9,6 +9,8 @@ import { AcpSessionStore } from "../src/acp-session-store.js";
 import type { DirectAgentCapability } from "../src/agent-capabilities.js";
 import type { CentralMessage } from "../src/central-rest.js";
 import {
+  type AcpPermissionApproval,
+  type AcpPermissionRequest,
   AcpSessionController,
   buildDirectPrompt,
   DirectDeliveryError,
@@ -43,11 +45,13 @@ async function target(
   options: {
     platform?: NodeJS.Platform;
     promptDeadlineMs?: number;
+    outerDeadlineMs?: number;
     maximumOutputBytes?: number;
     maximumStartupAttempts?: number;
     environment?: DirectAgentCapability["environment"];
     sourceEnvironment?: NodeJS.ProcessEnv;
     log?: VerboseLogger;
+    permissionApproval?: AcpPermissionApproval;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
@@ -73,6 +77,7 @@ async function target(
   let spawnCount = 0;
   let spawnOptions: SpawnOptions | undefined;
   const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
+  const permissionRequests: AcpPermissionRequest[] = [];
   cleanupStore = sessionStore;
   const delivery = new DirectDeliveryTarget({
     agentKind: "mock",
@@ -80,9 +85,15 @@ async function target(
     workingDirectory: root,
     environment: options.sourceEnvironment ?? process.env,
     sessionStore,
+    approvePermission: async (request) => {
+      permissionRequests.push(request);
+      return await (options.permissionApproval?.(request, new AbortController().signal) ??
+        Promise.resolve("allow" as const));
+    },
     initializationDeadlineMs: 2_000,
     sessionDeadlineMs: 2_000,
     promptDeadlineMs: options.promptDeadlineMs ?? 2_000,
+    ...(options.outerDeadlineMs === undefined ? {} : { outerDeadlineMs: options.outerDeadlineMs }),
     cancellationGraceMs: 100,
     cleanupDeadlineMs: 500,
     maximumOutputBytes: options.maximumOutputBytes ?? 16 * 1024,
@@ -102,6 +113,7 @@ async function target(
     countPath,
     descendantPath,
     promptPath,
+    permissionRequests,
     sessionStore,
     capability,
     spawnCount: () => spawnCount,
@@ -213,6 +225,35 @@ test("initializes ACP v1 with provider MCP setup and completes one persistent pr
       assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
     });
   }
+});
+
+test("waits for human approval and maps it to an ACP option", async (t) => {
+  const approved = await target(t, "permission-session-mcp");
+  await approved.delivery.deliver(MESSAGE, new AbortController().signal);
+  assert.equal(approved.permissionRequests.length, 1);
+  assert.equal(approved.permissionRequests[0]?.message.id, MESSAGE.id);
+  assert.equal(approved.permissionRequests[0]?.toolCall.title, "Unsafe operation");
+
+  const denied = await target(t, "permission-denied-session-mcp", {
+    permissionApproval: async () => "deny",
+  });
+  await denied.delivery.deliver(MESSAGE, new AbortController().signal);
+  assert.equal(denied.permissionRequests.length, 1);
+});
+
+test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {
+  const value = await target(t, "permission-session-mcp", {
+    promptDeadlineMs: 50,
+    outerDeadlineMs: 250,
+    permissionApproval: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return "allow";
+    },
+  });
+
+  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+    status: "completed",
+  });
 });
 
 test("verbose ACP logging omits the available command catalog", async (t) => {
@@ -367,6 +408,7 @@ test("turns an asynchronous missing-command spawn error into a bounded failure",
     workingDirectory: root,
     environment: process.env,
     sessionStore,
+    approvePermission: async () => "allow",
     initializationDeadlineMs: 500,
     maximumStartupAttempts: 1,
   });

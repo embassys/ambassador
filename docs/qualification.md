@@ -3,14 +3,33 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Email-only permission and inbox regression
+
+On 2026-09-04, the deterministic central contract and Ambassador integration
+were updated for ADR 0054. The flow proves that a new permission request creates
+no grantor-agent message or Ambassador inbox item, the emailed confirmation GET
+does not change state, `allow_once` produces the requester's
+`permission_outcome`, and a second action call is refused after the single use.
+The MCP catalog has no `respond_to_permission`; `get_inbox` contains only
+unanswered action calls and unread action results. The live runner now performs
+the same disposable-email sequence on its next controlled run.
+
+ADR 0055 replaces automatic ACP approval. Deterministic coverage now holds the
+provider request open, asks the local agent's own owner through
+`get_human_input`, resolves it only from the correlated `human_input_response`
+on `poll_messages`, maps acceptance to ACP `allow_once`, maps denial to
+rejection, pauses delivery deadlines during the human wait, suppresses the
+control response from provider prompting, and returns unrelated polled
+messages to the normal relay before acknowledging them.
+
 ## Live session inspection and unified inbox regression
 
 On 2026-09-04, the deterministic suite proved ADRs 0051 and 0052. Ambassador
 encrypted a validated `action_response` before central acknowledgement, kept
 it across a process restart, returned it once through `get_inbox`, and removed
-it from later inbox responses. The same tool returned pending permission and
-action requests until their response operations succeeded. Each pending item
-described the tool and required fields for its response. The database contained
+it from later inbox responses. At that revision, the same tool also returned
+pending permissions; ADR 0054 later removed that projection and left action
+requests until their response operation succeeded. The database contained
 neither the plaintext call ID nor the returned phone number. Separate tests
 covered exact duplicate handling, conflicting results, malformed messages,
 credential-shaped fields, identity binding, linked database files, and count
@@ -30,10 +49,30 @@ browser Origin requests, and does not make Authorization valid on `/mcp`.
 Separate coverage verified encrypted stable control-secret storage, fixed
 platform paths, and cleanup inclusion.
 
-The repository check passed 227 tests: 221 passed and six platform-specific or
+The repository check passed 234 tests: 228 passed and six platform-specific or
 opt-in cases skipped. Linting, type checking, and the production build passed.
 
 ## Clean Codex-to-Claude live qualification
+
+The ADR 0055 own-human input candidate passed a fresh combined run on
+2026-09-04 against reviewed central source revision
+`708f205bfaee5010eb86fcfae55967fb5d02071c`. Its packed tarball SHA-256 was
+`59d6114213a4aac63ea59b3cf34a7b50f7023d2893c4def7d907cdc67350d76b`,
+and the runner SHA-256 was
+`6d9de51f592d0eacda995d02db854d0860ab012fc863d7be9101523b72d08a64`.
+The diagnostic probes observed Codex ACP 1.8.0 and Claude Code 2.1.261.
+
+The run used `POST /api/get_human_input` for a provider permission request,
+answered `Allow once` through the disposable owner's email, received the
+correlated `human_input_response`, and resumed the open ACP request. One of the
+two providers requested approval; the other completed its turn without an ACP
+permission callback. The Embassys `get_phone_number` permission still used the
+separate grantor email flow. Codex issued one accepted action call, Claude
+submitted exactly one successful result, and Codex received it. Registration,
+verification, encrypted restart, DPoP positive and negative checks, the
+six-action catalog, acknowledgement order, every public CLI command, artifact
+scan, mail cleanup, and temporary-state cleanup passed. No central MCP request
+was made.
 
 On 2026-09-04, the completed ADR 0050 candidate passed a clean packed-artifact
 Codex-to-Claude flow against the deployed service. The tarball SHA-256 was

@@ -1,6 +1,6 @@
 # 0052 Unified agent inbox
 
-Status: accepted
+Status: accepted; permission projection superseded by ADR 0054
 
 Date: 2026-09-04
 

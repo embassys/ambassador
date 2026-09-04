@@ -176,6 +176,8 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
     body: JSON.stringify({
       target_email: target.email,
       action_type: "get_email",
+      decision_options: "once_always",
+      reason: "Needed for fixture qualification",
       scope: { use: "fixture" },
     }),
   });
@@ -189,10 +191,17 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
   const targetPoll = await target.protectedFetch("/api/poll_messages?timeout=0");
   assert.deepEqual(await targetPoll.json(), { messages: [] });
 
-  const decided = await target.protectedFetch("/api/respond_to_permission", {
+  const decisionToken = central.permissionDecisionToken(String(permissionId));
+  const confirmation = await fetch(
+    `${central.apiUrl}/permission/decide?token=${encodeURIComponent(decisionToken)}&choice=allow_once`,
+  );
+  assert.equal(confirmation.status, 200);
+  assert.equal((await target.protectedFetch("/api/poll_messages?timeout=0")).status, 200);
+
+  const decided = await fetch(`${central.apiUrl}/api/permission_decision`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ permission_id: permissionId, decision: "granted" }),
+    body: JSON.stringify({ token: decisionToken, decision: "allow_once" }),
   });
   assert.equal(decided.status, 200);
   const permissionResponse = await requester.protectedFetch("/api/poll_messages?timeout=0");
@@ -203,7 +212,9 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
   const permissionResponsePayload = permissionResponseMessages[0]?.payload as
     | Record<string, unknown>
     | undefined;
-  assert.equal(permissionResponsePayload?.type, "permission_response");
+  assert.equal(permissionResponsePayload?.type, "permission_outcome");
+  assert.equal(permissionResponsePayload?.decision, "allow_once");
+  assert.equal(permissionResponsePayload?.single_use, true);
   const permissionResponseId = permissionResponseMessages[0]?.id;
   assert.equal(typeof permissionResponseId, "string");
   const acknowledgedResponse = await requester.protectedFetch("/api/ack_message", {
@@ -229,6 +240,17 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
   assert.equal(typeof callId, "string");
   assert.equal(typeof actionMessageId, "string");
   assert.equal(central.messageState(actionMessageId as string), "queued");
+
+  const exhausted = await requester.protectedFetch("/api/call_action", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      target_email: target.email,
+      action_type: "get_email",
+      payload: { reason: "single use is exhausted" },
+    }),
+  });
+  assert.equal(exhausted.status, 403);
 
   const actionPoll = await target.protectedFetch("/api/poll_messages?timeout=0");
   const actionMessages = ((await actionPoll.json()) as { messages: Array<Record<string, unknown>> })

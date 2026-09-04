@@ -149,6 +149,75 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         )
         self.assertEqual(accepted.status_code, 200)
 
+    def test_human_input_is_answered_by_the_callers_own_human(self) -> None:
+        agent, agent_key, agent_token = fixture.seed_verified_identity(
+            "human-input@fixture.test"
+        )
+        sender, _sender_key, _sender_token = fixture.seed_verified_identity(
+            "human-input-sender@fixture.test"
+        )
+        assert agent.public_jwk is not None
+        source_message_id = fixture.queue_message(
+            agent.email,
+            sender.email,
+            {"type": "action_call"},
+        )
+        ask_path = "/api/get_human_input"
+        asked = self.client.post(
+            ask_path,
+            headers=self.protected_headers(
+                agent_key,
+                agent.public_jwk,
+                agent_token,
+                "POST",
+                ask_path,
+            ),
+            json={
+                "permission_type": "ambassador_acp_tool_execution",
+                "request": "Allow this local tool once?",
+                "input_type": "buttons",
+                "options": [
+                    {"label": "Allow once", "value": "allow_once"},
+                    {"label": "Deny", "value": "deny"},
+                ],
+                "message_id": source_message_id,
+            },
+        )
+        self.assertEqual(asked.status_code, 200)
+        request_id = asked.json()["request_id"]
+        token = fixture.state.human_input_tokens_by_id[request_id]
+        answered = self.client.post(
+            "/api/human_input_response",
+            json={"token": token, "value": "allow_once"},
+        )
+        self.assertEqual(answered.status_code, 200)
+
+        poll_path = "/api/poll_messages?timeout=0"
+        polled = self.client.get(
+            poll_path,
+            headers=self.protected_headers(
+                agent_key,
+                agent.public_jwk,
+                agent_token,
+                "GET",
+                poll_path,
+            ),
+        ).json()["messages"]
+        self.assertEqual(polled[-1]["sender_agent_id"], agent.id)
+        self.assertEqual(
+            polled[-1]["payload"],
+            {
+                "type": "human_input_response",
+                "request_id": request_id,
+                "action_type": "ambassador_acp_tool_execution",
+                "input_type": "buttons",
+                "value": "allow_once",
+                "text": None,
+                "prompt": "Allow this local tool once?",
+                "message_id": source_message_id,
+            },
+        )
+
     def test_permission_action_poll_and_ack_lifecycle(self) -> None:
         requester, requester_key, requester_token = fixture.seed_verified_identity(
             "requester@fixture.test"
@@ -172,6 +241,8 @@ class CurrentCentralFixtureTests(unittest.TestCase):
             json={
                 "target_email": target.email,
                 "action_type": "get_email",
+                "decision_options": "once_always",
+                "reason": "Needed for fixture qualification",
                 "scope": {"use": "fixture"},
             },
         )
@@ -187,13 +258,18 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         )
         self.assertEqual(target_poll.json(), {"messages": []})
 
-        response_path = "/api/respond_to_permission"
+        token = fixture.state.permission_tokens_by_id[permission_id]
+        confirmation = self.client.get(
+            "/permission/decide",
+            params={"token": token, "choice": "allow_once"},
+        )
+        self.assertEqual(confirmation.status_code, 200)
+        self.assertEqual(fixture.state.permissions[permission_id].status, "pending")
+
+        response_path = "/api/permission_decision"
         decided = self.client.post(
             response_path,
-            headers=self.protected_headers(
-                target_key, target.public_jwk, target_token, "POST", response_path
-            ),
-            json={"permission_id": permission_id, "decision": "granted"},
+            json={"token": token, "decision": "allow_once"},
         )
         self.assertEqual(decided.status_code, 200)
 
@@ -213,9 +289,14 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         self.assertEqual(
             messages[0]["payload"],
             {
-                "type": "permission_response",
+                "type": "permission_outcome",
                 "permission_id": permission_id,
-                "decision": "granted",
+                "action_type": "get_email",
+                "decision": "allow_once",
+                "status": "granted",
+                "granted": True,
+                "single_use": True,
+                "grantor_email": target.email,
             },
         )
 

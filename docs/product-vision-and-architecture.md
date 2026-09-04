@@ -126,9 +126,10 @@ supported. Ambassador does not initiate login or inspect, store, log, or return
 provider credentials.
 
 Every direct agent retains its provider-configured MCP and built-in tools.
-When an ACP agent asks for tool permission, Ambassador selects `allow_once`
-when available and otherwise selects the first positive option. This broad
-unattended access is an accepted development policy, not a security boundary.
+When an ACP agent asks for tool permission, Ambassador holds the request open,
+asks the human grantor through central email, and waits for the correlated
+decision from `poll_messages`. Approval selects `allow_once` when available;
+denial selects a rejection option. Ambassador does not auto-approve.
 OpenClaw and Hermes provide their own fixed agent commands. Exact client and
 ACP agent names, commands, arguments, modes, and environment policies remain
 compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
@@ -224,8 +225,8 @@ recover a message already consumed by central.
 
 Direct agents may use their normally configured tools while handling the fixed
 Embassys delivery prompt. Ambassador imposes no safe mode, tool disablement,
-or provider bypass. It automatically selects a positive ACP tool permission,
-preferring `allow_once`. This is an accepted owner-machine trust choice. A
+or provider bypass. ACP tool execution waits for the human email decision
+defined by ADR 0055. A
 missing tool leaves an action available through the encrypted pending-action
 inbox.
 
@@ -282,20 +283,24 @@ action call may deliver a message to another identity. The target submits one
 structured success or error result for the call. Central correlates it by
 `call_id` and queues an `action_response` for the original caller.
 
-The agent-facing `get_inbox` tool derives pending permission decisions from
-`get_my_permissions`: pending rows where the enrolled identity is the grantor.
-It stores no second permission queue. Central normally asks the human
-asynchronously by email and does not wake the grantor's local agent for a new
-permission request. A user who is already in the agent chat can inspect the
-same permission and explicitly grant or deny it through
-`respond_to_permission`.
+Embassys permission decisions belong only to the human email flow. Central
+emails the grantor's owner, does not wake the grantor's local agent, and queues
+the resulting `permission_outcome` to the requester. Ambassador exposes no
+permission-decision tool and does not project pending permissions into
+`get_inbox`. `get_my_permissions` remains available for status and audit.
 
 After the human decides, central sends the requester a `permission_outcome`.
 For a grant, Ambassador's fixed delivery prompt tells the receiving agent to
 continue the approved action once, using the outcome's `grantor_email` as the
 target and its `action_type`; outcome metadata is not passed to `call_action`.
 
-The same `get_inbox` response includes action calls already delivered to this
+Provider-tool approval inside a direct ACP turn is separate. Ambassador calls
+`get_human_input` with the triggering message ID, so central emails the local
+agent's own owner. The owner chooses allow once or deny. Ambassador waits for
+the correlated `human_input_response` on `poll_messages?timeout=0`, answers the
+open ACP request, and keeps the control response out of provider prompts.
+
+`get_inbox` includes action calls already delivered to this
 identity that still need a result. Ambassador encrypts the validated call ID,
 sender ID, action type, payload, and creation time before local delivery and
 central acknowledgement. A successful `submit_action_result` removes that call

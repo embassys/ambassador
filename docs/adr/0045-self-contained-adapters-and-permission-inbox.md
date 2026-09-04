@@ -1,6 +1,7 @@
 # 0045 Self-contained adapters and permission inbox
 
-Status: accepted; Claude adapter selection superseded by ADR 0047; inbox view superseded by ADR 0052
+Status: accepted; Claude adapter selection superseded by ADR 0047; permission
+inbox superseded by ADRs 0052 and 0054
 
 Date: 2026-09-03
 

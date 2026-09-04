@@ -36,11 +36,17 @@ Code ACP adapters; users do not install them separately. OpenClaw and Hermes
 provide their own ACP commands. Ambassador matches exact known MCP client and
 ACP agent names, but treats reported versions as diagnostic metadata.
 
-After registration, ask **Check my Embassys inbox.** One inbox shows permission
-requests awaiting a grant or denial, action calls awaiting the user's answer,
-and unread results returned by other identities. Pending requests remain until
-the user answers them. Returned results leave the inbox after Ambassador gives
-them to the agent.
+After registration, ask **Check my Embassys inbox.** It shows action calls
+awaiting the user's answer and unread results returned by other identities.
+Embassys permission requests go to the grantor's registered email instead of
+their agent inbox. Returned results leave the inbox after Ambassador gives them
+to the agent.
+
+If a direct agent asks ACP for permission to execute a provider tool,
+Ambassador keeps that request open and asks that agent's owner through Embassys
+email.
+It continues only after the correlated decision returns through central
+polling; approval is passed to the provider as **allow once** when available.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
@@ -92,11 +98,11 @@ provider configuration or credentials.
 
 The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
 startup paths are implemented. The current source provides one agent-facing
-inbox for pending permission decisions, unanswered action calls, and unread
-action results. Action calls and results use separate encrypted local stores. The
-0.2.14 release added package-owned Codex and Claude Code adapters, printed
-agent setup, bounded startup diagnostics, and the pending permission-request
-view. Live-central qualification has passed with real Codex and Claude Code,
+inbox for unanswered action calls and unread action results. Embassys emails
+permission requests to the grantor's human; the grantor's agent does not decide
+them. Action calls and results use separate encrypted local stores. The 0.2.17
+release added package-owned Codex and Claude Code adapters, printed agent
+setup, and bounded startup diagnostics. Live-central qualification has passed with real Codex and Claude Code,
 and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2 in both delivery modes.
 Ambassador matches exact known client and ACP agent names while treating
 reported versions as observations. Gemini CLI and Antigravity are not active

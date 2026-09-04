@@ -1,7 +1,7 @@
 # 0050 Persistent and observable ACP sessions
 
-Status: accepted; verbose logging amended by ADR 0051 and running inspection
-amended by ADR 0053
+Status: accepted; verbose logging amended by ADR 0051, running inspection
+amended by ADR 0053, and automatic ACP approval superseded by ADR 0055
 
 Date: 2026-09-04
 
@@ -39,7 +39,8 @@ Apply the same ACP v1 policy to OpenClaw, Hermes, Codex, and Claude Code:
   subscription login works without an API key, while an API key deliberately
   configured in the provider environment remains supported.
 
-Automatic tool approval is a temporary development policy. It gives a
+The automatic tool approval below was a temporary development policy and is
+superseded by ADR 0055. It gave a
 background direct-delivery turn access to the tools available in the user's
 provider configuration. A fixed Embassys prompt marks remote fields as data,
 but it is not a hard prompt-injection boundary. The user accepted this risk to
@@ -163,7 +164,7 @@ force.
 
 ## Approval
 
-The user approved common provider-configured tools, automatic positive ACP
+The user approved common provider-configured tools, the then-temporary automatic positive ACP
 permission selection, persistent inspectable sessions, CLI session management,
 redacted verbose output, current adapter releases, and 30-day retirement on
 2026-09-04.
