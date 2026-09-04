@@ -40,6 +40,7 @@ async function fixture(t: TestContext) {
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
     pendingActionPath: join(root, "pending-actions.sqlite"),
+    acpSessionPath: join(root, "acp-sessions.sqlite"),
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
     environment: {},
@@ -153,11 +154,6 @@ test("returns a correlated action result from the target MCP tool to the request
   assert.equal(permissionResponse.status, 200);
   const permission = (await permissionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof permission.permission_id, "string");
-  const permissionWake = await value.webhook.waitForWake();
-  assert.equal(
-    (permissionWake.ambassadorMessage.payload as Record<string, unknown>).type,
-    "permission_request",
-  );
 
   const pending = await target.callTool("list_pending_permission_requests", {});
   assert.equal(pending.count, 1);

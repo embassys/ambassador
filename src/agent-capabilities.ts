@@ -1,5 +1,5 @@
 export type DeliveryMode = "direct" | "webhook";
-export type McpConfigurationBehavior = "provider_config" | "session";
+export type McpConfigurationBehavior = "provider_config";
 
 export interface AgentClientInfo {
   readonly name: string;
@@ -25,7 +25,6 @@ export interface DirectAgentCapability {
   readonly environment: DirectAgentEnvironment;
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
   readonly bundledNodePackage?: NodePackageEntrypoint;
-  readonly builtInAdapter?: "claude-cli";
 }
 
 export type WebhookAgentCapability =
@@ -113,7 +112,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       command: "hermes-acp",
       args: [],
       agentInfo: { name: "hermes-agent" },
-      mcp: "session",
+      mcp: "provider_config",
       environment: [
         "APPDATA",
         "HOME",
@@ -147,7 +146,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       command: "codex-acp",
       args: [],
       agentInfo: { name: "@agentclientprotocol/codex-acp" },
-      mcp: "session",
+      mcp: "provider_config",
       environment: [
         "APPDATA",
         "CODEX_API_KEY",
@@ -186,12 +185,16 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     aliases: ["claude-code"],
     modes: ["direct"],
     direct: {
-      command: "claude",
+      command: "claude-agent-acp",
       args: [],
-      agentInfo: { name: "@embassys/claude-cli-acp" },
+      agentInfo: { name: "@agentclientprotocol/claude-agent-acp" },
       mcp: "provider_config",
       environment: "inherit",
-      builtInAdapter: "claude-cli",
+      bundledNodePackage: {
+        packageName: "@agentclientprotocol/claude-agent-acp",
+        binName: "claude-agent-acp",
+        entrypoint: "dist/index.js",
+      },
     },
     qualificationCases: ["claude-direct"],
   },
@@ -222,19 +225,10 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
       bundledNodePackage.entrypoint
         .split("/")
         .every((segment) => segment.length > 0 && segment !== "." && segment !== ".."));
-  const completeBuiltInAdapter =
-    value?.builtInAdapter === undefined ||
-    (value.builtInAdapter === "claude-cli" &&
-      value.command === "claude" &&
-      value.args.length === 0 &&
-      value.mcp === "provider_config" &&
-      value.agentInfo.name === "@embassys/claude-cli-acp" &&
-      windowsNodePackage === undefined &&
-      bundledNodePackage === undefined);
   const completeEnvironment =
     value !== undefined &&
     (value.environment === "inherit"
-      ? value.builtInAdapter === "claude-cli"
+      ? bundledNodePackage !== undefined
       : value.environment.length <= 32 &&
         value.environment.every((name) => ENVIRONMENT_NAME.test(name)) &&
         unique(value.environment));
@@ -244,11 +238,10 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     value.args.length <= 16 &&
     value.args.every((argument) => BOUNDED_METADATA.test(argument)) &&
     BOUNDED_METADATA.test(value.agentInfo.name) &&
-    (value.mcp === "provider_config" || value.mcp === "session") &&
+    value.mcp === "provider_config" &&
     completeEnvironment &&
     completeWindowsNodePackage &&
     completeBundledNodePackage &&
-    completeBuiltInAdapter &&
     !(windowsNodePackage !== undefined && bundledNodePackage !== undefined)
   );
 }

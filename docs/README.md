@@ -6,7 +6,6 @@
 2. [Target protocol](protocol.md)
 3. [Current work](implementation-plan.md)
 4. [Architecture decisions](adr/README.md)
-5. [Qualification strategy](qualification.md)
 
 The architecture and protocol define the accepted target. The implementation
 plan contains only work that is not complete.
@@ -15,6 +14,7 @@ plan contains only work that is not complete.
 
 | Need | Read |
 | --- | --- |
+| Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |
 | Set up Claude Code | [Claude Code setup](getting-started-claude.md) |

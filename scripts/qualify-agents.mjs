@@ -75,16 +75,18 @@ async function loadCandidate(candidatePath) {
       throw new Error("candidate archive failed");
     }
     const moduleUrl = (name) => pathToFileURL(join(packageRoot, "dist", name)).href;
-    const [capabilities, direct, localMcp, webhook] = await Promise.all([
+    const [capabilities, direct, localMcp, sessionStore, webhook] = await Promise.all([
       import(moduleUrl("agent-capabilities.js")),
       import(moduleUrl("direct-delivery.js")),
       import(moduleUrl("local-mcp.js")),
+      import(moduleUrl("acp-session-store.js")),
       import(moduleUrl("webhook-delivery.js")),
     ]);
     return {
       capabilities,
       direct,
       localMcp,
+      sessionStore,
       webhook,
       async close() {
         await rm(candidateRoot, { recursive: true, force: true });
@@ -133,6 +135,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
       const { PRODUCTION_AGENT_CAPABILITIES } = candidate.capabilities;
       const { resolveAgentCapability } = candidate.capabilities;
       const { DirectDeliveryTarget } = candidate.direct;
+      const { AcpSessionStore } = candidate.sessionStore;
       const { LocalMcpServer } = candidate.localMcp;
       const { WebhookDeliveryTarget } = candidate.webhook;
       const report = {
@@ -226,15 +229,19 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
             }
           }
 
+          let directTarget;
+          let sessionStore;
           try {
             if (profile.direct === undefined) throw new Error("direct unavailable");
-            const target = new DirectDeliveryTarget({
+            sessionStore = new AcpSessionStore(join(workingDirectory, "acp-sessions.sqlite"));
+            directTarget = new DirectDeliveryTarget({
+              agentKind: profile.kind,
               capability: profile.direct,
               workingDirectory,
               environment: process.env,
-              mcpEndpoint: mcp.endpoint,
+              sessionStore,
             });
-            await target.deliver(
+            await directTarget.deliver(
               {
                 id: `qualification-${profile.kind}-direct`,
                 sender_agent_id: "qualification.sender",
@@ -248,13 +255,15 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               },
               new AbortController().signal,
             );
-            await target.close();
             if (!observedMcpProfiles.has(profile.kind)) {
               throw new Error("qualification MCP call was not observed");
             }
             report.cases.push({ name: `${profile.kind}-direct`, status: "passed" });
           } catch {
             report.cases.push({ name: `${profile.kind}-direct`, status: "failed" });
+          } finally {
+            await directTarget?.close().catch(() => undefined);
+            sessionStore?.close();
           }
         }
       } catch {

@@ -4,7 +4,7 @@ Status: accepted; local delivery amended by ADR 0038
 
 Date: 2026-09-01
 
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 ## Problem
 
@@ -53,6 +53,12 @@ Protected work uses these REST routes:
 | List permissions | `GET /api/get_my_permissions` |
 | Acknowledge a message | `POST /api/ack_message` |
 
+The current permission-request response includes the original
+`permission_id`, `status`, and `message` fields and may also include
+`already_granted` and `decision`. Ambassador accepts both shapes because the
+live deployment added those two bounded status fields before the public server
+repository exposed them.
+
 Ambassador does not use central MCP or OAuth. It does not expose duplicate
 grant and deny routes, invitation routes, or health checks as local MCP tools.
 
@@ -84,6 +90,17 @@ The server models agent interaction as permission requests, action calls, and
 correlated action results. The action catalog is dynamic data returned by
 `list_action_types`. Ambassador owns a fixed local tool catalog but does not
 copy central action types into new MCP tools.
+
+For a new permission, central emails the grantor a confirmation page and does
+not queue a `permission_request` to the grantor's agent. The page is read-only
+on `GET` so mail scanners cannot make a decision; its form applies the human's
+choice. Central then queues `permission_outcome` to the requester. For a
+granted outcome, the fixed local-delivery prompt maps `grantor_email` and
+`action_type` into one `call_action` attempt without forwarding outcome-only
+fields. The protected `respond_to_permission` route and Ambassador's
+pending-permission projection remain available for an explicit request made by
+a user who is already in their agent chat. Ambassador does not poll email or
+submit emailed decision tokens in production.
 
 `call_action` queues an `action_call` with a new `call_id`. Only its target may
 call `submit_action_result`. The target supplies that `call_id`, a structured

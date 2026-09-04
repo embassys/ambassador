@@ -160,6 +160,16 @@ candidate passed the full repository suite and a clean live exchange with two
 new identities. Publication still requires all pull-request and main-branch
 release gates.
 
+The user then approved version 0.2.17 for ADR 0050 and the completed Phase 3B
+delivery architecture. This release replaces the built-in Claude bridge with
+the current public Claude ACP adapter, keeps the current public Codex ACP
+adapter, uses provider-configured MCP tools, persists bounded provider-session
+metadata, adds session inspection and cleanup commands, and adds redacted
+verbose diagnostics. Native subscription login works without requiring an API
+key, while deliberately configured provider API keys remain supported. The
+candidate passed the repository and clean-installed package suites plus a real
+Codex-to-Claude permission and action round trip against the deployed service.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
@@ -188,7 +198,7 @@ and disallow traditional publish tokens after trusted publishing works.
 Users need Node.js 24 with npm and `npx`. Native `better-sqlite3` binaries
 need qualification on every supported operating system. Direct mode adds the
 exact ACP SDK approved in ADR 0038. Ambassador packages the Codex adapter and
-its small Claude CLI bridge so users do not install separate ACP adapters.
+the Claude adapter so users do not install separate ACP adapters.
 
 ## Approval
 
@@ -199,7 +209,7 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
-0.2.12, 0.2.13, 0.2.14, 0.2.15, and 0.2.16 releases described above. Later
+0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, and 0.2.17 releases described above. Later
 publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned

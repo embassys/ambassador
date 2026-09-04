@@ -40,31 +40,45 @@ const app = acp
         name: scenario.startsWith("wrong-agent") ? "different-agent" : "mock-agent",
         version: scenario.startsWith("wrong-version") ? "2.0.0" : "1.0.0",
       },
-      agentCapabilities: { loadSession: false },
+      agentCapabilities: {
+        loadSession: true,
+        sessionCapabilities: { resume: {}, close: {}, delete: {}, list: {} },
+      },
       authMethods: [],
     };
   })
   .onRequest(acp.methods.agent.session.new, (context) => {
-    const expectSessionMcp = scenario.includes("session-mcp");
-    if ((context.params.mcpServers.length === 1) !== expectSessionMcp) {
-      throw new Error("invalid MCP setup");
-    }
-    const server = context.params.mcpServers[0];
-    if (
-      expectSessionMcp &&
-      (server === undefined ||
-        !("type" in server) ||
-        server.type !== "http" ||
-        server.name !== "ambassador" ||
-        !server.url.startsWith("http://127.0.0.1:") ||
-        server.headers.length !== 0)
-    ) {
-      throw new Error("invalid MCP server");
-    }
+    if (context.params.mcpServers.length !== 0) throw new Error("invalid MCP setup");
     const sessionId = "mock-session";
     sessions.add(sessionId);
     return { sessionId };
   })
+  .onRequest(acp.methods.agent.session.resume, (context) => {
+    if (context.params.mcpServers?.length !== 0) throw new Error("invalid MCP setup");
+    sessions.add(context.params.sessionId);
+    return {};
+  })
+  .onRequest(acp.methods.agent.session.load, async (context) => {
+    if (context.params.mcpServers.length !== 0) throw new Error("invalid MCP setup");
+    sessions.add(context.params.sessionId);
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId: context.params.sessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "stored request" },
+      },
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId: context.params.sessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "stored answer" },
+      },
+    });
+    return {};
+  })
+  .onRequest(acp.methods.agent.session.close, () => ({}))
+  .onRequest(acp.methods.agent.session.delete, () => ({}))
   .onRequest(acp.methods.agent.session.prompt, async (context) => {
     if (promptPath !== undefined) await writeFile(promptPath, "dispatched", "utf8");
     if (!sessions.has(context.params.sessionId)) throw new Error("unknown session");
@@ -99,7 +113,9 @@ const app = acp
           { optionId: "deny", name: "Deny", kind: "reject_once" },
         ],
       });
-      if (response.outcome.outcome !== "cancelled") throw new Error("permission was approved");
+      if (response.outcome.outcome !== "selected" || response.outcome.optionId !== "allow") {
+        throw new Error("permission was not approved once");
+      }
     }
     if (scenario.startsWith("overflow")) {
       await context.client.notify(acp.methods.client.session.update, {

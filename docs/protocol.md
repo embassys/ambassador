@@ -1,6 +1,6 @@
 # Ambassador protocol
 
-Status: accepted target; open implementation work is listed in
+Status: implemented; future work is listed in
 [Current work](implementation-plan.md)
 
 This document defines the current target without a compatibility or migration
@@ -13,25 +13,32 @@ The public package and commands are:
 ```text
 @embassys/ambassador
 ambassador start
+ambassador start --verbose
+ambassador sessions list
+ambassador sessions show <session-id>
+ambassador sessions show <session-id> --verbose
+ambassador sessions delete <session-id>
+ambassador sessions forget <session-id>
 ambassador webhook-secret
 ambassador clean
 ```
 
-None of these commands accepts options or positional values. `webhook-secret`
-creates one encrypted 48-character lowercase hexadecimal secret when absent
-and writes the stable value to standard output for the owner to copy into a
-receiver. It does not take the singleton process lock. `start` has no local
-token, agent selector, delivery-mode selector, endpoint option, configuration
-path, webhook secret option, or `--acp-agent` option.
+Only `start --verbose` and `sessions show <session-id> --verbose` accept an
+option. `webhook-secret` creates one encrypted 48-character lowercase
+hexadecimal secret when absent and writes the stable value to standard output
+for the owner to copy into a receiver. It does not take the singleton process
+lock. `start` has no local token, agent selector, delivery-mode selector,
+endpoint option, configuration path, webhook secret option, or `--acp-agent`
+option.
 
 `clean` acquires the singleton process lock and refuses to continue if
 Ambassador is running or the lock artifact is invalid. While it owns the lock,
 it removes every entry from the private Ambassador state directory except the
 lock database and its active SQLite sidecars. This includes the encrypted
 central credential and key, encrypted webhook secret and key, delivery profile,
-notification journal, interrupted temporary writes, and later local state
-artifacts. Symbolic links inside the state directory are removed as links; the
-command does not follow them.
+ACP session metadata, notification journal, interrupted temporary writes, and
+later local state artifacts. Symbolic links inside the state directory are
+removed as links; the command does not follow them.
 
 A successful command writes exactly:
 
@@ -60,11 +67,25 @@ MCP endpoint: http://127.0.0.1:8787/mcp
 the active delivery target within its deadline, close local state, and release
 the lock.
 
+Session management commands acquire the same process lock and therefore
+require the foreground process to be stopped. `sessions list` prints only
+Ambassador-owned metadata. `sessions show` starts the fixed configured agent,
+uses ACP `session/load`, and prints bounded user and agent history supplied by
+that provider. `--verbose` also includes bounded tool events. `sessions delete`
+requires the agent to advertise `session/delete` and forgets metadata only
+after provider success. `sessions forget` removes only the local record.
+
 Startup failures use bounded operator messages. They distinguish an occupied
 MCP port, invalid or unavailable local state, an unavailable agent or bundled
 adapter, ACP initialization failure, uncertain direct delivery, and a generic
 webhook or relay failure. They never print raw provider output, central bodies,
 credentials, or unbounded exception text.
+
+Verbose startup adds bounded timestamped events for ACP lifecycle and
+permission choices, MCP tool calls, central REST requests, and delivery state.
+It may include personally identifying request and result data. It always
+redacts authorization, DPoP material, nonces, tokens, verification codes,
+private keys, cookies, and webhook secrets. Verbose output is console-only.
 
 ## Local MCP
 
@@ -135,8 +156,11 @@ definitions do not become additional local tools.
 `GET /api/get_my_permissions` response. It accepts no arguments and returns
 only entries whose status is `pending` and whose `grantor_email` is the
 enrolled identity, plus their count. It adds no central route, local queue, or
-message persistence. The user selects a returned permission ID and explicitly
-chooses `granted` or `denied`; `respond_to_permission` submits that decision.
+message persistence. Normal permission requests are decided asynchronously by
+the human through central's emailed decision page; they do not wake the
+grantor's agent. If the user is already in their agent chat, they may instead
+select a returned permission ID and explicitly ask for `granted` or `denied`;
+`respond_to_permission` submits that decision.
 
 `list_pending_action_calls` is the separate unanswered-action inbox. It accepts
 no arguments and returns a count plus the validated `call_id`,
@@ -389,6 +413,18 @@ The current protected routes are:
 | Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
 | Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
 
+The permission-request response always includes `permission_id`, `status`, and
+`message`. The current deployment may also include `already_granted` and
+`decision`; Ambassador validates and returns those fields when present. For a
+new request, central emails the grantor a read-only confirmation page whose
+form submits the decision. It queues no `permission_request` message to the
+grantor's agent. After the human decides, central queues a
+`permission_outcome` to the requester. A granted outcome tells the receiving
+agent to continue once through `call_action`, mapping `grantor_email` to
+`target_email` and using the outcome's action type. Ambassador does not handle
+the email token or call central's unauthenticated decision endpoint during
+normal use.
+
 `call_action` delivers a request after central confirms permission. It does
 not execute the action. Its `call_id` correlates the one permitted result.
 
@@ -408,8 +444,10 @@ submission returns `409` without recovering the first response's message ID.
 Ambassador holds one 30-second central long poll. The response has a
 `messages` array. Current central messages contain `id`,
 `sender_agent_id`, optional `action_type_id`, `payload`, and
-`created_at`. The payload type may be `permission_request`,
-`permission_response`, `action_call`, or `action_response`.
+`created_at`. New permission requests do not appear in this queue. Current
+delivered payloads include `permission_outcome`, `action_call`, and
+`action_response`; Ambassador still validates any bounded payload object
+before local delivery.
 
 Central marks selected rows delivered in the same database statement that
 returns them. Before accepting a batch, Ambassador enforces its response,
@@ -504,35 +542,33 @@ uses a `PATH` shadow. External native agent commands retain their fixed
 invocation. On Windows, the same no-shell validation also applies to a reviewed
 external Node package such as OpenClaw.
 
+Adapter processes retain normal provider authentication and configuration.
+Native subscription login works without an API key; a user-configured provider
+API key remains available when the provider supports it.
+
 The enabled profiles and fixed contracts are:
 
 | Profile | MCP client name | Direct invocation | ACP agent name | MCP setup |
 | --- | --- | --- | --- | --- |
 | OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
-| Hermes | `mcp` | `hermes-acp` | `hermes-agent` | session injection |
-| Codex | `codex-mcp-client` | `codex-acp` | `@agentclientprotocol/codex-acp` | session injection |
-| Claude Code | `claude-code` | built-in bridge, then `claude --print` | `@embassys/claude-cli-acp` | provider configuration |
+| Hermes | `mcp` | `hermes-acp` | `hermes-agent` | provider configuration |
+| Codex | `codex-mcp-client` | current package-owned `codex-acp` | `@agentclientprotocol/codex-acp` | provider configuration |
+| Claude Code | `claude-code` | current package-owned `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | provider configuration |
 
 A profile is enabled only after its exact client and agent names, invocation,
 MCP configuration behavior, and qualification cases are committed. Adapter
-downloads at runtime are forbidden. Ambassador installs the exact Codex
-adapter as a production dependency. Its built-in Claude ACP bridge uses the
-separately installed official `claude` command and leaves authentication to
-that command. The Claude process inherits the environment supplied to
-Ambassador so its normal authentication precedence remains intact. Ambassador
-does not initiate login or inspect, store, log, or return provider credentials.
-OpenClaw and Hermes still provide their own agent commands. Reported MCP client
-and ACP agent versions are not allowlists. Gemini CLI and Antigravity are
-unsupported client names.
+downloads at runtime are forbidden. Ambassador declares the reviewed Codex and
+Claude adapters with unpinned npm wildcards. A fresh or updated Ambassador
+installation resolves the current releases; the repository lockfile records
+the versions tested by CI. OpenClaw and Hermes provide their own agent
+commands. Reported MCP client and ACP agent versions are not allowlists. Gemini
+CLI and Antigravity are unsupported client names.
 
-The Claude bridge does not use safe mode or strict MCP isolation. It loads the
-official CLI's normal provider configuration, disables built-in tools with
-`--tools ""`, and bypasses interactive permission checks for configured MCP
-tools with `--dangerously-skip-permissions`. Managed provider policy may still
-deny a tool. Its normal configuration must include Ambassador.
-OpenClaw already uses provider MCP configuration. Hermes and Codex retain their
-native configuration while Ambassador also supplies its endpoint through ACP.
-Ambassador imposes no safe-mode flag on those profiles.
+Every direct agent loads Ambassador and other tools from normal provider
+configuration. Session lifecycle requests send `mcpServers: []`. Ambassador
+does not disable built-in tools, request a provider bypass, or impose safe or
+restricted mode. Authentication and billing remain with the agent and its
+provider.
 
 The repository qualification probe runs each profile's fixed version command,
 records a bounded semantic version or `unavailable`, and continues to that
@@ -541,16 +577,17 @@ reported versions. It still requires ACP v1 and the exact `agentInfo.name`
 shown in the table. An incompatible release fails through bounded startup,
 initialization, session, or delivery handling.
 
-Ambassador initializes the agent and opens a gateway-managed session. It
-provides its loopback MCP endpoint in ACP session configuration where the
-agent supports that field. Agents that use provider configuration, such as the
-reviewed OpenClaw and Claude interfaces, must have Ambassador MCP configured
-before direct delivery.
+Ambassador initializes the agent and opens one persistent gateway-managed
+session for each central message. It requires `session/resume` or
+`session/load`. Before prompt dispatch, a bounded retry of the same central
+message may resume its stored session. A new central message always receives a
+new session.
 
-Ambassador has no interactive approval UI during background delivery. It never
-auto-approves an ACP permission request. A request that cannot be satisfied by
-the selected agent's preconfigured policy is denied, and the prompt may finish
-with a bounded failure.
+Ambassador has no interactive approval UI during background delivery. It
+selects `allow_once` for an ACP permission request when the agent offers it. If
+not, it selects the first advertised `allow_always` option. If neither positive
+option exists, it cancels the request. This temporary development policy gives
+the background agent broad access to its configured tools.
 
 The local MCP server advertises the same complete tool catalog before and
 after enrollment. Protected tools return `not_enrolled` until verification;
@@ -579,10 +616,18 @@ the delivery budget. Once prompt submission may have occurred, a crash,
 timeout, malformed stream, lost terminal result, or failed cleanup is
 uncertain. Ambassador does not automatically submit that message again.
 
-Direct mode does not resume the MCP chat that performed registration. Any ACP
-session identifier is gateway-owned opaque metadata and may be retained only
-if the selected agent supports safe exact-session resume. Otherwise a restart
-starts a new gateway-managed session and makes no continuity claim.
+Direct mode does not resume the MCP chat that performed registration. An
+owner-only SQLite database stores bounded provider session IDs, fixed agent
+kind, working directory, central message ID, action `call_id`, lifecycle state,
+and timestamps. It stores no prompt, message body, provider output, MCP data,
+or credential.
+
+Non-action sessions retire after a normal ACP turn. An action-call session
+stays active while its encrypted pending-action row remains and retires only
+after central accepts the matching `submit_action_result`. After 30 days,
+Ambassador calls `session/delete` when advertised and removes the local record
+after success. When deletion is unsupported, it forgets the local record. A
+transient deletion failure retains the record for another cleanup attempt.
 
 ## Central acknowledgement
 
@@ -623,11 +668,14 @@ internal seams. No deadline is a CLI option.
 Never write message bodies, permission details, MCP arguments or results,
 registration emails, verification codes, tokens, private keys, proofs, nonces,
 webhook secrets, prompts, or provider output to SQLite, profiles, normal logs,
-diagnostics, metrics, temporary files, crash artifacts, or support bundles.
-ADR 0046 defines the sole content exception: one bounded encrypted SQLite
-record for each unanswered action call, containing only its validated call ID,
-sender ID, action type, payload, and creation time. The only raw webhook-secret
-output is the explicit owner-invoked `webhook-secret` command.
+metrics, temporary files, crash artifacts, or support bundles. Verbose console
+output may contain bounded message, MCP, provider-history, and REST data after
+mandatory credential redaction; it is never persisted. ADR 0046 defines the
+sole durable content exception: one bounded encrypted SQLite record for each
+unanswered action call, containing only its validated call ID, sender ID,
+action type, payload, and creation time. The ACP session database contains only
+bounded identifiers, lifecycle state, and timestamps. The only raw
+webhook-secret output is the explicit owner-invoked `webhook-secret` command.
 
 The encrypted central credential contains only the central token and DPoP
 private key plus minimum format metadata. The webhook secret uses a different
@@ -655,7 +703,8 @@ The cutover must prove at least:
   arguments; the explicit secret command is the only display path;
 - complete-message webhook delivery, authentication, deduplication, retry, and
   acknowledgement ordering;
-- ACP v1 initialize, session, MCP setup, prompt, terminal success, failure,
+- ACP v1 initialize, persistent session create/resume/load/delete, provider MCP
+  setup, positive permission selection, prompt, terminal success, failure,
   cancellation, crash, and uncertainty handling;
 - deterministic CI coverage with a mock webhook receiver and mock ACP agent;
 - opt-in local coverage for direct delivery on all four profiles and webhook
@@ -667,10 +716,12 @@ The cutover must prove at least:
   delivery, the filtered pending-decision projection, the restart-safe
   unanswered-action list, removal only after successful result submission, and
   no general reply or local delivery-control tools;
-- the package-owned Codex adapter, the built-in Claude CLI bridge, validated
-  internal entrypoint launch, native Claude authentication ownership, normal
-  provider-configured MCP access, and bounded asynchronous child-process
-  failures;
+- current package-owned Codex and Claude adapters, validated internal
+  entrypoint launch, provider authentication ownership, normal
+  provider-configured MCP and built-in tool access, and bounded asynchronous
+  child-process failures;
+- session list, history display, delete, forget, action-result retirement,
+  30-day cleanup, and redacted verbose diagnostics;
 - startup output with working MCP setup commands for all supported agents and
   safe operator diagnostics for each startup or delivery failure class;
 - no separate connector process, user-selected webhook format, OpenClaw

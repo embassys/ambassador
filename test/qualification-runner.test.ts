@@ -23,7 +23,7 @@ test("real-agent runner loads the packed candidate without installing agents", a
   assert.match(combined, /hermes/u);
   assert.match(combined, /codex-acp/u);
   assert.match(combined, /claude/u);
-  assert.doesNotMatch(combined, /claude-agent-acp/u);
+  assert.doesNotMatch(combined, /@embassys\/claude-cli-acp/u);
   assert.doesNotMatch(combined, /agy_acp_server|antigravity-client|gemini-cli-mcp-client/u);
   assert.match(source, /version_probe/u);
   assert.doesNotMatch(
@@ -125,19 +125,21 @@ test("live runner has a fixed, separately confirmed real-Claude mode", async () 
     source,
     /const CLAUDE_CLIENT_INFO = \{ name: "claude-code", version: "qualification" \}/u,
   );
-  assert.match(source, /@embassys\/claude-cli-acp/u);
+  assert.match(source, /@agentclientprotocol\/claude-agent-acp/u);
   assert.match(source, /\.claude\.json/u);
   assert.match(source, /prepareClaudeMcp/u);
   assert.match(source, /usesOrdinaryHome/u);
   assert.match(source, /\.\.\.process\.env/u);
   assert.match(source, /CLAUDE_USER_MCP_PORT/u);
-  assert.equal(source.match(/localMcpPortFor\(index\)/gu)?.length, 2);
+  assert.equal(source.match(/localMcpPortFor\([^)]+\)/gu)?.length, 3);
   assert.equal(source.match(/await prepareClaudeMcp\(/gu)?.length, 2);
   assert.match(source, /claudeCapability\.direct\.mcp === "provider_config"/u);
   assert.match(source, /target_version_probe/u);
-  assert.match(source, /claude_permission_decision/u);
+  assert.match(source, /permission_email_decision/u);
   assert.match(source, /claude_action_result_mcp_call/u);
   assert.match(source, /claude_action_result_call_count/u);
+  assert.match(source, /session_commands/u);
+  assert.match(source, /verbose_start/u);
   assert.equal(
     /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
     false,
@@ -153,6 +155,7 @@ test("live runner has a fixed real Codex-to-Claude mode", async () => {
   assert.match(source, /CODEX_CLIENT_INFO/u);
   assert.match(source, /CLAUDE_CLIENT_INFO/u);
   assert.match(source, /requesterDirectMessages/u);
+  assert.match(source, /prepareCodexMcp/u);
   assert.match(source, /codex_response_delivery/u);
   assert.match(source, /requester_version_probe/u);
   assert.equal(

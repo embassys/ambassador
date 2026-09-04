@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { PRODUCTION_AGENT_CAPABILITIES } from "../src/agent-capabilities.js";
-import {
-  resolveBuiltInAgentEntrypoint,
-  resolveBundledNodePackageEntrypoint,
-} from "../src/direct-delivery.js";
+import { resolveBundledNodePackageEntrypoint } from "../src/direct-delivery.js";
 
 const CONTRACT = {
   packageName: "@agentclientprotocol/codex-acp",
@@ -49,7 +46,7 @@ test("resolves and validates the fixed entrypoint from a bundled Node agent pack
   );
 });
 
-test("the installed Ambassador provides the Codex dependency and its own Claude bridge", async () => {
+test("the installed Ambassador provides the Codex and Claude ACP dependencies", async () => {
   const codex = PRODUCTION_AGENT_CAPABILITIES.find((item) => item.kind === "codex")?.direct;
   assert.ok(codex?.bundledNodePackage !== undefined);
   assert.match(
@@ -58,8 +55,11 @@ test("the installed Ambassador provides the Codex dependency and its own Claude 
   );
 
   const claude = PRODUCTION_AGENT_CAPABILITIES.find((item) => item.kind === "claude")?.direct;
-  assert.equal(claude?.builtInAdapter, "claude-cli");
-  assert.match(await resolveBuiltInAgentEntrypoint("claude-cli"), /claude-cli-acp\.js$/u);
+  assert.ok(claude?.bundledNodePackage !== undefined);
+  assert.match(
+    await resolveBundledNodePackageEntrypoint(claude.bundledNodePackage),
+    /[/\\]dist[/\\]index\.js$/u,
+  );
 });
 
 test("rejects a missing, mismatched, or escaping bundled Node agent package", async (t) => {

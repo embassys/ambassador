@@ -13,14 +13,22 @@ The public package and commands are:
 ```text
 @embassys/ambassador
 ambassador start
+ambassador start --verbose
+ambassador sessions list
+ambassador sessions show <session-id>
+ambassador sessions show <session-id> --verbose
+ambassador sessions delete <session-id>
+ambassador sessions forget <session-id>
 ambassador webhook-secret
 ambassador clean
 ```
 
-None of these commands accepts options. `start` does not select an agent or
-delivery mode. `webhook-secret` creates or reveals the one encrypted receiver
-secret for owner-driven webhook setup. `clean` clears local enrollment and
-delivery state after it proves no foreground Ambassador process owns the lock.
+Only `start --verbose` and `sessions show <session-id> --verbose` accept an
+option. No command selects an agent, delivery mode, executable, endpoint, or
+credential. `webhook-secret` creates or reveals the one encrypted receiver
+secret for owner-driven webhook setup. `clean` clears local enrollment,
+delivery, and ACP session metadata after it proves no foreground Ambassador
+process owns the lock.
 Ambassador resolves a fixed agent profile from MCP `clientInfo` during
 registration. It asks for a delivery choice only when that profile supports
 both modes, then stores the result as nonsecret local profile data.
@@ -82,14 +90,14 @@ its idempotency key. No Ambassador-specific OpenClaw plugin is installed.
 ### Direct
 
 Ambassador acts as an ACP v1 client. It launches the selected local agent,
-creates or resumes a gateway-managed session as supported, and submits the
-complete central message as the prompt. The direct session is not the original
-chat in which the user registered.
+creates one persistent gateway-managed session per central message, and
+submits the complete message as the prompt. The direct session is not the
+original chat in which the user registered. A retry before prompt dispatch may
+resume the same session; a different message never inherits that context.
 
-Ambassador makes its MCP endpoint available through ACP session configuration
-where the selected agent supports it. A provider that does not accept
-session-level MCP configuration must have Ambassador MCP configured through
-its normal setup mechanism.
+All supported agents load Ambassador MCP and their other tools from normal
+provider configuration. ACP session lifecycle calls carry an empty
+`mcpServers` array.
 
 Agent support is a fixed capability registry, not a name supplied by the model.
 Each enabled entry has an exact bounded MCP client name, allowed modes, a fixed
@@ -107,17 +115,18 @@ ADR 0041. This keeps direct launch shell-free.
 The enabled direct profiles are OpenClaw, Hermes, Codex, and Claude Code. Only
 OpenClaw and Hermes also support webhook, with direct as their default. Codex
 and Claude Code register directly without a delivery question. Ambassador
-ships and validates the reviewed Codex ACP adapter as an exact production
-dependency. For Claude Code, Ambassador ships a small ACP v1 bridge that uses
-the separately installed official `claude` command and its existing native
-authentication. The official CLI owns authentication, and the provider decides
-billing. Ambassador does not select an authentication method, initiate login,
-or inspect, store, log, or return provider credentials.
-Claude loads its normal provider configuration for a direct turn, including
-configured MCP tools. Ambassador disables Claude's built-in tools but
-bypasses interactive permission checks for configured MCP tools, subject to
-managed provider policy, so resource-backed actions can finish.
-Claude therefore requires the documented user-scope Ambassador MCP entry.
+declares the reviewed public Codex and Claude ACP adapters with unpinned npm
+wildcards. A fresh or updated Ambassador installation resolves the current
+adapter release; `start` does not download code. The adapters and provider
+runtimes own authentication and billing choice. Native subscription login must
+work without an API key, while a user-configured provider API key remains
+supported. Ambassador does not initiate login or inspect, store, log, or return
+provider credentials.
+
+Every direct agent retains its provider-configured MCP and built-in tools.
+When an ACP agent asks for tool permission, Ambassador selects `allow_once`
+when available and otherwise selects the first positive option. This broad
+unattended access is an accepted development policy, not a security boundary.
 OpenClaw and Hermes provide their own fixed agent commands. Exact client and
 ACP agent names, commands, arguments, modes, and environment policies remain
 compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
@@ -177,11 +186,13 @@ state file. This protects against disclosure of one encrypted value without
 its key, not compromise of the owner's complete state directory.
 Local MCP trusts other processes running as the owner; strict loopback, Host,
 and Origin checks protect the browser and network boundary. The delivery
-profile may persist the mode, recognized agent kind, webhook URL, canonical
-direct working directory, and minimum ACP session metadata. It never contains
-a secret or message body. The notification journal remains ID-only. A separate
-SQLite inbox stores only encrypted, validated unanswered action calls, keyed to
-the enrolled DPoP identity.
+profile may persist the mode, recognized agent kind, webhook URL, and canonical
+direct working directory. An owner-only SQLite database holds bounded ACP
+session IDs, central correlation IDs, lifecycle state, and timestamps. It never
+contains a secret, message body, prompt, tool data, or provider output. The
+notification journal remains ID-only. A separate SQLite inbox stores only
+encrypted, validated unanswered action calls, keyed to the enrolled DPoP
+identity.
 
 ## Main flows
 
@@ -190,8 +201,8 @@ the enrolled DPoP identity.
 1. Acquire the singleton lock.
 2. Bind MCP on `127.0.0.1:8787` with strict Host and Origin checks.
 3. Reject supplied local Authorization credentials.
-4. Load the delivery profile, encrypted central credential, and encrypted
-   pending-action inbox if present.
+4. Load the delivery profile, encrypted central credential, encrypted
+   pending-action inbox, and ACP session metadata if present.
 5. For webhook mode, load the separately encrypted webhook secret.
 6. Prepare the configured delivery target.
 7. Start REST polling only when the required stored records are valid.
@@ -205,12 +216,11 @@ after repairing the local target resumes polling for new messages; it cannot
 recover a message already consumed by central.
 
 Direct agents may use their normally configured tools while handling the fixed
-Embassys delivery prompt. Claude loads its normal MCP configuration and
-bypasses interactive permission checks for configured MCP tools, subject to
-managed provider policy. OpenClaw, Hermes, and Codex retain their native tool
-behavior without an Ambassador-imposed safe mode. This is an accepted
-owner-machine trust choice. A missing tool leaves an action available through
-the encrypted pending-action inbox.
+Embassys delivery prompt. Ambassador imposes no safe mode, tool disablement,
+or provider bypass. It automatically selects a positive ACP tool permission,
+preferring `allow_once`. This is an accepted owner-machine trust choice. A
+missing tool leaves an action available through the encrypted pending-action
+inbox.
 
 ### Local reset
 
@@ -219,8 +229,8 @@ the encrypted pending-action inbox.
    changing state if another process owns the lock or if the lock cannot be
    validated.
 3. It removes the credential pair, webhook-secret pair, delivery profile,
-   encrypted pending-action inbox, notification journal, and any interrupted
-   state writes.
+   encrypted pending-action inbox, ACP session metadata, notification journal,
+   and any interrupted state writes.
 4. It retains the empty owner-only state directory and process lock for safe
    coordination.
 5. The next `ambassador start` exposes the bootstrap enrollment tools.
@@ -255,14 +265,23 @@ structured success or error result for the call. Central correlates it by
 
 The agent-facing `list_pending_permission_requests` tool derives a user's
 unanswered inbox from `get_my_permissions`: pending rows where the enrolled
-identity is the grantor. It stores no second queue and requires an explicit
-grant or deny through `respond_to_permission`.
+identity is the grantor. It stores no second queue. Central normally asks the
+human asynchronously by email and does not wake the grantor's local agent for
+a new permission request. A user who is already in the agent chat can still
+inspect the projection and explicitly grant or deny through
+`respond_to_permission`.
+
+After the human decides, central sends the requester a `permission_outcome`.
+For a grant, Ambassador's fixed delivery prompt tells the receiving agent to
+continue the approved action once, using the outcome's `grantor_email` as the
+target and its `action_type`; outcome metadata is not passed to `call_action`.
 
 `list_pending_action_calls` is different: it lists action calls already
 delivered to this identity that still need a result. Ambassador encrypts the
 validated call ID, sender ID, action type, payload, and creation time locally
 before local delivery and central acknowledgement. A successful
-`submit_action_result` removes that call. No new central route is required.
+`submit_action_result` removes that call and retires its ACP session. No new
+central route is required.
 
 ### Incoming message
 
@@ -276,6 +295,11 @@ before local delivery and central acknowledgement. A successful
 5. A webhook `2xx` or successful direct ACP completion transfers or completes
    local responsibility.
 6. Ambassador acknowledges the message to central and removes its local state.
+
+Direct session metadata remains available after delivery. Non-action sessions
+retire after a normal turn. Action-call sessions retire after the matching
+central result succeeds. Ambassador attempts provider deletion after 30 days
+and otherwise forgets metadata when deletion is unsupported.
 
 After a direct prompt may have started, an uncertain failure is not replayed
 automatically. The server cannot currently redeliver a message consumed by
@@ -312,14 +336,12 @@ retrieval or redelivery is the proper future fix.
   Published Ambassador 0.2.9 implements ADR 0041's name-based,
   version-observational policy; earlier artifacts do not gain that behavior
   retroactively.
-- Codex and the superseded Claude adapter direct delivery, plus both delivery modes for Hermes
-  Agent 0.20.5 and OpenClaw 2026.8.2 have passed with the live central service.
-  Ambassador 0.2.8 includes the qualified Hermes name-based ACP profile, and
-  published Ambassador 0.2.11 passed the earlier Claude Code direct flow. The
-  built-in Claude CLI bridge requires its own live qualification before its
-  release claim is recorded. Gemini CLI has been removed and Antigravity is
-  deferred under ADR 0043.
-  Hermes 0.21.0 has only its earlier contract and ACP startup probe, not the
-  full real-model round trip.
+- ADR 0050's common persistent-session policy and current public Codex and
+  Claude adapters passed one clean combined packed-artifact qualification with
+  the live central service. Both delivery modes for Hermes Agent 0.20.5 and
+  OpenClaw 2026.8.2 passed under the earlier delivery policy and still need an
+  ADR 0050 live repeat. Gemini CLI has been removed and Antigravity is deferred
+  under ADR 0043. Hermes 0.21.0 has only its earlier contract and ACP startup
+  probe, not the full real-model round trip.
 
 Potential server improvements live in [Central follow-ups](central-follow-ups.md).
