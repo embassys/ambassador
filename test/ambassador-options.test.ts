@@ -7,18 +7,49 @@ import {
   parseAmbassadorStartOptions,
 } from "../src/ambassador-options.js";
 
-test("accepts only ambassador start without options", () => {
-  assert.deepEqual(parseAmbassadorStartOptions(["start"]), {});
+test("accepts ambassador start with optional verbose output", () => {
+  assert.deepEqual(parseAmbassadorStartOptions(["start"]), { verbose: false });
+  assert.deepEqual(parseAmbassadorStartOptions(["start", "--verbose"]), { verbose: true });
 });
 
-test("accepts the explicit webhook-secret and clean commands without options", () => {
+test("accepts the explicit utility and session commands", () => {
   assert.deepEqual(parseAmbassadorCommand(["webhook-secret"]), { command: "webhook-secret" });
   assert.deepEqual(parseAmbassadorCommand(["clean"]), { command: "clean" });
-  assert.deepEqual(parseAmbassadorCommand(["start"]), { command: "start" });
+  assert.deepEqual(parseAmbassadorCommand(["start"]), { command: "start", verbose: false });
+  assert.deepEqual(parseAmbassadorCommand(["sessions", "list"]), {
+    command: "sessions",
+    action: "list",
+  });
+  assert.deepEqual(parseAmbassadorCommand(["sessions", "show", "session-1"]), {
+    command: "sessions",
+    action: "show",
+    sessionId: "session-1",
+    verbose: false,
+  });
+  assert.deepEqual(parseAmbassadorCommand(["sessions", "show", "session-1", "--verbose"]), {
+    command: "sessions",
+    action: "show",
+    sessionId: "session-1",
+    verbose: true,
+  });
+  assert.deepEqual(parseAmbassadorCommand(["sessions", "delete", "session-1"]), {
+    command: "sessions",
+    action: "delete",
+    sessionId: "session-1",
+  });
+  assert.deepEqual(parseAmbassadorCommand(["sessions", "forget", "session-1"]), {
+    command: "sessions",
+    action: "forget",
+    sessionId: "session-1",
+  });
   assert.throws(() => parseAmbassadorCommand(["webhook-secret", "extra"]));
   assert.throws(() => parseAmbassadorCommand(["webhook-secret", "--json"]));
   assert.throws(() => parseAmbassadorCommand(["clean", "extra"]));
   assert.throws(() => parseAmbassadorCommand(["clean", "--force"]));
+  assert.throws(() => parseAmbassadorCommand(["sessions"]));
+  assert.throws(() => parseAmbassadorCommand(["sessions", "show"]));
+  assert.throws(() => parseAmbassadorCommand(["sessions", "delete", "session-1", "extra"]));
+  assert.throws(() => parseAmbassadorCommand(["sessions", "forget", "session-1", "--force"]));
 });
 
 test("rejects old, split, duplicate, positional, configuration, and secret-value options", () => {

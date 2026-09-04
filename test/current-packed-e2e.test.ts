@@ -109,7 +109,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       binName: string;
       entrypoint: string;
     }): Promise<string>;
-    resolveBuiltInAgentEntrypoint(adapter: "claude-cli"): Promise<string>;
   };
   const capabilities = (await import(
     pathToFileURL(join(installedDist, "agent-capabilities.js")).href
@@ -117,7 +116,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     PRODUCTION_AGENT_CAPABILITIES: Array<{
       kind: string;
       direct?: {
-        builtInAdapter?: "claude-cli";
         bundledNodePackage?: {
           packageName: string;
           binName: string;
@@ -134,13 +132,13 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     await directDelivery.resolveBundledNodePackageEntrypoint(codexContract),
     /[/\\]dist[/\\]index\.js$/u,
   );
-  const claudeAdapter = capabilities.PRODUCTION_AGENT_CAPABILITIES.find(
+  const claudeContract = capabilities.PRODUCTION_AGENT_CAPABILITIES.find(
     (item) => item.kind === "claude",
-  )?.direct?.builtInAdapter;
-  assert.equal(claudeAdapter, "claude-cli");
+  )?.direct?.bundledNodePackage;
+  assert.ok(claudeContract !== undefined);
   assert.match(
-    await directDelivery.resolveBuiltInAgentEntrypoint(claudeAdapter),
-    /[/\\]dist[/\\]claude-cli-acp\.js$/u,
+    await directDelivery.resolveBundledNodePackageEntrypoint(claudeContract),
+    /[/\\]dist[/\\]index\.js$/u,
   );
   const root = await mkdtemp(join(tmpdir(), "ambassador-current-packed-"));
   t.after(() => rm(root, { recursive: true, force: true }));

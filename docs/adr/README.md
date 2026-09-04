@@ -10,7 +10,9 @@ ADR 0046 records the encrypted local inbox for unanswered action calls. ADR
 0047 replaces the Claude adapter and records the stable tool catalog and
 resilient local-delivery behavior. ADR 0048 leaves authentication entirely to
 the unmodified Claude CLI and its provider. ADR 0049 lets direct agents use
-their normally configured tools during templated delivery.
+their normally configured tools during templated delivery. ADR 0050 unifies
+direct-agent permissions and MCP setup, adds persistent inspectable sessions,
+and replaces the built-in Claude bridge with the current public ACP adapter.
 
 ## Current decisions
 
@@ -37,6 +39,7 @@ their normally configured tools during templated delivery.
 | [0047](0047-claude-cli-bridge-and-resilient-delivery.md) | Claude CLI bridge, stable tools, and resilient local delivery |
 | [0048](0048-claude-native-authentication.md) | Claude CLI owns authentication |
 | [0049](0049-provider-configured-tools-in-direct-delivery.md) | Provider-configured tools in direct delivery |
+| [0050](0050-persistent-observable-acp-sessions.md) | Persistent, observable ACP sessions with one direct-delivery policy |
 
 ## Historical ledger
 

@@ -358,12 +358,17 @@ export class CentralRestClient {
     };
     const result = await this.#request("POST", "/api/request_permission", body, signal);
     if (
-      !exactKeys(result, ["permission_id", "status", "message"]) ||
+      !exactKeys(result, ["permission_id", "status", "message"], ["already_granted", "decision"]) ||
       typeof result.permission_id !== "string" ||
       !NAME.test(result.permission_id) ||
       !["pending", "granted", "denied"].includes(result.status as string) ||
       typeof result.message !== "string" ||
-      result.message.length > 512
+      result.message.length > 512 ||
+      (result.already_granted !== undefined && typeof result.already_granted !== "boolean") ||
+      (result.decision !== undefined &&
+        result.decision !== null &&
+        result.decision !== "granted" &&
+        result.decision !== "denied")
     ) {
       throw failure("central_response_invalid");
     }

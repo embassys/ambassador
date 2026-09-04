@@ -44,6 +44,8 @@ const CODEX_CLIENT_INFO = { name: "codex-mcp-client", version: "qualification" }
 const CLAUDE_CLIENT_INFO = { name: "claude-code", version: "qualification" };
 const HERMES_CLIENT_INFO = { name: "mcp", version: "qualification" };
 const CLAUDE_COMMAND = "claude";
+const CLAUDE_ACP_COMMAND = "claude-agent-acp";
+const CODEX_ACP_COMMAND = "codex-acp";
 const CLAUDE_USER_MCP_PORT = 8787;
 const HERMES_ACP_COMMAND = "hermes-acp";
 const OPENCLAW_ACP_COMMAND = "openclaw";
@@ -206,6 +208,73 @@ async function findVerification(credentials, address, receivedAfter) {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   throw safeFailure("mail_timeout");
+}
+
+function permissionDecisionToken(detail) {
+  if (!isRecord(detail)) return undefined;
+  const candidates = [];
+  for (const format of ["text", "html"]) {
+    const content = detail[format];
+    if (!isRecord(content)) continue;
+    if (Array.isArray(content.links)) {
+      for (const link of content.links) {
+        if (isRecord(link) && typeof link.href === "string") candidates.push(link.href);
+      }
+    }
+    if (typeof content.body === "string" && content.body.length <= 2 * 1024 * 1024) {
+      candidates.push(...(content.body.match(/https:\/\/[^\s"'<>]+/gu) ?? []));
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const target = new URL(candidate.replaceAll("&amp;", "&"));
+      const token = target.searchParams.get("token");
+      if (
+        target.origin === LIVE_ORIGIN &&
+        target.pathname === "/permission/decide" &&
+        token !== null &&
+        token.length >= 16 &&
+        token.length <= 512
+      ) {
+        return token;
+      }
+    } catch {
+      // Ignore unrelated or presentation-only links in the test message.
+    }
+  }
+  return undefined;
+}
+
+async function findPermissionDecision(credentials, address, receivedAfter) {
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const query = new URLSearchParams({
+      server: credentials.serverId,
+      receivedAfter: receivedAfter.toISOString(),
+      itemsPerPage: "10",
+    });
+    const search = await mailosaurFetch(credentials, `/api/messages/search?${query.toString()}`, {
+      method: "POST",
+      body: JSON.stringify({ sentTo: address }),
+    });
+    const result = await search.json();
+    if (isRecord(result) && Array.isArray(result.items)) {
+      for (const summary of result.items) {
+        if (!isRecord(summary) || typeof summary.id !== "string" || summary.id.length === 0) {
+          continue;
+        }
+        const detailResponse = await mailosaurFetch(
+          credentials,
+          `/api/messages/${encodeURIComponent(summary.id)}`,
+        );
+        const detail = await detailResponse.json();
+        const token = permissionDecisionToken(detail);
+        if (token !== undefined) return { token, messageId: summary.id };
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw safeFailure("permission_mail_timeout");
 }
 
 async function deleteMessage(credentials, messageId) {
@@ -481,6 +550,38 @@ function claudeEnvironment(home) {
     ...process.env,
     HOME: home,
   };
+}
+
+function codexEnvironment(home) {
+  return {
+    HOME: home,
+    ...(process.env.LANG === undefined ? {} : { LANG: process.env.LANG }),
+    ...(process.env.LC_ALL === undefined ? {} : { LC_ALL: process.env.LC_ALL }),
+    ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
+    ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
+  };
+}
+
+async function runCodexConfiguration(home, arguments_) {
+  const child = spawn("codex", arguments_, {
+    cwd: home,
+    env: codexEnvironment(home),
+    shell: false,
+    stdio: "ignore",
+  });
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+  timeout.unref();
+  const code = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  }).finally(() => clearTimeout(timeout));
+  assert(code === 0, "codex_mcp_configuration");
+}
+
+async function prepareCodexMcp(home, endpoint) {
+  await runCodexConfiguration(home, ["mcp", "remove", "ambassador"]).catch(() => undefined);
+  await runCodexConfiguration(home, ["mcp", "add", "ambassador", "--url", endpoint]);
+  await runCodexConfiguration(home, ["mcp", "list"]);
 }
 
 async function runClaudeConfiguration(home, arguments_) {
@@ -930,11 +1031,12 @@ async function startGateway(
   workingDirectory = repositoryRoot,
   webhookFetch,
   localMcpPort = 0,
+  verbose = false,
 ) {
   const controller = new AbortController();
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(["start"], {
+  const running = packed.runCli(["start", ...(verbose ? ["--verbose"] : [])], {
     io: {
       stdout: {
         write(chunk) {
@@ -976,6 +1078,48 @@ async function startGateway(
       assert(result === 0, "gateway_stop");
     },
   };
+}
+
+async function runStoppedCliCommand(packed, stateRoot, environment, workingDirectory, args) {
+  let stdout = "";
+  let stderr = "";
+  const result = await packed.runCli(args, {
+    io: {
+      stdout: {
+        write(chunk) {
+          stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
+        },
+      },
+      stderr: {
+        write(chunk) {
+          stderr += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+          return true;
+        },
+      },
+    },
+    env: environment,
+    cwd: workingDirectory,
+    testOverrides: { centralOrigin: LIVE_ORIGIN, stateRoot },
+  });
+  assert(result === 0 && stderr === "", "cli_command");
+  return stdout;
+}
+
+function listedSessions(output) {
+  const lines = output.trim().split("\n").filter(Boolean);
+  assert(lines.length > 0 && lines[0] !== "No Ambassador sessions", "session_list");
+  const sessions = lines.map((line) => JSON.parse(line));
+  assert(
+    sessions.every(
+      (session) =>
+        isRecord(session) &&
+        typeof session.session_id === "string" &&
+        ["active", "retired"].includes(session.status),
+    ),
+    "session_list",
+  );
+  return sessions;
 }
 
 async function createGatewayWebhookSecret(packed, stateRoot) {
@@ -1316,6 +1460,7 @@ async function main() {
   const openClawGateways = [];
   const centralRoutes = new Set();
   const centralObservations = [];
+  const deliveredPayloadObservations = [];
   const directMessages = [];
   const requesterDirectMessages = [];
   const routeCounts = [new Map(), new Map()];
@@ -1326,6 +1471,8 @@ async function main() {
   const targetSubmittedCallIds = new Set();
   let targetPermissionDecisionObserved = false;
   let targetActionResultCallCount = 0;
+  let requesterActionCall;
+  let requesterRejectedActionCalls = 0;
   let hermesWebhookPort;
   let openClawGatewayPort;
   let catalogObservation;
@@ -1369,6 +1516,25 @@ async function main() {
       assert(localCompletedByGateway[gatewayIndex].has(acknowledgedMessageId), "ack_order");
     }
     const response = await fetch(input, init);
+    if (realCodexClaude && gatewayIndex === 0 && route === "POST /api/call_action") {
+      if (!response.ok) {
+        requesterRejectedActionCalls += 1;
+      } else {
+        try {
+          const result = await response.clone().json();
+          if (
+            isRecord(result) &&
+            typeof result.call_id === "string" &&
+            typeof result.message_id === "string" &&
+            result.status === "delivered"
+          ) {
+            requesterActionCall = result;
+          }
+        } catch {
+          // The production client owns response validation.
+        }
+      }
+    }
     if (isTargetPermissionDecision && response.ok) targetPermissionDecisionObserved = true;
     if (isTargetActionResult) targetActionResultCallCount += 1;
     if (submittedCallId !== undefined && response.ok) targetSubmittedCallIds.add(submittedCallId);
@@ -1461,12 +1627,28 @@ async function main() {
       );
       assert(
         canonicalJson(claudeCapability?.aliases) === canonicalJson([CLAUDE_CLIENT_INFO.name]) &&
-          claudeCapability?.direct?.command === CLAUDE_COMMAND &&
+          claudeCapability?.direct?.command === CLAUDE_ACP_COMMAND &&
           canonicalJson(claudeCapability.direct.args) === canonicalJson([]) &&
-          claudeCapability.direct.agentInfo.name === "@embassys/claude-cli-acp" &&
+          claudeCapability.direct.agentInfo.name === "@agentclientprotocol/claude-agent-acp" &&
           claudeCapability.direct.mcp === "provider_config" &&
-          claudeCapability.direct.builtInAdapter === "claude-cli",
+          claudeCapability.direct.bundledNodePackage?.packageName ===
+            "@agentclientprotocol/claude-agent-acp",
         "claude_profile",
+      );
+    }
+    if (anyRealCodex) {
+      const codexCapability = agentCapabilitiesModule.PRODUCTION_AGENT_CAPABILITIES.find(
+        (candidate) => candidate.kind === "codex",
+      );
+      assert(
+        canonicalJson(codexCapability?.aliases) === canonicalJson([CODEX_CLIENT_INFO.name]) &&
+          codexCapability?.direct?.command === CODEX_ACP_COMMAND &&
+          canonicalJson(codexCapability.direct.args) === canonicalJson([]) &&
+          codexCapability.direct.agentInfo.name === "@agentclientprotocol/codex-acp" &&
+          codexCapability.direct.mcp === "provider_config" &&
+          codexCapability.direct.bundledNodePackage?.packageName ===
+            "@agentclientprotocol/codex-acp",
+        "codex_profile",
       );
     }
     if (realHermes) {
@@ -1512,7 +1694,6 @@ async function main() {
         "# Controlled Embassys qualification policy",
         "",
         "The user approved only the synthetic get_phone_number qualification in this directory.",
-        "For its permission_request, call respond_to_permission with decision granted.",
         `For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
         "Do not grant, execute, or answer any other request.",
         "",
@@ -1576,7 +1757,7 @@ async function main() {
         : 0;
     const deliveryTargetFactoryFor = (index) => {
       if ((index === 0 && !realCodexClaude) || realWebhook) return undefined;
-      return ({ capability, endpoint, profile }) => {
+      return ({ capability, profile, sessionStore }) => {
         const selectedCapability = realDirect
           ? capability.direct
           : {
@@ -1589,16 +1770,34 @@ async function main() {
               mcp: "provider_config",
               environment: ["HOME", "PATH", "TMPDIR"],
             };
-        assert(selectedCapability !== undefined && profile.mode === "direct", "direct_profile");
+        assert(
+          selectedCapability !== undefined &&
+            profile.mode === "direct" &&
+            sessionStore !== undefined,
+          "direct_profile",
+        );
         const target = new directDeliveryModule.DirectDeliveryTarget({
+          agentKind: capability.kind,
           capability: selectedCapability,
           workingDirectory: realDirect ? profile.working_directory : repositoryRoot,
           environment: realDirect ? environmentFor(index) : process.env,
-          mcpEndpoint: endpoint,
+          sessionStore,
         });
         return {
           async deliver(message, signal) {
             const result = await target.deliver(message, signal);
+            const payload = isRecord(message.payload) ? message.payload : {};
+            deliveredPayloadObservations.push({
+              gateway: index,
+              fields: Object.keys(payload).sort(),
+              ...(typeof payload.type === "string" ? { type: payload.type } : {}),
+              ...(typeof payload.decision === "string" ? { decision: payload.decision } : {}),
+              ...(typeof payload.status === "string" ? { status: payload.status } : {}),
+              ...(typeof payload.granted === "boolean" ? { granted: payload.granted } : {}),
+              ...(typeof payload.single_use === "boolean"
+                ? { single_use: payload.single_use }
+                : {}),
+            });
             if (!realDirect) directMessages.push(message);
             if (realCodexClaude && index === 0) requesterDirectMessages.push(message);
             localCompletedByGateway[index].add(message.id);
@@ -1648,6 +1847,11 @@ async function main() {
           gateways[index].client.endpoint,
           claudeQualification?.usesOrdinaryHome === true,
         );
+      }
+      if (anyRealCodex && index === (realCodexClaude ? 0 : 1)) {
+        assert(codexHome !== undefined, "codex_isolation");
+        phase = "codex_mcp_configuration";
+        await prepareCodexMcp(codexHome, gateways[index].client.endpoint);
       }
       if (realHermesWebhook && index === 1) {
         assert(hermesHome !== undefined, "hermes_isolation");
@@ -1782,6 +1986,11 @@ async function main() {
           claudeQualification?.usesOrdinaryHome === true,
         );
       }
+      if (anyRealCodex && index === (realCodexClaude ? 0 : 1)) {
+        assert(codexHome !== undefined, "codex_isolation");
+        phase = "codex_mcp_configuration";
+        await prepareCodexMcp(codexHome, gateways[index].client.endpoint);
+      }
       const names = (await gateways[index].client.listTools()).map((tool) => tool.name);
       assert(
         JSON.stringify(names) ===
@@ -1884,7 +2093,6 @@ async function main() {
     );
 
     phase = "permission";
-    const recipientAckCountBeforePermission = successfulAckCounts[1];
     const requested = await gateways[0].client.call("request_permission", {
       target_email: addresses[1],
       action_type: "get_phone_number",
@@ -1894,60 +2102,58 @@ async function main() {
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
-    phase = `permission_request_${realWebhook ? "webhook" : "direct"}`;
-    if (realTarget) {
-      await waitForObservation(
-        () =>
-          targetPermissionDecisionObserved &&
-          successfulAckCounts[1] > recipientAckCountBeforePermission,
-        "permission_request_model_timeout",
-      );
-    } else {
-      const permissionMessage = await waitForDelivered(
-        directMessages,
-        (message) =>
-          isRecord(message) &&
-          isRecord(message.payload) &&
-          message.payload.type === "permission_request" &&
-          message.payload.permission_id === requested.permission_id,
-        "permission_request_direct_timeout",
-      );
-      assert(
-        isRecord(permissionMessage) && typeof permissionMessage.id === "string",
-        "permission_poll",
-      );
-    }
-
     phase = "permission_listing";
-    let permissionListing = { status: "server_error", fields: [] };
-    let permissionStatus;
-    try {
-      const listing = await gateways[1].client.call("get_my_permissions", {});
-      assert(Array.isArray(listing.permissions), "permission_listing");
-      const listed = listing.permissions.find(
-        (permission) => isRecord(permission) && permission.id === requested.permission_id,
-      );
-      assert(isRecord(listed), "permission_listing");
-      assert(typeof listed.status === "string", "permission_listing");
-      permissionStatus = listed.status;
-      permissionListing = {
-        status: "ok",
-        decision: permissionStatus,
-        fields: Object.keys(listed).sort(),
-      };
-    } catch {
-      permissionListing = { status: "server_error", fields: [] };
-    }
+    const pendingListing = await gateways[1].client.call("list_pending_permission_requests", {});
+    assert(
+      pendingListing.count >= 1 &&
+        Array.isArray(pendingListing.pending_permission_requests) &&
+        pendingListing.pending_permission_requests.some(
+          (permission) => isRecord(permission) && permission.id === requested.permission_id,
+        ),
+      "permission_listing",
+    );
+    const listing = await gateways[1].client.call("get_my_permissions", {});
+    assert(Array.isArray(listing.permissions), "permission_listing");
+    const listed = listing.permissions.find(
+      (permission) => isRecord(permission) && permission.id === requested.permission_id,
+    );
+    assert(isRecord(listed) && listed.status === "pending", "permission_listing");
+    const permissionListing = {
+      status: "ok",
+      decision: listed.status,
+      fields: Object.keys(listed).sort(),
+    };
 
-    if (permissionStatus === "pending" && !realTarget) {
-      await gateways[1].client.call("respond_to_permission", {
-        permission_id: requested.permission_id,
-        decision: "granted",
-      });
-    } else {
-      assert(permissionStatus === "granted", "permission_decision");
+    phase = "permission_email_decision";
+    const permissionMail = await findPermissionDecision(credentials, addresses[1], receivedAfter);
+    capturedMail.push(permissionMail.messageId);
+    const decisionTarget = new URL("/api/permission_decision", LIVE_ORIGIN);
+    centralRoutes.add("POST /api/permission_decision");
+    const decisionResponse = await fetch(decisionTarget, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: permissionMail.token, decision: "accept" }),
+      credentials: "omit",
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const decisionObservation = await sanitizedResponseObservation(
+      decisionTarget,
+      decisionResponse,
+    );
+    if (
+      centralObservations.length < 64 &&
+      !centralObservations.some(
+        (existing) => canonicalJson(existing) === canonicalJson(decisionObservation),
+      )
+    ) {
+      centralObservations.push(decisionObservation);
     }
-    if (realTarget) assert(targetPermissionDecisionObserved, "target_permission_decision");
+    assert(decisionResponse.ok, "permission_email_decision");
+    targetPermissionDecisionObserved = true;
+    await deleteMessage(credentials, permissionMail.messageId);
+    capturedMail.splice(capturedMail.indexOf(permissionMail.messageId), 1);
+
     phase = realCodexClaude ? "permission_response_codex" : "permission_response_webhook";
     const responseMessage = realCodexClaude
       ? await waitForDelivered(
@@ -1955,7 +2161,6 @@ async function main() {
           (message) =>
             isRecord(message) &&
             isRecord(message.payload) &&
-            message.payload.type === "permission_response" &&
             message.payload.permission_id === requested.permission_id,
           "permission_response_codex_timeout",
         )
@@ -1964,9 +2169,12 @@ async function main() {
       isRecord(responseMessage) &&
         typeof responseMessage.id === "string" &&
         isRecord(responseMessage.payload) &&
-        responseMessage.payload.type === "permission_response" &&
+        responseMessage.payload.type === "permission_outcome" &&
         responseMessage.payload.permission_id === requested.permission_id &&
-        responseMessage.payload.decision === "granted",
+        responseMessage.payload.decision === "accept" &&
+        responseMessage.payload.status === "granted" &&
+        responseMessage.payload.granted === true &&
+        responseMessage.payload.single_use === false,
       "permission_response",
     );
     if (realCodexClaude) {
@@ -1977,13 +2185,23 @@ async function main() {
     }
 
     phase = "action";
-    const called = await gateways[0].client.call("call_action", {
-      target_email: addresses[1],
-      action_type: "get_phone_number",
-      payload: { reason: actionReason },
-    });
+    if (realCodexClaude) {
+      await waitForObservation(
+        () => requesterActionCall !== undefined,
+        "permission_outcome_action_timeout",
+      );
+      assert(requesterRejectedActionCalls === 0, "permission_outcome_action_rejected");
+    }
+    const called = realCodexClaude
+      ? requesterActionCall
+      : await gateways[0].client.call("call_action", {
+          target_email: addresses[1],
+          action_type: "get_phone_number",
+          payload: { reason: actionReason },
+        });
     assert(
-      typeof called.call_id === "string" &&
+      isRecord(called) &&
+        typeof called.call_id === "string" &&
         typeof called.message_id === "string" &&
         called.status === "delivered",
       "action",
@@ -2091,10 +2309,139 @@ async function main() {
       markers,
     );
 
-    phase = "cleanup";
+    phase = "gateway_stop_before_cli";
     for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
     for (const gateway of openClawGateways.splice(0)) await gateway.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
+
+    phase = "webhook_secret_command";
+    const firstWebhookSecret = await runStoppedCliCommand(
+      packed,
+      roots[0],
+      environmentFor(0),
+      workingDirectoryFor(0),
+      ["webhook-secret"],
+    );
+    const secondWebhookSecret = await runStoppedCliCommand(
+      packed,
+      roots[0],
+      environmentFor(0),
+      workingDirectoryFor(0),
+      ["webhook-secret"],
+    );
+    assert(
+      /^[a-f0-9]{48}\n$/u.test(firstWebhookSecret) && secondWebhookSecret === firstWebhookSecret,
+      "webhook_secret_command",
+    );
+
+    let sessionCommands = "not_applicable";
+    if (realDirect) {
+      phase = "session_commands";
+      const directIndexes = realCodexClaude ? [0, 1] : [1];
+      const sessionsByIndex = new Map();
+      for (const index of directIndexes) {
+        const sessions = listedSessions(
+          await runStoppedCliCommand(
+            packed,
+            roots[index],
+            environmentFor(index),
+            workingDirectoryFor(index),
+            ["sessions", "list"],
+          ),
+        );
+        sessionsByIndex.set(index, sessions);
+        const shown = await runStoppedCliCommand(
+          packed,
+          roots[index],
+          environmentFor(index),
+          workingDirectoryFor(index),
+          ["sessions", "show", sessions[0].session_id],
+        );
+        assert(shown.trim().length > 0, "session_show");
+        const verboseHistory = await runStoppedCliCommand(
+          packed,
+          roots[index],
+          environmentFor(index),
+          workingDirectoryFor(index),
+          ["sessions", "show", sessions[0].session_id, "--verbose"],
+        );
+        assert(verboseHistory.includes("sessionUpdate"), "session_show_verbose");
+      }
+      const deleteIndex = 1;
+      const forgetIndex = realCodexClaude ? 0 : 1;
+      const deleteSessions = sessionsByIndex.get(deleteIndex);
+      const forgetSessions = sessionsByIndex.get(forgetIndex);
+      assert(
+        deleteSessions?.[0] !== undefined && forgetSessions?.[0] !== undefined,
+        "session_list",
+      );
+      const deleted = await runStoppedCliCommand(
+        packed,
+        roots[deleteIndex],
+        environmentFor(deleteIndex),
+        workingDirectoryFor(deleteIndex),
+        ["sessions", "delete", deleteSessions[0].session_id],
+      );
+      assert(deleted.includes("deleted session"), "session_delete");
+      const forgotten = await runStoppedCliCommand(
+        packed,
+        roots[forgetIndex],
+        environmentFor(forgetIndex),
+        workingDirectoryFor(forgetIndex),
+        ["sessions", "forget", forgetSessions[0].session_id],
+      );
+      assert(forgotten.includes("forgot session"), "session_forget");
+      sessionCommands = "passed";
+    }
+
+    phase = "verbose_start";
+    const verboseGateway = await startGateway(
+      packed,
+      roots[1],
+      centralFetchFor(1),
+      deliveryTargetFactoryFor(1),
+      clientInfoFor(1),
+      environmentFor(1),
+      workingDirectoryFor(1),
+      webhookFetchFor(1),
+      localMcpPortFor(1),
+      true,
+    );
+    await verboseGateway.client.call("get_my_permissions", {});
+    const verboseOutput = verboseGateway.stderr();
+    assert(
+      verboseOutput.includes("Verbose mode can print personal message, tool, and API data") &&
+        verboseOutput.includes("mcp.tool.request") &&
+        verboseOutput.includes("central.request") &&
+        verboseOutput.includes('"authorization":"[redacted]"') &&
+        verboseOutput.includes('"dpop":"[redacted]"'),
+      "verbose_output",
+    );
+    for (const secret of [
+      loadedCredential.record.access_token,
+      secondCredential.record.access_token,
+      loadedCredential.record.dpop_private_key_pkcs8,
+      secondCredential.record.dpop_private_key_pkcs8,
+      ...codes,
+      ...webhookSecrets,
+    ]) {
+      assert(!verboseOutput.includes(secret), "verbose_redaction");
+    }
+    await verboseGateway.stop();
+
+    phase = "clean_command";
+    for (let index = 0; index < 2; index += 1) {
+      const cleaned = await runStoppedCliCommand(
+        packed,
+        roots[index],
+        environmentFor(index),
+        workingDirectoryFor(index),
+        ["clean"],
+      );
+      assert(cleaned === "Ambassador local state cleared\n", "clean_command");
+    }
+
+    phase = "cleanup";
     for (const webhook of webhooks.splice(0)) await webhook.close();
     await rm(qualificationRoot, { recursive: true, force: true });
 
@@ -2120,7 +2467,7 @@ async function main() {
     const targetAgent = realCodex
       ? "codex-acp"
       : realClaude
-        ? "@embassys/claude-cli-acp"
+        ? "@agentclientprotocol/claude-agent-acp"
         : realHermes
           ? "hermes-agent"
           : realOpenClaw
@@ -2151,21 +2498,26 @@ async function main() {
         encrypted_restart: "passed",
         dpop_positive: "passed",
         dpop_negative_matrix: "passed",
-        permission_request_decision: "passed",
+        permission_email_decision: "passed",
         permission_listing: permissionListing,
         webhook_delivery_ack: realCodexClaude ? "not_applicable" : "passed",
         codex_response_delivery: realCodexClaude ? "passed" : "not_applicable",
         target_delivery_ack: "passed",
         acknowledgement_order: "passed",
         action_result_round_trip: "passed",
-        codex_permission_decision: realCodex ? "passed" : "not_applicable",
+        verbose_start: "passed",
+        session_commands: sessionCommands,
+        webhook_secret_command: "passed",
+        clean_command: "passed",
         codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
-        claude_permission_decision: realClaude ? "passed" : "not_applicable",
         claude_action_result_mcp_call: realClaude ? "passed" : "not_applicable",
+        requester_permission_outcome_action: realCodexClaude ? "passed" : "not_applicable",
+        requester_rejected_action_calls: realCodexClaude
+          ? requesterRejectedActionCalls
+          : "not_applicable",
         claude_action_result_call_count: realClaude
           ? targetActionResultCallCount
           : "not_applicable",
-        hermes_permission_decision: realHermes ? "passed" : "not_applicable",
         hermes_action_result_mcp_call: realHermes ? "passed" : "not_applicable",
         hermes_action_result_call_count: realHermes
           ? targetActionResultCallCount
@@ -2173,7 +2525,6 @@ async function main() {
         hermes_webhook_custody: realHermesWebhook ? "passed" : "not_applicable",
         hermes_webhook_bearer_filter: realHermesWebhook ? "passed" : "not_applicable",
         hermes_acp_v1: realHermesDirect ? "passed" : "not_applicable",
-        openclaw_permission_decision: realOpenClaw ? "passed" : "not_applicable",
         openclaw_action_result_mcp_call: realOpenClaw ? "passed" : "not_applicable",
         openclaw_action_result_call_count: realOpenClaw
           ? targetActionResultCallCount
@@ -2183,6 +2534,7 @@ async function main() {
         openclaw_native_hook: realOpenClawWebhook ? "passed" : "not_applicable",
         openclaw_acp_v1: realOpenClawDirect ? "passed" : "not_applicable",
         central_mcp_requests: 0,
+        delivered_payload_observations: deliveredPayloadObservations,
         artifact_scan: "passed",
         mail_cleanup: "passed",
       },
@@ -2201,7 +2553,7 @@ async function main() {
     phase = typeof error?.phase === "string" ? error.phase : phase;
     const failurePhase = phase.endsWith("_failed") ? phase : `${phase}_failed`;
     process.stderr.write(
-      `live qualification: ${JSON.stringify({ phase: failurePhase, target_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, action_catalog: catalogObservation, target_permission_decision_observed: targetPermissionDecisionObserved, target_action_result_call_count: targetActionResultCallCount, successful_ack_counts: successfulAckCounts, webhook_custody_counts: webhookAcceptedByGateway.map((messages) => messages.size), ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
+      `live qualification: ${JSON.stringify({ phase: failurePhase, target_agent: directAgent, reviewed_source_revision: SOURCE_REVISION, deployment_revision: "not_exposed", central_routes: [...centralRoutes].sort(), central_observations: centralObservations, delivered_payload_observations: deliveredPayloadObservations, action_catalog: catalogObservation, target_permission_decision_observed: targetPermissionDecisionObserved, target_action_result_call_count: targetActionResultCallCount, requester_rejected_action_calls: requesterRejectedActionCalls, successful_ack_counts: successfulAckCounts, webhook_custody_counts: webhookAcceptedByGateway.map((messages) => messages.size), ambassador_stderr_nonempty: gateways.map((gateway) => gateway.stderr().length > 0) })}\n`,
     );
     return 1;
   } finally {

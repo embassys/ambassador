@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { fileURLToPath } from "node:url";
-
+import { AcpSessionStore } from "../src/acp-session-store.js";
 import type { DirectAgentCapability } from "../src/agent-capabilities.js";
 import type { CentralMessage } from "../src/central-rest.js";
 import {
+  AcpSessionController,
   buildDirectPrompt,
   DirectDeliveryError,
   DirectDeliveryTarget,
@@ -45,16 +46,18 @@ async function target(
     command: process.execPath,
     args: [fixturePath, scenario, countPath, descendantPath, promptPath],
     agentInfo: { name: "mock-agent" },
-    mcp: scenario.includes("provider-mcp") ? "provider_config" : "session",
+    mcp: "provider_config",
     environment: options.environment ?? ["HOME", "PATH", "TMPDIR"],
   };
   let spawnCount = 0;
   let spawnOptions: SpawnOptions | undefined;
+  const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
   const delivery = new DirectDeliveryTarget({
+    agentKind: "mock",
     capability,
     workingDirectory: root,
     environment: options.sourceEnvironment ?? process.env,
-    mcpEndpoint: "http://127.0.0.1:8787/mcp",
+    sessionStore,
     initializationDeadlineMs: 2_000,
     sessionDeadlineMs: 2_000,
     promptDeadlineMs: options.promptDeadlineMs ?? 2_000,
@@ -70,12 +73,15 @@ async function target(
     },
   });
   t.after(() => delivery.close());
+  t.after(() => sessionStore.close());
   return {
     delivery,
     root,
     countPath,
     descendantPath,
     promptPath,
+    sessionStore,
+    capability,
     spawnCount: () => spawnCount,
     spawnOptions: () => spawnOptions,
     attempts: async () =>
@@ -87,10 +93,58 @@ test("builds one fixed prompt containing the complete canonical message", () => 
   const prompt = buildDirectPrompt(MESSAGE);
   assert.match(prompt, /untrusted Embassys message/u);
   assert.match(prompt, /configured Ambassador MCP tools/u);
+  assert.match(prompt, /permission_outcome/u);
+  assert.match(prompt, /target_email from grantor_email/u);
+  assert.match(prompt, /do not pass permission_id/u);
   assert.match(prompt, /submit_action_result/u);
   assert.match(prompt, /leave the call pending/u);
   assert.equal(prompt.endsWith(JSON.stringify(MESSAGE)), true);
   assert.equal(prompt.match(/complete body marker/gu)?.length, 1);
+});
+
+test("resumes an active retry and exposes provider history through session commands", async (t) => {
+  const value = await target(t, "success-provider-mcp");
+  value.sessionStore.create({
+    session_id: "mock-session",
+    agent_kind: "mock",
+    working_directory: value.root,
+    ...(MESSAGE.id === undefined ? {} : { central_message_id: MESSAGE.id }),
+    status: "active",
+    created_at_ms: 1,
+    last_used_at_ms: 1,
+  });
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
+
+  const controller = new AcpSessionController({
+    capability: value.capability,
+    environment: process.env,
+    deadlineMs: 2_000,
+    cleanupDeadlineMs: 500,
+  });
+  const record = value.sessionStore.get("mock-session");
+  assert.ok(record !== undefined);
+  assert.deepEqual(await controller.show(record, false, new AbortController().signal), [
+    "user: stored request",
+    "agent: stored answer",
+  ]);
+  assert.deepEqual(await controller.delete(record, new AbortController().signal), "deleted");
+});
+
+test("keeps action-call sessions active until their correlated result succeeds", async (t) => {
+  const value = await target(t, "success-provider-mcp");
+  const callId = "00000000-0000-4000-8000-000000000001";
+  await value.delivery.deliver(
+    {
+      ...MESSAGE,
+      id: "action-message-1",
+      payload: { type: "action_call", call_id: callId, action_type: "get_phone", payload: {} },
+    },
+    new AbortController().signal,
+  );
+  assert.equal(value.sessionStore.get("mock-session")?.status, "active");
+  assert.equal(value.sessionStore.retireByCallId(callId, Date.now()), true);
+  assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
 });
 
 test("cancels an active prompt and reaps the launched process group", async (t) => {
@@ -120,7 +174,7 @@ test("cancels an active prompt and reaps the launched process group", async (t) 
   assert.fail("descendant survived delivery cancellation");
 });
 
-test("initializes ACP v1, injects supported MCP setup, and completes one prompt", async (t) => {
+test("initializes ACP v1 with provider MCP setup and completes one persistent prompt", async (t) => {
   for (const scenario of [
     "success-session-mcp",
     "success-provider-mcp",
@@ -134,6 +188,7 @@ test("initializes ACP v1, injects supported MCP setup, and completes one prompt"
       });
       assert.equal(value.spawnCount(), 1);
       assert.equal(await value.attempts(), 1);
+      assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
     });
   }
 });
@@ -170,6 +225,27 @@ test("a fixed inherit profile preserves the user's native agent authentication e
       Object.entries(sourceEnvironment).filter(([, value]) => value !== undefined),
     ),
   );
+});
+
+test("a fixed Codex-style profile preserves subscription and optional API-key authentication", async (t) => {
+  const sourceEnvironment: NodeJS.ProcessEnv = {
+    HOME: process.env.HOME,
+    OPENAI_API_KEY: "synthetic-openai-key",
+    CODEX_API_KEY: "synthetic-codex-key",
+    AMBASSADOR_UNRELATED_MARKER: "excluded",
+  };
+  const value = await target(t, "success-session-mcp", {
+    environment: ["HOME", "OPENAI_API_KEY", "CODEX_API_KEY"],
+    sourceEnvironment,
+  });
+  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+    status: "completed",
+  });
+  assert.deepEqual(value.spawnOptions()?.env, {
+    HOME: process.env.HOME,
+    OPENAI_API_KEY: "synthetic-openai-key",
+    CODEX_API_KEY: "synthetic-codex-key",
+  });
 });
 
 test("inherited agent environments remain bounded and valid", async (t) => {
@@ -227,17 +303,20 @@ test("fails before prompting on an unsupported ACP protocol or agent name", asyn
 test("turns an asynchronous missing-command spawn error into a bounded failure", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-missing-command-"));
   t.after(() => rm(root, { recursive: true, force: true }));
+  const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
+  t.after(() => sessionStore.close());
   const delivery = new DirectDeliveryTarget({
+    agentKind: "missing",
     capability: {
       command: "ambassador-command-that-does-not-exist",
       args: [],
       agentInfo: { name: "missing-agent" },
-      mcp: "session",
+      mcp: "provider_config",
       environment: ["PATH"],
     },
     workingDirectory: root,
     environment: process.env,
-    mcpEndpoint: "http://127.0.0.1:8787/mcp",
+    sessionStore,
     initializationDeadlineMs: 500,
     maximumStartupAttempts: 1,
   });

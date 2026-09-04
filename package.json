@@ -1,6 +1,6 @@
 {
   "name": "@embassys/ambassador",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Local Ambassador for the Embassys agent network",
   "license": "MIT",
   "repository": {
@@ -43,7 +43,8 @@
     "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "1.8.0",
+    "@agentclientprotocol/claude-agent-acp": "*",
+    "@agentclientprotocol/codex-acp": "*",
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",

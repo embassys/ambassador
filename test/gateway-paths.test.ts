@@ -13,6 +13,7 @@ test("uses only a private Ambassador state root on macOS", () => {
     webhookSecretPath: "/Users/local/Library/Application Support/ambassador/webhook-secret.json",
     webhookSecretKeyPath: "/Users/local/Library/Application Support/ambassador/webhook-secret.key",
     pendingActionPath: "/Users/local/Library/Application Support/ambassador/pending-actions.sqlite",
+    acpSessionPath: "/Users/local/Library/Application Support/ambassador/acp-sessions.sqlite",
     profilePath: "/Users/local/Library/Application Support/ambassador/delivery-profile.json",
   });
 });
@@ -27,6 +28,7 @@ test("uses the XDG state root on Linux without a configuration path", () => {
     webhookSecretPath: "/state/ambassador/webhook-secret.json",
     webhookSecretKeyPath: "/state/ambassador/webhook-secret.key",
     pendingActionPath: "/state/ambassador/pending-actions.sqlite",
+    acpSessionPath: "/state/ambassador/acp-sessions.sqlite",
     profilePath: "/state/ambassador/delivery-profile.json",
   });
   assert.equal(
@@ -47,6 +49,7 @@ test("uses local application data on Windows", () => {
       webhookSecretPath: "D:\\Local\\ambassador\\webhook-secret.json",
       webhookSecretKeyPath: "D:\\Local\\ambassador\\webhook-secret.key",
       pendingActionPath: "D:\\Local\\ambassador\\pending-actions.sqlite",
+      acpSessionPath: "D:\\Local\\ambassador\\acp-sessions.sqlite",
       profilePath: "D:\\Local\\ambassador\\delivery-profile.json",
     },
   );
