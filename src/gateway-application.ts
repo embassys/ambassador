@@ -1,4 +1,5 @@
 import { AcpSessionStore, AcpSessionStoreError } from "./acp-session-store.js";
+import { ActionResultInbox, ActionResultInboxError } from "./action-result-inbox.js";
 import type { AgentCapability } from "./agent-capabilities.js";
 import { capabilityForKind } from "./agent-capabilities.js";
 import {
@@ -7,7 +8,12 @@ import {
   REST_BOOTSTRAP_TOOLS,
 } from "./central-enrollment.js";
 import { CentralProtectedTransport } from "./central-protected-transport.js";
-import { CentralRestClient, CentralRestError, REST_AUTHENTICATED_TOOLS } from "./central-rest.js";
+import {
+  type CentralPermission,
+  CentralRestClient,
+  CentralRestError,
+  REST_AUTHENTICATED_TOOLS,
+} from "./central-rest.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 import {
   type DeliveryProfile,
@@ -24,6 +30,11 @@ import { DpopNonceCache } from "./dpop.js";
 import { GatewayError } from "./errors.js";
 import { GuidedRegistration, GuidedRegistrationError } from "./guided-registration.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
+import {
+  EncryptedFileLocalControlSecretStore,
+  type LocalControlSecretStore,
+  LocalSessionControlError,
+} from "./local-control.js";
 import {
   type LocalMcpRouter,
   LocalMcpServer,
@@ -43,7 +54,7 @@ import {
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
 import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
-import { traceFetch, type VerboseLogger } from "./verbose-log.js";
+import { describeVerboseError, traceFetch, type VerboseLogger } from "./verbose-log.js";
 import { WebhookDeliveryError, WebhookDeliveryTarget } from "./webhook-delivery.js";
 import {
   EncryptedFileWebhookSecretStore,
@@ -69,7 +80,10 @@ export interface GatewayApplicationOptions {
   readonly credentialKeyPath: string;
   readonly webhookSecretPath: string;
   readonly webhookSecretKeyPath: string;
+  readonly localControlSecretPath: string;
+  readonly localControlSecretKeyPath: string;
   readonly pendingActionPath: string;
+  readonly actionResultPath: string;
   readonly acpSessionPath: string;
   readonly profilePath: string;
   readonly workingDirectory: string;
@@ -79,10 +93,11 @@ export interface GatewayApplicationOptions {
   readonly webhookFetch?: typeof fetch;
   readonly credentialStore?: CredentialStore;
   readonly webhookSecretStore?: WebhookSecretStore;
+  readonly localControlSecretStore?: LocalControlSecretStore;
   readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
   readonly acpSessionControllerFactory?: (
     capability: NonNullable<AgentCapability["direct"]>,
-  ) => Pick<AcpSessionController, "delete">;
+  ) => Pick<AcpSessionController, "delete" | "show">;
   readonly localMcpPort?: number;
   readonly nowSeconds?: () => number;
   readonly signal?: AbortSignal;
@@ -100,9 +115,35 @@ function safeFailure(): Error {
   return new Error("Ambassador operation failed");
 }
 
+function permissionInboxItem(permission: CentralPermission): Record<string, unknown> {
+  return {
+    kind: "permission_request",
+    permission_id: permission.id,
+    requester_email: permission.grantee_email,
+    action_type: permission.action_type,
+    ...(permission.scope === undefined || permission.scope === null
+      ? {}
+      : { scope: permission.scope }),
+    ...(permission.created_at === undefined || permission.created_at === null
+      ? {}
+      : { created_at: permission.created_at }),
+    response: {
+      tool: "respond_to_permission",
+      required: {
+        permission_id: permission.id,
+        decision: ["granted", "denied"],
+      },
+    },
+  };
+}
+
 function startupFailure(error: unknown): GatewayError {
   if (error instanceof GatewayError) return error;
-  if (error instanceof PendingActionInboxError || error instanceof AcpSessionStoreError) {
+  if (
+    error instanceof PendingActionInboxError ||
+    error instanceof ActionResultInboxError ||
+    error instanceof AcpSessionStoreError
+  ) {
     return new GatewayError(
       "local_state_invalid",
       "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
@@ -232,14 +273,28 @@ function localDeliveryFailure(error: unknown): boolean {
 
 function localError(error: unknown): LocalMcpToolError {
   if (error instanceof LocalMcpToolError) return error;
-  if (error instanceof IdentityError) return new LocalMcpToolError(error.code);
-  if (error instanceof CentralEnrollmentError) return new LocalMcpToolError(error.code);
-  if (error instanceof CentralRestError) return new LocalMcpToolError(error.code);
-  if (error instanceof GuidedRegistrationError) return new LocalMcpToolError(error.code);
-  if (error instanceof DeliveryProfileError) return new LocalMcpToolError(error.code);
-  if (error instanceof McpContractError) return new LocalMcpToolError("invalid_arguments");
-  if (error instanceof NotificationRelayError) return new LocalMcpToolError(error.code);
-  return new LocalMcpToolError("ambassador_operation_failed");
+  if (error instanceof IdentityError) {
+    return new LocalMcpToolError(error.code, undefined, "local_identity");
+  }
+  if (error instanceof CentralEnrollmentError) {
+    return new LocalMcpToolError(error.code, undefined, "central_enrollment");
+  }
+  if (error instanceof CentralRestError) {
+    return new LocalMcpToolError(error.code, undefined, "central_rest");
+  }
+  if (error instanceof GuidedRegistrationError) {
+    return new LocalMcpToolError(error.code, undefined, "guided_registration");
+  }
+  if (error instanceof DeliveryProfileError) {
+    return new LocalMcpToolError(error.code, undefined, "delivery_profile");
+  }
+  if (error instanceof McpContractError) {
+    return new LocalMcpToolError("invalid_arguments", undefined, "local_mcp_contract");
+  }
+  if (error instanceof NotificationRelayError) {
+    return new LocalMcpToolError(error.code, undefined, "notification_relay");
+  }
+  return new LocalMcpToolError("ambassador_operation_failed", undefined, "ambassador");
 }
 
 export async function openGatewayApplication(
@@ -262,6 +317,12 @@ export async function openGatewayApplication(
   const webhookSecretStore =
     options.webhookSecretStore ??
     new EncryptedFileWebhookSecretStore(options.webhookSecretPath, options.webhookSecretKeyPath);
+  const localControlSecretStore =
+    options.localControlSecretStore ??
+    new EncryptedFileLocalControlSecretStore(
+      options.localControlSecretPath,
+      options.localControlSecretKeyPath,
+    );
   const store =
     options.credentialStore ??
     new EncryptedFileCredentialStore(
@@ -280,15 +341,26 @@ export async function openGatewayApplication(
   let relay: NotificationRelay | undefined;
   let relayRun: Promise<void> | undefined;
   let pendingActionInbox: PendingActionInbox | undefined;
+  let actionResultInbox: ActionResultInbox | undefined;
   let acpSessionStore: AcpSessionStore | undefined;
   let sessionCleanupTimer: NodeJS.Timeout | undefined;
   let cleaningSessions = false;
   let closed = false;
   let activation: Promise<void> | undefined;
   let reportFailure: ((error: Error) => void) | undefined;
+  let sessionOperationTail: Promise<void> = Promise.resolve();
   const failure = new Promise<Error>((resolve) => {
     reportFailure = resolve;
   });
+
+  const runSessionOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = sessionOperationTail.then(operation);
+    sessionOperationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
 
   const enrollment = new CentralEnrollmentClient({
     centralOrigin,
@@ -321,43 +393,54 @@ export async function openGatewayApplication(
     if (cleaningSessions || acpSessionStore === undefined) return;
     cleaningSessions = true;
     try {
-      const cutoff = Math.max(0, Math.floor(nowSeconds() * 1_000) - SESSION_RETENTION_MS);
-      const expired = acpSessionStore.expiredRetired(cutoff).slice(0, MAX_SESSION_CLEANUP_BATCH);
-      for (const record of expired) {
-        if (lifetimeSignal.aborted) return;
-        const capability = capabilityForKind(record.agent_kind)?.direct;
-        if (capability === undefined) {
-          acpSessionStore.forget(record.session_id);
-          continue;
-        }
-        try {
-          const sessionController =
-            options.acpSessionControllerFactory?.(capability) ??
-            new AcpSessionController({
-              capability,
-              environment: options.environment,
-              log,
-            });
-          const result = await sessionController.delete(record, lifetimeSignal);
-          if (result === "deleted" || result === "unsupported") {
+      await runSessionOperation(async () => {
+        if (acpSessionStore === undefined) return;
+        const cutoff = Math.max(0, Math.floor(nowSeconds() * 1_000) - SESSION_RETENTION_MS);
+        const expired = acpSessionStore.expiredRetired(cutoff).slice(0, MAX_SESSION_CLEANUP_BATCH);
+        for (const record of expired) {
+          if (lifetimeSignal.aborted) return;
+          const capability = capabilityForKind(record.agent_kind)?.direct;
+          if (capability === undefined) {
             acpSessionStore.forget(record.session_id);
-            log("acp.session.cleaned", { session_id: record.session_id, result });
+            continue;
           }
-        } catch (error) {
-          log("acp.session.cleanup_failed", {
-            session_id: record.session_id,
-            error: error instanceof Error ? error.name : "Error",
-          });
+          try {
+            const sessionController =
+              options.acpSessionControllerFactory?.(capability) ??
+              new AcpSessionController({
+                capability,
+                environment: options.environment,
+                log,
+              });
+            const result = await sessionController.delete(record, lifetimeSignal);
+            if (result === "deleted" || result === "unsupported") {
+              acpSessionStore.forget(record.session_id);
+              log("acp.session.cleaned", { session_id: record.session_id, result });
+            }
+          } catch (error) {
+            log("acp.session.cleanup_failed", {
+              session_id: record.session_id,
+              error: error instanceof Error ? error.name : "Error",
+            });
+          }
         }
-      }
+      });
     } finally {
       cleaningSessions = false;
     }
   };
 
   const createDeliveryTarget = async (context: DeliveryTargetContext): Promise<DeliveryTarget> => {
+    const serializeDirectTarget = (target: DeliveryTarget): DeliveryTarget => {
+      if (context.profile.mode !== "direct") return target;
+      return {
+        deliver: (message, signal) =>
+          runSessionOperation(async () => await target.deliver(message, signal)),
+        close: async () => await target.close(),
+      };
+    };
     if (options.deliveryTargetFactory !== undefined) {
-      return options.deliveryTargetFactory(context);
+      return serializeDirectTarget(options.deliveryTargetFactory(context));
     }
     if (context.profile.mode === "webhook") {
       const secret = await webhookSecretStore.load();
@@ -377,7 +460,7 @@ export async function openGatewayApplication(
     }
     const sessionStore = context.sessionStore ?? acpSessionStore;
     if (sessionStore === undefined) throw new AcpSessionStoreError();
-    return new DirectDeliveryTarget({
+    const direct = new DirectDeliveryTarget({
       agentKind: context.capability.kind,
       capability: context.capability.direct,
       workingDirectory: context.profile.working_directory,
@@ -386,6 +469,7 @@ export async function openGatewayApplication(
       nowMs: () => Math.floor(nowSeconds() * 1_000),
       log,
     });
+    return serializeDirectTarget(direct);
   };
 
   const enableEnrolledIdentity = async (): Promise<void> => {
@@ -412,6 +496,9 @@ export async function openGatewayApplication(
         pendingActionInbox ??
         new PendingActionInbox(options.pendingActionPath, identity.credential());
       pendingActionInbox = nextPendingActionInbox;
+      const nextActionResultInbox =
+        actionResultInbox ?? new ActionResultInbox(options.actionResultPath, identity.credential());
+      actionResultInbox = nextActionResultInbox;
       const target = await createDeliveryTarget({
         ...profile,
         endpoint: local.endpoint,
@@ -441,6 +528,7 @@ export async function openGatewayApplication(
         },
         captureMessage: (message) => {
           nextPendingActionInbox.capture(message);
+          nextActionResultInbox.capture(message);
         },
       });
       rest = nextRest;
@@ -472,6 +560,51 @@ export async function openGatewayApplication(
   const requirePendingActionInbox = (): PendingActionInbox => {
     if (pendingActionInbox === undefined) throw safeFailure();
     return pendingActionInbox;
+  };
+
+  const requireActionResultInbox = (): ActionResultInbox => {
+    if (actionResultInbox === undefined) throw safeFailure();
+    return actionResultInbox;
+  };
+
+  const listSessions = (): ReturnType<AcpSessionStore["list"]> => {
+    if (acpSessionStore !== undefined) return acpSessionStore.list();
+    const transient = new AcpSessionStore(options.acpSessionPath);
+    try {
+      return transient.list();
+    } finally {
+      transient.close();
+    }
+  };
+
+  const sessionControl = {
+    list: () => listSessions(),
+    show: (sessionId: string, verbose: boolean, signal: AbortSignal) =>
+      runSessionOperation(async () => {
+        let transient: AcpSessionStore | undefined;
+        let sessionStore = acpSessionStore;
+        if (sessionStore === undefined) {
+          transient = new AcpSessionStore(options.acpSessionPath);
+          sessionStore = transient;
+        }
+        let record: ReturnType<AcpSessionStore["get"]>;
+        try {
+          record = sessionStore.get(sessionId);
+        } finally {
+          transient?.close();
+        }
+        if (record === undefined) throw new LocalSessionControlError("session_not_found");
+        const capability = capabilityForKind(record.agent_kind)?.direct;
+        if (capability === undefined) throw new LocalSessionControlError("agent_unsupported");
+        const sessionController =
+          options.acpSessionControllerFactory?.(capability) ??
+          new AcpSessionController({ capability, environment: options.environment, log });
+        return await sessionController.show(
+          record,
+          verbose,
+          AbortSignal.any([signal, lifetimeSignal]),
+        );
+      }),
   };
 
   const router: LocalMcpRouter = {
@@ -518,14 +651,37 @@ export async function openGatewayApplication(
           case "request_permission":
             result = await requireRest().requestPermission(arguments_, signal);
             break;
-          case "list_pending_permission_requests": {
+          case "get_inbox": {
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
             const enrolledEmail = identity.credential().token.email;
-            const pending = (await requireRest().getMyPermissions(signal)).filter(
-              (permission) =>
-                permission.status === "pending" && permission.grantor_email === enrolledEmail,
-            );
-            result = { count: pending.length, pending_permission_requests: pending };
+            const permissions = (await requireRest().getMyPermissions(signal))
+              .filter(
+                (permission) =>
+                  permission.status === "pending" && permission.grantor_email === enrolledEmail,
+              )
+              .map(permissionInboxItem);
+            const actionCalls = requirePendingActionInbox()
+              .list()
+              .map((action) => ({
+                kind: "action_call",
+                ...action,
+                response: {
+                  tool: "submit_action_result",
+                  required: {
+                    call_id: action.call_id,
+                    status: ["success", "error"],
+                    result: { type: "object" },
+                  },
+                },
+              }));
+            const actionResults = requireActionResultInbox()
+              .list()
+              .map((actionResult) => ({ kind: "action_result", ...actionResult }));
+            const items = [...permissions, ...actionCalls, ...actionResults];
+            result = { count: items.length, items };
+            assertSafeUpstreamResult(result, identity.credential().record.access_token);
+            const consumedResults = requireActionResultInbox().takeAll();
+            if (consumedResults.length !== actionResults.length) throw safeFailure();
             break;
           }
           case "respond_to_permission":
@@ -534,12 +690,6 @@ export async function openGatewayApplication(
           case "call_action":
             result = await requireRest().callAction(arguments_, signal);
             break;
-          case "list_pending_action_calls": {
-            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
-            const pending = requirePendingActionInbox().list();
-            result = { count: pending.length, pending_action_calls: pending };
-            break;
-          }
           case "submit_action_result": {
             result = await requireRest().submitActionResult(arguments_, signal);
             const callId = String(result.call_id);
@@ -558,20 +708,25 @@ export async function openGatewayApplication(
         log("mcp.tool.response", { name, result });
         return result;
       } catch (error) {
+        const mappedError = localError(error);
         log("mcp.tool.error", {
           name,
-          error: error instanceof Error ? error.name : "Error",
+          source: mappedError.source,
+          error_code: mappedError.code,
+          error: describeVerboseError(error),
         });
-        throw localError(error);
+        throw mappedError;
       }
     },
   };
 
   try {
+    const localControlSecret = await localControlSecretStore.createOrLoad();
     identity = await GatewayIdentity.open(store, nowSeconds);
     if (identity.enrolled) await loadProfile();
     local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
+      control: { secret: localControlSecret, sessions: sessionControl },
     });
     await local.listen();
     if (identity.enrolled) await enableEnrolledIdentity();
@@ -581,6 +736,7 @@ export async function openGatewayApplication(
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
     pendingActionInbox?.close();
+    actionResultInbox?.close();
     acpSessionStore?.close();
     journal.close();
     throw startupFailure(error);
@@ -598,6 +754,7 @@ export async function openGatewayApplication(
       await relayRun?.catch(() => undefined);
       await local.close();
       pendingActionInbox?.close();
+      actionResultInbox?.close();
       acpSessionStore?.close();
       journal.close();
     },

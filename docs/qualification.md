@@ -3,6 +3,36 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Live session inspection and unified inbox regression
+
+On 2026-09-04, the deterministic suite proved ADRs 0051 and 0052. Ambassador
+encrypted a validated `action_response` before central acknowledgement, kept
+it across a process restart, returned it once through `get_inbox`, and removed
+it from later inbox responses. The same tool returned pending permission and
+action requests until their response operations succeeded. Each pending item
+described the tool and required fields for its response. The database contained
+neither the plaintext call ID nor the returned phone number. Separate tests
+covered exact duplicate handling, conflicting results, malformed messages,
+credential-shaped fields, identity binding, linked database files, and count
+and byte limits.
+
+The ACP fixture also sent an available-command catalog during delivery and
+session history loading. Verbose startup recorded only its count, and verbose
+session history omitted the catalog and its descriptions.
+
+ADR 0053's deterministic cases kept the foreground process running while a
+second CLI invocation listed sessions and loaded both normal and verbose
+provider history. The same case proved that deletion still fails while the
+process owns the lock. A delivery-order case held a direct delivery open and
+proved that provider history loading waited for it to complete. Boundary tests
+proved the private route requires the encrypted internal secret, rejects
+browser Origin requests, and does not make Authorization valid on `/mcp`.
+Separate coverage verified encrypted stable control-secret storage, fixed
+platform paths, and cleanup inclusion.
+
+The repository check passed 227 tests: 221 passed and six platform-specific or
+opt-in cases skipped. Linting, type checking, and the production build passed.
+
 ## Clean Codex-to-Claude live qualification
 
 On 2026-09-04, the completed ADR 0050 candidate passed a clean packed-artifact
@@ -682,9 +712,9 @@ For each row:
 8. Prove the requester receives the resulting `action_response` before both
    delivered messages are acknowledged.
 9. Exercise one bounded failure and confirm no unsafe replay.
-10. Stop the gateway and exercise `sessions list`, both forms of `sessions
-    show`, `sessions delete`, and `sessions forget` against provider-created
-    sessions.
+10. While the gateway runs, exercise `sessions list` and both forms of
+    `sessions show` against provider-created sessions. Then stop it and
+    exercise `sessions delete` and `sessions forget`.
 11. Scan the isolated state and output.
 
 OpenClaw webhook qualification enables the built-in `/hooks/agent` endpoint in

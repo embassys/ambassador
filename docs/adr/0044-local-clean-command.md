@@ -1,6 +1,7 @@
 # 0044 Local clean command
 
-Status: accepted
+Status: accepted; local result state amended by ADR 0051 and control state by
+ADR 0053
 
 Date: 2026-09-03
 
@@ -36,8 +37,10 @@ active SQLite sidecars. The removed entries include:
 
 - the encrypted central credential and wrapping key;
 - the encrypted webhook secret and wrapping key;
+- the encrypted local-control secret and wrapping key;
 - the delivery profile;
 - the encrypted pending-action inbox and its SQLite sidecars;
+- the encrypted action-result inbox and its SQLite sidecars;
 - the ID-only notification journal and its SQLite sidecars; and
 - interrupted temporary writes and future files inside the product-owned state
   directory.

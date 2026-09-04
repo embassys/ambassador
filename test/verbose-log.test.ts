@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createVerboseLogger, redactVerboseValue, traceFetch } from "../src/verbose-log.js";
+import {
+  createVerboseLogger,
+  describeVerboseError,
+  redactVerboseValue,
+  traceFetch,
+} from "../src/verbose-log.js";
 
 test("redacts credentials recursively while preserving useful verbose data", () => {
   const token = "eyJheader.payload.signature";
@@ -19,6 +24,30 @@ test("redacts credentials recursively while preserving useful verbose data", () 
       ordinary: "visible",
     },
   );
+});
+
+test("describes the complete bounded error chain with codes and sources", () => {
+  const cause = Object.assign(new Error("The email address format is unsupported"), {
+    name: "CentralEnrollmentError",
+    code: "unsupported_email_format",
+  });
+  const error = Object.assign(new Error("Guided registration failed", { cause }), {
+    name: "GuidedRegistrationError",
+    code: "registration_failed",
+    stage: "central_registration",
+  });
+
+  assert.deepEqual(describeVerboseError(error), {
+    name: "GuidedRegistrationError",
+    message: "Guided registration failed",
+    error_code: "registration_failed",
+    stage: "central_registration",
+    cause: {
+      name: "CentralEnrollmentError",
+      message: "The email address format is unsupported",
+      error_code: "unsupported_email_format",
+    },
+  });
 });
 
 test("traces central requests and responses without consuming or exposing credentials", async () => {

@@ -11,7 +11,7 @@ import {
 } from "./delivery-profile.js";
 import type { WebhookSecretStore } from "./webhook-secret-store.js";
 
-export type GuidedRegistrationErrorCode = "invalid_arguments" | "registration_failed";
+export type GuidedRegistrationErrorCode = "invalid_arguments";
 
 export class GuidedRegistrationError extends Error {
   constructor(readonly code: GuidedRegistrationErrorCode) {
@@ -152,28 +152,23 @@ export class GuidedRegistration {
     }
 
     if (!capability.modes.includes(delivery.mode)) throw invalid();
-    try {
-      if (
-        delivery.mode === "webhook" &&
-        (delivery.url === undefined || (await this.#webhookSecretStore.load()) === undefined)
-      ) {
-        const prompt =
-          capability.webhook?.format === "openclaw-agent"
-            ? `Run \`ambassador webhook-secret\`, set the displayed value as OpenClaw \`hooks.token\`, enable hooks for agent \`${capability.webhook.agentId}\`, restart OpenClaw, then retry with its \`/hooks/agent\` URL.`
-            : `Run \`ambassador webhook-secret\`, configure the displayed secret in ${capability.displayName}, then retry with the receiver URL.`;
-        return {
-          status: "input_required",
-          prompt,
-          required: ["delivery.url"],
-          command: "ambassador webhook-secret",
-        };
-      }
-      const profile = await createDeliveryProfile(capability, delivery, this.#workingDirectory);
-      await this.#profileStore.save(profile);
-      return await this.#registerCentral(registration, signal);
-    } catch (error) {
-      if (error instanceof GuidedRegistrationError) throw error;
-      throw new GuidedRegistrationError("registration_failed");
+    if (
+      delivery.mode === "webhook" &&
+      (delivery.url === undefined || (await this.#webhookSecretStore.load()) === undefined)
+    ) {
+      const prompt =
+        capability.webhook?.format === "openclaw-agent"
+          ? `Run \`ambassador webhook-secret\`, set the displayed value as OpenClaw \`hooks.token\`, enable hooks for agent \`${capability.webhook.agentId}\`, restart OpenClaw, then retry with its \`/hooks/agent\` URL.`
+          : `Run \`ambassador webhook-secret\`, configure the displayed secret in ${capability.displayName}, then retry with the receiver URL.`;
+      return {
+        status: "input_required",
+        prompt,
+        required: ["delivery.url"],
+        command: "ambassador webhook-secret",
+      };
     }
+    const profile = await createDeliveryProfile(capability, delivery, this.#workingDirectory);
+    await this.#profileStore.save(profile);
+    return await this.#registerCentral(registration, signal);
   }
 }

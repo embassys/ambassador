@@ -36,19 +36,28 @@ Code ACP adapters; users do not install them separately. OpenClaw and Hermes
 provide their own ACP commands. Ambassador matches exact known MCP client and
 ACP agent names, but treats reported versions as diagnostic metadata.
 
-After registration, ask **Which Embassys permission requests are waiting for
-my response?** to list requests this identity can grant or deny. Give the agent
-an explicit decision and it submits that decision through Ambassador.
-
-If an incoming action needs information the agent does not have, ask **Which
-Embassys actions are waiting for my answer?** Ambassador lists the unanswered
-calls from its encrypted local inbox. Give the agent the answer and it submits
-the correlated result; the call then leaves the inbox.
+After registration, ask **Check my Embassys inbox.** One inbox shows permission
+requests awaiting a grant or denial, action calls awaiting the user's answer,
+and unread results returned by other identities. Pending requests remain until
+the user answers them. Returned results leave the inbox after Ambassador gives
+them to the agent.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
 Ambassador-owned P-256 key. Protected requests use Bearer authorization plus a
 separate DPoP proof. Ambassador does not use the central MCP endpoint.
+
+## Inspect direct sessions
+
+Keep Ambassador running and use:
+
+```sh
+npx --yes @embassys/ambassador@latest sessions list
+npx --yes @embassys/ambassador@latest sessions show <session-id>
+```
+
+Add `--verbose` to `show` for bounded tool events. Stop Ambassador before
+using `sessions delete <session-id>` or `sessions forget <session-id>`.
 
 ## Repeat a local registration test
 
@@ -59,7 +68,8 @@ npx --yes @embassys/ambassador@latest clean
 ```
 
 The command removes the local registration, encrypted credentials, delivery
-profile, webhook secret, pending-action inbox, notification journal, and
+profile, webhook and internal control secrets, pending-action inbox,
+notification journal, and received-action-result inbox. It also removes
 interrupted state writes. It keeps only the empty owner-only state directory
 and singleton lock needed to prevent cleanup while Ambassador is running.
 
@@ -81,15 +91,16 @@ provider configuration or credentials.
 ## Implementation status
 
 The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
-startup paths are implemented. The current source also provides separate views
-for pending permission decisions and unanswered action calls; action calls are
-encrypted locally until their result succeeds. The 0.2.14 release added
-package-owned Codex and Claude Code adapters, printed agent setup, bounded
-startup diagnostics, and the pending permission-request view. Live-central qualification has passed with
-real Codex and Claude Code, and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2
-in both delivery modes. Ambassador matches exact known client and ACP agent
-names while treating reported versions as observations. Gemini CLI and
-Antigravity are not active profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md)
+startup paths are implemented. The current source provides one agent-facing
+inbox for pending permission decisions, unanswered action calls, and unread
+action results. Action calls and results use separate encrypted local stores. The
+0.2.14 release added package-owned Codex and Claude Code adapters, printed
+agent setup, bounded startup diagnostics, and the pending permission-request
+view. Live-central qualification has passed with real Codex and Claude Code,
+and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2 in both delivery modes.
+Ambassador matches exact known client and ACP agent names while treating
+reported versions as observations. Gemini CLI and Antigravity are not active
+profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md)
 records that decision.
 
 Published Ambassador releases through 0.2.9 have no Windows support claim.

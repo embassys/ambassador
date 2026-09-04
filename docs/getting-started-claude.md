@@ -35,10 +35,8 @@ claude mcp add --transport http --scope user ambassador http://127.0.0.1:8787/mc
 
 Later, you can ask:
 
-- **Which Embassys permission requests are waiting for my approval?** Then tell
-  Claude Code which one to grant or deny.
-- **Which Embassys actions are waiting for my answer?** Then give Claude Code
-  the requested value so it can submit the result.
+- **Check my Embassys inbox.** Claude Code lists permission decisions and action
+  answers waiting for you, plus unread results returned by other identities.
 
 ## Incoming messages
 
@@ -61,12 +59,13 @@ is signed in, update Ambassador, and restart it. For a clean local registration 
 
 ## Inspect sessions
 
-- Stop Ambassador first.
+- Keep Ambassador running.
 - Run `npx --yes @embassys/ambassador@latest sessions list`.
 - Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
 - Add `--verbose` to `show` for bounded tool events.
-- Use `sessions delete <session-id>` to delete provider history, or
-  `sessions forget <session-id>` to remove only Ambassador's record.
+- Stop Ambassador before using `sessions delete <session-id>` to delete
+  provider history or `sessions forget <session-id>` to remove only
+  Ambassador's record.
 
 The command follows the current
 [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).

@@ -9,6 +9,7 @@ import { serializeCentralCredential } from "../src/central-credential.js";
 import { CentralEnrollmentClient } from "../src/central-enrollment.js";
 import { createDeliveryProfile, DeliveryProfileStore } from "../src/delivery-profile.js";
 import { openGatewayApplication } from "../src/gateway-application.js";
+import { LocalControlClient } from "../src/local-control.js";
 import { startFakeCentral } from "./support/fake-central.js";
 
 const NOW_SECONDS = 1_788_220_800;
@@ -52,7 +53,10 @@ test("startup deletes or forgets expired sessions and retains transient failures
     credentialKeyPath: join(root, "central-credential.key"),
     webhookSecretPath: join(root, "webhook-secret.json"),
     webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    localControlSecretPath: join(root, "local-control-secret.json"),
+    localControlSecretKeyPath: join(root, "local-control-secret.key"),
     pendingActionPath: join(root, "pending-actions.sqlite"),
+    actionResultPath: join(root, "action-results.sqlite"),
     acpSessionPath: sessionPath,
     profilePath: join(root, "delivery-profile.json"),
     workingDirectory: root,
@@ -76,6 +80,9 @@ test("startup deletes or forgets expired sessions and retains transient failures
       async close() {},
     }),
     acpSessionControllerFactory: () => ({
+      async show() {
+        return [];
+      },
       async delete(record) {
         deleted.push(record.session_id);
         if (record.session_id === "delete-me") return "deleted";
@@ -94,6 +101,116 @@ test("startup deletes or forgets expired sessions and retains transient failures
     assert.equal(observed.get("active-session")?.status, "active");
     observed.close();
   } finally {
+    controller.abort();
+    await application.close();
+  }
+});
+
+test("running session history waits for active direct delivery", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-session-control-order-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const central = await startFakeCentral(t);
+  const enrollment = new CentralEnrollmentClient({
+    centralOrigin: central.apiUrl,
+    nowSeconds: () => NOW_SECONDS,
+  });
+  const email = "session-control-order@fixture.test";
+  await enrollment.register({ email });
+  const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
+  const codex = capabilityForKind("codex");
+  assert.ok(codex !== undefined);
+  const profile = await createDeliveryProfile(codex, { mode: "direct" }, root);
+  await new DeliveryProfileStore(join(root, "delivery-profile.json")).save(profile);
+
+  const sessionPath = join(root, "acp-sessions.sqlite");
+  const seed = new AcpSessionStore(sessionPath);
+  seed.create({
+    session_id: "ordered-session",
+    agent_kind: "codex",
+    working_directory: root,
+    status: "active",
+    created_at_ms: NOW_SECONDS * 1_000,
+    last_used_at_ms: NOW_SECONDS * 1_000,
+  });
+  seed.close();
+
+  const secret = "0123456789abcdef".repeat(4);
+  let deliveryStarted!: () => void;
+  let releaseDelivery!: () => void;
+  const started = new Promise<void>((resolve) => {
+    deliveryStarted = resolve;
+  });
+  const release = new Promise<void>((resolve) => {
+    releaseDelivery = resolve;
+  });
+  let showStarted = false;
+  const controller = new AbortController();
+  const application = await openGatewayApplication({
+    journalPath: join(root, "notifications.sqlite"),
+    credentialPath: join(root, "central-credential.json"),
+    credentialKeyPath: join(root, "central-credential.key"),
+    webhookSecretPath: join(root, "webhook-secret.json"),
+    webhookSecretKeyPath: join(root, "webhook-secret.key"),
+    localControlSecretPath: join(root, "local-control-secret.json"),
+    localControlSecretKeyPath: join(root, "local-control-secret.key"),
+    pendingActionPath: join(root, "pending-actions.sqlite"),
+    actionResultPath: join(root, "action-results.sqlite"),
+    acpSessionPath: sessionPath,
+    profilePath: join(root, "delivery-profile.json"),
+    workingDirectory: root,
+    environment: process.env,
+    centralOrigin: central.apiUrl,
+    credentialStore: {
+      async load() {
+        return serializeCentralCredential(verified.credential);
+      },
+      async save() {
+        throw new Error("fixture identity is already enrolled");
+      },
+    },
+    localControlSecretStore: {
+      async load() {
+        return secret;
+      },
+      async createOrLoad() {
+        return secret;
+      },
+    },
+    localMcpPort: 0,
+    nowSeconds: () => NOW_SECONDS,
+    signal: controller.signal,
+    deliveryTargetFactory: () => ({
+      async deliver() {
+        deliveryStarted();
+        await release;
+        return { status: "completed" };
+      },
+      async close() {},
+    }),
+    acpSessionControllerFactory: () => ({
+      async show() {
+        showStarted = true;
+        return ["agent: ordered"];
+      },
+      async delete() {
+        return "unsupported";
+      },
+    }),
+  });
+
+  try {
+    central.queueMessage(email, { type: "fixture" });
+    await started;
+    const history = new LocalControlClient(application.endpoint, secret).showSession(
+      "ordered-session",
+      false,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(showStarted, false);
+    releaseDelivery();
+    assert.deepEqual(await history, ["agent: ordered"]);
+  } finally {
+    releaseDelivery();
     controller.abort();
     await application.close();
   }

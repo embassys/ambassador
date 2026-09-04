@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { type LocalMcpRouter, LocalMcpServer } from "../src/local-mcp.js";
+import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "../src/local-mcp.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
 
@@ -41,6 +41,9 @@ test("serves a loopback-only stateful MCP tool without bearer setup", async (t) 
   const client = new TestMcpClient(server.endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   assert.deepEqual(client.serverCapabilities.tools, {});
+  assert.match(client.serverInstructions ?? "", /register me/iu);
+  assert.match(client.serverInstructions ?? "", /Embassys/iu);
+  assert.match(client.serverInstructions ?? "", /do not use a browser/iu);
   assert.deepEqual(
     (await client.listTools()).map((tool) => tool.name),
     ["echo"],
@@ -61,6 +64,31 @@ test("serves a loopback-only stateful MCP tool without bearer setup", async (t) 
   assert.deepEqual(
     (await secondClient.listTools()).map((tool) => tool.name),
     ["echo"],
+  );
+});
+
+test("returns a useful bounded message and source for expected tool errors", async (t) => {
+  const backend = router();
+  backend.callTool = async () => {
+    throw new LocalMcpToolError("unsupported_email_format", undefined, "central_enrollment");
+  };
+  const server = new LocalMcpServer(backend, { port: 0 });
+  await server.listen();
+  t.after(() => server.close());
+  const client = new TestMcpClient(server.endpoint);
+  await client.initialize();
+
+  await assert.rejects(
+    client.callTool("echo", { value: "person+agent@example.test" }),
+    (error: unknown) => {
+      assert.ok(error instanceof McpCallError);
+      assert.match(error.serverMessage, /email address format/iu);
+      assert.deepEqual(error.data, {
+        code: "unsupported_email_format",
+        source: "central_enrollment",
+      });
+      return true;
+    },
   );
 });
 

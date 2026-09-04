@@ -8,6 +8,16 @@ the deployed email-decision permission flow, all public CLI commands, and the
 correlated action-result round trip. Evidence is in
 [Delivery qualification](qualification.md).
 
+ADR 0051's encrypted received-action-result storage is implemented. ADR 0052
+replaces the three separate inbox views with `get_inbox`, which combines
+pending permission decisions, unanswered action calls, and unread action
+results. Verbose ACP logging reports the available-command count without
+printing the command catalog or its descriptions.
+
+ADR 0053's live session inspection is implemented. `sessions list` and
+`sessions show` use the foreground process while it runs; destructive session
+commands remain stopped-only.
+
 There is no open Ambassador implementation phase. Version 0.2.17 is published
 under the npm `latest` tag. Any later publication remains a separate
 owner-controlled release action.

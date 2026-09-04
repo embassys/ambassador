@@ -1,6 +1,6 @@
 # 0007 SQLite
 
-Status: accepted; amended by ADR 0046
+Status: accepted; amended by ADRs 0046 and 0051
 
 Date: 2026-08-23
 
@@ -22,9 +22,10 @@ Open one connection and keep transactions short. Enable WAL, `synchronous=FULL`,
 
 The notification journal stores notification IDs and delivery state only.
 ADR 0046 adds a separate SQLite inbox whose action-call fields are encrypted
-before storage. SQLite never stores the local token, webhook secret, central
-JWT, delivery profile, registration data, MCP arguments, MCP results, other
-message content, provider output, or permission data.
+before storage. ADR 0051 adds another encrypted inbox for received action
+results. SQLite never stores the local token, webhook secret, central JWT,
+delivery profile, registration data, unrelated MCP arguments or results,
+other message content, provider output, or permission data.
 
 Database work stays synchronous and serialized. The Ambassador workload is
 small, so this is simpler than moving each short transaction to a worker.
