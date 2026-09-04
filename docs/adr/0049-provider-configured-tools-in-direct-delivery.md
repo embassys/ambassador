@@ -29,11 +29,11 @@ agent runtimes.
 - Change Claude's fixed MCP behavior from ACP session injection to provider
   configuration. The documented user-scope Ambassador MCP setup is required
   before direct delivery.
-- Keep Claude's built-in tools disabled with `--tools ""`. Allow configured
-  MCP tools without an interactive prompt with `--allowedTools "mcp__*"`,
-  subject to provider and managed deny policy, and keep unattended permission
-  prompts disabled. This lets a granted action use a configured calendar or
-  other MCP tool and then call `submit_action_result`.
+- Keep Claude's built-in tools disabled with `--tools ""`. Use
+  `--dangerously-skip-permissions` and keep unattended permission prompts
+  disabled so configured MCP tools can run without a person present. Managed
+  provider policy may still deny a tool. This lets a granted action use a
+  configured calendar or other MCP tool and then call `submit_action_result`.
 - Keep the fixed executable, non-persistent session, bounded output, deadline,
   no-shell launch, authentication ownership, and provider-output handling.
 - Do not parse, copy, or persist provider MCP configuration or its credentials.
@@ -50,12 +50,18 @@ The same provider configuration used in an ordinary Claude session also
 affects the background delivery turn.
 
 This deliberately broadens the background turn. Configured Claude MCP tools
-are allowed without an interactive prompt unless provider or managed policy
+can run without an interactive permission check unless managed provider policy
 denies them, and normal provider instructions, hooks, plugins, and skills can
 load. A model may still be influenced by data inside a remote action even
 though Ambassador wraps it in fixed instructions. The user accepted this
 tradeoff in favor of automatic execution. Users should configure only tools
 they are willing to make available to direct Embassys delivery.
+
+Claude's `--allowedTools` wildcard does not provide a generic all-MCP rule.
+`mcp__*` does not match a full `mcp__server__tool` name, while server-specific
+rules such as `mcp__ambassador__*` do. Bypass mode is therefore required to
+support arbitrary configured resource MCP servers without parsing provider
+configuration or hard-coding their names.
 
 Central permission and provider tool policy remain separate controls. Central
 decides whether the caller may send an action. Provider configuration decides

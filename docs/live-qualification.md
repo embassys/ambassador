@@ -9,12 +9,13 @@ general reply operations. It does test the deployed, action-specific
 `submit_action_result` contract.
 
 The runner covers the current package name, guided registration, one
-full-message webhook target, and one direct target. The default direct target
-is the deterministic mock ACP agent. Separately confirmed modes use the fixed
-Codex, Claude Code, Hermes, or OpenClaw profiles. Real-provider modes use isolated provider
-configuration copies. Installed-version probes are observational; production
-requires the exact known client and ACP agent names and then tries the fixed
-ACP v1 contract.
+full-message webhook endpoint, and one direct endpoint. The default direct
+target is the deterministic mock ACP agent. Separately confirmed modes use the
+fixed Codex, Claude Code, Hermes, or OpenClaw profiles. A combined mode uses
+Codex and Claude Code as the two direct endpoints in one flow. Real-provider
+modes use isolated provider configuration copies where native authentication
+allows it. Installed-version probes are observational; production requires the
+exact known client and ACP agent names and then tries the fixed ACP v1 contract.
 
 ## Safety
 
@@ -29,9 +30,9 @@ ACP v1 contract.
 
 1. Pack and scan the exact candidate package.
 2. Create two disposable identities through loopback local MCP.
-3. Use the exact enabled `clientInfo.name` for one webhook profile and one
-   direct profile. Prove a dual-mode profile advertises direct as its default;
-   prove a direct-only profile proceeds without a delivery question.
+3. Use the exact enabled `clientInfo.name` for the selected profiles. Prove a
+   dual-mode profile advertises direct as its default and a direct-only profile
+   proceeds without a delivery question.
 4. Receive and use both verification emails without persisting their codes.
 5. Restart and prove encrypted credential, encrypted webhook-secret, and
    nonsecret profile loading.
@@ -40,7 +41,7 @@ ACP v1 contract.
 8. Request and decide one synthetic `get_phone_number` permission.
 9. Deliver the action request to the direct target.
 10. Submit one correlated synthetic result from the target and deliver the
-    resulting `action_response` to the webhook requester.
+    resulting `action_response` to the selected requester endpoint.
 11. Prove each local acceptance or completion precedes its central
     acknowledgement.
 12. Record the consuming-poll restart-loss and non-idempotent result-submission
@@ -82,13 +83,22 @@ The runner also lets
 abandoned server-side polls expire after the restart check before it enqueues a
 message. Delete the isolated home after the run.
 
-For the real Claude Code mode, prepare an owner-only temporary home containing
-an owner-only copy of `.claude.json` and a minimal `.claude/settings.json`.
-Configure the copy through the official Claude CLI with the authentication
-method being qualified, without printing a credential or saving it in the
-repository. The runner replaces the isolated copy's `ambassador` user-scope MCP
-entry with the qualification gateway endpoint through the official CLI. Use
-the candidate's built-in Claude CLI bridge, then set:
+For the real Claude Code mode, choose the home that owns the authentication
+being qualified:
+
+- For file-backed authentication that works in a copy, prepare an owner-only
+  temporary home containing owner-only copies of `.claude.json` and
+  `.claude/settings.json`. The runner replaces only that copy's `ambassador`
+  user-scope MCP entry.
+- For native authentication tied to the ordinary home, such as the macOS
+  Keychain-backed subscription login, use the ordinary home. Configure
+  `ambassador` there before the run at exactly
+  `http://127.0.0.1:8787/mcp`. The runner binds the target gateway to that port,
+  checks the entry through the official CLI, and does not rewrite provider
+  configuration.
+
+Do not print a credential or save one in the repository. Use the candidate's
+built-in Claude CLI bridge, then set:
 
 ```sh
 export AMBASSADOR_LIVE_DIRECT_AGENT=claude
@@ -97,18 +107,37 @@ export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-cl
 pnpm run qualify:live
 ```
 
-The runner rejects the ordinary user home, non-owner-only configuration files,
-and command overrides. It registers with exact MCP client name `claude-code`
-and a deliberately non-release diagnostic version. Ambassador launches its
-compiled-in bridge and only the fixed `claude` command is started. The CLI owns
-authentication. ACP requires exact agent name
+The runner rejects non-owner-only files in an isolated copy and rejects command
+overrides. It inherits the same Claude environment as production while
+overriding only `HOME` when a copy is used. It registers with exact MCP client
+name `claude-code` and a deliberately non-release diagnostic version.
+Ambassador launches its compiled-in bridge and only the fixed `claude` command
+is started. The CLI owns authentication. ACP requires exact agent name
 `@embassys/claude-cli-acp`. Claude loads normal provider configuration, finds
 Ambassador through that configuration, keeps built-in tools disabled, and may
 use configured MCP tools without an interactive prompt. The controlled
 qualification policy directs the background turn to grant the synthetic
 permission and submit the synthetic action result through Ambassador MCP.
-Record the authentication category, not a credential value. Delete the
-isolated home after every attempt.
+Record the authentication category, not a credential value. Delete an isolated
+home after every attempt. The runner never deletes or modifies the ordinary
+home.
+
+For the combined Codex-to-Claude mode, prepare the Codex and Claude homes as
+described above, then set:
+
+```sh
+export AMBASSADOR_LIVE_DIRECT_AGENT=codex-claude
+export AMBASSADOR_CODEX_QUALIFICATION_HOME=/absolute/path/to/isolated/codex-home
+export AMBASSADOR_CLAUDE_QUALIFICATION_HOME=/absolute/path/to/claude-home
+export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-codex-and-real-claude-and-two-disposable-mailosaur-identities
+pnpm run qualify:live
+```
+
+This mode registers both identities as direct-only profiles. The controlled
+runner initiates the permission and action calls, Claude handles the inbound
+request and action, and Codex handles both correlated responses. It proves the
+two real direct-delivery endpoints in one central exchange; it does not claim
+that a user typed the initiating calls in an interactive Codex chat.
 
 For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
 `.hermes/auth.json`, `.hermes/config.yaml`, and

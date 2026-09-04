@@ -11,7 +11,6 @@ const MAXIMUM_SESSIONS = 4;
 const MAXIMUM_PROMPT_BYTES = 512 * 1024;
 const MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
 const PROMPT_DEADLINE_MS = 15 * 60 * 1_000;
-const ALLOWED_MCP_TOOLS = "mcp__*";
 
 type ManagedChild = ChildProcess;
 type SpawnClaude = (
@@ -199,14 +198,11 @@ export async function runClaudeCliAcpStdio(options: ClaudeCliAcpOptions = {}): P
             "--no-session-persistence",
             "--output-format",
             "json",
-            "--permission-mode",
-            "dontAsk",
+            "--dangerously-skip-permissions",
             "--permission-prompts",
             "none",
             "--tools",
             "",
-            "--allowedTools",
-            ALLOWED_MCP_TOOLS,
           ],
           {
             cwd: session.cwd,

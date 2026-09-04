@@ -127,7 +127,12 @@ test("live runner has a fixed, separately confirmed real-Claude mode", async () 
   );
   assert.match(source, /@embassys\/claude-cli-acp/u);
   assert.match(source, /\.claude\.json/u);
-  assert.match(source, /configureClaudeMcp/u);
+  assert.match(source, /prepareClaudeMcp/u);
+  assert.match(source, /usesOrdinaryHome/u);
+  assert.match(source, /\.\.\.process\.env/u);
+  assert.match(source, /CLAUDE_USER_MCP_PORT/u);
+  assert.equal(source.match(/localMcpPortFor\(index\)/gu)?.length, 2);
+  assert.equal(source.match(/await prepareClaudeMcp\(/gu)?.length, 2);
   assert.match(source, /claudeCapability\.direct\.mcp === "provider_config"/u);
   assert.match(source, /target_version_probe/u);
   assert.match(source, /claude_permission_decision/u);
@@ -139,6 +144,22 @@ test("live runner has a fixed, separately confirmed real-Claude mode", async () 
     "the live runner must not accept an arbitrary agent command",
   );
   assert.equal(/\b(?:npm|pnpm|npx|pip|brew)\b[^\n]*(?:install|add|update)/u.test(source), false);
+});
+
+test("live runner has a fixed real Codex-to-Claude mode", async () => {
+  const source = await readFile(join(process.cwd(), "scripts", "live-qualification.mjs"), "utf8");
+  assert.match(source, /run-live-qualification-with-real-codex-and-real-claude/u);
+  assert.match(source, /directAgent === "codex-claude"/u);
+  assert.match(source, /CODEX_CLIENT_INFO/u);
+  assert.match(source, /CLAUDE_CLIENT_INFO/u);
+  assert.match(source, /requesterDirectMessages/u);
+  assert.match(source, /codex_response_delivery/u);
+  assert.match(source, /requester_version_probe/u);
+  assert.equal(
+    /AMBASSADOR_LIVE_(?:AGENT_)?COMMAND/u.test(source),
+    false,
+    "the live runner must not accept an arbitrary agent command",
+  );
 });
 
 test("live runner has fixed, separately confirmed real-Hermes modes", async () => {

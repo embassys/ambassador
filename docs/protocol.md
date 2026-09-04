@@ -527,9 +527,9 @@ unsupported client names.
 
 The Claude bridge does not use safe mode or strict MCP isolation. It loads the
 official CLI's normal provider configuration, disables built-in tools with
-`--tools ""`, and allows configured MCP tools without an interactive prompt
-with `--allowedTools "mcp__*"`, subject to provider and managed deny policy.
-Its normal configuration must include Ambassador.
+`--tools ""`, and bypasses interactive permission checks for configured MCP
+tools with `--dangerously-skip-permissions`. Managed provider policy may still
+deny a tool. Its normal configuration must include Ambassador.
 OpenClaw already uses provider MCP configuration. Hermes and Codex retain their
 native configuration while Ambassador also supplies its endpoint through ACP.
 Ambassador imposes no safe-mode flag on those profiles.
