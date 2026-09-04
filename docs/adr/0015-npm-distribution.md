@@ -145,6 +145,13 @@ repository and package gates plus a real Codex-to-Claude permission and action
 round trip. Temporary qualification tracing and multi-instance overrides must
 not be present in the published artifact.
 
+Those conditions passed. PR 30 merged on 2026-09-04, all main-branch gates
+passed, and the OIDC job published 0.2.15 with the npm `latest` tag. The
+independently downloaded registry artifact matched npm's integrity metadata and
+the qualified candidate file tree, then passed clean-install, installed-CLI,
+artifact-scan, and signature checks. Its digests and results are recorded in
+the qualification document.
+
 Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
