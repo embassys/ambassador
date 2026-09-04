@@ -76,7 +76,8 @@ message bodies, identities, credentials, tokens, or secrets.
 This record supersedes only ADR 0038's MCP `clientInfo.version` and ACP
 `agentInfo.version` allowlists and its instruction to reject unlisted provider
 versions. ADR 0038 remains authoritative for fixed client names, commands,
-arguments, delivery modes, environment allowlists, ACP v1, and qualification.
+arguments, delivery modes, ACP v1, and qualification. ADR 0048 supersedes its
+Claude environment allowlist with a fixed inheritance policy.
 
 ## Approval
 

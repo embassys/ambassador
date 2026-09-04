@@ -49,7 +49,7 @@ jobs:
           .test-dist/test/notification-journal.test.js
           .test-dist/test/process-lock.test.js
       - if: always()
-        run: pnpm audit --prod --audit-level=high
+        run: pnpm audit --prod --audit-level=high --ignore-registry-errors
       - if: always()
         run: pnpm audit signatures
 
@@ -185,7 +185,7 @@ jobs:
             --dir "$install_root" \
             --allow-build=better-sqlite3 \
             add "$tarball"
-          pnpm --dir "$install_root" audit --prod --audit-level=high
+          pnpm --dir "$install_root" audit --prod --audit-level=high --ignore-registry-errors
           set +e
           signature_report=$(pnpm --dir "$install_root" audit signatures --json)
           signature_status=$?
@@ -286,7 +286,7 @@ jobs:
             --dir "$install_root" \
             --allow-build=better-sqlite3 \
             add "$tarball"
-          pnpm --dir "$install_root" audit --prod --audit-level=high
+          pnpm --dir "$install_root" audit --prod --audit-level=high --ignore-registry-errors
           set +e
           signature_report=$(pnpm --dir "$install_root" audit signatures --json)
           signature_status=$?

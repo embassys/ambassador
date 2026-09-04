@@ -16,7 +16,11 @@ const MESSAGE: CentralMessage = {
   created_at: "2026-09-04T12:00:00Z",
 };
 
-async function fixture(t: TestContext, scenario: string) {
+async function fixture(
+  t: TestContext,
+  scenario: string,
+  mcp: DirectAgentCapability["mcp"] = "provider_config",
+) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-claude-cli-acp-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const logPath = join(root, "claude-invocations.jsonl");
@@ -27,7 +31,7 @@ async function fixture(t: TestContext, scenario: string) {
     command: process.execPath,
     args: [launcher, mockCli, scenario, logPath],
     agentInfo: { name: "@embassys/claude-cli-acp" },
-    mcp: "session",
+    mcp,
     environment: ["HOME", "PATH", "TMPDIR"],
   };
   const delivery = new DirectDeliveryTarget({
@@ -46,7 +50,7 @@ async function fixture(t: TestContext, scenario: string) {
   return { delivery, logPath };
 }
 
-test("Claude ACP bridge uses the installed CLI login and an isolated Ambassador MCP session", async (t) => {
+test("Claude ACP bridge loads normal configured MCP tools for trusted action delivery", async (t) => {
   const value = await fixture(t, "success");
   assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
     status: "completed",
@@ -56,36 +60,34 @@ test("Claude ACP bridge uses the installed CLI login and an isolated Ambassador 
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { args: string[]; input: string });
-  assert.deepEqual(calls[0], { args: ["auth", "status"], input: "" });
-  const promptCall = calls[1];
+  assert.equal(calls.length, 1);
+  const promptCall = calls[0];
   assert.ok(promptCall !== undefined);
+  assert.equal(promptCall.args.includes("auth"), false);
   assert.equal(promptCall.args.includes("--print"), true);
-  assert.equal(promptCall.args.includes("--safe-mode"), true);
-  assert.equal(promptCall.args.includes("--strict-mcp-config"), true);
+  assert.equal(promptCall.args.includes("--safe-mode"), false);
+  assert.equal(promptCall.args.includes("--strict-mcp-config"), false);
+  assert.equal(promptCall.args.includes("--mcp-config"), false);
   assert.equal(promptCall.args.includes("--no-session-persistence"), true);
+  assert.equal(promptCall.args.includes("--permission-mode"), false);
+  assert.equal(promptCall.args.includes("dontAsk"), false);
+  assert.equal(promptCall.args.includes("--dangerously-skip-permissions"), true);
   assert.equal(promptCall.args.includes("--permission-prompts"), true);
   assert.equal(promptCall.args.includes("none"), true);
   assert.equal(promptCall.args.includes("--tools"), true);
   assert.equal(promptCall.args.includes(""), true);
-  const mcpIndex = promptCall.args.indexOf("--mcp-config");
-  assert.notEqual(mcpIndex, -1);
-  assert.deepEqual(JSON.parse(promptCall.args[mcpIndex + 1] ?? ""), {
-    mcpServers: {
-      ambassador: { type: "http", url: "http://127.0.0.1:8787/mcp" },
-    },
-  });
+  assert.equal(promptCall.args.includes("--allowedTools"), false);
   assert.match(promptCall.input, /untrusted Embassys message/u);
   assert.match(promptCall.input, /private prompt marker/u);
 });
 
-test("Claude ACP bridge rejects a signed-out CLI before prompt submission", async (t) => {
-  const value = await fixture(t, "signed-out");
+test("Claude ACP bridge requires normal provider MCP configuration", async (t) => {
+  const value = await fixture(t, "success", "session");
   await assert.rejects(
     value.delivery.deliver(MESSAGE, new AbortController().signal),
     (error: unknown) => error instanceof DirectDeliveryError && error.code === "startup_failed",
   );
-  const calls = (await readFile(value.logPath, "utf8")).trim().split("\n");
-  assert.equal(calls.length, 1);
+  assert.equal(await readFile(value.logPath, "utf8"), "");
 });
 
 test("Claude ACP bridge does not reflect provider failure details", async (t) => {

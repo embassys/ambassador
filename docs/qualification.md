@@ -3,6 +3,94 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Clean Codex-to-Claude live qualification
+
+On 2026-09-04, one fresh packed candidate completed a single two-real-agent
+flow against the deployed service. Codex ACP 1.8.0 was the direct requester
+endpoint and Claude Code 2.1.260 was the direct target endpoint. The candidate
+SHA-256 was
+`ea7a0252b038037253fca249188f2715e9f1ef941f15794d6f0d6cee21a3e2c5`,
+and the runner SHA-256 was
+`d6a5bde92e43a571cc663db318e53a29fdfe1e8783919996df526c23cf0ea372`.
+
+The runner registered and verified two new disposable identities, restarted
+both gateways from encrypted state, and passed the DPoP positive and negative
+matrix. It initiated a synthetic `get_phone_number` request from the Codex
+identity. Claude granted the permission and submitted exactly one correlated
+result. Codex then accepted the permission response and action response through
+its real direct-delivery path. Both gateways acknowledged central only after
+successful local completion. The live six-action catalog matched the recorded
+schemas; no DPoP nonce or central MCP request was observed. Artifact scanning
+and Mailosaur cleanup passed.
+
+This is a combined direct-delivery qualification, not an interactive chat
+transcript: the controlled runner invoked `request_permission` and
+`call_action`, while the real Codex and Claude processes handled their
+respective inbound messages.
+
+## ADR 0049 live Claude and Codex repeat
+
+On 2026-09-04, the post-ADR 0049 source candidate ran against the deployed
+service with Claude Code 2.1.260 and the package-owned Codex ACP adapter 1.8.0.
+The packed candidate SHA-256 was
+`ea7a0252b038037253fca249188f2715e9f1ef941f15794d6f0d6cee21a3e2c5`.
+The live runner SHA-256 was
+`ee95fde55b1625bb184b81dc218c0d5bd0a31bc2d9883bfe5622192e1738c79a`.
+
+Real Claude passed the complete live-central direct flow twice consecutively.
+Real Codex passed the same flow against the same archive. Every final run
+registered and verified two disposable identities, reloaded encrypted state,
+passed the DPoP positive and negative matrix, granted the synthetic permission,
+submitted exactly one correlated synthetic phone result, delivered the action
+response, and preserved local-completion-before-acknowledgement ordering. The
+live six-action catalog matched its recorded schemas. No DPoP nonce or central
+MCP request was observed. Artifact scanning, Mailosaur cleanup, and temporary
+state cleanup passed.
+
+The initial Claude attempts found two concrete defects before the final passes.
+First, Claude rejected the generic `mcp__*` allow rule because it does not match
+a full `mcp__server__tool` name. The bridge now uses Claude's non-interactive
+permission bypass while retaining `--tools ""`, which keeps built-in filesystem
+and shell tools unavailable. A local exact-tool probe confirmed the configured
+MCP call before the live repeat. Second, the runner moved the target MCP port
+after its encrypted-state restart and did not prepare Claude's provider entry
+again. The runner now preserves port 8787 for an ordinary Claude home and
+prepares provider MCP configuration after both starts.
+
+This installation keeps its subscription login in macOS Keychain and cannot
+authenticate after `HOME` is replaced with a copied directory. The runner now
+supports the ordinary home for that native authentication case without
+rewriting provider configuration. It still supports owner-only isolated homes
+for authentication methods that work in a copy.
+
+These runs use the repository's controlled webhook requester and one real
+direct target per run. They prove both real direct-agent paths and the complete
+central round trip; they are not a shared interactive Claude-to-Codex chat.
+
+## Provider-configured Claude bridge source qualification
+
+On 2026-09-04, the current source removed the Claude-specific authentication
+preflight. The built-in bridge now lets the installed official CLI apply its
+native authentication and organization policy. The fixed Claude profile alone
+inherits Ambassador's bounded process environment; every other profile keeps
+its compiled allowlist. ADR 0049 subsequently changed Claude to normal provider
+MCP configuration so resource-backed actions can use configured tools. The
+unattended prompt keeps no built-in tools, no session persistence, and bounded
+provider output.
+
+The repository check passed 204 tests: 198 passed and six platform-specific or
+opt-in cases skipped. Linting and type checking passed. Regression cases prove
+that the bridge makes no separate auth invocation, preserves representative
+native authentication environments, rejects inherited-environment bounds and
+invalid names, loads normal configured MCP tools without safe or strict
+isolation, uses the provider's non-interactive permission bypass rather than a
+non-matching generic MCP wildcard, and does not reflect provider failure
+details. The live runner now
+configures Ambassador through Claude's provider configuration and requires the
+real background turn to submit its result automatically. The subsequent
+real-provider results are recorded above. Published-release evidence remains
+separate from source-candidate qualification.
+
 ## Ambassador 0.2.15 candidate
 
 On 2026-09-04, the byte-final 0.2.15 candidate added the encrypted local
@@ -566,10 +654,12 @@ Direct qualification uses its fixed ACP command and session MCP configuration.
 
 Codex direct qualification uses Ambassador's package-owned ACP adapter. Claude
 Code direct qualification uses Ambassador's built-in ACP bridge and the
-installed official `claude` command with ordinary `claude.ai` authentication.
-Both receive Ambassador MCP through ACP session configuration. The runner
-records installed provider versions as evidence but does not use them as
-allowlists.
+installed official `claude` command with its native authentication. Codex
+receives Ambassador MCP through ACP session configuration. Claude uses its
+normal provider configuration. A Keychain-backed Claude subscription can be
+qualified against the ordinary user home without modifying that configuration;
+the documented Ambassador entry must already use port 8787. The runner records
+installed provider versions as evidence but does not use them as allowlists.
 
 On 2026-09-02, isolated installs of the three entry points approved at that
 time passed ACP v1 initialization and returned the exact `agentInfo` identities
@@ -757,10 +847,11 @@ pnpm run qualify:agents
 Put secret values in the process environment, never in command arguments. The
 runner first requires the local fixture readiness endpoint, observes the
 installed provider versions, loads the code from the exact candidate archive,
-runs all seven delivery cases, and prints one safe JSON report. Configure the
-OpenClaw provider-side MCP entry for `http://127.0.0.1:8787/mcp` without
-authentication before starting the runner. The other four profiles receive the
-same endpoint by ACP session injection. Each direct case must call the
+runs the delivery cases, and prints one safe JSON report. Configure OpenClaw's
+provider-side MCP entry for `http://127.0.0.1:8787/mcp` without authentication
+before starting the runner. The real-Claude runner configures the same endpoint
+as a user-scope MCP entry in its isolated provider home. Hermes and Codex
+receive it by ACP session injection. Each direct case must call the
 qualification `get_my_permissions` tool, which proves the real MCP client's
 exact name match. Missing, unauthenticated, or failing agents make the delivery
 case fail; a version-command observation does not. The runner never invokes an
