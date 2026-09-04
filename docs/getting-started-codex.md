@@ -58,7 +58,8 @@ Later, you can ask:
 Ambassador includes the approved Codex ACP adapter and launches it when a
 central message arrives. You do not install `codex-acp` separately. The
 incoming message runs in a new Ambassador-managed session, not the registration
-chat.
+chat. Ambassador does not add a safe-mode restriction to Codex; the adapter
+retains Codex's native tool and policy behavior.
 
 If startup or ACP initialization fails, Ambassador prints a bounded reason.
 Confirm Codex is signed in, update Ambassador, and restart it. For a clean local

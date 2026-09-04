@@ -30,6 +30,8 @@ async function target(
     promptDeadlineMs?: number;
     maximumOutputBytes?: number;
     maximumStartupAttempts?: number;
+    environment?: DirectAgentCapability["environment"];
+    sourceEnvironment?: NodeJS.ProcessEnv;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
@@ -44,14 +46,14 @@ async function target(
     args: [fixturePath, scenario, countPath, descendantPath, promptPath],
     agentInfo: { name: "mock-agent" },
     mcp: scenario.includes("provider-mcp") ? "provider_config" : "session",
-    environment: ["HOME", "PATH", "TMPDIR"],
+    environment: options.environment ?? ["HOME", "PATH", "TMPDIR"],
   };
   let spawnCount = 0;
   let spawnOptions: SpawnOptions | undefined;
   const delivery = new DirectDeliveryTarget({
     capability,
     workingDirectory: root,
-    environment: process.env,
+    environment: options.sourceEnvironment ?? process.env,
     mcpEndpoint: "http://127.0.0.1:8787/mcp",
     initializationDeadlineMs: 2_000,
     sessionDeadlineMs: 2_000,
@@ -143,6 +145,60 @@ test("runs a native executable through the Windows direct-delivery path", async 
   });
   assert.equal(value.spawnCount(), 1);
   assert.equal(value.spawnOptions()?.detached, false);
+});
+
+test("a fixed inherit profile preserves the user's native agent authentication environment", async (t) => {
+  const sourceEnvironment: NodeJS.ProcessEnv = {
+    HOME: process.env.HOME,
+    PATH: process.env.PATH,
+    ANTHROPIC_API_KEY: "synthetic-api-key",
+    CLAUDE_CODE_OAUTH_TOKEN: "synthetic-oauth-token",
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    AWS_PROFILE: "synthetic-profile",
+    AMBASSADOR_UNRELATED_MARKER: "preserved",
+  };
+  const value = await target(t, "success-session-mcp", {
+    environment: "inherit",
+    sourceEnvironment,
+  });
+  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+    status: "completed",
+  });
+  assert.deepEqual(
+    value.spawnOptions()?.env,
+    Object.fromEntries(
+      Object.entries(sourceEnvironment).filter(([, value]) => value !== undefined),
+    ),
+  );
+});
+
+test("inherited agent environments remain bounded and valid", async (t) => {
+  await assert.rejects(
+    target(t, "success-session-mcp", {
+      environment: "inherit",
+      sourceEnvironment: Object.fromEntries(
+        Array.from({ length: 513 }, (_, index) => [`AMBASSADOR_TEST_${index}`, "value"]),
+      ),
+    }),
+    (error: unknown) =>
+      error instanceof DirectDeliveryError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    target(t, "success-session-mcp", {
+      environment: "inherit",
+      sourceEnvironment: { "INVALID=NAME": "value" },
+    }),
+    (error: unknown) =>
+      error instanceof DirectDeliveryError && error.code === "invalid_configuration",
+  );
+  await assert.rejects(
+    target(t, "success-session-mcp", {
+      environment: "inherit",
+      sourceEnvironment: { AMBASSADOR_TEST_VALUE: "é".repeat(16_385) },
+    }),
+    (error: unknown) =>
+      error instanceof DirectDeliveryError && error.code === "invalid_configuration",
+  );
 });
 
 test("retries a bounded startup failure only before prompt dispatch", async (t) => {

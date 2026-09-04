@@ -109,10 +109,17 @@ OpenClaw and Hermes also support webhook, with direct as their default. Codex
 and Claude Code register directly without a delivery question. Ambassador
 ships and validates the reviewed Codex ACP adapter as an exact production
 dependency. For Claude Code, Ambassador ships a small ACP v1 bridge that uses
-the separately installed official `claude` command and the user's normal
-`claude.ai` login; it does not require or forward an Anthropic API key.
+the separately installed official `claude` command and its existing native
+authentication. The official CLI owns authentication, and the provider decides
+billing. Ambassador does not select an authentication method, initiate login,
+or inspect, store, log, or return provider credentials.
+Claude loads its normal provider configuration for a direct turn, including
+configured MCP tools. Ambassador disables Claude's built-in tools but
+bypasses interactive permission checks for configured MCP tools, subject to
+managed provider policy, so resource-backed actions can finish.
+Claude therefore requires the documented user-scope Ambassador MCP entry.
 OpenClaw and Hermes provide their own fixed agent commands. Exact client and
-ACP agent names, commands, arguments, modes, and environment allowlists remain
+ACP agent names, commands, arguments, modes, and environment policies remain
 compiled in. Gemini CLI and Antigravity are not active profiles. Unknown,
 ambiguous, disabled, and incomplete profiles are unsupported.
 
@@ -196,6 +203,14 @@ one bounded repair message without taking down the MCP server. Central,
 credential, state, and listener failures remain fatal. Restarting Ambassador
 after repairing the local target resumes polling for new messages; it cannot
 recover a message already consumed by central.
+
+Direct agents may use their normally configured tools while handling the fixed
+Embassys delivery prompt. Claude loads its normal MCP configuration and
+bypasses interactive permission checks for configured MCP tools, subject to
+managed provider policy. OpenClaw, Hermes, and Codex retain their native tool
+behavior without an Ambassador-imposed safe mode. This is an accepted
+owner-machine trust choice. A missing tool leaves an action available through
+the encrypted pending-action inbox.
 
 ### Local reset
 

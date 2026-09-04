@@ -42,7 +42,8 @@ Later, you can ask:
 
 Ambassador launches the installed `hermes-acp` command for incoming messages
 and injects its MCP endpoint into that new session. The incoming message does
-not return to the registration chat.
+not return to the registration chat. Ambassador does not disable Hermes's
+normally configured tools.
 
 ## Optional webhook delivery
 

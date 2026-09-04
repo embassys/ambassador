@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-test("main publishes the Ambassador 0.2.15 candidate through npm OIDC after approval", async () => {
+test("main publishes the Ambassador 0.2.16 candidate through npm OIDC after approval", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
@@ -22,13 +22,17 @@ test("main publishes the Ambassador 0.2.15 candidate through npm OIDC after appr
   assert.match(workflow, /id-token: write/u);
   assert.match(workflow, /npm install --global npm@11\.19\.0/u);
   assert.match(workflow, /npm publish "\$\{\{ steps\.artifact\.outputs\.tarball \}\}"/u);
+  assert.equal(
+    workflow.match(/audit --prod --audit-level=high --ignore-registry-errors/gu)?.length,
+    3,
+  );
   assert.doesNotMatch(workflow, /NODE_AUTH_TOKEN|NPM_TOKEN|secrets\.NPM/u);
 
   const packageJson = JSON.parse(
     await readFile(join(process.cwd(), "package.json"), "utf8"),
   ) as Record<string, unknown>;
   assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.15");
+  assert.equal(packageJson.version, "0.2.16");
   assert.deepEqual(packageJson.engines, { node: ">=24.19.0" });
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });

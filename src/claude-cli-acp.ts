@@ -10,15 +10,7 @@ const AGENT_NAME = "@embassys/claude-cli-acp";
 const MAXIMUM_SESSIONS = 4;
 const MAXIMUM_PROMPT_BYTES = 512 * 1024;
 const MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
-const AUTH_DEADLINE_MS = 15_000;
 const PROMPT_DEADLINE_MS = 15 * 60 * 1_000;
-const ALLOWED_AMBASSADOR_TOOLS = [
-  "mcp__ambassador__list_action_types",
-  "mcp__ambassador__list_pending_permission_requests",
-  "mcp__ambassador__list_pending_action_calls",
-  "mcp__ambassador__submit_action_result",
-  "mcp__ambassador__get_my_permissions",
-].join(",");
 
 type ManagedChild = ChildProcess;
 type SpawnClaude = (
@@ -32,19 +24,16 @@ export interface ClaudeCliAcpOptions {
   readonly commandPrefixArguments?: readonly string[];
   readonly environment?: NodeJS.ProcessEnv;
   readonly spawnProcess?: SpawnClaude;
-  readonly authDeadlineMs?: number;
   readonly promptDeadlineMs?: number;
   readonly maximumOutputBytes?: number;
 }
 
 interface BridgeSession {
   readonly cwd: string;
-  readonly mcpEndpoint: string;
   active: AbortController | undefined;
 }
 
 class ClaudeCliFailure extends Error {}
-class ClaudeCliSignedOut extends Error {}
 
 function positiveInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -52,39 +41,6 @@ function positiveInteger(value: number): boolean {
 
 function boundedCommandPart(value: string): boolean {
   return value.length > 0 && value.length <= 4_096 && !value.includes("\u0000");
-}
-
-function exactAmbassadorEndpoint(servers: readonly acp.McpServer[]): string {
-  if (servers.length !== 1) throw new ClaudeCliFailure();
-  const server = servers[0];
-  if (
-    server === undefined ||
-    !("type" in server) ||
-    server.type !== "http" ||
-    server.name !== "ambassador" ||
-    server.headers.length !== 0
-  ) {
-    throw new ClaudeCliFailure();
-  }
-  let url: URL;
-  try {
-    url = new URL(server.url);
-  } catch {
-    throw new ClaudeCliFailure();
-  }
-  if (
-    url.protocol !== "http:" ||
-    url.hostname !== "127.0.0.1" ||
-    url.port.length === 0 ||
-    url.pathname !== "/mcp" ||
-    url.search !== "" ||
-    url.hash !== "" ||
-    url.username !== "" ||
-    url.password !== ""
-  ) {
-    throw new ClaudeCliFailure();
-  }
-  return url.href;
 }
 
 function promptText(blocks: readonly acp.ContentBlock[]): string {
@@ -192,14 +148,13 @@ export async function runClaudeCliAcpStdio(options: ClaudeCliAcpOptions = {}): P
   const prefix = options.commandPrefixArguments ?? [];
   const environment = options.environment ?? process.env;
   const spawnProcess = options.spawnProcess ?? (spawn as SpawnClaude);
-  const authDeadlineMs = options.authDeadlineMs ?? AUTH_DEADLINE_MS;
   const promptDeadlineMs = options.promptDeadlineMs ?? PROMPT_DEADLINE_MS;
   const maximumOutputBytes = options.maximumOutputBytes ?? MAXIMUM_OUTPUT_BYTES;
   if (
     !boundedCommandPart(command) ||
     prefix.length > 8 ||
     !prefix.every(boundedCommandPart) ||
-    ![authDeadlineMs, promptDeadlineMs, maximumOutputBytes].every(positiveInteger)
+    ![promptDeadlineMs, maximumOutputBytes].every(positiveInteger)
   ) {
     throw new ClaudeCliFailure();
   }
@@ -216,37 +171,16 @@ export async function runClaudeCliAcpStdio(options: ClaudeCliAcpOptions = {}): P
         authMethods: [],
       };
     })
-    .onRequest(acp.methods.agent.session.new, async (context) => {
-      if (sessions.size >= MAXIMUM_SESSIONS || !isAbsolute(context.params.cwd)) {
-        throw new ClaudeCliFailure();
-      }
-      const mcpEndpoint = exactAmbassadorEndpoint(context.params.mcpServers);
-      const auth = await runCommand(command, [...prefix, "auth", "status"], {
-        cwd: context.params.cwd,
-        environment,
-        input: "",
-        signal: deadline(undefined, authDeadlineMs),
-        maximumOutputBytes: 64 * 1024,
-        spawnProcess,
-      });
-      let status: unknown;
-      try {
-        status = JSON.parse(auth.stdout);
-      } catch {
-        throw new ClaudeCliFailure();
-      }
+    .onRequest(acp.methods.agent.session.new, (context) => {
       if (
-        auth.code !== 0 ||
-        status === null ||
-        typeof status !== "object" ||
-        Array.isArray(status) ||
-        (status as Record<string, unknown>).loggedIn !== true ||
-        (status as Record<string, unknown>).authMethod !== "claude.ai"
+        sessions.size >= MAXIMUM_SESSIONS ||
+        !isAbsolute(context.params.cwd) ||
+        context.params.mcpServers.length !== 0
       ) {
-        throw new ClaudeCliSignedOut();
+        throw new ClaudeCliFailure();
       }
       const sessionId = randomUUID();
-      sessions.set(sessionId, { cwd: context.params.cwd, mcpEndpoint, active: undefined });
+      sessions.set(sessionId, { cwd: context.params.cwd, active: undefined });
       return { sessionId };
     })
     .onRequest(acp.methods.agent.session.prompt, async (context) => {
@@ -255,30 +189,20 @@ export async function runClaudeCliAcpStdio(options: ClaudeCliAcpOptions = {}): P
       const prompt = promptText(context.params.prompt);
       const active = new AbortController();
       session.active = active;
-      const mcpConfig = JSON.stringify({
-        mcpServers: { ambassador: { type: "http", url: session.mcpEndpoint } },
-      });
       try {
         const result = await runCommand(
           command,
           [
             ...prefix,
             "--print",
-            "--safe-mode",
-            "--strict-mcp-config",
-            "--mcp-config",
-            mcpConfig,
             "--no-session-persistence",
             "--output-format",
             "json",
-            "--permission-mode",
-            "dontAsk",
+            "--dangerously-skip-permissions",
             "--permission-prompts",
             "none",
             "--tools",
             "",
-            "--allowedTools",
-            ALLOWED_AMBASSADOR_TOOLS,
           ],
           {
             cwd: session.cwd,

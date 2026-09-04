@@ -11,15 +11,7 @@ if (logPath !== undefined) {
   await appendFile(logPath, `${JSON.stringify({ args, input })}\n`, "utf8");
 }
 
-if (args.join(" ") === "auth status") {
-  process.stdout.write(
-    `${JSON.stringify({
-      loggedIn: scenario !== "signed-out",
-      authMethod: scenario === "signed-out" ? "none" : "claude.ai",
-    })}\n`,
-  );
-  process.exitCode = 0;
-} else if (scenario === "prompt-failure") {
+if (scenario === "prompt-failure") {
   process.stderr.write("private provider failure details\n");
   process.exitCode = 17;
 } else {
