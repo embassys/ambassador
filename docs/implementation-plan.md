@@ -14,9 +14,10 @@ session reads on both gateways. OpenClaw uses its reviewed load path to restore
 its gateway mapping. See [Delivery qualification](qualification.md)
 for versions, artifact digests, and the limits of these checks.
 
-The user approved the PR, merge, and 0.2.18 release on 2026-09-05. Complete the
-remaining provider delivery qualification and PR/main CI gates, then verify the
-published npm artifact. Approval-option mapping remains deferred by the user;
+The user approved the PR, merge, and 0.2.18 release on 2026-09-05. The release
+candidate passed both direct and webhook delivery with Hermes and OpenClaw.
+Complete the final PR/main CI gates, then verify the published npm artifact.
+Approval-option mapping remains deferred by the user;
 central recovery remains server work.
 
 Phase 3B is complete. ADR 0050's common ACP policy, public Codex and Claude
