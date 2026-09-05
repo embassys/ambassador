@@ -14,11 +14,14 @@ session reads on both gateways. OpenClaw uses its reviewed load path to restore
 its gateway mapping. See [Delivery qualification](qualification.md)
 for versions, artifact digests, and the limits of these checks.
 
-The user approved the PR, merge, and 0.2.18 release on 2026-09-05. The release
-candidate passed both direct and webhook delivery with Hermes and OpenClaw.
-Complete the final PR/main CI gates, then verify the published npm artifact.
-Approval-option mapping remains deferred by the user;
-central recovery remains server work.
+PR 37 merged and version 0.2.18 was published on 2026-09-05. All six provider
+delivery modes and every main-branch release gate passed, including Windows.
+The independently downloaded npm artifact matched the qualified candidate and
+passed clean-install, runtime, artifact, vulnerability, and signature checks.
+The user deferred further Windows fixes to a separate pull request; no further
+Windows change or release-gate exception was needed after the merge.
+Approval-option mapping remains deferred by the user; central recovery remains
+server work.
 
 Phase 3B is complete. ADR 0050's common ACP policy, public Codex and Claude
 adapters, persistent session lifecycle, session commands, verbose diagnostics,
@@ -49,8 +52,8 @@ ADR 0053's live session inspection is implemented. `sessions list` and
 commands remain stopped-only.
 
 The controlled live Codex-to-Claude qualification of ADR 0055 passed against
-the deployed own-human input endpoint. Version 0.2.18 is approved for release;
-0.2.17 remains published under the npm `latest` tag until publication completes.
+the deployed own-human input endpoint. Version 0.2.18 is published under the
+npm `latest` tag.
 
 The deterministic Windows lanes cover state, startup, packaging, and mock
 delivery. A support claim for an individual real-agent mode on Windows still

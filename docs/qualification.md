@@ -3,6 +3,31 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## 0.2.18 published artifact
+
+On 2026-09-05, [PR 37](https://github.com/embassys/ambassador/pull/37)
+merged at `1e06138f0c91a79f902ee5d7865ff3f8a5a4bbe6`.
+[Release workflow 33959402564](https://github.com/embassys/ambassador/actions/runs/33959402564)
+passed every Linux, macOS, Windows, Docker, package, and audit gate, then
+published `@embassys/ambassador@0.2.18` with the npm `latest` tag through OIDC.
+The user had approved merging before the final pull-request Windows check;
+the main-branch Windows checks subsequently passed without a release-gate change.
+
+A separate registry download passed npm's SHA-512 integrity and SHA-1 checks.
+Its extracted file tree, modes, and link metadata matched the qualified local
+candidate. The registry tarball SHA-256 was
+`25d82c0640f950fa7993aa81f6a0b16fe6eeeb68d8334f9cced62266c6cde06f`.
+Its npm integrity value was
+`sha512-8a1X/TlW527kCrYUtNp4S3HPGJ7jTEaYYwlTFAT4EKW2yeB5LQiPp3uTwm6FL+kTx72jd4VZd1TBr+FaYySBcw==`.
+
+A fresh pnpm install retained the strict release-age, subdependency, and
+build-script policies. The installed command, packed runtime flow, artifact
+scan, and vulnerability audit passed. All 141 audited package signatures
+verified, with none missing or invalid. The live candidate evidence below covers
+all six provider delivery modes. Hermes reported 0.20.5 in its webhook run
+(its direct version probe was unavailable), and OpenClaw reported 2026.8.2 in
+both modes. All temporary provider homes and copied authentication were removed.
+
 ## 0.2.18 release candidate
 
 On 2026-09-05, the clean-installed 0.2.18 candidate passed the remaining
