@@ -44,7 +44,7 @@ Ambassador launches the installed `hermes-acp` command for incoming messages
 and loads tools from normal Hermes configuration. It passes no extra MCP
 servers. The incoming message does not return to the registration chat.
 Ambassador does not disable built-in tools or request permission bypass. If
-Hermes asks to use a tool, Ambassador emails the human grantor and keeps the
+Hermes asks to use a tool, Ambassador emails you at your registered address and keeps the
 request pending until the decision arrives through Embassys. An approval is
 passed to Hermes as **allow once** when available.
 
@@ -102,3 +102,9 @@ receiver must use HTTPS. For a clean local registration test, see
 
 The MCP command follows Hermes Agent's current
 [official MCP guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/guides/use-mcp-with-hermes.md).
+
+For requesting an action, waiting for email approval, answering later, and
+retrieving results, see [Request and answer an action](action-workflow.md).
+Provider compaction manages context; sessions with no unfinished work become
+eligible for cleanup after 30 idle days. `sessions show` labels a truncated
+recent preview when provider history is large.

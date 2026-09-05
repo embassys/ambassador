@@ -300,6 +300,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       localControlSecretKeyPath: paths.localControlSecretKeyPath,
       pendingActionPath: paths.pendingActionPath,
       actionResultPath: paths.actionResultPath,
+      outboundActionPath: paths.outboundActionPath,
       acpSessionPath: paths.acpSessionPath,
       profilePath: paths.profilePath,
       workingDirectory: context.cwd,

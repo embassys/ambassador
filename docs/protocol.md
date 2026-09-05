@@ -119,7 +119,7 @@ The boundary keeps these limits:
 | Local or upstream response body | 4 MiB |
 | Active MCP sessions | 32 |
 | Concurrent tool calls | 8 |
-| Serialized structured tool result | 512 KiB |
+| Serialized structured tool result | 768 KiB |
 
 JSON-RPC batches and redirects are rejected. Errors do not reflect request
 bodies, remote bodies, URLs, headers, or credentials. Expected tool failures
@@ -149,13 +149,14 @@ profile.
 
 ## Tool catalog
 
-Before enrollment, expose exactly:
+Advertise one stable catalog before and after enrollment. Bootstrap tools work
+only before enrollment and return `already_enrolled` afterwards:
 
 - `register_agent`
 - `verify_email`
 - `resend_verification`
 
-After a credential is durably stored, expose exactly these agent-facing tools:
+Protected tools return `not_enrolled` until a credential is durably stored:
 
 - `list_action_types`
 - `request_permission`
@@ -173,18 +174,23 @@ Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
 catalog. `list_action_types` returns central action definitions as data; those
 definitions do not become additional local tools.
 
-`get_inbox` is the single agent-facing view of work and unread results. It
-accepts no arguments and returns:
-
-- encrypted local action calls that still need a result; and
-- encrypted local action results that have not appeared in a previous inbox
-  response.
+`get_inbox` is the paginated view of unanswered action calls, unread action
+results, and saved outbound action status. Its optional `limit` is 1–100
+(default 50); its optional opaque `cursor` continues a previous page. A response
+contains `count`, `items`, and `next_cursor` when more items remain. Follow each
+continuation until it is absent. Counts refer to this page, not the whole store.
+Pages visit calls, results, then outbound intents in insertion order within each
+store. Concurrent arrivals may require another traversal from the beginning.
 
 Each action-call item includes the tool and fields needed for its response.
-Action calls remain until `submit_action_result` succeeds. Ambassador removes
-received action results after returning them through `get_inbox`, so the
-default view contains unread results only. The tool adds no central route,
-does not poll central on demand, and is not a general message inbox.
+Calls remain until `submit_action_result` succeeds. A page targets 500 KiB and
+always includes a complete first record; the serialized tool result is capped
+at 768 KiB. Validation, credential checks, serialization, and cancellation checks
+all precede removal of exactly the received results on that page. Failed reads
+retain results. MCP disconnection after local consumption remains uncertain;
+reading does not prove the human saw the answer. Denied outbound intents remain visible until a later explicit permission
+request replaces them; uncertain intents remain for inspection.
+The tool does not poll central or control delivery.
 
 Permission decisions do not appear in `get_inbox`. Central emails the
 grantor's human, queues no request to the grantor's agent, and later delivers a
@@ -452,9 +458,8 @@ characters and appears in the email. For a new request, central emails the
 grantor a read-only confirmation page whose form submits the decision. It
 queues no `permission_request` message to the grantor's agent. After the human
 decides, central queues a
-`permission_outcome` to the requester. A granted outcome tells the receiving
-agent to continue once through `call_action`, mapping `grantor_email` to
-`target_email` and using the outcome's action type. Ambassador does not handle
+`permission_outcome` to the requester. A permission-only request produces a
+status notification; it supplies no action payload. Ambassador does not handle
 the email token or call central's unauthenticated decision endpoint during
 normal use.
 
@@ -462,6 +467,27 @@ An `allow_once` grant permits one action call. `allow_always` and the simpler
 `accept` decision are standing grants. If central returns
 `already_granted: true`, the requester can proceed immediately and no new
 approval email was sent.
+
+The local MCP `request_permission` tool optionally accepts `action_payload`
+when the user also wants an action submitted after approval. This requires an
+explicit `target_email` and excludes `message_id`; either supported permission
+name selector remains valid. Ambassador strips `action_payload` before calling
+the unchanged REST endpoint. It saves the exact target, action, and payload in
+an encrypted outbound store before requesting permission, binds the returned
+permission ID, and dispatches once after a matching granted outcome or an
+already-granted response. The grantor address, permission ID, and action type
+must all match the saved intent. The receiving agent must not submit a second
+`call_action` for that intent.
+
+Only one outstanding intent per target/action pair is admitted. Repeating the
+same request returns its status; a different payload is rejected while it is
+outstanding. `get_inbox` exposes its operation ID, payload, and status:
+`request_uncertain`, `awaiting_permission`, `ready`, `dispatch_uncertain`,
+`submitted`, or `denied`. A repeated identical request can safely dispatch
+`ready` work after a crash. Uncertain requests or dispatches never retry
+automatically. A received, durably captured result clears its submitted intent.
+Permission decisions themselves remain in the email flow. This local intent
+adds no server lookup or idempotency guarantee.
 
 `call_action` delivers a request after central confirms permission. It does
 not execute the action. Its `call_id` correlates the one permitted result.
@@ -494,12 +520,14 @@ nesting, structural-token, batch-count, and normalized-message limits.
 Conflicting duplicate IDs reject the batch.
 
 Message bodies remain in a bounded in-memory delivery queue. The notification
-journal stores present IDs and delivery state only. Two bounded persistence
-exceptions use separate encrypted inboxes. Ambassador stores validated
+journal stores present IDs and delivery state only. Two central-message
+persistence exceptions use separate encrypted inboxes. Ambassador stores validated
 `action_call` fields so a user can answer later, and validated
 `action_response` fields so a foreground agent can retrieve a returned result.
-It writes either record before local delivery or central acknowledgement.
-Other message types are not persisted. Polling pauses while the queue contains
+It captures these records when a poll returns, including during an ACP approval
+wait, before local delivery or central acknowledgement.
+Other central message bodies are not persisted. The separate outbound store
+holds explicit local action intent and its correlated status. Polling pauses while the queue contains
 work. An ID-less message may be delivered once but cannot be acknowledged.
 
 ## Webhook delivery
@@ -617,11 +645,20 @@ reported versions. It still requires ACP v1 and the exact `agentInfo.name`
 shown in the table. An incompatible release fails through bounded startup,
 initialization, session, or delivery handling.
 
-Ambassador initializes the agent and opens one persistent gateway-managed
-session for each central message. It requires `session/resume` or
-`session/load`. Before prompt dispatch, a bounded retry of the same central
-message may resume its stored session. A new central message always receives a
-new session.
+Ambassador initializes the agent and reuses a persistent session for a
+central-issued remote `sender_agent_id`, scoped to the enrolled DPoP identity,
+fixed provider, and canonical working directory. Payload-supplied identities
+never select a session. It requires `session/resume` or `session/load`, preferring
+resume without history replay. OpenClaw's reviewed profile requires load to
+recover its gateway session mapping across process restarts. Each message has its own dispatch state and each
+action its own completion correlation. Only a prepared message may retry;
+dispatched, completed, or uncertain messages cannot be prompted again.
+
+Provider configuration owns model context and automatic compaction. Compaction
+does not settle an action or prune Ambassador's stores. During `session/load`,
+Ambassador streams and discards history, bounds each NDJSON event, and retains
+no replay transcript. New turn output retains its 4 MiB cumulative bound.
+Session inspection keeps at most a 512 KiB recent preview and labels truncation.
 
 Ambassador has no interactive approval UI during background delivery. For an
 ACP permission request, it submits one human approval request correlated by the
@@ -634,8 +671,9 @@ Approval selects `allow_once` when offered, then another advertised positive
 option; denial selects an advertised rejection option. A missing option of the
 required polarity cancels the ACP request.
 
-Messages consumed by the approval poll remain in a bounded in-memory queue for
-the normal relay. The correlated response is handled internally and is not sent
+Messages consumed by the approval poll are capped at 256 messages and 16 MiB
+in memory, then drained in batches of at most 512 KiB for the normal relay.
+Action calls and results are encrypted at receipt, before buffer admission. The correlated response is handled internally and is not sent
 to the provider as another prompt. Unrelated messages keep their arrival order.
 
 The local MCP server advertises the same complete tool catalog before and
@@ -671,12 +709,18 @@ kind, working directory, central message ID, action `call_id`, lifecycle state,
 and timestamps. It stores no prompt, message body, provider output, MCP data,
 or credential.
 
-Non-action sessions retire after a normal ACP turn. An action-call session
-stays active while its encrypted pending-action row remains and retires only
-after central accepts the matching `submit_action_result`. After 30 days,
-Ambassador calls `session/delete` when advertised and removes the local record
-after success. When deletion is unsupported, it forgets the local record. A
-transient deletion failure retains the record for another cleanup attempt.
+Sessions remain reusable after normal turns and accepted action results.
+Central acceptance settles only the matching action, including when a different
+MCP chat submits it. Outstanding actions and unfinished or uncertain dispatches
+protect the session from automatic retirement. After 30 days without activity,
+a session with no unfinished work becomes eligible for retirement and cleanup.
+
+Maintenance runs asynchronously at startup and daily. It drains indexed pages
+of 32 sessions, releases the provider operation queue between deletions, and
+skips transient failures until the next pass. It deletes provider history when
+ACP supports it and otherwise forgets local metadata. Metadata is capped at
+1,024 provider sessions and a 256 MiB SQLite database; settled message/action
+correlations older than 30 days are pruned in bounded batches. Use the new metadata schema directly and reject incompatible existing state.
 
 ## Central acknowledgement
 
@@ -713,7 +757,8 @@ a declared development limitation.
 | ACP child cleanup | 5 seconds |
 
 One 15-minute-and-30-second outer ACP delivery budget includes all ACP stages.
-A stage never extends it. Tests may inject shorter positive deadlines through
+A stage never extends it except while waiting for the explicit human approval
+described above. Tests may inject shorter positive deadlines through
 internal seams. No deadline is a CLI option.
 
 Never write message bodies, permission details, MCP arguments or results,
@@ -723,7 +768,8 @@ metrics, temporary files, crash artifacts, or support bundles. Verbose console
 output may contain bounded message, MCP, provider-history, and REST data after
 mandatory credential redaction; it is never persisted. ADR 0046 defines the
 bounded encrypted record for each unanswered action call. ADR 0051 defines a
-separate bounded encrypted record for each received action result. The ACP
+separate bounded encrypted record for each received action result. ADR 0056
+adds encrypted explicit outbound action intent and paginated reads. The ACP
 session database contains only bounded identifiers, lifecycle state, and
 timestamps. The only raw
 webhook-secret output is the explicit owner-invoked `webhook-secret` command.
@@ -738,11 +784,18 @@ nonsecret. The notification journal remains ID-only. The pending-action
 encryption key is derived with domain separation from the loaded DPoP private
 key, so the inbox is bound to the enrolled identity without another
 user-managed secret. Its SQLite lookup key and authenticated ciphertext reveal
-neither the call ID nor the action payload. The inbox is bounded to 256 records
-and 480 KiB of ciphertext. The action-result inbox uses separate domain labels
-with the same identity binding. Its lookup key and authenticated ciphertext
-reveal neither the call ID nor the returned data. It is bounded to 256 records
-and 400 KiB of ciphertext.
+neither the call ID nor the action payload. Each of the pending-action,
+received-result, and outbound-intent stores allows 1 GiB of ciphertext, with a
+512 KiB per-record limit. SQLite indexes, free pages, and WAL files add disk
+overhead; the quota measures live ciphertext. Quotas are independent of model
+context, response size, and delivery memory. Indexed keyset reads decrypt only
+a bounded page; startup validates metadata and a sample record without reading
+the full store. Transactional byte counters avoid scanning all ciphertext for
+capacity checks. Unread results and unanswered calls have no automatic expiry.
+
+Existing-state migration is out of scope. Use the new encrypted store schemas
+directly; reject incompatible or unknown schemas and different identities.
+The owner can reset disposable development state with `ambassador clean`.
 
 ## Acceptance cases
 
@@ -767,7 +820,7 @@ The cutover must prove at least:
 - bounded in-memory delivery custody, an ID-only notification journal, and the
   encrypted, bounded pending-action exception;
 - exact target-authorized action-result submission and correlated response
-  delivery, the filtered pending-decision projection, the restart-safe
+  delivery, the email-only human decision flow, the restart-safe
   unanswered-action list, the encrypted received-result list, removal only
   after successful result submission, and no general reply or local
   delivery-control tools;
@@ -775,8 +828,8 @@ The cutover must prove at least:
   entrypoint launch, provider authentication ownership, normal
   provider-configured MCP and built-in tool access, and bounded asynchronous
   child-process failures;
-- session list, history display, delete, forget, action-result retirement,
-  30-day cleanup, and redacted verbose diagnostics;
+- session list, bounded history display, delete, forget, peer reuse, independent
+  action completion, 30-day idle cleanup, and redacted verbose diagnostics;
 - startup output with working MCP setup commands for all supported agents and
   safe operator diagnostics for each startup or delivery failure class;
 - no separate connector process, user-selected webhook format, OpenClaw
@@ -784,7 +837,7 @@ The cutover must prove at least:
   migration path in the artifact; and
 - local cleanup removes all enrollment and delivery state, refuses while the
   process lock is held, leaves provider and central state alone, and returns to
-  the bootstrap catalog; and
+  unenrolled tool behavior; and
 - no credential, plaintext pending-action content, or plaintext received-result
   content leakage in databases, profiles, temporary files, packages, or
   qualification output.

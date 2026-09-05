@@ -22,6 +22,7 @@ export interface DirectAgentCapability {
     readonly name: string;
   };
   readonly mcp: McpConfigurationBehavior;
+  readonly sessionRestore?: "load";
   readonly environment: DirectAgentEnvironment;
   readonly windowsNodePackage?: WindowsNodePackageEntrypoint;
   readonly bundledNodePackage?: NodePackageEntrypoint;
@@ -71,6 +72,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
       args: ["acp"],
       agentInfo: { name: "openclaw-acp" },
       mcp: "provider_config",
+      sessionRestore: "load",
       environment: [
         "APPDATA",
         "HOME",
@@ -239,6 +241,7 @@ function completeDirect(value: DirectAgentCapability | undefined): boolean {
     value.args.every((argument) => BOUNDED_METADATA.test(argument)) &&
     BOUNDED_METADATA.test(value.agentInfo.name) &&
     value.mcp === "provider_config" &&
+    (value.sessionRestore === undefined || value.sessionRestore === "load") &&
     completeEnvironment &&
     completeWindowsNodePackage &&
     completeBundledNodePackage &&

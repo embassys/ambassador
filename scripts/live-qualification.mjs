@@ -1160,7 +1160,14 @@ async function startGateway(
   };
 }
 
-async function runStoppedCliCommand(packed, stateRoot, environment, workingDirectory, args) {
+async function runQualificationCliCommand(
+  packed,
+  stateRoot,
+  environment,
+  workingDirectory,
+  args,
+  localControlMcpEndpoint,
+) {
   let stdout = "";
   let stderr = "";
   const result = await packed.runCli(args, {
@@ -1180,7 +1187,11 @@ async function runStoppedCliCommand(packed, stateRoot, environment, workingDirec
     },
     env: environment,
     cwd: workingDirectory,
-    testOverrides: { centralOrigin: LIVE_ORIGIN, stateRoot },
+    testOverrides: {
+      centralOrigin: LIVE_ORIGIN,
+      stateRoot,
+      ...(localControlMcpEndpoint === undefined ? {} : { localControlMcpEndpoint }),
+    },
   });
   assert(result === 0 && stderr === "", "cli_command");
   return stdout;
@@ -1573,6 +1584,7 @@ async function main() {
       route === "POST /api/ack_message" ||
       route === "POST /api/request_permission" ||
       route === "POST /api/get_human_input" ||
+      route === "POST /api/call_action" ||
       isTargetActionResult
     ) {
       try {
@@ -1647,7 +1659,13 @@ async function main() {
         }
       }
     }
-    if (realCodexClaude && gatewayIndex === 0 && route === "POST /api/call_action") {
+    if (gatewayIndex === 0 && route === "POST /api/call_action") {
+      assert(
+        isRecord(requestBody) &&
+          requestBody.target_email === addresses[1] &&
+          canonicalJson(requestBody.payload) === canonicalJson({ reason: actionReason }),
+        "saved_action_payload",
+      );
       if (!response.ok) {
         requesterRejectedActionCalls += 1;
       } else {
@@ -1987,6 +2005,7 @@ async function main() {
         );
         const target = new directDeliveryModule.DirectDeliveryTarget({
           agentKind: capability.kind,
+          identityScope: roots[index],
           capability: selectedCapability,
           workingDirectory: realDirect ? profile.working_directory : repositoryRoot,
           environment: realDirect ? environmentFor(index) : process.env,
@@ -2305,6 +2324,7 @@ async function main() {
       decision_options: "once_always",
       reason: "Needed to complete the controlled live qualification.",
       scope: permissionScope,
+      action_payload: { reason: actionReason },
     });
     assert(
       typeof requested.permission_id === "string" && requested.status === "pending",
@@ -2333,7 +2353,6 @@ async function main() {
         addresses[0],
         "requester_agent_permission_email_decision",
         () =>
-          requesterActionCall !== undefined ||
           requesterDirectMessages.some(
             (message) =>
               isRecord(message.payload) &&
@@ -2375,21 +2394,14 @@ async function main() {
     }
 
     phase = "action";
-    if (realCodexClaude) {
-      await waitForObservation(
-        () => requesterActionCall !== undefined,
-        "permission_outcome_action_timeout",
-        REAL_AGENT_WAIT_MS,
-      );
-      assert(requesterRejectedActionCalls === 0, "permission_outcome_action_rejected");
-    }
-    const called = realCodexClaude
-      ? requesterActionCall
-      : await gateways[0].client.call("call_action", {
-          target_email: addresses[1],
-          action_type: "get_phone_number",
-          payload: { reason: actionReason },
-        });
+    await waitForObservation(
+      () => requesterActionCall !== undefined,
+      "saved_action_dispatch_timeout",
+      REAL_AGENT_WAIT_MS,
+    );
+    assert(requesterRejectedActionCalls === 0, "saved_action_rejected");
+    assert(routeCounts[0].get("POST /api/call_action") === 1, "saved_action_once");
+    const called = requesterActionCall;
     assert(
       isRecord(called) &&
         typeof called.call_id === "string" &&
@@ -2472,6 +2484,51 @@ async function main() {
       assert(targetActionResultCallCount === 1, "target_action_result_count");
     }
 
+    phase = "running_session_reads";
+    const sessionsByIndex = new Map();
+    if (realDirect) {
+      const directIndexes = realCodexClaude ? [0, 1] : [1];
+      for (const index of directIndexes) {
+        const endpoint = gateways[index].client.endpoint;
+        const sessions = listedSessions(
+          await runQualificationCliCommand(
+            packed,
+            roots[index],
+            environmentFor(index),
+            workingDirectoryFor(index),
+            ["sessions", "list"],
+            endpoint,
+          ),
+        );
+        sessionsByIndex.set(index, sessions);
+        const shown = await runQualificationCliCommand(
+          packed,
+          roots[index],
+          environmentFor(index),
+          workingDirectoryFor(index),
+          ["sessions", "show", sessions[0].session_id],
+          endpoint,
+        );
+        assert(shown.trim().length > 0, "session_show");
+        const verboseHistory = await runQualificationCliCommand(
+          packed,
+          roots[index],
+          environmentFor(index),
+          workingDirectoryFor(index),
+          ["sessions", "show", sessions[0].session_id, "--verbose"],
+          endpoint,
+        );
+        assert(verboseHistory.includes("sessionUpdate"), "session_show_verbose");
+      }
+    }
+    if (realCodexClaude) {
+      const sessions = sessionsByIndex.get(0);
+      assert(
+        sessions?.length === 1 && sessions[0].status === "active",
+        "requester_peer_session_reused",
+      );
+    }
+
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
       join(roots[1], "central-credential.json"),
@@ -2516,14 +2573,14 @@ async function main() {
     for (const gateway of gateways.splice(0)) await gateway.stop();
 
     phase = "webhook_secret_command";
-    const firstWebhookSecret = await runStoppedCliCommand(
+    const firstWebhookSecret = await runQualificationCliCommand(
       packed,
       roots[0],
       environmentFor(0),
       workingDirectoryFor(0),
       ["webhook-secret"],
     );
-    const secondWebhookSecret = await runStoppedCliCommand(
+    const secondWebhookSecret = await runQualificationCliCommand(
       packed,
       roots[0],
       environmentFor(0),
@@ -2538,36 +2595,6 @@ async function main() {
     let sessionCommands = "not_applicable";
     if (realDirect) {
       phase = "session_commands";
-      const directIndexes = realCodexClaude ? [0, 1] : [1];
-      const sessionsByIndex = new Map();
-      for (const index of directIndexes) {
-        const sessions = listedSessions(
-          await runStoppedCliCommand(
-            packed,
-            roots[index],
-            environmentFor(index),
-            workingDirectoryFor(index),
-            ["sessions", "list"],
-          ),
-        );
-        sessionsByIndex.set(index, sessions);
-        const shown = await runStoppedCliCommand(
-          packed,
-          roots[index],
-          environmentFor(index),
-          workingDirectoryFor(index),
-          ["sessions", "show", sessions[0].session_id],
-        );
-        assert(shown.trim().length > 0, "session_show");
-        const verboseHistory = await runStoppedCliCommand(
-          packed,
-          roots[index],
-          environmentFor(index),
-          workingDirectoryFor(index),
-          ["sessions", "show", sessions[0].session_id, "--verbose"],
-        );
-        assert(verboseHistory.includes("sessionUpdate"), "session_show_verbose");
-      }
       const deleteIndex = 1;
       const forgetIndex = realCodexClaude ? 0 : 1;
       const deleteSessions = sessionsByIndex.get(deleteIndex);
@@ -2576,7 +2603,7 @@ async function main() {
         deleteSessions?.[0] !== undefined && forgetSessions?.[0] !== undefined,
         "session_list",
       );
-      const deleted = await runStoppedCliCommand(
+      const deleted = await runQualificationCliCommand(
         packed,
         roots[deleteIndex],
         environmentFor(deleteIndex),
@@ -2584,7 +2611,7 @@ async function main() {
         ["sessions", "delete", deleteSessions[0].session_id],
       );
       assert(deleted.includes("deleted session"), "session_delete");
-      const forgotten = await runStoppedCliCommand(
+      const forgotten = await runQualificationCliCommand(
         packed,
         roots[forgetIndex],
         environmentFor(forgetIndex),
@@ -2632,7 +2659,7 @@ async function main() {
 
     phase = "clean_command";
     for (let index = 0; index < 2; index += 1) {
-      const cleaned = await runStoppedCliCommand(
+      const cleaned = await runQualificationCliCommand(
         packed,
         roots[index],
         environmentFor(index),
@@ -2709,11 +2736,13 @@ async function main() {
         action_result_round_trip: "passed",
         verbose_start: "passed",
         session_commands: sessionCommands,
+        running_session_reads: realDirect ? "passed" : "not_applicable",
+        requester_peer_session_reused: realCodexClaude ? "passed" : "not_applicable",
         webhook_secret_command: "passed",
         clean_command: "passed",
         codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
         claude_action_result_mcp_call: realClaude ? "passed" : "not_applicable",
-        requester_permission_outcome_action: realCodexClaude ? "passed" : "not_applicable",
+        requester_saved_outbound_action: "passed",
         requester_rejected_action_calls: realCodexClaude
           ? requesterRejectedActionCalls
           : "not_applicable",

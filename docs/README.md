@@ -14,6 +14,7 @@ plan contains only work that is not complete.
 
 | Need | Read |
 | --- | --- |
+| Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |

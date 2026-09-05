@@ -24,6 +24,7 @@ test("records all reviewed production agent contracts exactly", () => {
         args: ["acp"],
         agentInfo: { name: "openclaw-acp" },
         mcp: "provider_config",
+        sessionRestore: "load",
         environment: [
           "APPDATA",
           "HOME",

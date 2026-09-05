@@ -54,10 +54,9 @@ Later, you can ask:
 
 Ambassador launches `openclaw acp` for incoming messages. OpenClaw does not
 receive extra MCP configuration through ACP, so keep the MCP entry above
-enabled. The incoming message runs in a new Ambassador-managed session, not the
-registration chat. Ambassador does not disable built-in tools or request
-permission bypass. If OpenClaw asks to use a tool, Ambassador emails the human
-grantor and keeps the request pending until the decision arrives through
+enabled. Direct messages from the same remote identity reuse a persistent session
+within your enrollment and working directory. The registration chat remains separate. Ambassador does not disable built-in tools or request
+permission bypass. If OpenClaw asks to use a tool, Ambassador emails you at your registered address and keeps the request pending until the decision arrives through
 Embassys. An approval is passed to OpenClaw as **allow once** when available.
 
 ## Inspect sessions
@@ -110,3 +109,9 @@ For a clean local registration test, see
 
 The MCP steps follow OpenClaw's current
 [official MCP instructions](https://docs.openclaw.ai/cli/mcp).
+
+For requesting an action, waiting for email approval, answering later, and
+retrieving results, see [Request and answer an action](action-workflow.md).
+Provider compaction manages context; sessions with no unfinished work become
+eligible for cleanup after 30 idle days. `sessions show` labels a truncated
+recent preview when provider history is large.

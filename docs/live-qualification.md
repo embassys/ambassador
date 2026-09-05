@@ -43,19 +43,21 @@ not instructions for the current runner. The current flow is email-only.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
 7. Validate the live action catalog against the recorded fixture schemas.
 8. Request one synthetic `get_phone_number` permission with the
-   `once_always` menu, prove that the grantor's agent has no inbox item, and
+   `once_always` menu and a saved exact `action_payload`, prove that the
+   grantor's agent has no inbox item, and
    apply `allow_once` from the disposable permission email.
 9. Make the direct ACP target request one harmless fixture tool, prove its ACP
    request remains pending, answer `Allow once` through the target owner's
    `get_human_input` email, and prove Ambassador receives the correlated
    `human_input_response` through `poll_messages?timeout=0` before selecting
    ACP `allow_once`. Prove the control response is not prompted to the agent.
-10. Deliver the action request to the direct target.
+10. Prove Ambassador dispatches the saved exact action payload once after the
+    matching grant, then delivers it to the direct target.
 11. Submit one correlated synthetic result from the target and deliver the
     resulting `action_response` to the selected requester endpoint.
 12. Prove each local acceptance or completion precedes its central
     acknowledgement.
-13. Prove one provider session per message, action-result retirement,
+13. Prove provider session reuse per remote identity, independent action completion,
     running-process `sessions list`, normal and verbose running-process
     `sessions show`, stopped-process `sessions delete` and `sessions forget`,
     stable repeated `webhook-secret`, and redacted `start --verbose` output.
@@ -152,7 +154,8 @@ pnpm run qualify:live
 
 This mode registers both identities as direct-only profiles. The controlled
 runner initiates the permission request, applies the grant through the
-disposable human decision email, and initiates the action call. Claude handles
+disposable human decision email, and observes Ambassador dispatch the saved
+action payload exactly once. Claude handles
 the inbound action and Codex handles both correlated responses. It proves the
 two real direct-delivery endpoints in one central exchange; it does not claim
 that a user typed the initiating calls in an interactive Codex chat.

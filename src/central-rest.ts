@@ -113,6 +113,52 @@ function objectSchema(
   return { type: "object", properties, required: [...required], additionalProperties: false };
 }
 
+export function normalizePermissionRequest(arguments_: unknown): Record<string, unknown> {
+  if (
+    !exactKeys(
+      arguments_,
+      [],
+      [
+        "target_email",
+        "message_id",
+        "action_type",
+        "permission_type",
+        "decision_options",
+        "reason",
+        "scope",
+      ],
+    ) ||
+    (arguments_.target_email === undefined && arguments_.message_id === undefined) ||
+    (arguments_.action_type === undefined) === (arguments_.permission_type === undefined) ||
+    (arguments_.decision_options !== undefined &&
+      arguments_.decision_options !== "accept_deny" &&
+      arguments_.decision_options !== "once_always") ||
+    (arguments_.reason !== undefined &&
+      (typeof arguments_.reason !== "string" || arguments_.reason.length > 500))
+  ) {
+    throw failure("invalid_arguments");
+  }
+  const body = {
+    ...(arguments_.target_email === undefined
+      ? {}
+      : { target_email: requestEmail(arguments_.target_email) }),
+    ...(arguments_.message_id === undefined
+      ? {}
+      : { message_id: requestUuid(arguments_.message_id) }),
+    ...(arguments_.action_type === undefined
+      ? { permission_type: requestPermissionName(arguments_.permission_type) }
+      : { action_type: requestPermissionName(arguments_.action_type) }),
+    ...(arguments_.decision_options === undefined
+      ? {}
+      : { decision_options: arguments_.decision_options }),
+    ...(arguments_.reason === undefined ? {} : { reason: arguments_.reason }),
+    ...(arguments_.scope === undefined
+      ? {}
+      : { scope: arguments_.scope === null ? null : requestObject(arguments_.scope) }),
+  };
+  return body;
+}
+
 export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "list_action_types",
@@ -123,7 +169,7 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "request_permission",
     description:
-      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Embassys emails that identity's human owner, who decides asynchronously; their agent does not approve the request. Supply target_email, message_id, or both when they identify the same grantor; message_id takes precedence. Use exactly one permission name. Check already_granted before waiting for email approval.",
+      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Embassys emails that identity's human owner, who decides asynchronously; their agent does not approve the request. Supply target_email, message_id, or both when they identify the same grantor; message_id takes precedence. Use exactly one permission name. Check already_granted before waiting for email approval. Include action_payload only when the user also wants that exact action submitted after approval; Ambassador saves and dispatches it, so do not separately call call_action for the same intent.",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,6 +203,11 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
           description: "Human-readable reason shown in the approval email.",
         },
         scope: { anyOf: [{ type: "object" }, { type: "null" }] },
+        action_payload: {
+          type: "object",
+          description:
+            "Optional exact action payload to save encrypted locally and submit once after permission is granted. Requires target_email and no message_id. Omit for permission only. Inspect status through get_inbox; do not also call call_action for this intent.",
+        },
       },
       allOf: [
         { anyOf: [{ required: ["target_email"] }, { required: ["message_id"] }] },
@@ -168,8 +219,11 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "get_inbox",
     description:
-      "Use this Embassys Ambassador tool when the user asks what needs their attention, what action request they need to answer, or whether an action result came back. It returns unanswered action calls and unread action results. Embassys permission requests are decided by the human through email and do not appear here. Returned action results are marked read and removed from the inbox.",
-    inputSchema: objectSchema({}),
+      "Check unanswered action calls, unread action results, and saved outbound action status. Use next_cursor to retrieve further pages. Only results included in a successful response are marked read. Embassys permission decisions remain in the human email flow.",
+    inputSchema: objectSchema({
+      limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+      cursor: { type: "string", minLength: 1, maxLength: 128 },
+    }),
   },
   {
     name: "call_action",
@@ -432,48 +486,7 @@ export class CentralRestClient {
     arguments_: unknown,
     signal?: AbortSignal,
   ): Promise<CentralPermissionRequestResult> {
-    if (
-      !exactKeys(
-        arguments_,
-        [],
-        [
-          "target_email",
-          "message_id",
-          "action_type",
-          "permission_type",
-          "decision_options",
-          "reason",
-          "scope",
-        ],
-      ) ||
-      (arguments_.target_email === undefined && arguments_.message_id === undefined) ||
-      (arguments_.action_type === undefined) === (arguments_.permission_type === undefined) ||
-      (arguments_.decision_options !== undefined &&
-        arguments_.decision_options !== "accept_deny" &&
-        arguments_.decision_options !== "once_always") ||
-      (arguments_.reason !== undefined &&
-        (typeof arguments_.reason !== "string" || arguments_.reason.length > 500))
-    ) {
-      throw failure("invalid_arguments");
-    }
-    const body = {
-      ...(arguments_.target_email === undefined
-        ? {}
-        : { target_email: requestEmail(arguments_.target_email) }),
-      ...(arguments_.message_id === undefined
-        ? {}
-        : { message_id: requestUuid(arguments_.message_id) }),
-      ...(arguments_.action_type === undefined
-        ? { permission_type: requestPermissionName(arguments_.permission_type) }
-        : { action_type: requestPermissionName(arguments_.action_type) }),
-      ...(arguments_.decision_options === undefined
-        ? {}
-        : { decision_options: arguments_.decision_options }),
-      ...(arguments_.reason === undefined ? {} : { reason: arguments_.reason }),
-      ...(arguments_.scope === undefined
-        ? {}
-        : { scope: arguments_.scope === null ? null : requestObject(arguments_.scope) }),
-    };
+    const body = normalizePermissionRequest(arguments_);
     const result = await this.#request("POST", "/api/request_permission", body, signal);
     if (
       !exactKeys(result, ["permission_id", "status", "message"], ["already_granted", "decision"]) ||
