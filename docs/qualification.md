@@ -47,6 +47,10 @@ after a failed assertion, and allows Windows state initialization to finish.
 The approval deadline test leaves room for Windows process startup while keeping
 the simulated human wait longer than both deadlines. These are test changes;
 the release runtime and public CLI contract did not change during qualification.
+The concurrent crash-handoff test also accepts a fail-closed artifact rejection
+when a contender observes changing SQLite metadata. It still requires exactly
+one owner and successful acquisition after all contenders release; settled
+contention and invalid-artifact tests retain their exact expected errors.
 
 The same 0.2.18 candidate then passed a fresh combined Codex-to-Claude run
 using runner SHA-256
