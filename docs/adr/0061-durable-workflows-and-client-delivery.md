@@ -82,6 +82,14 @@ turn or prove presentation in the originating chat.
 Retain one enrollment and one incoming direct or webhook execution profile.
 A provider extension may separately retain a verified original-conversation
 return route in its own ID-only journal, keyed by the outgoing operation UUID.
+The OpenClaw observer checks the captured conversation's activity before
+waiting and again before injection. While a foreground turn is active, it
+defers delivery and rereads the operation after the turn ends. This lets a
+foreground receipt remove an already-presented result before native injection.
+It never acknowledges a deferred result. The activity check and injection are
+separate provider calls, so this reduces overlap without claiming an atomic
+display guarantee. Missing activity information pauses native delivery and
+preserves the result for normal checks.
 OpenClaw routes persist in provider state; a Claude channel route lasts for
 that stdio process. Route journals cap at 10,000 records and 32 observers. Native bridges obtain that route from provider context, not model
 arguments. Qualified OpenClaw and future Hermes bridges are opt-in extensions, use fixed
