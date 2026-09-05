@@ -21,7 +21,7 @@ test("records all reviewed production agent contracts exactly", () => {
       },
       direct: {
         command: "openclaw",
-        args: ["acp"],
+        args: ["acp", "--no-prefix-cwd"],
         agentInfo: { name: "openclaw-acp" },
         mcp: "provider_config",
         sessionRestore: "load",

@@ -13,8 +13,8 @@ full-message webhook endpoint, and one direct endpoint. The default direct
 target is the deterministic mock ACP agent. Separately confirmed modes use the
 fixed Codex, Claude Code, Hermes, or OpenClaw profiles. A combined mode uses
 Codex and Claude Code as the two direct endpoints in one flow. Real-provider
-modes use isolated provider configuration copies where native authentication
-allows it. Installed-version probes are observational; production requires the
+modes use owner-prepared provider profiles or an explicitly supported ordinary
+home. Authentication remains with the provider. Installed-version probes are observational; production requires the
 exact known client and ACP agent names and then tries the fixed ACP v1 contract.
 
 Historical observations below ADR 0054 may mention the former
@@ -25,9 +25,10 @@ not instructions for the current runner. The current flow is email-only.
 
 - Use disposable Mailosaur addresses and synthetic action data.
 - Read Mailosaur credentials from approved local secret storage.
-- Keep addresses, codes, tokens, keys, proofs, messages, and payloads out of
-  commands, files, logs, screenshots, and reports.
-- Capture only route names, status, timing, digests, and safe pass/fail evidence.
+- Keep codes, tokens, keys, proofs, nonces and webhook secrets out of commands,
+  diagnostics, screenshots and reports. Do not inspect or copy provider credentials.
+- Development diagnostics retain bounded synthetic request and response bodies.
+  Reports contain route names, status, timing, digests and pass/fail evidence.
 - Delete captured mail and all temporary state in cleanup.
 
 ## Required live checks after the cutover
@@ -42,21 +43,19 @@ not instructions for the current runner. The current flow is email-only.
    nonsecret profile loading.
 6. Prove valid Bearer plus DPoP requests and the negative DPoP matrix.
 7. Validate the live action catalog against the recorded fixture schemas.
-8. Request one synthetic `get_phone_number` permission with the
-   `once_always` menu and a saved exact `action_payload`, prove that the
-   grantor's agent has no inbox item, and
-   apply `allow_once` from the disposable permission email.
-9. Make the direct ACP target request one harmless fixture tool, prove its ACP
-   request remains pending, answer `Allow once` through the target owner's
-   `get_human_input` email, and prove Ambassador receives the correlated
-   `human_input_response` through `poll_messages?timeout=0` before selecting
-   ACP `allow_once`. Prove the control response is not prompted to the agent.
-10. Prove Ambassador dispatches the saved exact action payload once after the
-    matching grant, then delivers it to the direct target.
-11. Submit one correlated synthetic result from the target and deliver the
-    resulting `action_response` to the selected requester endpoint.
-12. Prove each local acceptance or completion precedes its central
-    acknowledgement.
+8. Submit one typed `message_box request_action` with a stable request UUID,
+   exact `get_phone_number` name and synthetic payload. Prove the pending
+   permission queues no request to the grantor's agent. Apply the chosen option
+   through the disposable permission email.
+9. Make the direct ACP target request one harmless fixture tool. Keep the ACP
+   request pending, verify the provider's exact option labels and IDs, select
+   its one-time option through the owner's email, and receive the correlated
+   response through the shared poller. Return the selected ID unchanged.
+10. Dispatch the saved action payload once after the matching grant.
+11. Submit one correlated result through `message_box`. Check the original
+    request UUID, assert the actual returned values, then acknowledge its cursor.
+    Prove the owned result does not start an unrelated requester ACP turn.
+12. Prove encrypted local custody precedes every central acknowledgement.
 13. Prove provider session reuse per remote identity, independent action completion,
     running-process `sessions list`, normal and verbose running-process
     `sessions show`, stopped-process `sessions delete` and `sessions forget`,
@@ -81,8 +80,8 @@ After packing and clean-installing the candidate, set
 mode, the runner uses the mock ACP fixture compiled by `pnpm run test:build`
 and does not run a paid provider.
 
-For the real Codex mode, prepare an owner-only temporary home containing only
-the copied Codex authentication needed for the run. Use the candidate's
+For the real Codex mode, use an owner-prepared isolated profile authenticated
+through Codex's normal login. Do not inspect or copy its credentials. Use the candidate's
 package-owned `codex-acp` dependency, then set:
 
 ```sh
@@ -92,8 +91,13 @@ export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-co
 pnpm run qualify:live
 ```
 
-The runner rejects an ordinary user home, records the installed version when
-one can be observed, uses the compiled-in Codex command and profile, and never
+For a single real Codex target, the explicitly selected ordinary home is also
+supported when its `ambassador` MCP entry is already configured at
+`http://127.0.0.1:8787/mcp`. The runner checks that entry without rewriting it.
+Keep the Codex requester isolated in a combined two-provider run so the two
+Ambassador processes do not compete for the same fixed port.
+
+The runner records the installed version when one can be observed, uses the compiled-in Codex command and profile, and never
 accepts a command override. The observation does not establish compatibility;
 ACP v1 initialization with the exact known agent name remains authoritative.
 The runner also lets
@@ -103,16 +107,12 @@ message. Delete the isolated home after the run.
 For the real Claude Code mode, choose the home that owns the authentication
 being qualified:
 
-- For file-backed authentication that works in a copy, prepare an owner-only
-  temporary home containing owner-only copies of `.claude.json` and
-  `.claude/settings.json`. The runner replaces only that copy's `ambassador`
-  user-scope MCP entry.
-- For native authentication tied to the ordinary home, such as the macOS
-  Keychain-backed subscription login, use the ordinary home. Configure
-  `ambassador` there before the run at exactly
-  `http://127.0.0.1:8787/mcp`. The runner binds the target gateway to that port,
-  checks the entry through the official CLI, and does not rewrite provider
-  configuration.
+- Use an owner-prepared isolated profile authenticated through Claude's normal
+  login. The runner replaces only that profile's `ambassador` MCP entry.
+- For native authentication tied to the ordinary home, such as macOS Keychain,
+  use that home with `ambassador` already configured at
+  `http://127.0.0.1:8787/mcp`. The runner verifies the entry through Claude's
+  CLI and does not rewrite it.
 
 Do not print a credential or save one in the repository. Use the candidate's
 package-owned public Claude ACP adapter, then set:
@@ -132,9 +132,11 @@ Ambassador launches only the fixed package-owned `claude-agent-acp` entrypoint.
 ACP requires exact agent name `@agentclientprotocol/claude-agent-acp`. The
 adapter and Claude Code own authentication. Claude loads normal provider
 configuration and keeps its built-in tools. Ambassador requests no safe mode,
-tool restriction, or permission bypass; it selects `allow_once` when ACP asks
-for approval only after the correlated human decision arrives through central
-polling. The runner applies each permission through the disposable human
+tool restriction, or permission bypass. It presents ACP's actual options and
+returns the exact human-selected ID after the correlated decision arrives
+through central polling. The controlled human fixture chooses the provider's
+one-time option for this synthetic operation. It handles each subsequent
+approval until that turn finishes, with a total deadline and ten-decision cap. The runner applies each permission through the disposable human
 decision email. The controlled
 qualification policy directs Claude only to submit the synthetic action result
 through Ambassador MCP. Record the authentication category, not a credential
@@ -160,11 +162,9 @@ the inbound action and Codex handles both correlated responses. It proves the
 two real direct-delivery endpoints in one central exchange; it does not claim
 that a user typed the initiating calls in an interactive Codex chat.
 
-For Hermes, prepare an owner-only temporary home containing only `.hermes/.env`,
-`.hermes/auth.json`, `.hermes/config.yaml`, and
-`.hermes/shared/nous_auth.json` copied from the authenticated installation.
-Remove unrelated MCP entries only from that copy. Put the installed Hermes
-Agent and `hermes-acp` on `PATH`, then choose one fixed mode:
+For Hermes, use an owner-prepared isolated profile authenticated through its
+normal login. Put the installed Hermes Agent and `hermes-acp` on `PATH`, then
+choose one fixed mode. Do not inspect or copy provider credentials.
 
 ```sh
 export AMBASSADOR_HERMES_QUALIFICATION_HOME=/absolute/path/to/isolated/home
@@ -182,23 +182,23 @@ export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-he
 pnpm run qualify:live
 ```
 
-The runner rejects the ordinary Hermes home and non-owner-only copies. It uses
+For a direct Hermes target, an explicitly selected ordinary home is also
+supported when its `ambassador` MCP entry is already prepared at
+`http://127.0.0.1:8787/mcp`. The runner leaves that entry unchanged. Webhook tests
+still require an isolated profile because the runner configures and starts a
+receiver. Non-owner-only isolated profiles are rejected. The runner uses
 the exact MCP client name `mcp` with a deliberately non-release version value,
 launches only compiled-in `hermes-acp` for direct mode, and configures
-Ambassador MCP only in the isolated copy. The runner records the installed
+Ambassador MCP only in the isolated profile. The runner records the installed
 Hermes version when it can, but does not use that observation as a compatibility
 gate; direct mode requires ACP v1 and the exact `hermes-agent` name. Webhook
 mode starts Hermes's authenticated generic route,
 requires its bearer filter and native HMAC V2 validation, and suppresses
 provider output. Delete the isolated home after every attempt.
 
-For OpenClaw, prepare an owner-only temporary home containing copies of
-`.openclaw/openclaw.json`, `.openclaw/state/openclaw.sqlite`, and
-`.openclaw/agents/main/agent/openclaw-agent.sqlite`. Copy only the provider
-credential used by that OpenClaw agent; for the tested Codex-backed agent this
-also means `.codex/auth.json` and its provider configuration. Use SQLite's
-backup operation for live database copies. Put the installed `openclaw` on
-`PATH`, then choose one fixed mode:
+For OpenClaw, use an owner-prepared isolated profile authenticated through its
+normal login. Put the installed `openclaw` on `PATH`, then choose one fixed
+mode. Do not inspect or copy provider credentials or session databases.
 
 ```sh
 export AMBASSADOR_OPENCLAW_QUALIFICATION_HOME=/absolute/path/to/isolated/home
@@ -216,10 +216,17 @@ export AMBASSADOR_CONFIRM_LIVE_QUALIFICATION=run-live-qualification-with-real-op
 pnpm run qualify:live
 ```
 
-The runner rejects the ordinary OpenClaw home. It configures Ambassador MCP
-only in the copy. Direct mode launches the fixed `openclaw acp` profile and
-requires ACP v1 plus exact agent name `openclaw-acp`. Webhook mode creates the
-secret through the packed Ambassador CLI, writes it to the copied
+For a direct OpenClaw target, an explicitly selected ordinary home is also
+supported. Its gateway must already be running, with an `ambassador` MCP entry
+at `http://127.0.0.1:8787/mcp`. The runner checks gateway status and leaves its
+service, workspace, authentication and MCP configuration unchanged. The owner
+must prepare and restore any temporary MCP entry separately. Webhook tests
+still require an isolated profile because they configure a receiver.
+
+The runner configures Ambassador MCP only in an isolated profile. Direct mode
+launches the fixed `openclaw acp` profile and requires ACP v1 plus exact agent
+name `openclaw-acp`. Webhook mode creates the
+secret through the packed Ambassador CLI, writes it to the isolated
 OpenClaw configuration through `openclaw config patch --stdin`, enables the
 native `/hooks/agent` route for `main`, and runs the real OpenClaw gateway. It
 does not install a plugin. Delete the isolated home after every attempt.

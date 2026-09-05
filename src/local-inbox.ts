@@ -2,6 +2,7 @@ import type { ActionResultInbox } from "./action-result-inbox.js";
 import { serializeLocalToolResult } from "./local-tool-result.js";
 import { McpContractError } from "./mcp-contract.js";
 import type { OutboundActions } from "./outbound-actions.js";
+import type { OwnerQuestions } from "./owner-questions.js";
 import type { PendingActionInbox } from "./pending-action-inbox.js";
 
 const PAGE_BYTES = 500 * 1024;
@@ -45,6 +46,7 @@ export class LocalInbox {
     readonly calls: PendingActionInbox,
     readonly results: ActionResultInbox,
     readonly outbound?: OutboundActions,
+    readonly owners?: OwnerQuestions,
   ) {}
 
   get(
@@ -62,7 +64,6 @@ export class LocalInbox {
     options.signal?.throwIfAborted();
     let cursor = decode(arguments_.cursor);
     const items: Record<string, unknown>[] = [];
-    const consumed: string[] = [];
     let more = false;
     let pageBytes = 2;
     while (cursor.section < 3) {
@@ -81,15 +82,35 @@ export class LocalInbox {
               kind: "action_call",
               ...entry.value,
               response: {
-                tool: "submit_action_result",
+                tool: "message_box",
                 required: {
+                  type: "submit_action_result",
+                  request_id: { type: "string", format: "uuid" },
                   call_id: (entry.value as { call_id: string }).call_id,
                   status: ["success", "error"],
                   result: { type: "object" },
                 },
               },
             }
-          : { kind: cursor.section === 1 ? "action_result" : "outbound_action", ...entry.value };
+          : {
+              kind: cursor.section === 1 ? "action_result" : "outbound_action",
+              ...entry.value,
+              ...(cursor.section === 1
+                ? {
+                    receipt: {
+                      tool: "message_box",
+                      arguments: {
+                        type: "acknowledge_results",
+                        call_ids: [(entry.value as { call_id: string }).call_id],
+                      },
+                    },
+                  }
+                : {}),
+            };
+      if (cursor.section === 0) {
+        const question = this.owners?.forCall((entry.value as { call_id: string }).call_id);
+        if (question !== undefined) Object.assign(item, { owner_question: question });
+      }
       const itemBytes =
         Buffer.byteLength(JSON.stringify(item), "utf8") + (items.length === 0 ? 0 : 1);
       if (items.length >= limit || (items.length > 0 && pageBytes + itemBytes > PAGE_BYTES)) {
@@ -98,7 +119,6 @@ export class LocalInbox {
       }
       items.push(item);
       pageBytes += itemBytes;
-      if (cursor.section === 1) consumed.push((entry.value as { call_id: string }).call_id);
       cursor = { section: cursor.section, after: entry.sequence };
     }
     const result: InboxPage = {
@@ -106,12 +126,10 @@ export class LocalInbox {
       items,
       ...(more ? { next_cursor: encode(cursor) } : {}),
     };
-    // All validation and serialization precedes consumption, including custom credential checks.
+    // Reads never consume results, including when the transport disconnects after serialization.
     options.validate?.(result);
     serializeLocalToolResult(result);
     options.signal?.throwIfAborted();
-    if (this.results.removeMany(consumed) !== consumed.length)
-      throw new Error("Inbox consumption failed");
     return result;
   }
 }

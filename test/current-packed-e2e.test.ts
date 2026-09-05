@@ -195,11 +195,8 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     "verify_email",
     "resend_verification",
     "list_action_types",
-    "request_permission",
-    "get_inbox",
-    "call_action",
-    "submit_action_result",
     "get_my_permissions",
+    "message_box",
   ];
   assert.deepEqual(
     (await client.listTools()).map(({ name }) => name),
@@ -225,8 +222,15 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   );
   assert.equal(Array.isArray((await client.callTool("list_action_types", {})).action_types), true);
 
-  const marker = "clean-installed-memory-only-message";
-  const messageId = central.queueMessage(email, { type: "fixture", value: marker });
+  const marker = "clean-installed-encrypted-result";
+  const callId = "10000000-0000-4000-8000-000000000099";
+  const messageId = central.queueMessage(email, {
+    type: "action_response",
+    call_id: callId,
+    action_type: "get_phone_number",
+    status: "success",
+    result: { phone_number: "+447700900099", marker },
+  });
   const wake = await webhook.waitForWake();
   assert.equal(wake.rawBody.includes(Buffer.from(marker, "utf8")), true);
   for (
@@ -238,9 +242,18 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   }
   assert.equal(central.messageState(messageId), "acked");
   assert.equal(
-    (await readFile(join(root, "notifications.sqlite"))).includes(Buffer.from(marker, "utf8")),
+    (await readFile(join(root, "notification-custody.sqlite"))).includes(
+      Buffer.from(marker, "utf8"),
+    ),
     false,
   );
+  const firstInbox = await client.callTool("message_box", { type: "inbox" });
+  const secondInbox = await client.callTool("message_box", { type: "inbox" });
+  assert.equal(firstInbox.count, 1);
+  assert.deepEqual(secondInbox, firstInbox);
+  assert.equal(JSON.stringify(firstInbox).includes("+447700900099"), true);
+  await client.callTool("message_box", { type: "acknowledge_results", call_ids: [callId] });
+  assert.equal((await client.callTool("message_box", { type: "inbox" })).count, 0);
 
   controller.abort();
   assert.equal(await running, 0);
@@ -258,9 +271,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     ],
     markers: [
       { name: "webhook-secret", encoding: "utf8", value: webhookSecret },
-      { name: "registration-email", encoding: "utf8", value: email },
       { name: "verification-code", encoding: "utf8", value: verificationCode },
-      { name: "message-body", encoding: "utf8", value: marker },
       { name: "old-package", encoding: "utf8", value: "@a2adev/gateway" },
       { name: "old-binary", encoding: "utf8", value: "a2a-gateway" },
       { name: "old-webhook-flag", encoding: "utf8", value: "--webhook-url" },
@@ -302,7 +313,10 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   );
   assert.equal(cleanStdout, "Ambassador local state cleared\n");
   assert.equal(cleanStderr, "");
-  assert.deepEqual(await readdir(root), ["ambassador.lock"]);
+  assert.deepEqual((await readdir(root)).sort(), ["ambassador.lock", "diagnostics"]);
+  const diagnostics = await readFile(join(root, "diagnostics", "events.jsonl"), "utf8");
+  assert.equal(diagnostics.includes(marker), true);
+  assert.equal(diagnostics.includes(verificationCode), false);
 
   let restartStdout = "";
   let restartStderr = "";

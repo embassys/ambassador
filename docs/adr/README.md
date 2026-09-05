@@ -22,11 +22,14 @@ and leaves the inbox for unanswered calls and unread results.
 ADR 0055 replaces automatic ACP tool approval with a human email decision
 correlated through central polling. ADR 0056 adds paginated encrypted stores,
 explicit outbound intent, and sessions reused per remote identity.
+ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 
 ## Current decisions
 
 | ADR | Decision |
 | --- | --- |
+| [0062](0062-explicit-local-enrollment-context.md) | Explicit local enrollment context independent of permission count |
+| [0063](0063-persistent-openclaw-webhook-peers.md) | Persistent OpenClaw webhook conversations per enrolled requester |
 | [0006](0006-toolchain.md) | Repository toolchain |
 | [0007](0007-sqlite.md) | SQLite for the ID-only journal and encrypted action inboxes |
 | [0012](0012-http-deadlines.md) | HTTP and delivery deadlines |
@@ -54,8 +57,12 @@ explicit outbound intent, and sessions reused per remote identity.
 | [0053](0053-live-session-inspection.md) | Inspect ACP sessions while Ambassador runs |
 | [0054](0054-email-only-embassys-permission-decisions.md) | Email-only human decisions for Embassys permissions |
 | [0055](0055-email-mediated-acp-tool-permission.md) | Email-mediated human decisions for ACP tool execution |
-
 | [0056](0056-scalable-inboxes-and-peer-sessions.md) | Scalable encrypted inboxes, explicit action intent, and persistent peer sessions |
+| [0057](0057-production-review-fixes.md) | Production fixes, exact provider approval choices, and preserved local access after expiry |
+| [0058](0058-confirm-running-process-stop.md) | Confirm stopping a running Ambassador before start or clean |
+| [0059](0059-development-diagnostics-and-action-contract.md) | Development body logs and exact action contracts |
+| [0060](0060-long-polling-message-box.md) | Typed message box and repeated ten-minute waits |
+| [0061](0061-durable-workflows-and-client-delivery.md) | Durable workflows, owner questions and client-specific return |
 
 ## Historical ledger
 

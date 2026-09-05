@@ -27,6 +27,21 @@ codex mcp add ambassador --url http://127.0.0.1:8787/mcp
 
 Check it with `codex mcp list`. Inside Codex, `/mcp` shows active servers.
 
+Set the tool timeout in the existing entry in `~/.codex/config.toml`, or in a
+trusted project's `.codex/config.toml`, so the ten-minute wait can finish:
+
+```toml
+[mcp_servers.ambassador]
+url = "http://127.0.0.1:8787/mcp"
+tool_timeout_sec = 660
+```
+
+For a project that requires Embassys tools on its first turn, also set
+`required = true` in that entry. Codex then waits for Ambassador's startup and
+reports a connection failure instead of starting with the server unavailable.
+Keep Ambassador running before opening the chat. A required global entry also
+affects unrelated Codex projects, so prefer project scope for this setting.
+
 ### Codex desktop app or IDE
 
 - Open **Settings → MCP servers → Add server**.
@@ -60,7 +75,7 @@ central message arrives. You do not install `codex-acp` separately. Ambassador r
 your enrollment and working directory. The registration chat remains separate. Ambassador loads tools from normal Codex configuration, passes no extra
 MCP servers, and does not disable built-in tools, choose safe mode, or request
 permission bypass. If Codex asks to use a tool, Ambassador emails you at your registered address and keeps the request pending until their decision arrives through
-Embassys. An approval is passed to Codex as **allow once** when available.
+Embassys. Ambassador presents the provider's exact choices and returns your selected option unchanged.
 
 ## Inspect sessions
 
@@ -84,3 +99,8 @@ retrieving results, see [Request and answer an action](action-workflow.md).
 Provider compaction manages context; sessions with no unfinished work become
 eligible for cleanup after 30 idle days. `sessions show` labels a truncated
 recent preview when provider history is large.
+
+For the unpublished workflow candidate, configure the provider tool timeout
+above 640 seconds or use an explicit shorter wait. Requests and later checks
+use message_box, and results remain until receipt. See
+[Client delivery and qualification](client-delivery.md).

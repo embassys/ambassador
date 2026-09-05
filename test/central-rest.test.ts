@@ -10,9 +10,108 @@ import {
   REST_AUTHENTICATED_TOOLS,
 } from "../src/central-rest.js";
 import { DpopNonceCache } from "../src/dpop.js";
+import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 import { type FakeCentral, startFakeCentral } from "./support/fake-central.js";
 
 const NOW_SECONDS = 1_788_220_800;
+
+test("recognizes exact central permission errors without returning arbitrary detail", async () => {
+  const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
+  for (const [detail, expected] of [
+    ["No permission exists for this action", "permission_missing"],
+    ["Permission is pending, not granted", "permission_pending"],
+    ["Permission is denied, not granted", "permission_denied"],
+    ["Permission has expired", "permission_expired"],
+    [
+      "This permission was granted for a single use, which has already been spent. Request permission again.",
+      "permission_spent",
+    ],
+    ["private unexpected server detail", "central_request_rejected"],
+  ]) {
+    const client = new CentralRestClient({
+      centralOrigin: "https://central.fixture.test",
+      transport: new CentralProtectedTransport({
+        credential: () => credential,
+        now: () => FIXTURE_NOW_SECONDS,
+        fetch: async () =>
+          new Response(JSON.stringify({ detail }), {
+            status: 403,
+            headers: { "content-type": "application/json" },
+          }),
+      }),
+    });
+    await assert.rejects(
+      client.callAction({
+        target_email: "peer@example.test",
+        action_type: "read_calendar_event_by_title",
+        payload: { title: "a" },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof CentralRestError);
+        assert.equal(error.code, expected);
+        assert.equal(error.response?.notAccepted, true);
+        assert.doesNotMatch(JSON.stringify(error), /private unexpected/u);
+        return true;
+      },
+    );
+  }
+});
+
+test("classifies reviewed pre-acceptance errors without trusting the response body", async () => {
+  const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
+  for (const status of [400, 403, 404, 409, 422, 429, 500, 502]) {
+    const client = new CentralRestClient({
+      centralOrigin: "https://central.fixture.test",
+      transport: new CentralProtectedTransport({
+        credential: () => credential,
+        now: () => FIXTURE_NOW_SECONDS,
+        fetch: async () =>
+          new Response("private server rejection details", {
+            status,
+            headers: { "retry-after": "12" },
+          }),
+      }),
+    });
+    for (const [index, operation] of [
+      () => client.requestPermission({ target_email: "peer@fixture.test", action_type: "lookup" }),
+      () =>
+        client.callAction({
+          target_email: "peer@fixture.test",
+          action_type: "lookup",
+          payload: {},
+        }),
+    ].entries())
+      await assert.rejects(operation(), (error: unknown) => {
+        assert.ok(error instanceof CentralRestError);
+        assert.equal(error.response?.httpStatus, status);
+        assert.equal(error.response?.notAccepted, status < 500 && !(index === 1 && status === 409));
+        assert.equal(error.response?.retryAfterMs, status === 429 ? 12_000 : undefined);
+        assert.doesNotMatch(JSON.stringify(error), /private server/u);
+        return true;
+      });
+  }
+});
+
+test("reports credential expiry without a network request or a retryable transport error", async () => {
+  const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
+  let calls = 0;
+  const client = new CentralRestClient({
+    centralOrigin: "https://central.fixture.test",
+    transport: new CentralProtectedTransport({
+      credential: () => credential,
+      now: () => credential.token.expiresAt,
+      fetch: async () => {
+        calls += 1;
+        throw new Error("unexpected network");
+      },
+    }),
+  });
+  await assert.rejects(
+    client.pollRemoteMessages(0),
+    (error: unknown) => error instanceof CentralRestError && error.code === "credential_expired",
+  );
+  assert.equal(calls, 0);
+});
 
 async function enroll(central: FakeCentral, email: string): Promise<LoadedCentralCredential> {
   const enrollment = new CentralEnrollmentClient({
@@ -38,21 +137,10 @@ function rest(central: FakeCentral, credential: LoadedCentralCredential): Centra
 test("post-enrollment catalog exposes the current agent-facing tools with discoverable descriptions", () => {
   assert.deepEqual(
     REST_AUTHENTICATED_TOOLS.map((tool) => tool.name),
-    [
-      "list_action_types",
-      "request_permission",
-      "get_inbox",
-      "call_action",
-      "submit_action_result",
-      "get_my_permissions",
-    ],
+    ["list_action_types", "get_my_permissions"],
   );
   const serialized = JSON.stringify(REST_AUTHENTICATED_TOOLS);
   assert.match(serialized, /Embassys Ambassador/iu);
-  assert.match(
-    REST_AUTHENTICATED_TOOLS.find(({ name }) => name === "get_inbox")?.description ?? "",
-    /unanswered action calls.*unread.*action results/iu,
-  );
   for (const removed of [
     "poll_messages",
     "ack_message",
@@ -129,6 +217,36 @@ test("hides Ambassador's temporary ACP permission types from the action catalog"
   ]);
 });
 
+test("owner questions reuse known action types without changing the catalog", async (t) => {
+  const central = await startFakeCentral(t);
+  const credential = await enroll(central, "calendar-owner@fixture.test");
+  const sender = central.seedClient("calendar-caller@fixture.test");
+  const client = rest(central, credential);
+  const before = await client.listActionTypes();
+  for (const action of ["get_phone_number", "create_calendar_event", "get_free_busy_permission"]) {
+    const messageId = central.queueMessage(
+      "calendar-owner@fixture.test",
+      { type: "action_call", action_type: action },
+      sender.email,
+      action,
+    );
+    for (let repeat = 0; repeat < 2; repeat++) {
+      const requested = await client.requestHumanInput({
+        permission_type: action,
+        request: "May I complete this requested action?",
+        input_type: "buttons",
+        options: [
+          { label: "Approve", value: "approve" },
+          { label: "Decline", value: "deny" },
+        ],
+        message_id: messageId,
+      });
+      assert.equal(requested.status, "pending");
+      assert.deepEqual(await client.listActionTypes(), before);
+    }
+  }
+});
+
 test("asks the enrolled agent's own human and receives the correlated answer", async (t) => {
   const central = await startFakeCentral(t);
   const credential = await enroll(central, "human-input@fixture.test");
@@ -179,6 +297,42 @@ test("asks the enrolled agent's own human and receives the correlated answer", a
     prompt: "Codex wants to run a local tool. Allow this once?",
     message_id: messageId,
   });
+});
+
+test("asks for text tied to the triggering message without creating a permission", async (t) => {
+  const central = await startFakeCentral(t);
+  const credential = await enroll(central, "owner-text@fixture.test");
+  const messageId = central.queueMessage("owner-text@fixture.test", { type: "action_call" });
+  const client = rest(central, credential);
+  const requested = await client.requestHumanInput({
+    permission_type: "get_phone_number",
+    request: "What number should I return?",
+    input_type: "text",
+    message_id: messageId,
+  });
+  assert.equal(requested.input_type, "text");
+  assert.equal(requested.options, null);
+  const answered = await fetch(`${central.apiUrl}/api/human_input_response`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      token: central.humanInputResponseToken(requested.request_id),
+      text: "test phone answer",
+    }),
+  });
+  assert.equal(answered.status, 200);
+  const messages = (await client.pollRemoteMessages(0)).messages;
+  assert.deepEqual(messages.at(-1)?.payload, {
+    type: "human_input_response",
+    request_id: requested.request_id,
+    action_type: "get_phone_number",
+    input_type: "text",
+    value: null,
+    text: "test phone answer",
+    prompt: "What number should I return?",
+    message_id: messageId,
+  });
+  assert.deepEqual(await client.getMyPermissions(), []);
 });
 
 test("I02-R02 REST client projects the fixed action and permission routes", async (t) => {
