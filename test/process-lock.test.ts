@@ -185,7 +185,10 @@ test("atomically selects one contender after its previous owner crashes", async 
   assert.equal(ownerIndexes.length, 1);
   for (const outcome of settledOutcomes) {
     if (outcome.type !== "acquired") {
-      assert.deepEqual(outcome, { type: "rejected", code: "daemon_running" });
+      assert.equal(outcome.type, "rejected");
+      // A contender may observe a changed SQLite sidecar and fail its artifact
+      // validation before reaching SQLite's busy-lock check. Both reject it.
+      assert.ok(outcome.code === "daemon_running" || outcome.code === "lock_invalid");
     }
   }
 
