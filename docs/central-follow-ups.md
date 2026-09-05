@@ -1,9 +1,19 @@
 # Central service follow-ups
 
-These are worthwhile changes to
-[`embassys/agent2agent`](https://github.com/embassys/agent2agent). They do not
-block the gateway and the gateway must not emulate them with compatibility
-branches.
+These are server changes tracked for
+[`embassys/agent2agent`](https://github.com/embassys/agent2agent). The production
+review treats message custody, credential renewal, and listener
+lifecycle as release limitations. Ambassador must not emulate missing server
+contracts with compatibility branches. The user requested issues instead of
+API code changes.
+
+- [Issue 1: recoverable messages and bounded batches](https://github.com/embassys/agent2agent/issues/1).
+- [Issue 2: credential renewal and identity recovery](https://github.com/embassys/agent2agent/issues/2).
+- [Issue 3: listener lifecycle and bounded polls](https://github.com/embassys/agent2agent/issues/3).
+
+- [Issue 4: recover accepted submissions after a lost response](https://github.com/embassys/agent2agent/issues/4).
+- [Issue 5: tell the caller when an action is waiting for its owner](https://github.com/embassys/agent2agent/issues/5).
+- [Issue 6: define and validate action result schemas](https://github.com/embassys/agent2agent/issues/6).
 
 ## Security and operations
 
@@ -37,9 +47,8 @@ branches.
 ## Message reliability
 
 The consuming poll can lose a delivered message when the gateway crashes
-before acknowledgement. Server-side retrieval or redelivery would solve the
-problem without storing other message bodies in the gateway or turning the
-pending-action inbox into a delivery replay mechanism.
+before durable local capture. ADR 0061 now persists received message bodies,
+but server-side retrieval or redelivery is still needed for a lost poll response.
 
 Investigate live delivery liveness after accepted permission writes. In two
 controlled runs on 2026-09-02, central accepted the permission operation but
@@ -94,11 +103,18 @@ output schema, idempotency key, or outcome lookup. A client that loses the
 successful response cannot recover its message ID by repeating the request,
 because a later submission returns `409`.
 
-Add a `result_schema` to each `list_action_types` entry and validate
+[Issue 6](https://github.com/embassys/agent2agent/issues/6) tracks adding a
+`result_schema` to each `list_action_types` entry and validating
 `submit_action_result.result` against it. The existing `input_schema` describes
 the payload sent by the caller, not the answer expected from the target. Until
 central publishes a result schema, Ambassador can request only a generic JSON
 object and cannot tell the user the exact fields for an arbitrary action.
+
+A controlled-central test with real Claude desktop and OpenClaw on 2026-09-05
+returned only an owner's approval decision as a successful free/busy result.
+No calendar read happened. Prompt guidance now distinguishes approval from
+execution, but it cannot enforce the shape of arbitrary action results. Result
+schemas must also make permission-suffixed calendar actions unambiguous.
 
 Define result size and nesting limits. Serialize competing submissions so two
 requests cannot both observe `pending`, and add an idempotent recovery contract
@@ -122,3 +138,12 @@ should let it remove that row without guessing.
 Token refresh, revocation, and deliberate identity recovery would improve
 long-running installations. They should keep the private key local and must
 not turn an ordinary `401` into automatic identity replacement.
+
+[Issue 2](https://github.com/embassys/agent2agent/issues/2) also covers recovery
+after `ambassador clean` removes the local token and DPoP key. The local
+gateway becomes unenrolled while central still rejects the verified address
+as already registered. Deleting and re-registering the central agent creates
+a new ID; old permissions cannot be assumed to authorize that replacement.
+The server needs an owner-verified recovery contract that distinguishes token
+renewal with the existing key from recovery after losing it. Recovery cannot
+restore local data that the owner deleted.

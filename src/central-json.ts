@@ -1,4 +1,5 @@
 import { TextDecoder } from "node:util";
+import { finishResponseTrace } from "./verbose-log.js";
 
 export const CENTRAL_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 const MAX_DEPTH = 100;
@@ -219,22 +220,29 @@ export async function readCentralJson(
   response: Response,
   maximumBytes = CENTRAL_RESPONSE_MAX_BYTES,
 ): Promise<unknown> {
-  if (
-    !Number.isSafeInteger(maximumBytes) ||
-    maximumBytes < 1 ||
-    !JSON_MEDIA_TYPE.test(response.headers.get("content-type") ?? "") ||
-    response.headers.has("content-encoding")
-  ) {
-    invalid();
-  }
-  const bytes = await readBoundedBytes(response, maximumBytes);
-  let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return invalid();
+    if (
+      !Number.isSafeInteger(maximumBytes) ||
+      maximumBytes < 1 ||
+      !JSON_MEDIA_TYPE.test(response.headers.get("content-type") ?? "") ||
+      response.headers.has("content-encoding")
+    ) {
+      invalid();
+    }
+    const bytes = await readBoundedBytes(response, maximumBytes);
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return invalid();
+    }
+    const result = parseStrictCentralJson(text);
+    finishResponseTrace(response, result, bytes.byteLength);
+    return result;
+  } catch (error) {
+    finishResponseTrace(response, undefined);
+    throw error;
   }
-  return parseStrictCentralJson(text);
 }
 
 export function assertNoCentralCredentialFields(value: unknown): void {

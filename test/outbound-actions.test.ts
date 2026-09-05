@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { parseCentralCredential } from "../src/central-credential.js";
-import type { CentralMessage } from "../src/central-rest.js";
+import { type CentralMessage, CentralRestError } from "../src/central-rest.js";
 import { OutboundActions } from "../src/outbound-actions.js";
 import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 
@@ -61,6 +61,7 @@ async function fixture(t: TestContext, fail = false, granted = false) {
     path,
     requests,
     calls,
+    transport,
     get store() {
       return store;
     },
@@ -100,6 +101,56 @@ test("records encrypted intent before requesting permission and dispatches its e
     },
   });
   assert.equal(value.store.page().items.length, 0);
+});
+
+test("confirmed permission rejection permits an explicit corrected request after restart", async (t) => {
+  const value = await fixture(t);
+  const submit = value.transport.requestPermission;
+  value.transport.requestPermission = async () => {
+    throw new CentralRestError("central_request_rejected", { httpStatus: 422, notAccepted: true });
+  };
+  await assert.rejects(value.store.request(arguments_));
+  assert.equal(value.store.page().items[0]?.value.status, "request_rejected");
+  value.reopen();
+  value.transport.requestPermission = submit;
+  await value.store.request({ ...arguments_, action_payload: { query: "corrected" } });
+  assert.equal(value.requests.length, 1);
+  assert.equal(value.store.page().items[0]?.value.status, "awaiting_permission");
+});
+
+test("an explicit authentication rejection does not leave an uncertain permission request", async (t) => {
+  const value = await fixture(t);
+  value.transport.requestPermission = async () => {
+    throw new CentralRestError("central_authentication_failed");
+  };
+  await assert.rejects(value.store.request(arguments_));
+  assert.equal(value.store.page().items[0]?.value.status, "request_rejected");
+  assert.equal(value.store.page().items[0]?.value.rejection?.reason, "authentication_required");
+});
+
+test("confirmed dispatch rejection allows a new explicit intent but never retries a lost response", async (t) => {
+  for (const notAccepted of [true, false]) {
+    const value = await fixture(t, false, true);
+    const submit = value.transport.callAction;
+    let attempts = 0;
+    value.transport.callAction = async () => {
+      attempts += 1;
+      throw new CentralRestError("central_request_rejected", {
+        httpStatus: notAccepted ? 429 : 500,
+        notAccepted,
+      });
+    };
+    await value.store.request(arguments_);
+    assert.equal(
+      value.store.page().items[0]?.value.status,
+      notAccepted ? "dispatch_rejected" : "dispatch_uncertain",
+    );
+    value.reopen();
+    value.transport.callAction = submit;
+    await value.store.request(arguments_);
+    assert.equal(attempts, 1);
+    assert.equal(value.calls.length, notAccepted ? 1 : 0);
+  }
 });
 
 test("keeps uncertain dispatches across restart without retrying or replacing their payload", async (t) => {

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { AcpSessionStore, AcpSessionStoreError } from "./acp-session-store.js";
+import { ActionCatalogError } from "./action-catalog.js";
 import { ActionResultInbox, ActionResultInboxError } from "./action-result-inbox.js";
 import type { AgentCapability } from "./agent-capabilities.js";
 import { capabilityForKind } from "./agent-capabilities.js";
@@ -27,13 +29,13 @@ import {
 import { DpopNonceCache } from "./dpop.js";
 import { GatewayError } from "./errors.js";
 import { GuidedRegistration, GuidedRegistrationError } from "./guided-registration.js";
+import { HumanInputMailbox } from "./human-input-mailbox.js";
 import { GatewayIdentity, IdentityError } from "./identity.js";
 import {
   EncryptedFileLocalControlSecretStore,
   type LocalControlSecretStore,
   LocalSessionControlError,
 } from "./local-control.js";
-import { LocalInbox } from "./local-inbox.js";
 import {
   type LocalMcpRouter,
   LocalMcpServer,
@@ -45,14 +47,16 @@ import {
   McpContractError,
   safeLocalToolArguments,
 } from "./mcp-contract.js";
-import { NotificationJournal } from "./notification-journal.js";
+import { MESSAGE_BOX_TOOL, MessageBox, MessageBoxError } from "./message-box.js";
 import {
   type DeliveryTarget,
   NotificationRelay,
   NotificationRelayError,
   RetryableNotificationReceiveError,
 } from "./notification-relay.js";
+import { NotificationStore } from "./notification-store.js";
 import { OutboundActionError, OutboundActions } from "./outbound-actions.js";
+import { OwnerQuestionError, OwnerQuestions } from "./owner-questions.js";
 import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
 import { SessionMaintenance } from "./session-maintenance.js";
 import { describeVerboseError, traceFetch, type VerboseLogger } from "./verbose-log.js";
@@ -100,10 +104,10 @@ export interface GatewayApplicationOptions {
     capability: NonNullable<AgentCapability["direct"]>,
   ) => Pick<AcpSessionController, "delete" | "show">;
   readonly localMcpPort?: number;
-  readonly centralAgentPermissionPollIntervalMs?: number;
   readonly nowSeconds?: () => number;
   readonly signal?: AbortSignal;
   readonly onRuntimeNotice?: (notice: GatewayError) => void;
+  readonly onStopRequested?: () => void;
   readonly log?: VerboseLogger;
 }
 
@@ -204,6 +208,7 @@ function webhookDeliveryFailure(error: unknown): boolean {
 }
 
 function runtimeFailure(error: unknown, agentName: string): GatewayError {
+  if (credentialExpiryFailure(error)) return expiredCredentialNotice();
   const direct = directDeliveryFailure(error);
   if (direct === "agent_unavailable") {
     return new GatewayError(
@@ -240,6 +245,28 @@ function runtimeFailure(error: unknown, agentName: string): GatewayError {
   );
 }
 
+function expiredCredentialNotice(): GatewayError {
+  return new GatewayError(
+    "credential_expired",
+    "Ambassador paused central delivery because its credential expired. Local inbox and session reads remain available. Embassys does not yet offer credential renewal; keep local state and contact the service owner for recovery",
+    0,
+  );
+}
+
+function credentialExpiryFailure(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (
+      (current instanceof CentralRestError || current instanceof IdentityError) &&
+      current.code === "credential_expired"
+    )
+      return true;
+    if (current === null || typeof current !== "object") return false;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function localDeliveryFailure(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -254,6 +281,12 @@ function localDeliveryFailure(error: unknown): boolean {
 
 function localError(error: unknown): LocalMcpToolError {
   if (error instanceof LocalMcpToolError) return error;
+  if (
+    error instanceof MessageBoxError ||
+    error instanceof OwnerQuestionError ||
+    error instanceof ActionCatalogError
+  )
+    return new LocalMcpToolError(error.code, undefined, "message_box");
   if (error instanceof IdentityError) {
     return new LocalMcpToolError(error.code, undefined, "local_identity");
   }
@@ -261,7 +294,7 @@ function localError(error: unknown): LocalMcpToolError {
     return new LocalMcpToolError(error.code, undefined, "central_enrollment");
   }
   if (error instanceof CentralRestError) {
-    return new LocalMcpToolError(error.code, undefined, "central_rest");
+    return new LocalMcpToolError(error.code, error.response?.retryAfterMs, "central_rest");
   }
   if (error instanceof GuidedRegistrationError) {
     return new LocalMcpToolError(error.code, undefined, "guided_registration");
@@ -288,12 +321,6 @@ export async function openGatewayApplication(
     options.log === undefined
       ? options.centralFetch
       : traceFetch(options.centralFetch ?? globalThis.fetch, log);
-  let journal: NotificationJournal;
-  try {
-    journal = new NotificationJournal(options.journalPath);
-  } catch (error) {
-    throw startupFailure(error);
-  }
   const profileStore = new DeliveryProfileStore(options.profilePath);
   const webhookSecretStore =
     options.webhookSecretStore ??
@@ -320,6 +347,10 @@ export async function openGatewayApplication(
   let local!: LocalMcpServer;
   let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
+  let notificationStore: NotificationStore | undefined;
+  let humanInputMailbox: HumanInputMailbox | undefined;
+  let messageBox: MessageBox | undefined;
+  let ownerQuestions: OwnerQuestions | undefined;
   let relayRun: Promise<void> | undefined;
   let pendingActionInbox: PendingActionInbox | undefined;
   let outboundActions: OutboundActions | undefined;
@@ -392,8 +423,9 @@ export async function openGatewayApplication(
         url: context.profile.url,
         secret,
         contract: context.capability.webhook,
+        identityScope: identity.localCredential().keyThumbprint,
         now: () => nowSeconds() * 1_000,
-        ...(options.webhookFetch === undefined ? {} : { fetch: options.webhookFetch }),
+        fetch: traceFetch(options.webhookFetch ?? globalThis.fetch, log, "webhook"),
       });
     }
     if (context.capability.direct === undefined) {
@@ -403,7 +435,7 @@ export async function openGatewayApplication(
     if (sessionStore === undefined) throw new AcpSessionStoreError();
     const direct = new DirectDeliveryTarget({
       agentKind: context.capability.kind,
-      identityScope: identity.credential().keyThumbprint,
+      identityScope: identity.localCredential().keyThumbprint,
       capability: context.capability.direct,
       workingDirectory: context.profile.working_directory,
       environment: options.environment,
@@ -440,7 +472,7 @@ export async function openGatewayApplication(
         sessionCleanupTimer.unref();
       }
       const transport = new CentralProtectedTransport({
-        credential: () => identity.credential(),
+        credential: () => identity.localCredential(),
         nonceCache: new DpopNonceCache(),
         ...(centralFetch === undefined ? {} : { fetch: centralFetch }),
         now: nowSeconds,
@@ -448,58 +480,113 @@ export async function openGatewayApplication(
       const nextRest = new CentralRestClient({ centralOrigin, transport });
       const nextPendingActionInbox =
         pendingActionInbox ??
-        new PendingActionInbox(options.pendingActionPath, identity.credential());
+        new PendingActionInbox(options.pendingActionPath, identity.localCredential());
       pendingActionInbox = nextPendingActionInbox;
       const nextActionResultInbox =
-        actionResultInbox ?? new ActionResultInbox(options.actionResultPath, identity.credential());
+        actionResultInbox ??
+        new ActionResultInbox(options.actionResultPath, identity.localCredential());
       actionResultInbox = nextActionResultInbox;
       const nextOutboundActions =
         outboundActions ??
         new OutboundActions(
           options.outboundActionPath ??
             join(dirname(options.pendingActionPath), "outbound-actions.sqlite"),
-          identity.credential(),
+          identity.localCredential(),
           nextRest,
         );
       outboundActions = nextOutboundActions;
-      const capturedMessages = new WeakSet<object>();
+      rest = nextRest;
+      notificationStore ??= new NotificationStore(
+        join(dirname(options.journalPath), "notification-custody.sqlite"),
+        identity.localCredential(),
+      );
+      humanInputMailbox ??= new HumanInputMailbox(
+        join(dirname(options.journalPath), "human-input-responses.sqlite"),
+        identity.localCredential(),
+      );
+      const mailbox = humanInputMailbox;
+      const custody = notificationStore;
+      ownerQuestions ??= new OwnerQuestions({
+        path: join(dirname(options.pendingActionPath), "owner-questions.sqlite"),
+        credential: identity.localCredential(),
+        pending: nextPendingActionInbox,
+        transport: nextRest,
+        enqueueContinuation: (message) => {
+          custody.enqueueLocal(message);
+          relay?.notifyStoredWork();
+        },
+      });
+      const owners = ownerQuestions;
+      while (owners.recoverLocalContinuations())
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      messageBox ??= new MessageBox({
+        path: join(dirname(options.pendingActionPath), "operations.sqlite"),
+        credential: identity.localCredential(),
+        transport: nextRest,
+        pending: nextPendingActionInbox,
+        results: nextActionResultInbox,
+        outbound: nextOutboundActions,
+        owners,
+        expired: () => identity.expired,
+        completeAction: (callId) =>
+          acpSessionStore?.completeAction(callId, Math.floor(nowSeconds() * 1_000)),
+        log,
+      });
+      const box = messageBox;
+      if (identity.expired) {
+        options.onRuntimeNotice?.(expiredCredentialNotice());
+        return;
+      }
       const captureMessage = async (
         message: import("./central-rest.js").CentralMessage,
-      ): Promise<void> => {
-        if (capturedMessages.has(message)) return;
-        nextPendingActionInbox.capture(message);
-        nextActionResultInbox.capture(message);
-        await nextOutboundActions.capture(message, lifetimeSignal);
-        capturedMessages.add(message);
+      ): Promise<boolean> => {
+        log("delivery.received", { message });
+        const internal = mailbox.capture(message);
+        const owned = await box.capture(message);
+        return internal ? owned && owners.deliveryMessage(message) !== undefined : !owned;
       };
       const permissionCoordinator = new CentralAgentPermissionCoordinator({
         transport: nextRest,
         log,
-        captureMessage,
-        ...(options.centralAgentPermissionPollIntervalMs === undefined
-          ? {}
-          : { pollIntervalMs: options.centralAgentPermissionPollIntervalMs }),
+        waitForResponse: (id, signal) => mailbox.wait(id, signal),
       });
       const baseTarget = await createDeliveryTarget({
         ...profile,
         endpoint: local.endpoint,
         ...(acpSessionStore === undefined ? {} : { sessionStore: acpSessionStore }),
-        approvePermission: permissionCoordinator.approve,
+        approvePermission: (request, signal) =>
+          permissionCoordinator.approve(
+            { ...request, message: owners.permissionMessage(request.message) },
+            signal,
+          ),
       });
-      const target: DeliveryTarget = {
-        deliver: async (message, signal) =>
-          permissionCoordinator.consumeInternalMessage(message)
-            ? { status: "completed" }
-            : await baseTarget.deliver(message, signal),
-        close: async () => await baseTarget.close(),
-      };
       const nextRelay = new NotificationRelay({
-        journal,
-        deliveryTarget: target,
+        store: notificationStore,
+        onDeliveryError: (error) =>
+          options.onRuntimeNotice?.(runtimeFailure(error, profile.capability.displayName)),
+        onAcknowledgementError: (error, messageId) =>
+          log("delivery.acknowledgement_uncertain", {
+            message_id: messageId,
+            error: describeVerboseError(error),
+          }),
+        deliveryTarget: {
+          deliver: async (message, signal) => {
+            if (
+              message.payload.type === "owner_input" &&
+              !owners.isPendingLocalContinuation(message)
+            )
+              return { status: "completed" };
+            if (message.payload.type === "human_input_response") {
+              const resumed = owners.deliveryMessage(message);
+              if (resumed !== undefined) return await baseTarget.deliver(resumed, signal);
+              return { status: "completed" };
+            }
+            return await baseTarget.deliver(message, signal);
+          },
+          close: async () => await baseTarget.close(),
+        },
         receiveMessages: async (signal) => {
           try {
-            const buffered = permissionCoordinator.takeBufferedMessages();
-            if (buffered.length > 0) return buffered;
             return (await nextRest.pollRemoteMessages(CENTRAL_POLL_SECONDS, signal)).messages;
           } catch (error) {
             if (
@@ -516,6 +603,7 @@ export async function openGatewayApplication(
         },
         acknowledgeMessage: async (messageId, signal) => {
           await nextRest.ackMessage({ message_id: messageId }, signal);
+          log("delivery.acknowledged", { message_id: messageId });
         },
         captureMessage,
       });
@@ -525,7 +613,7 @@ export async function openGatewayApplication(
       void relayRun.catch((error: unknown) => {
         if (!closed && !lifetimeSignal.aborted) {
           const notice = runtimeFailure(error, profile.capability.displayName);
-          if (localDeliveryFailure(error)) {
+          if (localDeliveryFailure(error) || credentialExpiryFailure(error)) {
             options.onRuntimeNotice?.(notice);
           } else {
             reportFailure?.(notice);
@@ -543,16 +631,6 @@ export async function openGatewayApplication(
   const requireRest = (): CentralRestClient => {
     if (rest === undefined) throw safeFailure();
     return rest;
-  };
-
-  const requirePendingActionInbox = (): PendingActionInbox => {
-    if (pendingActionInbox === undefined) throw safeFailure();
-    return pendingActionInbox;
-  };
-
-  const requireActionResultInbox = (): ActionResultInbox => {
-    if (actionResultInbox === undefined) throw safeFailure();
-    return actionResultInbox;
   };
 
   const listSessions = (): ReturnType<AcpSessionStore["list"]> => {
@@ -596,13 +674,21 @@ export async function openGatewayApplication(
   };
 
   const router: LocalMcpRouter = {
+    enrollmentContext: () => identity.enrollment,
     async listTools() {
-      return [...REST_BOOTSTRAP_TOOLS, ...REST_AUTHENTICATED_TOOLS];
+      return [...REST_BOOTSTRAP_TOOLS, ...REST_AUTHENTICATED_TOOLS, MESSAGE_BOX_TOOL];
     },
     async callTool(name, untrustedArguments, signal, clientInfo) {
+      const request_id = randomUUID();
+      const started = performance.now();
       try {
         const arguments_ = safeLocalToolArguments(untrustedArguments);
-        log("mcp.tool.request", { name, arguments: arguments_, client_info: clientInfo });
+        log("mcp.tool.request", {
+          request_id,
+          name,
+          arguments: arguments_,
+          client_info: clientInfo,
+        });
         let result: Record<string, unknown>;
         if (!identity.enrolled) {
           switch (name) {
@@ -618,63 +704,65 @@ export async function openGatewayApplication(
               await enableEnrolledIdentity();
               break;
             default:
-              if (REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name)) {
+              if (
+                name === "message_box" ||
+                REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name)
+              ) {
                 throw new LocalMcpToolError("not_enrolled");
               }
               throw new LocalMcpToolError("tool_not_found");
           }
           assertSafeUpstreamResult(result);
-          log("mcp.tool.response", { name, result });
+          log("mcp.tool.response", {
+            request_id,
+            name,
+            result,
+            duration_ms: Math.round(performance.now() - started),
+          });
           return result;
         }
 
+        if (REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name)) identity.credential();
         switch (name) {
           case "register_agent":
           case "verify_email":
           case "resend_verification":
             throw new LocalMcpToolError("already_enrolled");
           case "list_action_types":
-            result = { action_types: await requireRest().listActionTypes(signal) };
+            result = {
+              enrollment: identity.enrollment,
+              action_types: await requireRest().listActionTypes(signal),
+            };
             break;
-          case "request_permission":
-            if (outboundActions === undefined) throw safeFailure();
-            result = await outboundActions.request(arguments_, signal);
+          case "message_box":
+            if (messageBox === undefined) throw safeFailure();
+            result = await messageBox.call(arguments_, signal);
             break;
-          case "get_inbox": {
-            result = new LocalInbox(
-              requirePendingActionInbox(),
-              requireActionResultInbox(),
-              outboundActions,
-            ).get(arguments_, {
-              signal,
-              validate: (page) =>
-                assertSafeUpstreamResult(page, identity.credential().record.access_token),
-            });
-            break;
-          }
-          case "call_action":
-            result = await requireRest().callAction(arguments_, signal);
-            break;
-          case "submit_action_result": {
-            result = await requireRest().submitActionResult(arguments_, signal);
-            const callId = String(result.call_id);
-            requirePendingActionInbox().remove(callId);
-            acpSessionStore?.completeAction(callId, Math.floor(nowSeconds() * 1_000));
-            break;
-          }
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
-            result = { permissions: await requireRest().getMyPermissions(signal) };
+            result = {
+              enrollment: identity.enrollment,
+              permissions: await requireRest().getMyPermissions(signal),
+              message:
+                "You are registered and verified. An empty permissions list means no permissions have been granted yet; you are still registered. Do not register again.",
+            };
             break;
           default:
             throw new LocalMcpToolError("tool_not_found");
         }
-        assertSafeUpstreamResult(result, identity.credential().record.access_token);
-        log("mcp.tool.response", { name, result });
+        assertSafeUpstreamResult(result, identity.localCredential().record.access_token);
+        log("mcp.tool.response", {
+          request_id,
+          name,
+          result,
+          duration_ms: Math.round(performance.now() - started),
+        });
         return result;
       } catch (error) {
         const mappedError = localError(error);
         log("mcp.tool.error", {
+          request_id,
+          duration_ms: Math.round(performance.now() - started),
           name,
           source: mappedError.source,
           error_code: mappedError.code,
@@ -691,7 +779,11 @@ export async function openGatewayApplication(
     if (identity.enrolled) await loadProfile();
     local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
-      control: { secret: localControlSecret, sessions: sessionControl },
+      control: {
+        secret: localControlSecret,
+        sessions: sessionControl,
+        ...(options.onStopRequested === undefined ? {} : { stop: options.onStopRequested }),
+      },
     });
     await local.listen();
     if (identity.enrolled) await enableEnrolledIdentity();
@@ -700,12 +792,16 @@ export async function openGatewayApplication(
     if (sessionCleanupTimer !== undefined) clearInterval(sessionCleanupTimer);
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
+    await messageBox?.close();
+    ownerQuestions?.close();
     pendingActionInbox?.close();
     actionResultInbox?.close();
     outboundActions?.close();
+    notificationStore?.close();
+    humanInputMailbox?.close();
     await sessionMaintenance?.settled();
     acpSessionStore?.close();
-    journal.close();
+
     throw startupFailure(error);
   }
 
@@ -720,12 +816,15 @@ export async function openGatewayApplication(
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
       await local.close();
+      await messageBox?.close();
+      ownerQuestions?.close();
       pendingActionInbox?.close();
       actionResultInbox?.close();
       outboundActions?.close();
+      notificationStore?.close();
+      humanInputMailbox?.close();
       await sessionMaintenance?.settled();
       acpSessionStore?.close();
-      journal.close();
     },
   };
 }

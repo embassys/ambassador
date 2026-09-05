@@ -1,7 +1,13 @@
 # Ambassador protocol
 
-Status: implemented; future work is listed in
+Status: delivery cutover in progress; current work is listed in
 [Current work](implementation-plan.md)
+
+[ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) is the approved
+target for durable receipt, typed message-box operations, structured owner
+input, explicit client receipts, streaming and client-specific delivery.
+The implementation plan distinguishes implemented behavior from outstanding
+qualification.
 
 This document defines the current target without a compatibility or migration
 promise.
@@ -31,10 +37,30 @@ lock. `start` has no local token, agent selector, delivery-mode selector,
 endpoint option, configuration path, webhook secret option, or `--acp-agent`
 option.
 
+When `start` or `clean` finds Ambassador running, an interactive terminal asks:
+
+```text
+Ambassador is already running. Stop it and start a new instance? [y/N]
+Ambassador is already running. Stop it and clear local Ambassador state? [y/N]
+```
+
+Only `y` or `yes`, ignoring case and surrounding spaces, confirms the stop.
+Empty, negative, and other answers leave Ambassador running. End of input and
+cancellation also leave it running. Both standard input and standard error
+must be terminals; non-interactive commands retain the `daemon_running` error.
+
+The CLI first authenticates the private control route and reads its random
+in-memory process instance ID. After confirmation, it requests graceful
+shutdown of that exact instance and waits up to 30 seconds to acquire the
+singleton lock. A changed instance rejects the request. An unavailable control
+route, including a running version without these operations, requires the
+owner to stop Ambassador in its terminal. There is no PID-based or forced
+shutdown, and an unrelated process occupying the port is never stopped.
+
 `clean` acquires the singleton process lock and refuses to continue if
-Ambassador is running or the lock artifact is invalid. While it owns the lock,
+shutdown does not release it or the lock artifact is invalid. While it owns the lock,
 it removes every entry from the private Ambassador state directory except the
-lock database and its active SQLite sidecars. This includes the encrypted
+lock database, its active SQLite sidecars, and the diagnostics directory. This includes the encrypted
 central credential and key, encrypted webhook secret and key, encrypted local
 control secret and key, delivery profile, ACP session metadata, notification
 journal, interrupted temporary writes, and later local state artifacts.
@@ -51,10 +77,10 @@ The operation is idempotent. It retains the empty state directory and lock for
 coordination, then the next `start` presents the bootstrap enrollment catalog.
 It never calls central, unregisters an email, removes provider configuration,
 or handles provider credentials. The explicit `clean` command is the owner's
-authorization for this local deletion; there is no force option or interactive
-prompt.
+authorization for this local deletion. It asks a question only when another
+Ambassador must be stopped; there is no force option.
 
-The process acquires its singleton lock before reading credentials, binding a
+The process acquires its singleton lock before reading central credentials, binding a
 listener, calling central, starting an agent, or sending a webhook. It binds
 `127.0.0.1:8787` and prints the ready endpoint followed by fixed MCP setup
 commands for every supported agent. The output ends with the registration
@@ -88,7 +114,7 @@ Verbose startup adds bounded timestamped events for ACP lifecycle and
 permission choices, MCP tool calls, central REST requests, and delivery state.
 It may include personally identifying request and result data. It always
 redacts authorization, DPoP material, nonces, tokens, verification codes,
-private keys, cookies, and webhook secrets. Verbose output is console-only.
+private keys, cookies, and webhook secrets. The same redacted events are retained in rotating development logs even without verbose.
 ACP available-command catalogs and their descriptions are omitted; the log
 records only the session ID and command count for that update.
 
@@ -100,9 +126,11 @@ authentication. Ambassador requires `Host: 127.0.0.1:8787`. A present
 header is rejected. Host and Origin checks happen before body parsing.
 
 The same listener has a non-MCP private control route used only by Ambassador's
-CLI for live session reads. It requires exact loopback Host, rejects every
+CLI for live session reads and confirmed process shutdown. It requires exact loopback Host, rejects every
 Origin, requires the generated encrypted internal bearer secret, and accepts
-only exact bounded `sessions.list` and `sessions.show` operations. The route,
+only exact bounded `sessions.list`, `sessions.show`, `process.status`, and
+`process.stop` operations. Status returns only an instance ID; stop requires
+that ID and acknowledges the request before starting graceful shutdown. The route,
 secret, and operations are never exposed in the MCP catalog or configuration.
 
 The local MCP boundary trusts processes running as the owner on the same
@@ -118,8 +146,14 @@ The boundary keeps these limits:
 | Private control request body | 4 KiB |
 | Local or upstream response body | 4 MiB |
 | Active MCP sessions | 32 |
-| Concurrent tool calls | 8 |
+| Concurrent ordinary tool calls | 8 |
+| Concurrent held message-box calls | 32 |
 | Serialized structured tool result | 768 KiB |
+
+MCP sessions expire after 30 minutes without activity. At capacity, the oldest
+inactive session can be reclaimed. Active requests, tools, and streams prevent
+reclamation. Requests using expired IDs return 404 and clients initialize
+again. HTTP connection closure alone does not terminate a logical session.
 
 JSON-RPC batches and redirects are rejected. Errors do not reflect request
 bodies, remote bodies, URLs, headers, or credentials. Expected tool failures
@@ -149,64 +183,69 @@ profile.
 
 ## Tool catalog
 
-Advertise one stable catalog before and after enrollment. Bootstrap tools work
-only before enrollment and return `already_enrolled` afterwards:
+Advertise six tools before and after enrollment: `register_agent`,
+`verify_email`, `resend_verification`, `list_action_types`,
+`get_my_permissions`, and `message_box`. Bootstrap tools return
+`already_enrolled` after enrollment. Protected work requires enrollment.
+Expired credentials retain access to local inboxes, saved operation checks and
+receipts, while central work reports `credential_expired`.
 
-- `register_agent`
-- `verify_email`
-- `resend_verification`
+MCP initialization includes a local enrollment snapshot. Successful
+`get_my_permissions` and `list_action_types` responses include `enrollment`
+with `status: "registered"`, `verified: true`, `agent_id`, `email` and
+`credential_status: "active"`. An empty permission list means no permission
+records, not an unregistered account. Later verification and tool results
+supersede the initialization snapshot. Initialization for an expired credential
+still identifies the registered account and reports `credential_status:
+"expired"`; protected operations retain their normal expiry error. Only the
+allowlisted public identity fields are exposed. See [ADR 0062](adr/0062-explicit-local-enrollment-context.md).
 
-Protected tools return `not_enrolled` until a credential is durably stored:
+`message_box` is a strict discriminated union. Unknown fields fail validation.
 
-- `list_action_types`
-- `request_permission`
-- `get_inbox`
-- `call_action`
-- `submit_action_result`
-- `get_my_permissions`
+| Type | Purpose and required input |
+| --- | --- |
+| `request_action` | New request UUID, exact catalog action name, target email, exact object payload; optional decision menu, reason, scope and wait |
+| `request_permission` | New request UUID, exact catalog name, target email or triggering message ID; no action payload |
+| `submit_action_result` | New request UUID, pending call UUID, success/error status and result object |
+| `check` | Existing request UUID; optional event cursor and wait |
+| `acknowledge` | Existing request UUID and returned event cursor |
+| `inbox` | Optional limit 1..100 and opaque pagination cursor |
+| `acknowledge_results` | Received call UUIDs from the inbox |
+| `ask_owner` | New request UUID, pending call UUID, question, text/buttons input type and exact button options when applicable |
+| `answer_owner` | New answer request UUID, question UUID, matching pending call UUID and exact text or button value |
+| `check_owner` | Existing owner-question request UUID |
 
-Incoming delivery and central acknowledgement belong to Ambassador. The target
-catalog has no local `poll_messages` or `ack_message` tools. It also has no
-general reply, conversation, outcome-lookup, activation, or token-reissue tool
-because central has no corresponding REST operation.
+A mutation UUID identifies immutable input. Repeated identical submissions
+observe existing state. Changed input under that UUID fails. Owner questions
+have their own request namespace; answer UUIDs belong to their question.
+`wait_seconds` is observation metadata and may change without changing identity.
+Request-action, request-permission and check calls default to a 600-second
+deadline including submission. An explicit 0..600-second wait supports constrained
+clients. Timeout returns the same request ID and a check continuation. The agent
+tells the user they can ask again. There is no scheduled retry or new submission.
 
-Ambassador owns the MCP tool schemas. It does not fetch or mirror a central MCP
-catalog. `list_action_types` returns central action definitions as data; those
-definitions do not become additional local tools.
+Events carry receipt cursors. Reading a check or inbox never consumes results.
+A check with a previous cursor acknowledges those events before waiting for
+later events. Explicit receipts durably precede result removal. Cancellation
+ends observation, not accepted work. Uncertain external outcomes are retained
+and never automatically repeated. The API has no reconciliation endpoint.
 
-`get_inbox` is the paginated view of unanswered action calls, unread action
-results, and saved outbound action status. Its optional `limit` is 1–100
-(default 50); its optional opaque `cursor` continues a previous page. A response
-contains `count`, `items`, and `next_cursor` when more items remain. Follow each
-continuation until it is absent. Counts refer to this page, not the whole store.
-Pages visit calls, results, then outbound intents in insertion order within each
-store. Concurrent arrivals may require another traversal from the beginning.
+Inbox pages visit pending calls, unread results, then outbound intents in
+insertion order. The default limit is 50, maximum 100, with a 500 KiB page
+target and complete first record. A serialized tool response is capped at
+768 KiB. Follow `next_cursor` until absent. Counts describe the current page.
+Pending calls include reply instructions and any saved owner question. Permission
+decisions remain in email and operation events, not the inbox. This tool does
+not poll central or control delivery.
 
-Each action-call item includes the tool and fields needed for its response.
-Calls remain until `submit_action_result` succeeds. A page targets 500 KiB and
-always includes a complete first record; the serialized tool result is capped
-at 768 KiB. Validation, credential checks, serialization, and cancellation checks
-all precede removal of exactly the received results on that page. Failed reads
-retain results. MCP disconnection after local consumption remains uncertain;
-reading does not prove the human saw the answer. Denied outbound intents remain visible until a later explicit permission
-request replaces them; uncertain intents remain for inspection.
-The tool does not poll central or control delivery.
-
-Permission decisions do not appear in `get_inbox`. Central emails the
-grantor's human, queues no request to the grantor's agent, and later delivers a
-`permission_outcome` to the requester. `get_my_permissions` remains the
-agent-facing audit and status view.
-
-Central action definitions currently describe request payloads through
-`input_schema` but do not publish a result schema. Ambassador therefore tells
-the agent to submit a structured success or error object, but it cannot state
-or validate action-specific result fields. A central `result_schema` is tracked
-as server work. Ambassador does not duplicate the central action catalog in a
-local result-schema registry.
-
-Reject any argument named `token`, `jwt`, `access_token`, `authorization`, `private_key`,
-`secret`, `proof`, or `dpop` before dispatch. Reject any upstream result
-containing those credential fields or stored token bytes.
+Incoming receipt and central acknowledgements belong to Ambassador. There are
+no local `poll_messages`, `ack_message`, separate business tools, arbitrary
+chat, or outcome-lookup tools. Action catalog entries remain data, not new tools.
+Catalog input schemas are checked in a bounded worker using the installed SDK's
+standards validator. No names, values or defaults are rewritten. Unsupported
+schemas fail explicitly. Central currently publishes no action result schemas.
+Credential-like fields and stored credential bytes cannot enter tool arguments,
+results or diagnostic output.
 
 ## Guided registration
 
@@ -440,7 +479,7 @@ The current protected routes are:
 | --- | --- | --- |
 | List actions | `GET /api/list_action_types` | none |
 | Request permission | `POST /api/request_permission` | `target_email`, `message_id`, or both when consistent; exactly one of `action_type` / `permission_type`; optional `decision_options`, `reason`, and `scope` |
-| Ask the local agent's owner | `POST /api/get_human_input` | internal only; fixed `permission_type`, bounded question, `buttons`, allow-once and deny options, triggering `message_id` |
+| Ask the local agent's owner | `POST /api/get_human_input` | internal only; bounded question, `text` or `buttons`, exact options for buttons, triggering `message_id` |
 | Call action | `POST /api/call_action` | `target_email`, `action_type`, `payload` |
 | Submit action result | `POST /api/submit_action_result` | `call_id`, `result`, `status` |
 | List permissions | `GET /api/get_my_permissions` | none |
@@ -468,26 +507,21 @@ An `allow_once` grant permits one action call. `allow_always` and the simpler
 `already_granted: true`, the requester can proceed immediately and no new
 approval email was sent.
 
-The local MCP `request_permission` tool optionally accepts `action_payload`
-when the user also wants an action submitted after approval. This requires an
-explicit `target_email` and excludes `message_id`; either supported permission
-name selector remains valid. Ambassador strips `action_payload` before calling
-the unchanged REST endpoint. It saves the exact target, action, and payload in
-an encrypted outbound store before requesting permission, binds the returned
-permission ID, and dispatches once after a matching granted outcome or an
-already-granted response. The grantor address, permission ID, and action type
-must all match the saved intent. The receiving agent must not submit a second
-`call_action` for that intent.
+The `message_box` request-action variant saves exact outbound intent before
+requesting permission. Only one outstanding intent per target/action pair is
+admitted. A matching permission grant dispatches its exact payload once.
+The action name, permission ID and grantor must match. An existing grant can
+permit immediate dispatch. A permission-only request has no payload and never
+creates work. Broad-sounding permission names do not authorize different action
+types. Central checks the exact action UUID, current grantee identity, grantor,
+expiry and remaining uses.
 
-Only one outstanding intent per target/action pair is admitted. Repeating the
-same request returns its status; a different payload is rejected while it is
-outstanding. `get_inbox` exposes its operation ID, payload, and status:
-`request_uncertain`, `awaiting_permission`, `ready`, `dispatch_uncertain`,
-`submitted`, or `denied`. A repeated identical request can safely dispatch
-`ready` work after a crash. Uncertain requests or dispatches never retry
-automatically. A received, durably captured result clears its submitted intent.
-Permission decisions themselves remain in the email flow. This local intent
-adds no server lookup or idempotency guarantee.
+Persisted outbound states distinguish awaiting permission, ready, submitted,
+denied, confirmed rejection and uncertainty. A fresh explicit request may replace
+a denied or confirmed-rejected intent. Uncertain work cannot be replaced or
+automatically retried. A saved call or permission ID can repair a partially saved
+operation after restart without another external submission. A received action
+result clears submitted outbound intent after durable capture.
 
 `call_action` delivers a request after central confirms permission. It does
 not execute the action. Its `call_id` correlates the one permitted result.
@@ -505,30 +539,35 @@ submission returns `409` without recovering the first response's message ID.
 
 ## Incoming queue
 
-Ambassador holds one 30-second central long poll. The response has a
-`messages` array. Current central messages contain `id`,
-`sender_agent_id`, optional `action_type_id`, `payload`, and
-`created_at`. New permission requests do not appear in this queue. Current
-delivered payloads include `permission_outcome`, `human_input_response`,
-`action_call`, and `action_response`; Ambassador still validates any bounded
-payload object before local delivery. The human-input response is internal ACP
-control and is not sent to the provider as a business prompt.
+One receiver calls `poll_messages?timeout=30` under a 40-second HTTP deadline.
+It validates and atomically captures the entire bounded batch in encrypted
+notification custody before processing or acknowledgement. Maximum batch size
+is 256 messages and 512 KiB. Duplicate IDs with identical canonical contents are
+ignored; conflicting contents fail the batch. A quota or disk failure admits no
+partial batch and stops reception.
 
-Central marks selected rows delivered in the same database statement that
-returns them. Before accepting a batch, Ambassador enforces its response,
-nesting, structural-token, batch-count, and normalized-message limits.
-Conflicting duplicate IDs reject the batch.
+Independent bounded workers process events, deliver provider prompts, and
+acknowledge central. Shared encrypted human-input custody replaces the competing
+ACP approval poller. An ACP turn waiting on its owner cannot stop receipt of its
+answer. Provider failure pauses provider delivery and preserves uncertainty;
+reception, operation updates and acknowledgements continue.
 
-Message bodies remain in a bounded in-memory delivery queue. The notification
-journal stores present IDs and delivery state only. Two central-message
-persistence exceptions use separate encrypted inboxes. Ambassador stores validated
-`action_call` fields so a user can answer later, and validated
-`action_response` fields so a foreground agent can retrieve a returned result.
-It captures these records when a poll returns, including during an ACP approval
-wait, before local delivery or central acknowledgement.
-Other central message bodies are not persisted. The separate outbound store
-holds explicit local action intent and its correlated status. Polling pauses while the queue contains
-work. An ID-less message may be delivered once but cannot be acknowledged.
+Persist dispatch intent before a provider invocation and acknowledgement intent
+before sending it. Restart resumes prepared work, marks interrupted external
+attempts uncertain, and never replays a dispatched prompt. Recovery uses bounded
+batches. Completed custody records compact to ID/fingerprint tombstones after
+processing and acknowledgement settle. Business result receipt is separate.
+
+Owned outgoing permission/result events wake their operation waiter instead of
+creating an unrelated ACP conversation. Incoming action calls go to the selected
+incoming delivery profile. A matching owner answer resumes that call's original
+peer session once. Duplicate or stale answers cannot start another continuation.
+Unowned valid notifications use the configured incoming profile.
+
+The server currently marks rows delivered before returning the poll response.
+Local custody cannot repair a response lost before capture. Server recovery and
+listener fixes remain API issues; this protocol does not promise exactly-once
+delivery.
 
 ## Webhook delivery
 
@@ -566,19 +605,26 @@ Content-Type: application/json
   "message": "<fixed untrusted-input instructions and complete normalized central message JSON>",
   "name": "Embassys Ambassador",
   "agentId": "main",
-  "sessionMode": "isolated",
+  "sessionMode": "persistent",
+  "sessionKey": "hook:ambassador:<SHA-256 of enrollment, receiver, provider and requester>",
   "deliver": false
 }
 ```
 
 Ambassador does not send HMAC-v2, timestamp, or request-ID headers to OpenClaw.
+ADR 0063 fixes the session key to the enrollment key thumbprint, canonical
+receiver URL, provider agent ID and top-level central sender identity. Payload
+fields cannot choose the destination. Restart preserves the peer conversation;
+new enrollments and different requesters remain separate. The receiver enables
+request session keys with the restricted `hook:ambassador:` prefix.
 OpenClaw's native hook authenticates the bearer, applies its agent allowlist,
 uses the idempotency key for bounded replay handling, safety-wraps external
 content, and admits a normal model turn. The native request body may not exceed
 256 KiB. The Hermes canonical body retains its 512 KiB limit.
 
 A `2xx` means the receiver accepted responsibility for the complete message.
-Ambassador records that transfer before acknowledging central. A non-`2xx`
+Ambassador records that transfer independently of central acknowledgement, which
+follows encrypted local custody. A non-`2xx`
 or pre-acceptance transport failure may retry within the fixed delivery budget
 using the same idempotency key. Hermes receives a fresh timestamp and signature
 on each attempt. Because a timeout can be uncertain, receivers must deduplicate
@@ -618,7 +664,7 @@ The enabled profiles and fixed contracts are:
 
 | Profile | MCP client name | Direct invocation | ACP agent name | MCP setup |
 | --- | --- | --- | --- | --- |
-| OpenClaw | `openclaw-bundle-mcp` | `openclaw acp` | `openclaw-acp` | provider configuration |
+| OpenClaw | `openclaw-bundle-mcp` | `openclaw acp --no-prefix-cwd` | `openclaw-acp` | provider configuration |
 | Hermes | `mcp` | `hermes-acp` | `hermes-agent` | provider configuration |
 | Codex | `codex-mcp-client` | current package-owned `codex-acp` | `@agentclientprotocol/codex-acp` | provider configuration |
 | Claude Code | `claude-code` | current package-owned `claude-agent-acp` | `@agentclientprotocol/claude-agent-acp` | provider configuration |
@@ -660,87 +706,75 @@ Ambassador streams and discards history, bounds each NDJSON event, and retains
 no replay transcript. New turn output retains its 4 MiB cumulative bound.
 Session inspection keeps at most a 512 KiB recent preview and labels truncation.
 
-Ambassador has no interactive approval UI during background delivery. For an
-ACP permission request, it submits one human approval request correlated by the
-triggering central `message_id` to `POST /api/get_human_input`. Central always
-emails the authenticated agent's own owner. Ambassador repeatedly calls
-`poll_messages?timeout=0` until the matching `human_input_response` arrives; it
-does not use `get_human_input_status`.
-Normal prompt and outer delivery deadlines pause during that human wait.
-Approval selects `allow_once` when offered, then another advertised positive
-option; denial selects an advertised rejection option. A missing option of the
-required polarity cancels the ACP request.
+An ACP tool permission request remains open while Ambassador calls central's
+`get_human_input` for its own owner. It sends every provider option in order,
+using the exact name as the button label and exact option ID as the value.
+Labels and IDs must fit 1..64 characters, there must be 1..10 options, and values
+must be unique. Invalid menus fail before email submission. The selected value
+must match an offered ID and returns unchanged. No approval-kind mapping or
+automatic approval is allowed.
 
-Messages consumed by the approval poll are capped at 256 messages and 16 MiB
-in memory, then drained in batches of at most 512 KiB for the normal relay.
-Action calls and results are encrypted at receipt, before buffer admission. The correlated response is handled internally and is not sent
-to the provider as another prompt. Unrelated messages keep their arrival order.
+The independent central receiver captures responses in the shared encrypted
+mailbox. Correlation checks request ID, triggering message ID, prompt, input
+type, action and exact offered value. There is no approval-specific central
+poller. The control answer is consumed internally, never submitted as another
+ACP prompt. Normal prompt and outer delivery deadlines pause during this
+explicit human approval wait.
 
-The local MCP server advertises the same complete tool catalog before and
-after enrollment. Protected tools return `not_enrolled` until verification;
-bootstrap registration tools return `already_enrolled` afterwards. Correctness
-does not depend on an MCP client implementing tool-list-change notifications.
+Every provider prompt has a short fixed untrusted-data warning and a compiled
+cue for its message type, followed by the complete central JSON.
+JSON uses two-space indentation inside a fenced `json` block. OpenClaw's fixed
+`--no-prefix-cwd` option hides its directory banner; the real ACP working
+directory and peer-session binding remain unchanged. Detailed
+workflow instructions load through MCP initialization instead of appearing in
+every conversation message. Unknown types get an inbox cue and never an action
+instruction. Permission outcomes still forbid constructing an action; owner
+answers remain bound to their named call. The provider uses `message_box` to
+answer known calls with structured success or a definitive error. If user
+information is missing, `ask_owner` saves a question before sending a text or
+button email and returns `waiting_for_owner`. The ACP turn may finish. The
+answer resumes only the pending call, with its saved peer and action context.
+The question is bounded to 2,000 characters; text answers to 4,000. A foreground
+`answer_owner` binds the supplied answer to the same question and call.
+It saves the answer before enqueuing a local provider continuation. The answer
+UUID identifies that continuation for deduplication; it is never acknowledged
+to central. Interrupted local handoffs are recovered in bounded batches.
+Any ACP approval during the resumed turn refers to the original central-issued
+action notification, not the local answer UUID.
+Free-form model output is never interpreted as a workflow command.
 
-For each central message, Ambassador sends one ACP prompt containing:
+A finished ACP turn is not a completed action and not evidence of user
+presentation. Pending calls remain until accepted result submission. Provider
+history remains with the provider; Ambassador keeps identifiers, bounded
+in-memory inspection and encrypted workflow records.
 
-1. a fixed, trusted Embassys instruction envelope that identifies the
-   following remote fields as data;
-2. the complete canonical JSON message; and
-3. direction to use the configured Ambassador MCP tools when a permission or
-   action operation requires them.
+Optional original-conversation return is separate from this incoming execution
+profile. The OpenClaw provider extension captures the logical session key in a
+trusted tool hook. Its ID-only route journal lives in provider state. It checks
+the existing operation, injects the returned data through reviewed `chat.inject`,
+and then acknowledges the event. The API appends to the current history behind
+that logical key, including after a reset; it does not pin an old history instance.
+Ambiguous injection is not repeated. A missing route leaves the result unread.
 
-For an `action_call`, the agent uses `submit_action_result` with the supplied
-`call_id` when it can provide a structured success or definitive error without
-guessing. If the result needs user input that is not available in that turn,
-the agent leaves the call pending. The user can later ask for pending actions,
-supply the answer, and have an agent submit the correlated result through MCP.
-Ambassador does not reinterpret free-form provider output as an action result
-and still discards that output after bounded processing.
-
-A normal terminal ACP result completes local handling and permits central
-acknowledgement. Startup failure before prompt submission may be retried within
-the delivery budget. Once prompt submission may have occurred, a crash,
-timeout, malformed stream, lost terminal result, or failed cleanup is
-uncertain. Ambassador does not automatically submit that message again.
-
-Direct mode does not resume the MCP chat that performed registration. An
-owner-only SQLite database stores bounded provider session IDs, fixed agent
-kind, working directory, central message ID, action `call_id`, lifecycle state,
-and timestamps. It stores no prompt, message body, provider output, MCP data,
-or credential.
-
-Sessions remain reusable after normal turns and accepted action results.
-Central acceptance settles only the matching action, including when a different
-MCP chat submits it. Outstanding actions and unfinished or uncertain dispatches
-protect the session from automatic retirement. After 30 days without activity,
-a session with no unfinished work becomes eligible for retirement and cleanup.
-
-Maintenance runs asynchronously at startup and daily. It drains indexed pages
-of 32 sessions, releases the provider operation queue between deletions, and
-skips transient failures until the next pass. It deletes provider history when
-ACP supports it and otherwise forgets local metadata. Metadata is capped at
-1,024 provider sessions and a 256 MiB SQLite database; settled message/action
-correlations older than 30 days are pruned in bounded batches. Use the new metadata schema directly and reject incompatible existing state.
+The experimental Claude Code stdio channel proxy captures its own process
+conversation, returns acceptance immediately, and sends `claude/channel`
+notifications. Notification acceptance is not display or human receipt, so
+results remain unread. Routes last for that channel process. Hermes native
+return remains unqualified because the reviewed public hooks do not supply the
+gateway routing key or an idle-only injection operation. It uses foreground
+long polls. See [Client delivery](client-delivery.md) for configuration and limits.
 
 ## Central acknowledgement
 
-After webhook custody transfer or successful direct completion, Ambassador
-sends one protected `POST /api/ack_message`. Only a response with the matching
-`message_id` and `status: "acked"` removes the journal row.
+Acknowledge a central message only after durable local custody. This confirms
+that Ambassador owns the captured record; it does not certify model execution,
+action completion, client acceptance or human display. A missing central ID is
+not acknowledged. A failed or interrupted acknowledgement is recorded uncertain
+and is not retried against the current non-idempotent API.
 
-The current server does not make acknowledgement idempotent. Ambassador does
-not blindly replay an acknowledgement after an uncertain response. It reports
-the bounded failure without redelivering completed local work.
-
-A process crash clears delivery bodies from memory. Startup can remove stale
-pre-delivery journal rows whose bodies cannot be recovered. The separate
-encrypted pending-action record survives, but Ambassador does not replay it to
-the delivery target; it is available through `get_inbox` for a later
-user-driven answer. A captured action response remains unread in `get_inbox`
-until that tool returns it once. Central has no delivered-message retrieval, so a crash
-between central's consuming poll and local capture can still lose any message.
-Other non-action messages can also be lost or left unacknowledged. This remains
-a declared development limitation.
+Webhook `2xx` confirms receiver acceptance. Direct completion confirms a provider
+turn finished. Neither consumes a returned business result. Only an explicit
+message-box receipt, or a qualified native display receipt, does that.
 
 ## Deadlines and data boundary
 
@@ -748,11 +782,15 @@ a declared development limitation.
 | --- | --- |
 | Central REST call | 30 seconds |
 | Central message long poll | 40 seconds for a 30-second server hold |
-| Local MCP request | 35 seconds |
+| Ordinary local MCP request | 35 seconds |
+| Message-box business wait | 600 seconds by default |
+| Local MCP wait transport | 640 seconds |
+| Lock acquisition after confirmed process shutdown | 30 seconds |
 | Webhook delivery | 10 seconds |
 | ACP process initialization | 15 seconds |
 | ACP session creation or resume | 15 seconds |
 | ACP prompt | 15 minutes |
+| ACP session close | 15 seconds, capped by the remaining outer budget |
 | ACP cancellation grace | 10 seconds |
 | ACP child cleanup | 5 seconds |
 
@@ -761,83 +799,40 @@ A stage never extends it except while waiting for the explicit human approval
 described above. Tests may inject shorter positive deadlines through
 internal seams. No deadline is a CLI option.
 
-Never write message bodies, permission details, MCP arguments or results,
-registration emails, verification codes, tokens, private keys, proofs, nonces,
-webhook secrets, prompts, or provider output to SQLite, profiles, normal logs,
-metrics, temporary files, crash artifacts, or support bundles. Verbose console
-output may contain bounded message, MCP, provider-history, and REST data after
-mandatory credential redaction; it is never persisted. ADR 0046 defines the
-bounded encrypted record for each unanswered action call. ADR 0051 defines a
-separate bounded encrypted record for each received action result. ADR 0056
-adds encrypted explicit outbound action intent and paginated reads. The ACP
-session database contains only bounded identifiers, lifecycle state, and
-timestamps. The only raw
-webhook-secret output is the explicit owner-invoked `webhook-secret` command.
+Development diagnostics always record bounded request/response bodies and
+workflow events after mandatory credential redaction. Startup prints the
+owner-only diagnostics directory. Four JSONL files of at most 8 MiB each, a
+64 KiB record cap and a bounded queue limit retention. Disk failures and dropped
+records are reported. `clean` preserves these logs. Verbose adds console output.
+Logs are never recovery input. The user approved keeping this detailed retention
+for the development release on 2026-09-05. Later production releases must review
+that policy separately.
 
-The encrypted central credential contains only the central token and DPoP
-private key plus minimum format metadata. The webhook secret uses a different
-encrypted file, wrapping key, and authenticated-data scope. Ambassador
-generates both wrapping keys internally. All four files have the same strict
-ownership, link, permission, and atomic-write checks. A value without its
-matching key fails closed; there is no migration. The delivery profile is
-nonsecret. The notification journal remains ID-only. The pending-action
-encryption key is derived with domain separation from the loaded DPoP private
-key, so the inbox is bound to the enrolled identity without another
-user-managed secret. Its SQLite lookup key and authenticated ciphertext reveal
-neither the call ID nor the action payload. Each of the pending-action,
-received-result, and outbound-intent stores allows 1 GiB of ciphertext, with a
-512 KiB per-record limit. SQLite indexes, free pages, and WAL files add disk
-overhead; the quota measures live ciphertext. Quotas are independent of model
-context, response size, and delivery memory. Indexed keyset reads decrypt only
-a bounded page; startup validates metadata and a sample record without reading
-the full store. Transactional byte counters avoid scanning all ciphertext for
-capacity checks. Unread results and unanswered calls have no automatic expiry.
+Tokens, verification codes, private keys, proofs, nonces, cookies and webhook
+secrets are excluded before diagnostics or tool result handling. The central
+token and DPoP private key live only in one atomic encrypted credential. Its
+wrapping material is generated internally in a separate owner-only file. The
+webhook and private control secrets have separate encrypted scopes. Provider
+credentials remain with providers.
 
-Existing-state migration is out of scope. Use the new encrypted store schemas
-directly; reject incompatible or unknown schemas and different identities.
-The owner can reset disposable development state with `ambassador clean`.
+Encrypted workflow stores hold notifications, pending calls, received results,
+outbound intent, operation events, owner questions and human-input responses.
+Each allows 1 GiB of live ciphertext and 512 KiB per record; operation events
+have an additional 32 KiB/32-event bound. Domain-separated keys bind stores to
+enrollment. Indexed reads and transactional counters avoid full body scans.
+SQLite indexes, free pages and WAL files add disk overhead. Calls and unread
+results have no automatic expiry. Native route journals contain identifiers and
+delivery state only, capped at 10,000 records and 32 observers.
+
+This development cutover uses new schemas directly. Migration is out of scope.
+Unknown schemas and changed identity bindings fail closed. `clean` clears local
+enrollment and workflow state after proving Ambassador stopped, preserving
+diagnostics and provider configuration. It never deletes or resets central
+identity. Central identity/credential recovery remains server work.
 
 ## Acceptance cases
 
-The cutover must prove at least:
-
-- the new package, binary, startup contract, and rejection of old interfaces;
-- exact capability-registry matching, direct-only automatic selection, and
-  dual-mode registration with direct as the default;
-- safe `clientInfo` handling, rejection of unknown or incomplete profiles, and
-  no model-supplied agent or process configuration;
-- no raw secret in MCP, profile data, normal output, logs, or process
-  arguments; the explicit secret command is the only display path;
-- complete-message webhook delivery, authentication, deduplication, retry, and
-  acknowledgement ordering;
-- ACP v1 initialize, persistent session create/resume/load/delete, provider MCP
-  setup, positive permission selection, prompt, terminal success, failure,
-  cancellation, crash, and uncertainty handling;
-- deterministic CI coverage with a mock webhook receiver and mock ACP agent;
-- opt-in local coverage for direct delivery on all four profiles and webhook
-  delivery on OpenClaw and Hermes;
-- unchanged central REST and DPoP behavior from ADR 0037;
-- bounded in-memory delivery custody, an ID-only notification journal, and the
-  encrypted, bounded pending-action exception;
-- exact target-authorized action-result submission and correlated response
-  delivery, the email-only human decision flow, the restart-safe
-  unanswered-action list, the encrypted received-result list, removal only
-  after successful result submission, and no general reply or local
-  delivery-control tools;
-- current package-owned Codex and Claude adapters, validated internal
-  entrypoint launch, provider authentication ownership, normal
-  provider-configured MCP and built-in tool access, and bounded asynchronous
-  child-process failures;
-- session list, bounded history display, delete, forget, peer reuse, independent
-  action completion, 30-day idle cleanup, and redacted verbose diagnostics;
-- startup output with working MCP setup commands for all supported agents and
-  safe operator diagnostics for each startup or delivery failure class;
-- no separate connector process, user-selected webhook format, OpenClaw
-  receiver plugin, old package alias, old CLI, compatibility reader, or
-  migration path in the artifact; and
-- local cleanup removes all enrollment and delivery state, refuses while the
-  process lock is held, leaves provider and central state alone, and returns to
-  unenrolled tool behavior; and
-- no credential, plaintext pending-action content, or plaintext received-result
-  content leakage in databases, profiles, temporary files, packages, or
-  qualification output.
+[Workflow tests](workflow-test-plan.md) define deterministic regression cases.
+[Qualification](qualification.md) records exact live evidence, package identity,
+provider configuration and remaining limits. Fixtures and HTTP success alone
+cannot qualify a desktop conversation.

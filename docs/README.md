@@ -15,6 +15,11 @@ plan contains only work that is not complete.
 | Need | Read |
 | --- | --- |
 | Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
+| Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
+| Understand the supplied examples of users getting stuck | [Stalled-session review](stalled-session-review.md) |
+| Configure foreground waits and optional native return | [Client delivery](client-delivery.md) |
+| Implement the approved durable workflow and client matrix | [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) |
+| Check workflow regression and live acceptance requirements | [Workflow test plan](workflow-test-plan.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |

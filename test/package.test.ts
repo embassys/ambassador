@@ -32,11 +32,13 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   );
   assert.deepEqual(packageJson.files, [
     "dist",
+    "extensions",
     "docs/getting-started-claude.md",
     "docs/getting-started-codex.md",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
     "docs/action-workflow.md",
+    "docs/client-delivery.md",
     "docs/development-reset.md",
     "docs/live-qualification.md",
   ]);

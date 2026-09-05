@@ -1,0 +1,7 @@
+{
+  "id": "ambassador-conversation-return",
+  "name": "Ambassador conversation return",
+  "description": "Return Embassys results to the OpenClaw conversation that requested them.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

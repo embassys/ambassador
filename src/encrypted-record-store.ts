@@ -10,6 +10,9 @@ const RECORD_SQL =
   "CREATE TABLE records (sequence INTEGER PRIMARY KEY AUTOINCREMENT, record_key TEXT NOT NULL UNIQUE CHECK (length(record_key) = 43), correlation_key TEXT UNIQUE CHECK (correlation_key IS NULL OR length(correlation_key) = 43), iv BLOB NOT NULL CHECK (length(iv) = 12), tag BLOB NOT NULL CHECK (length(tag) = 16), ciphertext BLOB NOT NULL CHECK (length(ciphertext) BETWEEN 1 AND 524288)) STRICT";
 const USAGE_SQL =
   "CREATE TABLE usage (id INTEGER PRIMARY KEY CHECK (id = 1), identity TEXT NOT NULL CHECK (length(identity) = 43), records INTEGER NOT NULL CHECK (records >= 0), bytes INTEGER NOT NULL CHECK (bytes >= 0)) STRICT";
+const STATES_SQL =
+  "CREATE TABLE record_states (sequence INTEGER PRIMARY KEY REFERENCES records(sequence) ON DELETE CASCADE, state INTEGER NOT NULL CHECK (state BETWEEN 0 AND 255)) STRICT";
+const STATES_INDEX_SQL = "CREATE INDEX records_by_state ON record_states (state, sequence)";
 
 interface Row {
   sequence: bigint;
@@ -26,6 +29,7 @@ export interface EncryptedRecordStoreOptions<T> {
   readonly identifier: (value: T) => string;
   readonly error: () => Error;
   readonly maximumBytes?: number;
+  readonly indexedStates?: boolean;
 }
 
 export interface RecordPage<T> {
@@ -120,26 +124,30 @@ export class EncryptedRecordStore<T> {
           )
           .all();
         if (version === 0 && definitions.length !== 0) throw this.#options.error();
-        if (version !== 0 && version !== 2) throw this.#options.error();
+        const expectedVersion = this.#options.indexedStates ? 3 : 2;
+        if (version !== 0 && version !== expectedVersion) throw this.#options.error();
         if (version === 0) {
           this.#database.exec(`${RECORD_SQL}; ${USAGE_SQL}`);
+          if (this.#options.indexedStates)
+            this.#database.exec(`${STATES_SQL}; ${STATES_INDEX_SQL}`);
           this.#database
             .prepare("INSERT INTO usage VALUES (1, ?, 0, 0)")
             .run(this.#key("store-identity"));
-          this.#database.pragma("user_version = 2");
+          this.#database.pragma(`user_version = ${expectedVersion}`);
         }
         const actual = this.#database
           .prepare<[], { name: string; sql: string }>(
             "SELECT name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
           )
           .all();
-        if (
-          actual.length !== 2 ||
-          actual[0]?.name !== "records" ||
-          sql(actual[0].sql) !== sql(RECORD_SQL) ||
-          actual[1]?.name !== "usage" ||
-          sql(actual[1].sql) !== sql(USAGE_SQL)
-        )
+        const expected = [
+          RECORD_SQL,
+          USAGE_SQL,
+          ...(this.#options.indexedStates ? [STATES_SQL, STATES_INDEX_SQL] : []),
+        ]
+          .map(sql)
+          .sort();
+        if (JSON.stringify(actual.map((row) => sql(row.sql)).sort()) !== JSON.stringify(expected))
           throw this.#options.error();
       })
       .immediate();
@@ -208,8 +216,20 @@ export class EncryptedRecordStore<T> {
 
   put(
     value: T,
-    options: { readonly replace?: boolean; readonly correlation?: string } = {},
+    options: {
+      readonly replace?: boolean;
+      readonly correlation?: string;
+      readonly state?: number;
+    } = {},
   ): boolean {
+    if (
+      options.state !== undefined &&
+      (!this.#options.indexedStates ||
+        !Number.isInteger(options.state) ||
+        options.state < 0 ||
+        options.state > 255)
+    )
+      throw this.#options.error();
     const plaintext = Buffer.from(JSON.stringify(value), "utf8");
     try {
       if (plaintext.length > ENCRYPTED_RECORD_MAX_BYTES) throw this.#options.error();
@@ -251,6 +271,13 @@ export class EncryptedRecordStore<T> {
           this.#database
             .prepare("UPDATE usage SET records = records + ?, bytes = bytes + ? WHERE id = 1")
             .run(prior === undefined ? 1 : 0, growth);
+          if (this.#options.indexedStates) {
+            this.#database
+              .prepare(
+                "INSERT INTO record_states (sequence, state) SELECT sequence, ? FROM records WHERE record_key = ? ON CONFLICT(sequence) DO UPDATE SET state = excluded.state",
+              )
+              .run(options.state ?? 0, key);
+          }
           return true;
         })
         .immediate();
@@ -306,6 +333,26 @@ export class EncryptedRecordStore<T> {
         return removed;
       })
       .immediate();
+  }
+
+  transaction<R>(operation: () => R): R {
+    return this.#database.transaction(operation).immediate();
+  }
+
+  nextInStates(states: readonly number[]): T | undefined {
+    if (
+      !this.#options.indexedStates ||
+      states.length < 1 ||
+      states.length > 256 ||
+      states.some((state) => !Number.isInteger(state) || state < 0 || state > 255)
+    )
+      throw this.#options.error();
+    const row = this.#database
+      .prepare<number[], Row>(
+        `SELECT r.* FROM records r JOIN record_states s ON s.sequence = r.sequence WHERE s.state IN (${states.map(() => "?").join(",")}) ORDER BY s.sequence LIMIT 1`,
+      )
+      .get(...states);
+    return row === undefined ? undefined : this.#decrypt(row);
   }
 
   close(): void {

@@ -9,6 +9,8 @@ import {
 
 export const LOCAL_CONTROL_PATH = "/_ambassador/control";
 const SECRET = /^[a-f0-9]{64}$/u;
+const PROCESS_INSTANCE_ID =
+  /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const SESSION_ID = /^[\x20-\x7e]{1,512}$/u;
 const AGENT_KIND = /^[a-z][a-z0-9-]{0,63}$/u;
 const CORRELATION_ID = /^[\x20-\x7e]{1,256}$/u;
@@ -236,6 +238,32 @@ export class LocalControlClient {
     this.#url = controlUrl(mcpEndpoint);
     this.#secret = secret;
     this.#fetch = fetchImplementation;
+  }
+
+  async getProcessInstance(signal?: AbortSignal): Promise<string> {
+    const result = await this.#request({ operation: "process.status" }, signal);
+    if (
+      !isRecord(result) ||
+      !exactKeys(result, ["instance_id"]) ||
+      typeof result.instance_id !== "string" ||
+      !PROCESS_INSTANCE_ID.test(result.instance_id)
+    ) {
+      throw new LocalControlClientError("invalid_response");
+    }
+    return result.instance_id;
+  }
+
+  async stopProcess(instanceId: string, signal?: AbortSignal): Promise<void> {
+    if (!PROCESS_INSTANCE_ID.test(instanceId)) {
+      throw new LocalControlClientError("operation_failed");
+    }
+    const result = await this.#request(
+      { operation: "process.stop", instance_id: instanceId },
+      signal,
+    );
+    if (!isRecord(result) || !exactKeys(result, ["stopping"]) || result.stopping !== true) {
+      throw new LocalControlClientError("invalid_response");
+    }
   }
 
   async listSessions(signal?: AbortSignal): Promise<readonly AcpSessionRecord[]> {

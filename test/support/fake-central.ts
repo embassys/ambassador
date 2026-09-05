@@ -96,7 +96,7 @@ interface HumanInputRecord {
   readonly agentEmail: string;
   readonly actionType: string;
   readonly prompt: string;
-  readonly inputType: "buttons";
+  readonly inputType: "buttons" | "text";
   readonly options: readonly { readonly label: string; readonly value: string }[];
   readonly messageId: string;
   status: "pending" | "answered";
@@ -864,9 +864,9 @@ async function route(
 
   if (request.method === "POST" && target.pathname === "/api/human_input_response") {
     if (
-      !exactKeys(body, ["token", "value"]) ||
+      !exactKeys(body, ["token"], ["value", "text"]) ||
       typeof body.token !== "string" ||
-      typeof body.value !== "string"
+      (typeof body.value !== "string" && typeof body.text !== "string")
     ) {
       detail(response, 422, "Invalid human input response");
       return;
@@ -884,7 +884,11 @@ async function route(
       detail(response, 410, "This link is no longer usable");
       return;
     }
-    if (!input.options.some(({ value }) => value === body.value)) {
+    if (
+      input.inputType === "buttons"
+        ? !input.options.some(({ value }) => value === body.value)
+        : typeof body.text !== "string" || body.text.length < 1 || body.text.length > 4_000
+    ) {
       detail(response, 400, "Answer was not offered");
       return;
     }
@@ -899,8 +903,8 @@ async function route(
         request_id: input.id,
         action_type: input.actionType,
         input_type: input.inputType,
-        value: body.value,
-        text: null,
+        value: input.inputType === "buttons" ? body.value : null,
+        text: input.inputType === "text" ? body.text : null,
         prompt: input.prompt,
         message_id: input.messageId,
       },
@@ -910,8 +914,8 @@ async function route(
       request_id: input.id,
       status: "answered",
       input_type: input.inputType,
-      value: body.value,
-      text: null,
+      value: input.inputType === "buttons" ? body.value : null,
+      text: input.inputType === "text" ? body.text : null,
     });
     return;
   }
@@ -930,24 +934,24 @@ async function route(
 
   if (request.method === "POST" && target.pathname === "/api/get_human_input") {
     if (
-      !exactKeys(body, ["permission_type", "request", "input_type", "options", "message_id"]) ||
+      !exactKeys(body, ["permission_type", "request", "input_type", "message_id"], ["options"]) ||
       typeof body.permission_type !== "string" ||
       body.permission_type.length < 1 ||
       body.permission_type.length > 128 ||
       typeof body.request !== "string" ||
       body.request.length < 1 ||
       body.request.length > 2_000 ||
-      body.input_type !== "buttons" ||
-      !Array.isArray(body.options) ||
-      body.options.length < 1 ||
-      body.options.length > 10 ||
+      (body.input_type !== "buttons" && body.input_type !== "text") ||
+      (body.input_type === "buttons"
+        ? !Array.isArray(body.options) || body.options.length < 1 || body.options.length > 10
+        : body.options != null) ||
       typeof body.message_id !== "string"
     ) {
       detail(response, 422, "Invalid human input request");
       return;
     }
     const options: Array<{ label: string; value: string }> = [];
-    for (const option of body.options) {
+    for (const option of (body.options ?? []) as unknown[]) {
       if (
         !exactKeys(option, ["label", "value"]) ||
         typeof option.label !== "string" ||
@@ -978,7 +982,7 @@ async function route(
       return;
     }
     const actionType = body.permission_type;
-    if (!state.humanInputActionTypes.has(actionType)) {
+    if (actionByName(state, actionType) === undefined) {
       state.humanInputActionTypes.set(actionType, {
         id: nextId(state, "action.human_input"),
         name: actionType,
@@ -992,7 +996,7 @@ async function route(
       agentEmail: identity.email,
       actionType,
       prompt: body.request,
-      inputType: "buttons",
+      inputType: body.input_type,
       options,
       messageId: body.message_id,
       status: "pending",
@@ -1007,9 +1011,9 @@ async function route(
     safeJson(response, 200, {
       request_id: requestId,
       status: "pending",
-      input_type: "buttons",
+      input_type: body.input_type,
       message: `Question emailed to ${identity.email}`,
-      options,
+      options: body.input_type === "buttons" ? options : null,
     });
     return;
   }
