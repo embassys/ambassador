@@ -18,6 +18,8 @@ test("uses only a private Ambassador state root on macOS", () => {
       "/Users/local/Library/Application Support/ambassador/local-control-secret.key",
     pendingActionPath: "/Users/local/Library/Application Support/ambassador/pending-actions.sqlite",
     actionResultPath: "/Users/local/Library/Application Support/ambassador/action-results.sqlite",
+    outboundActionPath:
+      "/Users/local/Library/Application Support/ambassador/outbound-actions.sqlite",
     acpSessionPath: "/Users/local/Library/Application Support/ambassador/acp-sessions.sqlite",
     profilePath: "/Users/local/Library/Application Support/ambassador/delivery-profile.json",
   });
@@ -36,6 +38,7 @@ test("uses the XDG state root on Linux without a configuration path", () => {
     localControlSecretKeyPath: "/state/ambassador/local-control-secret.key",
     pendingActionPath: "/state/ambassador/pending-actions.sqlite",
     actionResultPath: "/state/ambassador/action-results.sqlite",
+    outboundActionPath: "/state/ambassador/outbound-actions.sqlite",
     acpSessionPath: "/state/ambassador/acp-sessions.sqlite",
     profilePath: "/state/ambassador/delivery-profile.json",
   });
@@ -60,6 +63,7 @@ test("uses local application data on Windows", () => {
       localControlSecretKeyPath: "D:\\Local\\ambassador\\local-control-secret.key",
       pendingActionPath: "D:\\Local\\ambassador\\pending-actions.sqlite",
       actionResultPath: "D:\\Local\\ambassador\\action-results.sqlite",
+      outboundActionPath: "D:\\Local\\ambassador\\outbound-actions.sqlite",
       acpSessionPath: "D:\\Local\\ambassador\\acp-sessions.sqlite",
       profilePath: "D:\\Local\\ambassador\\delivery-profile.json",
     },

@@ -1,6 +1,6 @@
 # 0046 Encrypted pending-action inbox
 
-Status: accepted; agent-facing view amended by ADR 0052
+Status: accepted; view amended by ADR 0052; storage and paging amended by ADR 0056
 
 Date: 2026-09-03
 
@@ -19,19 +19,20 @@ impossible after acknowledgement or restart.
 
 ## Decision
 
-- Add the zero-argument MCP tool `list_pending_action_calls`. It returns a count
+- Expose unanswered calls through `get_inbox` with ADR 0056 pagination. It returns a page count
   and each unanswered call's `call_id`, `sender_agent_id`, `action_type`,
   `payload`, and `created_at`.
 - Do not add or probe a central endpoint. The view comes from local Ambassador
   state.
-- Before delivering or acknowledging a validated `action_call`, store those
-  five fields in a separate encrypted SQLite inbox. Do not store the outer
+- On receipt from either the normal poll or an approval poll, store those five
+  validated `action_call` fields in a separate encrypted SQLite inbox. Do not store the outer
   message ID or any other message type.
 - Encrypt every row with AES-256-GCM. Derive a domain-separated encryption key
   from the loaded DPoP private key and key thumbprint, use an HMAC lookup key
   instead of the plaintext call ID, and keep the existing owner-only directory,
   link, permission, schema, and SQLite safety checks.
-- Bound the inbox to 256 calls and 480 KiB of ciphertext. A duplicate with the
+- Bound each record to 512 KiB and the store to 1 GiB of ciphertext. Use
+  indexed keyset pages and transactional byte accounting. A duplicate with the
   same exact content is idempotent; a conflicting duplicate fails closed.
 - If an agent cannot answer without unavailable user input, it leaves the call
   pending. A later agent session can list the call, collect the user's answer,
@@ -46,8 +47,7 @@ impossible after acknowledgement or restart.
 
 The user can answer an action asynchronously even after the delivery turn ends
 or Ambassador restarts. Webhook and direct delivery use the same inbox and MCP
-tools. Permission decisions continue to use the central projection from ADR
-0045.
+tools. Permission decisions use the human email flow in ADR 0054.
 
 This is a deliberate narrow exception to ADR 0038's previous prohibition on
 local message-body persistence. A party that obtains the owner's complete

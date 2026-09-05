@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -134,7 +134,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
     } else {
       const { PRODUCTION_AGENT_CAPABILITIES } = candidate.capabilities;
       const { resolveAgentCapability } = candidate.capabilities;
-      const { DirectDeliveryTarget } = candidate.direct;
+      const { AcpSessionController, DirectDeliveryTarget } = candidate.direct;
       const { AcpSessionStore } = candidate.sessionStore;
       const { LocalMcpServer } = candidate.localMcp;
       const { WebhookDeliveryTarget } = candidate.webhook;
@@ -156,7 +156,9 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
         report.cases.push({ name: "local-central-fixture", status: "failed" });
       }
 
-      const qualificationRoot = await mkdtemp(join(tmpdir(), "ambassador-agent-qualification-"));
+      const qualificationRoot = await realpath(
+        await mkdtemp(join(tmpdir(), "ambassador-agent-qualification-")),
+      );
       const observedMcpProfiles = new Set();
       const mcp = new LocalMcpServer({
         async listTools() {
@@ -233,13 +235,31 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           let sessionStore;
           try {
             if (profile.direct === undefined) throw new Error("direct unavailable");
+            const marker = `synthetic-${randomUUID()}`;
+            let recalling = false;
+            let recalled = false;
+            let recentText = "";
             sessionStore = new AcpSessionStore(join(workingDirectory, "acp-sessions.sqlite"));
             directTarget = new DirectDeliveryTarget({
+              identityScope: "local-provider-qualification",
               agentKind: profile.kind,
               capability: profile.direct,
               workingDirectory,
               environment: process.env,
               sessionStore,
+              // Synthetic read-only qualification never grants an unexpected provider tool.
+              approvePermission: async () => "deny",
+              log(event, value) {
+                if (
+                  recalling &&
+                  event === "acp.update" &&
+                  value?.update?.sessionUpdate === "agent_message_chunk" &&
+                  value.update.content?.type === "text"
+                ) {
+                  recentText = (recentText + value.update.content.text).slice(-8192);
+                  recalled ||= recentText.includes(marker);
+                }
+              },
             });
             await directTarget.deliver(
               {
@@ -248,13 +268,28 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
                 action_type_id: "qualification",
                 payload: {
                   synthetic: true,
-                  qualification_request:
-                    "Call the configured Ambassador get_my_permissions MCP tool exactly once, then finish.",
+                  qualification_request: `Call the configured Ambassador get_my_permissions MCP tool exactly once, then remember this synthetic marker for our next message: ${marker}.`,
                 },
                 created_at: new Date().toISOString(),
               },
               new AbortController().signal,
             );
+            recalling = true;
+            await directTarget.deliver(
+              {
+                id: `qualification-${profile.kind}-second-turn`,
+                sender_agent_id: "qualification.sender",
+                payload: {
+                  synthetic: true,
+                  qualification_request:
+                    "Repeat the exact synthetic marker from our preceding message. Do not call tools.",
+                },
+                created_at: new Date().toISOString(),
+              },
+              new AbortController().signal,
+            );
+            if (sessionStore.list().length !== 1) throw new Error("peer session was not reused");
+            if (!recalled) throw new Error("peer context was not recalled");
             if (!observedMcpProfiles.has(profile.kind)) {
               throw new Error("qualification MCP call was not observed");
             }
@@ -263,6 +298,18 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
             report.cases.push({ name: `${profile.kind}-direct`, status: "failed" });
           } finally {
             await directTarget?.close().catch(() => undefined);
+            if (sessionStore !== undefined && profile.direct !== undefined) {
+              const controller = new AcpSessionController({
+                capability: profile.direct,
+                environment: process.env,
+              });
+              for (const record of sessionStore.list()) {
+                const status = await controller
+                  .delete(record, AbortSignal.timeout(20_000))
+                  .catch(() => "failed");
+                report.cases.push({ name: `${profile.kind}-history-cleanup`, status });
+              }
+            }
             sessionStore?.close();
           }
         }
@@ -274,7 +321,11 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
         await rm(qualificationRoot, { recursive: true, force: true });
       }
       process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-      if (!fixture || report.cases.some(({ status }) => status !== "passed")) process.exitCode = 1;
+      if (
+        !fixture ||
+        report.cases.some(({ status }) => !["passed", "deleted", "unsupported"].includes(status))
+      )
+        process.exitCode = 1;
     }
   }
 }

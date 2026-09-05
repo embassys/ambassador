@@ -1,5 +1,25 @@
 # Current work
 
+ADR 0056 is implemented and qualified. Indexed encrypted stores allow 1 GiB
+each, `get_inbox` pages safely, receipt capture covers approval polling, and
+saved outbound intent dispatches the exact requested payload after a grant.
+ACP sessions reuse context per remote identity while tracking each message and
+action independently. Idle cleanup runs in bounded background batches. Existing
+state and migration are outside the approved scope.
+
+The deterministic suite, clean-installed live REST flow, real two-turn context
+recall with all four providers, and combined real Codex-to-Claude action round
+trip passed. The combined run also verified peer-session reuse and running
+session reads on both gateways. OpenClaw uses its reviewed load path to restore
+its gateway mapping. See [Delivery qualification](qualification.md)
+for versions, artifact digests, and the limits of these checks.
+
+The user approved the PR, merge, and 0.2.18 release on 2026-09-05. The release
+candidate passed both direct and webhook delivery with Hermes and OpenClaw.
+Complete the final PR/main CI gates, then verify the published npm artifact.
+Approval-option mapping remains deferred by the user;
+central recovery remains server work.
+
 Phase 3B is complete. ADR 0050's common ACP policy, public Codex and Claude
 adapters, persistent session lifecycle, session commands, verbose diagnostics,
 provider-configured MCP use, retention cleanup, documentation, and deterministic
@@ -10,7 +30,8 @@ correlated action-result round trip. Evidence is in
 
 ADR 0051's encrypted received-action-result storage is implemented. ADR 0052
 replaces the three separate inbox views with `get_inbox`, which combines
-unanswered action calls and unread action results. ADR 0054 replaces agent-side
+unanswered action calls, unread action results, and ADR 0056's outbound status.
+ADR 0054 replaces agent-side
 Embassys permission decisions with the deployed human email flow and updates
 the current request schema and live qualification. Verbose ACP logging reports
 the available-command count without printing the command catalog or its
@@ -28,8 +49,8 @@ ADR 0053's live session inspection is implemented. `sessions list` and
 commands remain stopped-only.
 
 The controlled live Codex-to-Claude qualification of ADR 0055 passed against
-the deployed own-human input endpoint. The remaining work is a separately
-approved release. Version 0.2.17 remains published under the npm `latest` tag.
+the deployed own-human input endpoint. Version 0.2.18 is approved for release;
+0.2.17 remains published under the npm `latest` tag until publication completes.
 
 The deterministic Windows lanes cover state, startup, packaging, and mock
 delivery. A support claim for an individual real-agent mode on Windows still

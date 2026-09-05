@@ -12,6 +12,7 @@ export interface GatewayPaths {
   localControlSecretKeyPath: string;
   pendingActionPath: string;
   actionResultPath: string;
+  outboundActionPath: string;
   acpSessionPath: string;
   profilePath: string;
 }
@@ -32,6 +33,7 @@ export function pathsForStateDirectory(
     localControlSecretKeyPath: join(stateDirectory, "local-control-secret.key"),
     pendingActionPath: join(stateDirectory, "pending-actions.sqlite"),
     actionResultPath: join(stateDirectory, "action-results.sqlite"),
+    outboundActionPath: join(stateDirectory, "outbound-actions.sqlite"),
     acpSessionPath: join(stateDirectory, "acp-sessions.sqlite"),
     profilePath: join(stateDirectory, "delivery-profile.json"),
   };

@@ -1,6 +1,6 @@
 # 0051 Encrypted received-action-result inbox
 
-Status: accepted; retrieval lifecycle amended by ADR 0052
+Status: accepted; retrieval amended by ADR 0052; capacity and safe paging by ADR 0056
 
 Date: 2026-09-04
 
@@ -27,14 +27,17 @@ creating the missing push channel.
 
 - Expose each result's `call_id`, sender agent ID, action type, status,
   structured result, and creation time through an agent-facing inbox.
-- Before local delivery or central acknowledgement, validate and store every
+- At receipt from either polling path, before local delivery or acknowledgement,
+  validate and store every
   `action_response` in a separate encrypted SQLite inbox.
 - Encrypt each row with AES-256-GCM. Derive separate encryption and HMAC lookup
   keys from the enrolled DPoP private key and thumbprint. The plaintext call ID
   and returned data do not enter SQLite.
 - Key records by the HMAC of `call_id`. An exact duplicate is idempotent and a
   conflicting duplicate fails closed.
-- Bound the inbox to 256 records and 400 KiB of ciphertext. Records remain
+- Bound each record to 512 KiB and the store to 1 GiB of ciphertext. Use
+  bounded keyset pages; validate and serialize a page before consuming only its
+  returned results. Records remain
   available across restarts until the inbox returns them or the owner runs
   `ambassador clean`.
 - Do not accept a foreground chat or session ID in MCP input. Do not attempt a
@@ -56,9 +59,8 @@ captured from central. A crash after central consumes a message but before
 local capture can still lose the result because central has no retrieval or
 redelivery route.
 
-The new database is separate from the existing pending-action database. This
-avoids a migration for existing installations and keeps the two directions
-clear. A complete local-state compromise can decrypt both inboxes because both
+The result database is separate from the pending-action database, keeping the
+two directions and their quotas independent. A complete local-state compromise can decrypt both inboxes because both
 derive keys from the enrolled credential.
 
 ## Approval

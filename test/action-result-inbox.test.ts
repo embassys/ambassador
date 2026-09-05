@@ -74,9 +74,9 @@ test("encrypts received action results and keeps them across restart", async (t)
 
   const restarted = new ActionResultInbox(path, ownerCredential);
   assert.deepEqual(restarted.list(), firstResult());
-  assert.deepEqual(restarted.takeAll(), firstResult());
+  assert.equal(restarted.removeMany(firstResult().map((value) => value.call_id)), 1);
   assert.deepEqual(restarted.list(), []);
-  assert.deepEqual(restarted.takeAll(), []);
+  assert.equal(restarted.removeMany([]), 0);
   restarted.close();
 
   const consumedRestart = new ActionResultInbox(path, ownerCredential);
@@ -132,7 +132,7 @@ test("orders results, accepts error results, rejects conflicts, and binds the id
   );
 
   const database = new Database(path);
-  database.prepare("UPDATE action_results SET ciphertext = zeroblob(length(ciphertext))").run();
+  database.prepare("UPDATE records SET ciphertext = zeroblob(length(ciphertext))").run();
   database.close();
   assert.throws(() => new ActionResultInbox(path, credential()), /invalid/u);
 });
@@ -176,7 +176,7 @@ test("rejects malformed responses, credential fields, and linked inbox artifacts
   assert.equal(await readFile(target, "utf8"), "target-data");
 });
 
-test("bounds the number and total size of received action results", async (t) => {
+test("bounds received result bytes independently from record count", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-action-results-bounds-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -185,10 +185,12 @@ test("bounds the number and total size of received action results", async (t) =>
     const suffix = index.toString(16).padStart(12, "0");
     assert.equal(countBounded.capture(resultMessage(`20000000-0000-4000-8000-${suffix}`)), true);
   }
-  assert.throws(() => countBounded.capture(resultMessage("30000000-0000-4000-8000-000000000000")));
+  assert.equal(countBounded.capture(resultMessage("30000000-0000-4000-8000-000000000000")), true);
   countBounded.close();
 
-  const sizeBounded = new ActionResultInbox(join(root, "size.sqlite"), credential());
-  assert.throws(() => sizeBounded.capture(resultMessage(FIRST_CALL_ID, "x".repeat(480 * 1024))));
+  const sizeBounded = new ActionResultInbox(join(root, "size.sqlite"), credential(), {
+    maximumBytes: 32 * 1024,
+  });
+  assert.throws(() => sizeBounded.capture(resultMessage(FIRST_CALL_ID, "x".repeat(33 * 1024))));
   sizeBounded.close();
 });

@@ -1,6 +1,6 @@
 {
   "name": "@embassys/ambassador",
-  "version": "0.2.17",
+  "version": "0.2.18",
   "description": "Local Ambassador for the Embassys agent network",
   "license": "MIT",
   "repository": {
@@ -13,6 +13,7 @@
     "docs/getting-started-codex.md",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
+    "docs/action-workflow.md",
     "docs/development-reset.md",
     "docs/live-qualification.md"
   ],

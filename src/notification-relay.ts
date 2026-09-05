@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 
+import { captureCentralMessages } from "./central-message-buffer.js";
 import type { CentralMessage } from "./central-rest.js";
 import { type NotificationJournal, validateNotificationId } from "./notification-journal.js";
 
@@ -180,6 +181,11 @@ export class NotificationRelay {
         } catch {
           throw new NotificationRelayError("journal_failed");
         }
+        // Capture the entire validated batch before any delivery can wait on a human.
+        await captureCentralMessages(
+          deliveryQueue.map((item) => item.message),
+          this.#captureMessage,
+        );
         for (const item of deliveryQueue) {
           if (signal.aborted) return;
           await this.#deliver(item.message, signal);
@@ -201,7 +207,6 @@ export class NotificationRelay {
         return;
       }
     }
-    await this.#captureMessage(message);
     if (id !== undefined) {
       try {
         this.#journal.beginDelivery(id);

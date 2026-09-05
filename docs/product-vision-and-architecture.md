@@ -92,10 +92,12 @@ its idempotency key. No Ambassador-specific OpenClaw plugin is installed.
 ### Direct
 
 Ambassador acts as an ACP v1 client. It launches the selected local agent,
-creates one persistent gateway-managed session per central message, and
-submits the complete message as the prompt. The direct session is not the
-original chat in which the user registered. A retry before prompt dispatch may
-resume the same session; a different message never inherits that context.
+reuses one persistent session per central-issued remote agent identity within
+the local enrollment, provider, and working directory, and submits each complete
+message as a separate turn. This session is separate from the registration chat.
+Individual message dispatch and action completion states remain independent.
+Provider-native compaction manages context; Ambassador keeps no provider history.
+Sessions without unfinished work become eligible for cleanup after 30 idle days.
 
 All supported agents load Ambassador MCP and their other tools from normal
 provider configuration. ACP session lifecycle calls carry an empty
@@ -194,9 +196,11 @@ profile may persist the mode, recognized agent kind, webhook URL, and canonical
 direct working directory. An owner-only SQLite database holds bounded ACP
 session IDs, central correlation IDs, lifecycle state, and timestamps. It never
 contains a secret, message body, prompt, tool data, or provider output. The
-notification journal remains ID-only. Two separate SQLite inboxes store only
-encrypted, validated unanswered action calls and received action results. Both
-are keyed to the enrolled DPoP identity.
+notification journal remains ID-only. Separate encrypted SQLite stores hold
+validated unanswered calls, unread results, and explicit outbound action intent.
+Each has a 1 GiB ciphertext quota and a 512 KiB record limit. Indexed pagination
+keeps decryption and MCP responses bounded as disk usage grows. All stores are
+bound to the enrolled DPoP identity. Existing-state migration is outside the current development scope.
 
 ## Main flows
 
@@ -210,7 +214,7 @@ are keyed to the enrolled DPoP identity.
    separately authenticated non-MCP route for live session reads.
 4. Reject supplied Authorization credentials on `/mcp`.
 5. For an enrolled identity, open the encrypted action-call and action-result
-   inboxes and ACP session metadata.
+   inboxes, explicit outbound intents, and ACP session metadata.
 6. For webhook mode, load the separately encrypted webhook secret.
 7. Prepare the configured delivery target.
 8. Start REST polling only when the required stored records are valid.
@@ -229,6 +233,18 @@ or provider bypass. ACP tool execution waits for the human email decision
 defined by ADR 0055. A
 missing tool leaves an action available through the encrypted pending-action
 inbox.
+
+### Permission and action continuation
+
+When requesting permission, the agent may include the exact `action_payload`
+that the user wants submitted. Ambassador saves it encrypted, correlates the
+permission response, and submits it at most once after the matching grant.
+Permission-only requests produce status notifications. A model never has to
+reconstruct a missing payload from a new session or a compacted conversation.
+Uncertain outcomes stay visible without automatic retry. `get_inbox` pages
+through pending calls, unread results, and outbound status.
+
+See [Request and answer an action](action-workflow.md) for the complete journey.
 
 ### Session inspection
 
@@ -249,7 +265,7 @@ always require that stopped path because they remove provider or local state.
    changing state if another process owns the lock or if the lock cannot be
    validated.
 3. It removes the credential pair, webhook-secret pair, local-control-secret
-   pair, delivery profile, encrypted action-call and action-result inboxes, ACP
+   pair, delivery profile, encrypted action-call, result, and outbound-intent stores, ACP
    session metadata, notification journal, and any interrupted state writes.
 4. It retains the empty owner-only state directory and process lock for safe
    coordination.
@@ -290,9 +306,10 @@ permission-decision tool and does not project pending permissions into
 `get_inbox`. `get_my_permissions` remains available for status and audit.
 
 After the human decides, central sends the requester a `permission_outcome`.
-For a grant, Ambassador's fixed delivery prompt tells the receiving agent to
-continue the approved action once, using the outcome's `grantor_email` as the
-target and its `action_type`; outcome metadata is not passed to `call_action`.
+If the requester saved an exact `action_payload` with its permission request,
+Ambassador matches the grant to that encrypted intent and dispatches the saved
+payload at most once. A permission-only request creates no action. Provider
+context and outcome metadata cannot supply or replace the intended payload.
 
 Provider-tool approval inside a direct ACP turn is separate. Ambassador calls
 `get_human_input` with the triggering message ID, so central emails the local
@@ -304,15 +321,15 @@ open ACP request, and keeps the control response out of provider prompts.
 identity that still need a result. Ambassador encrypts the validated call ID,
 sender ID, action type, payload, and creation time before local delivery and
 central acknowledgement. A successful `submit_action_result` removes that call
-and retires its ACP session.
+and settles only its action correlation. The peer's ACP session remains reusable.
 
-The final inbox item is an unread `action_response` received for an action this
+Another inbox item is an unread `action_response` received for an action this
 identity requested. Ambassador encrypts the call ID, sender ID, action type,
 status, structured result, and creation time before local delivery and central
 acknowledgement. Results survive restarts until `get_inbox` returns them once.
 This lets a foreground agent answer "have we heard back?" without access to
 the background ACP session. None of these inbox views requires a new central
-route.
+route. The same paginated view exposes saved outbound intent and its status.
 
 ### Incoming message
 
@@ -327,10 +344,12 @@ route.
    local responsibility.
 6. Ambassador acknowledges the message to central and removes its local state.
 
-Direct session metadata remains available after delivery. Non-action sessions
-retire after a normal turn. Action-call sessions retire after the matching
-central result succeeds. Ambassador attempts provider deletion after 30 days
-and otherwise forgets metadata when deletion is unsupported.
+Direct sessions retain context for the same remote identity, enrollment,
+provider, and working directory. Outstanding actions and unfinished dispatches
+keep a session active. After 30 idle days without unfinished work, Ambassador
+attempts provider deletion in bounded background batches and otherwise forgets
+metadata when deletion is unsupported. Provider compaction manages context;
+it does not complete actions or delete Ambassador inbox records.
 
 After a direct prompt may have started, an uncertain failure is not replayed
 automatically. The server cannot currently redeliver a message consumed by

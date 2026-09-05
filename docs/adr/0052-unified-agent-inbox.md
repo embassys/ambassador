@@ -1,6 +1,7 @@
 # 0052 Unified agent inbox
 
-Status: accepted; permission projection superseded by ADR 0054
+Status: accepted; permission projection superseded by ADR 0054; safe paging and
+outbound status amended by ADR 0056
 
 Date: 2026-09-04
 
@@ -13,21 +14,18 @@ direction of an action exchange.
 
 ## Decision
 
-- Replace `list_pending_permission_requests`, `list_pending_action_calls`, and
-  `list_action_results` with the zero-argument `get_inbox` tool. Do not retain
-  the old names as aliases.
-- Return pending permission decisions first, unanswered action calls second,
-  and unread action results last.
-- Include a `response` object on each permission and action-call item. It names
-  the response tool and the fields that tool requires.
-- Keep permission items until `respond_to_permission` succeeds. Keep action
-  calls until `submit_action_result` succeeds.
-- Remove received action results from the encrypted local store after
-  `get_inbox` returns them. A result therefore appears in one successful inbox
-  response. Results remain encrypted across restarts before that response.
-- Keep permission decisions as a live projection of central state. Keep action
-  calls and action results in their existing separate encrypted stores. The
-  unified inbox is an agent-facing view, not a third database.
+- Replace the former three list tools with `get_inbox`; retain no aliases.
+- Accept optional `limit` and `cursor` under ADR 0056. Return complete call,
+  result, then outbound-intent items in bounded pages with `next_cursor`.
+- Include a `response` object on each action call naming `submit_action_result`
+  and its required fields. Keep the call until central accepts that result.
+- Keep calls, results, and outbound intents in separate encrypted stores.
+  Validate and serialize the complete page before consuming exactly its read
+  results. Denied intents remain until a later explicit permission request
+  replaces them. Failed reads do not consume results.
+- Permission decisions stay in ADR 0054's human email flow, never in this view.
+- Uncertain outbound intents remain visible. Repeated identical requests report
+  their state and do not replay an uncertain external operation.
 - Do not copy action-specific result schemas into Ambassador. Central currently
   accepts a structured result object but publishes only the caller's
   `input_schema`. Track a central result-schema addition separately.

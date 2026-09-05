@@ -41,19 +41,25 @@ const app = acp
         version: scenario.startsWith("wrong-version") ? "2.0.0" : "1.0.0",
       },
       agentCapabilities: {
-        loadSession: true,
-        sessionCapabilities: { resume: {}, close: {}, delete: {}, list: {} },
+        loadSession: scenario !== "resume-only",
+        sessionCapabilities: {
+          ...(scenario === "large-history" ? {} : { resume: {} }),
+          close: {},
+          delete: {},
+          list: {},
+        },
       },
       authMethods: [],
     };
   })
   .onRequest(acp.methods.agent.session.new, (context) => {
     if (context.params.mcpServers.length !== 0) throw new Error("invalid MCP setup");
-    const sessionId = "mock-session";
+    const sessionId = scenario === "unique-sessions" ? `mock-${process.pid}` : "mock-session";
     sessions.add(sessionId);
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.resume, (context) => {
+    if (scenario === "load-required") throw new Error("resume cannot recover the session mapping");
     if (context.params.mcpServers?.length !== 0) throw new Error("invalid MCP setup");
     sessions.add(context.params.sessionId);
     return {};
@@ -75,6 +81,16 @@ const app = acp
         content: { type: "text", text: "stored answer" },
       },
     });
+    if (scenario === "large-history") {
+      for (let i = 0; i < 200; i++)
+        await context.client.notify(acp.methods.client.session.update, {
+          sessionId: context.params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `history-${i} ${"x".repeat(1024)}` },
+          },
+        });
+    }
     if (scenario.startsWith("commands")) {
       await context.client.notify(acp.methods.client.session.update, {
         sessionId: context.params.sessionId,
