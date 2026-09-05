@@ -189,6 +189,19 @@ release preparation. Publication retains the repository, cross-platform package,
 provider delivery, live-central, and audit gates above. Record the final npm
 artifact and its independent verification in the qualification document.
 
+The user then explicitly approved merging without waiting for the final
+Windows pull-request check and deferring further Windows fixes to a separate
+pull request. PR 37 merged on 2026-09-05 at
+`1e06138f0c91a79f902ee5d7865ff3f8a5a4bbe6`. The existing main-branch publication
+workflow and its release checks were retained.
+
+All main-branch checks, including Windows, passed in workflow `33959402564`.
+The OIDC job published 0.2.18 with the npm `latest` tag. An independent registry
+download matched npm's integrity metadata and the qualified candidate file tree,
+then passed clean installation, installed runtime, artifact scanning,
+vulnerability auditing, and all 141 package signature checks. The final artifact
+digests are recorded in the qualification document.
+
 Versions 0.2.0 through 0.2.6 under the old package name are historical
 development publications. They are not a fallback or migration source. A new
 publication requires separate user approval.
