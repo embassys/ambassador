@@ -13,7 +13,8 @@ Before starting any task, read these files in order:
    startup and trust, ADR 0046 for pending actions, ADR 0050 for ACP sessions,
    ADR 0051 for received action results, ADR 0052 for the unified inbox, and
    ADR 0053 for live session inspection, ADR 0054 for Embassys permission
-   decisions, and ADR 0055 for ACP provider-tool approval
+   decisions, ADR 0055 for ACP provider-tool approval, and ADR 0056 for scalable
+   inboxes, explicit outbound intent, and peer sessions
 
 The architecture and protocol describe the accepted target. The implementation
 plan says which parts are not built yet. During the delivery cutover, replace
@@ -78,7 +79,7 @@ scope on your own.
   control through local `poll_messages` or `ack_message` tools after the
   cutover. Expose the exact central `submit_action_result` operation for the
   target of an action call. Expose unanswered action calls and unread action
-  results through the local `get_inbox` view. Embassys permission decisions
+  results and saved outbound action status through paginated `get_inbox`. Embassys permission decisions
   belong to the human email flow in ADR 0054; do not expose a local decision
   tool or project them into `get_inbox`. Do not treat the inbox as general chat
   or delivery control.
@@ -92,14 +93,17 @@ scope on your own.
   consume the correlated `human_input_response` from `poll_messages`, and map
   `allow_once` to the provider's narrowest positive option. Do not auto-approve
   and do not use `request_permission` for the provider approval.
-- Store only bounded ACP session metadata. Retire non-action sessions after a
-  normal turn and action sessions after central accepts their correlated
-  result. Delete or forget retired sessions after 30 days as defined by ADR
-  0050.
+- Reuse ACP sessions per central-issued remote identity, scoped to enrollment,
+  fixed provider, and canonical working directory. Track message dispatch and
+  each action separately; never replay a dispatched or uncertain message. Keep
+  unfinished work active, clean idle sessions after 30 days in bounded batches,
+  and delegate model compaction to the provider as defined by ADR 0056.
 - Keep the notification journal ID-only. The only local body-persistence
-  exceptions are ADR 0046's encrypted pending-action inbox and ADR 0051's
-  encrypted received-result inbox. Keep every other central message body in
-  bounded memory; do not invent server redelivery.
+  exceptions are ADR 0046's encrypted pending-action inbox, ADR 0051's encrypted
+  received-result inbox, and ADR 0056's encrypted explicit outbound intent.
+  Each store has a 1 GiB ciphertext quota with bounded indexed reads. Use new
+  schemas directly; existing state and migration are out of scope. Keep every
+  other central message body in bounded memory; do not invent server redelivery.
 - The gateway follows the current
   [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST service
   at `https://mcp.embassys.ai`. Review current server code and live behavior
@@ -115,6 +119,8 @@ scope on your own.
 - `request_permission` accepts the deployed target and permission-name selector
   pairs plus optional email decision menu, reason, and scope. A new request
   emails the grantor's human and queues no request to the grantor's agent.
+  Local `action_payload` optionally saves exact outbound intent and never enters
+  the central permission request. A grant alone supplies no action payload.
   Ambassador never handles an emailed decision token in normal operation.
 - Protected central requests send `Authorization: Bearer <token>` and a
   separate `DPoP: <proof>` header. A nonce is optional and is used only after

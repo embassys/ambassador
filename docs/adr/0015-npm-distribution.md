@@ -179,6 +179,16 @@ Use npm trusted publishing with GitHub Actions OIDC and no long-lived publish
 token. A main push publishes only a new version from `package.json` and skips
 an existing version.
 
+On 2026-09-05, the user approved creating and merging the ADR 0056 pull request
+and publishing version 0.2.18. It includes paginated encrypted stores, explicit
+outbound action intent, persistent peer sessions, bounded receipt buffering,
+and the previously merged email-mediated ACP approval and inbox improvements.
+Existing-state migration remains outside the accepted scope. The combined real
+Codex-to-Claude action round trip and four-provider context recall passed before
+release preparation. Publication retains the repository, cross-platform package,
+provider delivery, live-central, and audit gates above. Record the final npm
+artifact and its independent verification in the qualification document.
+
 Versions 0.2.0 through 0.2.6 under the old package name are historical
 development publications. They are not a fallback or migration source. A new
 publication requires separate user approval.
@@ -214,7 +224,7 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
-0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, and 0.2.17 releases described above. Later
+0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, 0.2.17, and 0.2.18 releases described above. Later
 publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned

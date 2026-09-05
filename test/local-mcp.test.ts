@@ -5,7 +5,7 @@ import { type LocalMcpRouter, LocalMcpServer, LocalMcpToolError } from "../src/l
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 import { rawPost } from "./support/raw-http.js";
 
-const MAX_TOOL_RESULT_BYTES = 512 * 1024;
+const MAX_TOOL_RESULT_BYTES = 768 * 1024;
 
 function router(): LocalMcpRouter & { calls: Array<Record<string, unknown>> } {
   const calls: Array<Record<string, unknown>> = [];
@@ -141,7 +141,7 @@ test("rejects host, origin, authorization, and body violations before dispatch",
   assert.equal(backend.calls.length, 0);
 });
 
-test("returns a 512 KiB tool result and rejects one byte above it before transport", async (t) => {
+test("returns a 768 KiB tool result and rejects one byte above it before transport", async (t) => {
   const backend = router();
   const server = new LocalMcpServer(backend, { port: 0 });
   await server.listen();

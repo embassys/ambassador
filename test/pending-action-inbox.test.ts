@@ -103,9 +103,7 @@ test("orders calls, rejects conflicts, and fails closed with another identity", 
   );
 
   const database = new Database(path);
-  database
-    .prepare("UPDATE pending_action_calls SET ciphertext = zeroblob(length(ciphertext))")
-    .run();
+  database.prepare("UPDATE records SET ciphertext = zeroblob(length(ciphertext))").run();
   database.close();
   assert.throws(() => new PendingActionInbox(path, credential()), /invalid/u);
 });
@@ -149,7 +147,7 @@ test("rejects malformed action calls and linked inbox artifacts", async (t) => {
   assert.equal(await readFile(target, "utf8"), "target-data");
 });
 
-test("bounds the number and total size of pending action records", async (t) => {
+test("bounds pending action bytes independently from record count", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-pending-actions-bounds-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -161,12 +159,12 @@ test("bounds the number and total size of pending action records", async (t) => 
       true,
     );
   }
-  assert.throws(() =>
-    countBounded.capture(actionMessage("30000000-0000-4000-8000-000000000000", "overflow")),
-  );
+  assert.equal(countBounded.capture(actionMessage("30000000-0000-4000-8000-000000000000")), true);
   countBounded.close();
 
-  const sizeBounded = new PendingActionInbox(join(root, "size.sqlite"), credential());
-  assert.throws(() => sizeBounded.capture(actionMessage(FIRST_CALL_ID, "x".repeat(480 * 1024))));
+  const sizeBounded = new PendingActionInbox(join(root, "size.sqlite"), credential(), {
+    maximumBytes: 32 * 1024,
+  });
+  assert.throws(() => sizeBounded.capture(actionMessage(FIRST_CALL_ID, "x".repeat(33 * 1024))));
   sizeBounded.close();
 });

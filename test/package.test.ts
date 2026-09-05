@@ -9,7 +9,7 @@ test("package metadata exposes only the Ambassador package and binary", async ()
   ) as Record<string, unknown>;
 
   assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.17");
+  assert.equal(packageJson.version, "0.2.18");
   assert.equal(packageJson.private, undefined);
   assert.equal(packageJson.license, "MIT");
   assert.equal(
@@ -36,6 +36,7 @@ test("package metadata exposes only the Ambassador package and binary", async ()
     "docs/getting-started-codex.md",
     "docs/getting-started-hermes.md",
     "docs/getting-started-openclaw.md",
+    "docs/action-workflow.md",
     "docs/development-reset.md",
     "docs/live-qualification.md",
   ]);

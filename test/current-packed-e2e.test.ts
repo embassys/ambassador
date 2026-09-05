@@ -80,7 +80,7 @@ interface PackedCli {
 }
 
 async function waitForEndpoint(read: () => string): Promise<string> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + (process.platform === "win32" ? 30_000 : 5_000);
   while (Date.now() < deadline) {
     const match = /MCP endpoint: (http:\/\/127\.0\.0\.1:[0-9]+\/mcp)/u.exec(read());
     if (match?.[1] !== undefined) return match[1];
@@ -141,6 +141,15 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     /[/\\]dist[/\\]index\.js$/u,
   );
   const root = await mkdtemp(join(tmpdir(), "ambassador-current-packed-"));
+  const controller = new AbortController();
+  const restartController = new AbortController();
+  const gatewayRuns: Array<Promise<number>> = [];
+  // Stop listeners before removing their state, including on a failed assertion.
+  t.after(async () => {
+    controller.abort();
+    restartController.abort();
+    await Promise.all(gatewayRuns);
+  });
   t.after(() => rm(root, { recursive: true, force: true }));
   const central = await startFakeCentral(t);
   const webhookSecret = await createWebhookSecret(packed, root, central.apiUrl);
@@ -149,7 +158,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
     nowSeconds: NOW_SECONDS,
     contract: "openclaw-agent",
   });
-  const controller = new AbortController();
   let stdout = "";
   let stderr = "";
   const running = packed.runCli(["start"], {
@@ -177,7 +185,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       nowSeconds: () => NOW_SECONDS,
     },
   });
-  t.after(() => controller.abort());
+  gatewayRuns.push(running);
 
   const endpoint = await waitForEndpoint(() => stdout);
   const client = new TestMcpClient(endpoint);
@@ -296,7 +304,6 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   assert.equal(cleanStderr, "");
   assert.deepEqual(await readdir(root), ["ambassador.lock"]);
 
-  const restartController = new AbortController();
   let restartStdout = "";
   let restartStderr = "";
   const restarted = packed.runCli(["start"], {
@@ -324,6 +331,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
       nowSeconds: () => NOW_SECONDS,
     },
   });
+  gatewayRuns.push(restarted);
   const restartEndpoint = await waitForEndpoint(() => restartStdout);
   const restartClient = new TestMcpClient(restartEndpoint);
   await restartClient.initialize({ name: "openclaw-bundle-mcp", version: "clean-check" });

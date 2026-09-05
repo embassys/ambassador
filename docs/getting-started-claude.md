@@ -44,11 +44,11 @@ Later, you can ask:
 
 - Ambassador includes the public Claude ACP adapter; you do not install it.
 - The adapter uses Claude Code's normal authentication and configuration.
-- Each incoming message gets a separate persistent provider session, not the
-  chat used for registration.
+- Messages from the same remote identity reuse a persistent provider session
+  within your enrollment and working directory. The registration chat remains separate.
 - Ambassador passes no extra MCP servers and does not disable built-in tools,
   choose safe mode, or request permission bypass.
-- If Claude asks to use a tool, Ambassador emails the human grantor and keeps
+- If Claude asks to use a tool, Ambassador emails you at your registered address and keeps
   the request pending until their decision arrives through Embassys. An
   approval is passed to Claude as **allow once** when available.
 - Anthropic remains responsible for authentication, policy, and
@@ -71,3 +71,9 @@ is signed in, update Ambassador, and restart it. For a clean local registration 
 
 The command follows the current
 [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp).
+
+For requesting an action, waiting for email approval, answering later, and
+retrieving results, see [Request and answer an action](action-workflow.md).
+Provider compaction manages context; sessions with no unfinished work become
+eligible for cleanup after 30 idle days. `sessions show` labels a truncated
+recent preview when provider history is large.

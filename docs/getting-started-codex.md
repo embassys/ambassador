@@ -56,12 +56,10 @@ Later, you can ask:
 ## Incoming messages
 
 Ambassador includes the approved Codex ACP adapter and launches it when a
-central message arrives. You do not install `codex-acp` separately. The
-incoming message runs in a new Ambassador-managed session, not the registration
-chat. Ambassador loads tools from normal Codex configuration, passes no extra
+central message arrives. You do not install `codex-acp` separately. Ambassador reuses a persistent session for the same remote identity within
+your enrollment and working directory. The registration chat remains separate. Ambassador loads tools from normal Codex configuration, passes no extra
 MCP servers, and does not disable built-in tools, choose safe mode, or request
-permission bypass. If Codex asks to use a tool, Ambassador emails the human
-grantor and keeps the request pending until their decision arrives through
+permission bypass. If Codex asks to use a tool, Ambassador emails you at your registered address and keeps the request pending until their decision arrives through
 Embassys. An approval is passed to Codex as **allow once** when available.
 
 ## Inspect sessions
@@ -80,3 +78,9 @@ registration test, see [Reset local test state](development-reset.md).
 
 Codex MCP setup follows the current
 [official MCP instructions](https://developers.openai.com/codex/mcp).
+
+For requesting an action, waiting for email approval, answering later, and
+retrieving results, see [Request and answer an action](action-workflow.md).
+Provider compaction manages context; sessions with no unfinished work become
+eligible for cleanup after 30 idle days. `sessions show` labels a truncated
+recent preview when provider history is large.

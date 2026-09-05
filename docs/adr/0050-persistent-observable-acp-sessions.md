@@ -1,7 +1,8 @@
 # 0050 Persistent and observable ACP sessions
 
 Status: accepted; verbose logging amended by ADR 0051, running inspection
-amended by ADR 0053, and automatic ACP approval superseded by ADR 0055
+amended by ADR 0053, automatic ACP approval superseded by ADR 0055, and
+peer reuse, history bounds, and retention amended by ADR 0056
 
 Date: 2026-09-04
 
@@ -63,42 +64,33 @@ specific provider billing method.
 
 ### Session ownership and lifecycle
 
-Create one provider session for each incoming central message. Store only
-bounded session metadata in an owner-only SQLite database:
+Reuse one provider session per central-issued remote agent identity, scoped to
+local enrollment, fixed provider, and canonical working directory. Never use a
+payload identity. Keep bounded provider IDs, peer bindings, per-message dispatch
+states, independent action correlations, and lifecycle timestamps in SQLite.
+No message body, prompt, tool data, provider history, or credential belongs there.
 
-- provider session ID;
-- fixed agent profile;
-- canonical working directory;
-- central message ID when present;
-- action `call_id` when present;
-- creation and last-use times; and
-- `active` or `retired` state with an optional retirement time.
+Require `session/resume` or `session/load`; prefer resume without replay except
+for OpenClaw's fixed load path in ADR 0056. A prepared message may retry before
+dispatch. Dispatched, completed, or uncertain
+messages cannot be prompted again. Other messages from the same peer reuse
+context. Use the new schemas directly without migrating existing state.
 
-Do not copy prompts, message bodies, provider output, tool arguments, tool
-results, or credentials into the session database. The provider remains the
-owner of conversation history.
+Central acceptance of `submit_action_result` settles only that call, including
+when a different MCP chat submits it. Pending calls and unfinished or uncertain
+dispatches prevent automatic retirement. Reusable sessions become eligible for
+retirement and cleanup after 30 idle days with no unfinished work.
+Cleanup runs in the background at startup and daily, drains indexed bounded
+batches, and releases provider control between records. Delete provider history
+when ACP supports deletion; otherwise forget local metadata. Transient failures
+remain for the next pass and do not starve later records. Keep at most 1,024
+sessions and a 256 MiB metadata database. Prune settled correlations after 30
+days; keep unresolved correlations. Closing an adapter does not delete history.
 
-Require an enabled direct profile to advertise `session/resume` or
-`session/load`. Reuse the stored session only when retrying the same central
-message before prompt dispatch. New central messages receive new sessions and
-cannot inherit data from another sender or request.
-
-After a normal turn, retire sessions for messages that need no later action
-result. Keep an action-call session active while its encrypted pending-action
-record remains. Retire it only after central successfully accepts the matching
-`submit_action_result`. Correlate this transition by `call_id`, even when a
-different MCP chat submits the result. An uncertain or rejected central result
-does not retire the session.
-
-Retain retired session metadata for 30 days. A cleanup pass runs at startup and
-at a bounded interval while Ambassador runs. After retention:
-
-- call ACP `session/delete` when the current agent advertises it;
-- forget the local record when deletion succeeds;
-- forget the local record when the agent does not support deletion; and
-- retain the record and retry later after a transient deletion failure.
-
-Closing an active adapter connection does not delete provider history.
+Provider-native compaction owns the model context. Ambassador streams history
+replay with individual event bounds, keeps normal turn output bounded, and shows
+only a labelled recent preview of large histories. Compaction never implies an
+action completed or an encrypted inbox record can be removed.
 
 ### CLI and diagnostics
 

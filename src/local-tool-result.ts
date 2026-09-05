@@ -1,6 +1,6 @@
 // The MCP SDK mirrors this JSON as structured content and an escaped text item.
 // This cap keeps both copies and a maximum-size request ID below the 4 MiB transport limit.
-const MAX_LOCAL_TOOL_RESULT_BYTES = 512 * 1024;
+const MAX_LOCAL_TOOL_RESULT_BYTES = 768 * 1024;
 
 export class LocalToolResultTooLarge extends Error {
   constructor() {

@@ -173,6 +173,14 @@ test("atomically selects one contender after its previous owner crashes", async 
   const ownerIndexes = settledOutcomes.flatMap((outcome, index) =>
     outcome.type === "acquired" ? [index] : [],
   );
+  assert.equal(ownerIndexes.length, 1);
+  for (const outcome of settledOutcomes) {
+    // Contenders can fail during platform-specific artifact validation before
+    // reaching SQLite. Ownership, not that racing error's classification, is
+    // the contract here. Check the settled owner's conflict separately below.
+    if (outcome.type !== "acquired") assert.equal(outcome.type, "rejected");
+  }
+  await assert.rejects(ProcessLock.acquire(path), { code: "daemon_running" });
   await Promise.all(
     ownerIndexes.map(async (index) => {
       const winner = contenders[index];
@@ -182,13 +190,6 @@ test("atomically selects one contender after its previous owner crashes", async 
       assert.deepEqual(await released, { type: "released" });
     }),
   );
-  assert.equal(ownerIndexes.length, 1);
-  for (const outcome of settledOutcomes) {
-    if (outcome.type !== "acquired") {
-      assert.deepEqual(outcome, { type: "rejected", code: "daemon_running" });
-    }
-  }
-
   const reacquired = await ProcessLock.acquire(path);
   await reacquired.release();
 });

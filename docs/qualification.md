@@ -3,6 +3,176 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## 0.2.18 release candidate
+
+On 2026-09-05, the clean-installed 0.2.18 candidate passed the remaining
+Hermes and OpenClaw delivery matrix against `https://mcp.embassys.ai`.
+The tarball SHA-256 was
+`f8ab69e84187afe718f38a1755d4b8664bc266e020240b750c6e1df6234c9392`.
+A fresh pack after the qualification-harness fixes produced the same bytes.
+Reviewed central revision remained
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its
+revision.
+
+| Provider | Mode | Action round trip | Result submissions | Session commands |
+| --- | --- | --- | --- | --- |
+| Hermes | Direct | Passed | 1 | Running reads and stopped metadata cleanup passed; provider deletion unsupported |
+| Hermes | Webhook | Passed | 1 | Not applicable |
+| OpenClaw | Direct | Passed | 1 | Running reads and stopped metadata cleanup passed; provider deletion unsupported |
+| OpenClaw | Webhook | Passed | 1 | Not applicable |
+
+Every run used disposable identities and an isolated provider configuration.
+Registration, verification, encrypted restart, DPoP checks, emailed permission,
+saved outbound intent, acknowledgement order, artifact scanning, mail cleanup,
+and local cleanup passed. Webhook cases also passed the native authentication
+and custody checks. These four runs did not request ACP human approval; the
+combined Codex-to-Claude evidence below covers that flow.
+
+Hermes direct used runner SHA-256
+`374ee5d5f02bd55e7f180188d99f615404a16713b34588e2f4aebb7c21da1fb2`;
+Hermes webhook used
+`c76a0a9ba729eb18591316c05a5b85d53571a060a2886d667a6c3aeffceeb9f0`;
+both OpenClaw modes used
+`2fd191868b8edf181b71de8ac3c911fd1d4c24c7a0bbd3306ff4ca57d3480f32`.
+The runner now configures Hermes MCP in both modes, expects only the action
+message at the target webhook under the email-permission contract, and keeps
+the provider gateway available while Ambassador's stopped-only session commands
+run. Earlier attempts completed the action exchange but failed these later
+harness assertions; fresh complete runs passed after correction.
+
+The full local check passed 249 tests with six expected skips. CI run
+`33957758524` passed all Linux, macOS, Windows, Docker, package, and audit gates.
+The packed test now stops both gateway instances before removing state, including
+after a failed assertion, and allows Windows state initialization to finish.
+The approval deadline test leaves room for Windows process startup while keeping
+the simulated human wait longer than both deadlines. These are test changes;
+the release runtime and public CLI contract did not change during qualification.
+The concurrent crash-handoff test checks ownership independently of the
+platform-specific error that rejects a racing contender. It requires exactly
+one owner, rejection of every loser, the exact `daemon_running` error from a
+new contender after the winner settles, and successful acquisition after release.
+Invalid-artifact tests retain their exact expected errors.
+
+The same 0.2.18 candidate then passed a fresh combined Codex-to-Claude run
+using runner SHA-256
+`2fd191868b8edf181b71de8ac3c911fd1d4c24c7a0bbd3306ff4ca57d3480f32`.
+Its clean install resolved Codex ACP 1.10.0 / Codex 0.153.4 and Claude ACP
+0.75.0 / Claude Agent SDK 0.3.257. The controlled harness initiated the request
+and applied the disposable email decisions. Ambassador dispatched the saved
+payload once with zero rejected action calls; real Claude submitted the
+correlated result exactly once. Real Codex processed the permission outcome and
+action response in one peer session. One ACP own-human email approval, both
+agents' running session reads, stopped session deletion and forgetting,
+acknowledgement order, verbose redaction, artifact scanning, mail cleanup, and
+`clean` passed. Host Claude reported 2.1.261; the separate host Codex version
+probe remained unavailable and did not gate its package-owned adapter.
+
+## ADR 0056 combined Codex-to-Claude live qualification
+
+On 2026-09-05, the combined live flow passed with real Codex and Claude against
+`https://mcp.embassys.ai`. It used the same clean-installed candidate described
+below, with tarball SHA-256
+`815a533a84cb64cf2056a9d068c729ac67dcfd4ed89dafb1ab9d304d8e5965b7`.
+The final runner SHA-256 was
+`70301d4fd05badc9c4b64dfe0ec93ac6e598a3e9c3768275fdad6769125ed89b`.
+Reviewed central revision remained
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its
+revision.
+
+The installed package used Codex ACP 1.10.0 / Codex 0.153.4 and Claude ACP
+0.74.0 / Claude Agent SDK 0.3.257. The separate host Claude command reported
+2.1.261; the host Codex ACP version probe was unavailable and did not select or
+gate the package-owned adapter. Codex used an isolated home with its existing
+authentication and no API-key environment variables. Claude used its ordinary
+home and existing Ambassador MCP setup.
+
+The controlled harness initiated `request_permission` with an exact saved
+payload and applied the disposable email decisions. Ambassador submitted one
+action call with zero rejected attempts. Real Claude called
+`submit_action_result` exactly once with the expected synthetic result. Real
+Codex processed both the permission outcome and correlated action response in
+one active peer session. This is a combined real-agent exchange; the initiating
+MCP call was made by the harness, not an interactive Codex chat.
+
+Registration, verification, encrypted restart, DPoP positive and negative
+checks, the action catalog, Embassys email permission, and one ACP own-human
+email approval passed. Both agents completed delivery before acknowledgement.
+Running `sessions list`, normal `sessions show`, and verbose `sessions show`
+passed for both gateways. Stopped session deletion and forgetting, repeated
+`webhook-secret`, verbose startup redaction, artifact scanning, `clean`, mail
+cleanup, and temporary-state cleanup also passed.
+
+The first attempt completed the action round trip but failed the later
+session-list check: the harness sent Codex's read to the default port occupied
+by Claude. The runner now supplies each gateway's endpoint through the existing
+private-control test override and checks session history while the gateways run.
+It also waits for Codex's permission-outcome turn to complete before ending that
+turn's human-approval check; gateway-side action dispatch alone is insufficient.
+All 21 relevant CLI and qualification-runner tests passed before the final live
+repeat. No production code, public CLI contract, or ADR changed for this repair.
+
+## ADR 0056 storage, session reuse, and explicit outbound intent
+
+On 2026-09-05, `pnpm run check` passed 255 tests: 249 passed and six
+platform-specific or opt-in cases skipped. Linting, type checking, and the
+production build passed. Coverage includes indexed encrypted paging beyond the
+former store limits, byte quotas, validation before result consumption, receipt
+capture across approval waits, bounded buffer drainage, peer isolation, separate
+action completion, early result acceptance, dispatch replay refusal, repeated
+retention batches, bounded history replay, and exact outbound intent across a
+restart. Existing-state migration is deliberately absent.
+
+The packed candidate SHA-256 was
+`815a533a84cb64cf2056a9d068c729ac67dcfd4ed89dafb1ab9d304d8e5965b7`.
+A clean npm install resolved Codex ACP 1.10.0 with Codex 0.153.4 and Claude ACP
+0.74.0. The clean-installed live run passed against reviewed central revision
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its
+revision. The runner SHA-256 was
+`4226c63cf480c84bd77306881cd22486aa407f25fda9f658d5d4267acb9d0e41`.
+
+The live flow used two disposable identities, a controlled webhook requester,
+and the deterministic ACP target. Registration, verification, encrypted restart,
+DPoP positive and negative checks, the current action catalog, both human email
+approval flows, acknowledgement order, and the action-result round trip passed.
+The requester saved an exact payload before permission was granted, and
+Ambassador issued exactly one matching action call. Artifact scanning, mail
+cleanup, temporary-state cleanup, and `clean` passed. No central MCP request
+was made. Live session commands were not exercised by this mock-provider run;
+their current behavior is covered by the deterministic CLI tests.
+
+Separate real-provider checks used two synthetic messages from the same remote
+identity and required the second turn to recall an unpredictable marker supplied
+only in the first. Each turn launched a fresh ACP process. All four retained
+one provider session and recalled the marker:
+
+| Provider | Observed ACP version | Context recall | Synthetic history cleanup |
+| --- | --- | --- | --- |
+| OpenClaw | 2026.8.2 | Passed using load | Delete unsupported |
+| Codex | 1.10.0 | Passed | Deleted |
+| Claude Code | 0.74.0 | Passed | Deleted |
+| Hermes | 0.20.5 | Passed | Delete unsupported |
+
+These checks used normal provider authentication and configuration, requested
+no tools, and received no permission callbacks. Local temporary state was
+removed. OpenClaw and Hermes retain their synthetic native history because
+they do not advertise ACP deletion. The checks establish context continuity;
+they do not force model compaction or replace the full real-provider delivery
+matrix. `qualify:agents` now also requires second-turn marker recall and attempts
+provider history cleanup.
+
+The initial OpenClaw attempt exposed a restart failure in its advertised resume
+path. Its installed bridge restores the ACP-to-gateway ledger mapping through
+load, which the fixed production profile now requires. The older locked Codex
+ACP 1.8.0 / Codex 0.152.1 runtime rejected the configured `gpt-6-astra` model;
+the clean install above passed without changing provider settings. The existing
+24-hour dependency-age policy and development lockfile remain unchanged.
+Public adapter specifications remain the approved npm wildcards.
+
+Central polling still consumes messages before local capture, and result
+submission still has no idempotency key or outcome lookup. This change does not
+claim to recover those uncertain server outcomes. The user deferred the ACP
+approval-option mapping change. No release was published by this qualification.
+
 ## Email-only permission and inbox regression
 
 On 2026-09-04, the deterministic central contract and Ambassador integration

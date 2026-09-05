@@ -32,14 +32,20 @@ test("startup deletes or forgets expired sessions and retains transient failures
 
   const sessionPath = join(root, "acp-sessions.sqlite");
   const seed = new AcpSessionStore(sessionPath);
-  for (const sessionId of ["delete-me", "forget-me", "retry-me", "active-session"]) {
+  for (const sessionId of [
+    "delete-me",
+    "forget-me",
+    "retry-me",
+    "active-session",
+    ...Array.from({ length: 20 }, (_, i) => `expired-${i.toString().padStart(2, "0")}`),
+  ]) {
     seed.create({
       session_id: sessionId,
       agent_kind: "codex",
       working_directory: root,
       status: "active",
       created_at_ms: 1,
-      last_used_at_ms: 1,
+      last_used_at_ms: sessionId === "active-session" ? NOW_SECONDS * 1_000 : 1,
     });
     if (sessionId !== "active-session") seed.retire(sessionId, 2);
   }
@@ -85,7 +91,8 @@ test("startup deletes or forgets expired sessions and retains transient failures
       },
       async delete(record) {
         deleted.push(record.session_id);
-        if (record.session_id === "delete-me") return "deleted";
+        if (record.session_id === "delete-me" || record.session_id.startsWith("expired-"))
+          return "deleted";
         if (record.session_id === "forget-me") return "unsupported";
         throw new Error("transient provider failure");
       },
@@ -93,7 +100,10 @@ test("startup deletes or forgets expired sessions and retains transient failures
   });
 
   try {
-    assert.deepEqual(deleted, ["delete-me", "forget-me", "retry-me"]);
+    for (let i = 0; i < 200 && deleted.length < 23; i++)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(deleted.length, 23);
+    assert.equal(new Set(deleted).size, 23);
     const observed = new AcpSessionStore(sessionPath);
     assert.equal(observed.get("delete-me"), undefined);
     assert.equal(observed.get("forget-me"), undefined);
