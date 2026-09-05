@@ -20,7 +20,8 @@ agent-facing inbox. ADR 0053 lets the owner inspect sessions through the
 foreground process. ADR 0054 makes Embassys permission decisions email-only
 and leaves the inbox for unanswered calls and unread results.
 ADR 0055 replaces automatic ACP tool approval with a human email decision
-correlated through central polling.
+correlated through central polling. ADR 0056 adds paginated encrypted stores,
+explicit outbound intent, and sessions reused per remote identity.
 
 ## Current decisions
 
@@ -53,6 +54,8 @@ correlated through central polling.
 | [0053](0053-live-session-inspection.md) | Inspect ACP sessions while Ambassador runs |
 | [0054](0054-email-only-embassys-permission-decisions.md) | Email-only human decisions for Embassys permissions |
 | [0055](0055-email-mediated-acp-tool-permission.md) | Email-mediated human decisions for ACP tool execution |
+
+| [0056](0056-scalable-inboxes-and-peer-sessions.md) | Scalable encrypted inboxes, explicit action intent, and persistent peer sessions |
 
 ## Historical ledger
 

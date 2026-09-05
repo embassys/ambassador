@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-
+import { CentralMessageBuffer, captureCentralMessages } from "./central-message-buffer.js";
 import {
   ACP_TOOL_HUMAN_INPUT_TYPE,
   type CentralHumanInputRequest,
@@ -10,7 +10,6 @@ import {
 import type { AcpPermissionApproval, AcpPermissionRequest } from "./direct-delivery.js";
 import type { VerboseLogger } from "./verbose-log.js";
 
-const MAX_BUFFERED_MESSAGES = 256;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const MAX_TOOL_LABEL_LENGTH = 160;
 
@@ -29,6 +28,7 @@ export interface CentralAgentPermissionCoordinatorOptions {
   readonly transport: CentralAgentPermissionTransport;
   readonly pollIntervalMs?: number;
   readonly log?: VerboseLogger;
+  readonly captureMessage?: (message: CentralMessage) => void | Promise<void>;
 }
 
 export class CentralAgentPermissionError extends Error {
@@ -107,7 +107,8 @@ export class CentralAgentPermissionCoordinator {
   readonly #transport: CentralAgentPermissionTransport;
   readonly #pollIntervalMs: number;
   readonly #log: VerboseLogger;
-  readonly #bufferedMessages: CentralMessage[] = [];
+  readonly #bufferedMessages = new CentralMessageBuffer();
+  readonly #captureMessage: NonNullable<CentralAgentPermissionCoordinatorOptions["captureMessage"]>;
   readonly #internalMessageIds = new Set<string>();
   #approvalTail: Promise<void> = Promise.resolve();
 
@@ -115,6 +116,7 @@ export class CentralAgentPermissionCoordinator {
     this.#transport = options.transport;
     this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.#log = options.log ?? (() => undefined);
+    this.#captureMessage = options.captureMessage ?? (() => undefined);
     if (!Number.isSafeInteger(this.#pollIntervalMs) || this.#pollIntervalMs < 1) {
       throw new CentralAgentPermissionError("invalid_permission_request");
     }
@@ -130,7 +132,7 @@ export class CentralAgentPermissionCoordinator {
   };
 
   takeBufferedMessages(): readonly CentralMessage[] {
-    return this.#bufferedMessages.splice(0, this.#bufferedMessages.length);
+    return this.#bufferedMessages.take();
   }
 
   consumeInternalMessage(message: CentralMessage): boolean {
@@ -157,10 +159,12 @@ export class CentralAgentPermissionCoordinator {
         await delay(this.#pollIntervalMs, undefined, { signal }).catch(() => undefined);
         continue;
       }
-      if (this.#bufferedMessages.length + messages.length > MAX_BUFFERED_MESSAGES) {
+      await captureCentralMessages(messages, this.#captureMessage);
+      try {
+        this.#bufferedMessages.push(messages);
+      } catch {
         throw new CentralAgentPermissionError("message_buffer_full");
       }
-      this.#bufferedMessages.push(...messages);
       let decision: "allow" | "deny" | undefined;
       for (const message of messages) {
         const candidate = outcomeDecision(

@@ -53,6 +53,12 @@ The central integration uses the unversioned REST API at
 Ambassador-owned P-256 key. Protected requests use Bearer authorization plus a
 separate DPoP proof. Ambassador does not use the central MCP endpoint.
 
+For the complete permission, action, and result flow, see
+[Request and answer an action](docs/action-workflow.md). Ambassador can save the
+exact action payload with a permission request and submit it once after approval.
+The inbox pages through pending calls, unread results, and outbound status.
+Each encrypted store allows 1 GiB; reads remain bounded.
+
 ## Inspect direct sessions
 
 Keep Ambassador running and use:
@@ -75,7 +81,7 @@ npx --yes @embassys/ambassador@latest clean
 
 The command removes the local registration, encrypted credentials, delivery
 profile, webhook and internal control secrets, pending-action inbox,
-notification journal, and received-action-result inbox. It also removes
+notification journal, received-action-result inbox, and saved outbound intents. It also removes
 interrupted state writes. It keeps only the empty owner-only state directory
 and singleton lock needed to prevent cleanup while Ambassador is running.
 
@@ -89,7 +95,7 @@ or to an owner-only backup after stopping Ambassador:
 
 Remove the directory as one unit. Deleting only `delivery-profile.json`, an
 encrypted value, or its key leaves an intentionally invalid partial state. The
-next `ambassador start` presents the enrollment tools again. Neither reset
+next `ambassador start` enables registration again. Neither reset
 method deletes the central registration, so use a new disposable email when
 rerunning without server-side cleanup. Neither changes the agent's normal
 provider configuration or credentials.

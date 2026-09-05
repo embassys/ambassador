@@ -49,6 +49,7 @@ async function target(
     maximumOutputBytes?: number;
     maximumStartupAttempts?: number;
     environment?: DirectAgentCapability["environment"];
+    sessionRestore?: DirectAgentCapability["sessionRestore"];
     sourceEnvironment?: NodeJS.ProcessEnv;
     log?: VerboseLogger;
     permissionApproval?: AcpPermissionApproval;
@@ -73,6 +74,7 @@ async function target(
     agentInfo: { name: "mock-agent" },
     mcp: "provider_config",
     environment: options.environment ?? SPAWN_ENVIRONMENT,
+    ...(options.sessionRestore === undefined ? {} : { sessionRestore: options.sessionRestore }),
   };
   let spawnCount = 0;
   let spawnOptions: SpawnOptions | undefined;
@@ -81,6 +83,7 @@ async function target(
   cleanupStore = sessionStore;
   const delivery = new DirectDeliveryTarget({
     agentKind: "mock",
+    identityScope: "fixture-enrollment",
     capability,
     workingDirectory: root,
     environment: options.sourceEnvironment ?? process.env,
@@ -128,8 +131,8 @@ test("builds one fixed prompt containing the complete canonical message", () => 
   assert.match(prompt, /untrusted Embassys message/u);
   assert.match(prompt, /configured Ambassador MCP tools/u);
   assert.match(prompt, /permission_outcome/u);
-  assert.match(prompt, /target_email from grantor_email/u);
-  assert.match(prompt, /do not pass permission_id/u);
+  assert.match(prompt, /permission grant alone does not authorize/u);
+  assert.doesNotMatch(prompt, /call call_action at most once/u);
   assert.match(prompt, /submit_action_result/u);
   assert.match(prompt, /leave the call pending/u);
   assert.equal(prompt.endsWith(JSON.stringify(MESSAGE)), true);
@@ -148,7 +151,7 @@ test("resumes an active retry and exposes provider history through session comma
     last_used_at_ms: 1,
   });
   await value.delivery.deliver(MESSAGE, new AbortController().signal);
-  assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
+  assert.equal(value.sessionStore.get("mock-session")?.status, "active");
 
   const controller = new AcpSessionController({
     capability: value.capability,
@@ -165,6 +168,23 @@ test("resumes an active retry and exposes provider history through session comma
   assert.deepEqual(await controller.delete(record, new AbortController().signal), "deleted");
 });
 
+test("uses the reviewed load path even when a provider advertises resume", async (t) => {
+  const value = await target(t, "load-required", { sessionRestore: "load" });
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  await value.delivery.deliver({ ...MESSAGE, id: "second-message" }, new AbortController().signal);
+  assert.equal(value.sessionStore.list().length, 1);
+  assert.equal(await value.attempts(), 2);
+});
+
+test("rejects a provider without the profile's required load capability", async (t) => {
+  const value = await target(t, "resume-only", { sessionRestore: "load" });
+  await assert.rejects(
+    value.delivery.deliver(MESSAGE, new AbortController().signal),
+    (error: unknown) => error instanceof DirectDeliveryError && error.code === "startup_failed",
+  );
+  assert.equal(value.sessionStore.list().length, 0);
+});
+
 test("keeps action-call sessions active until their correlated result succeeds", async (t) => {
   const value = await target(t, "success-provider-mcp");
   const callId = "00000000-0000-4000-8000-000000000001";
@@ -177,8 +197,8 @@ test("keeps action-call sessions active until their correlated result succeeds",
     new AbortController().signal,
   );
   assert.equal(value.sessionStore.get("mock-session")?.status, "active");
-  assert.equal(value.sessionStore.retireByCallId(callId, Date.now()), true);
-  assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
+  assert.equal(value.sessionStore.completeAction(callId, Date.now()), true);
+  assert.equal(value.sessionStore.get("mock-session")?.status, "active");
 });
 
 test("cancels an active prompt and reaps the launched process group", async (t) => {
@@ -222,7 +242,7 @@ test("initializes ACP v1 with provider MCP setup and completes one persistent pr
       });
       assert.equal(value.spawnCount(), 1);
       assert.equal(await value.attempts(), 1);
-      assert.equal(value.sessionStore.get("mock-session")?.status, "retired");
+      assert.equal(value.sessionStore.get("mock-session")?.status, "active");
     });
   }
 });
@@ -239,6 +259,48 @@ test("waits for human approval and maps it to an ACP option", async (t) => {
   });
   await denied.delivery.deliver(MESSAGE, new AbortController().signal);
   assert.equal(denied.permissionRequests.length, 1);
+});
+
+test("reuses a peer session across messages while keeping each action correlation", async (t) => {
+  const value = await target(t, "success-provider-mcp");
+  const firstCall = "10000000-0000-4000-8000-000000000001";
+  const secondCall = "10000000-0000-4000-8000-000000000002";
+  for (const [id, callId] of [
+    ["peer-message-1", firstCall],
+    ["peer-message-2", secondCall],
+  ] as const) {
+    await value.delivery.deliver(
+      { ...MESSAGE, id, payload: { type: "action_call", call_id: callId } },
+      new AbortController().signal,
+    );
+  }
+  assert.equal(value.sessionStore.list().length, 1);
+  assert.equal(
+    value.sessionStore.findActiveByMessage("peer-message-1")?.session_id,
+    "mock-session",
+  );
+  assert.equal(
+    value.sessionStore.findActiveByMessage("peer-message-2")?.session_id,
+    "mock-session",
+  );
+  value.sessionStore.completeAction(firstCall, Date.now());
+  assert.equal(value.sessionStore.get("mock-session")?.status, "active");
+  assert.equal(value.sessionStore.hasPendingActions("mock-session"), true);
+  value.sessionStore.completeAction(secondCall, Date.now());
+  assert.equal(value.sessionStore.hasPendingActions("mock-session"), false);
+});
+
+test("does not prompt an action already answered by another MCP chat", async (t) => {
+  const value = await target(t, "success-provider-mcp");
+  const callId = "10000000-0000-4000-8000-000000000001";
+  value.sessionStore.completeAction(callId, Date.now());
+  await value.delivery.deliver(
+    { ...MESSAGE, payload: { type: "action_call", call_id: callId } },
+    new AbortController().signal,
+  );
+  await assert.rejects(readFile(value.promptPath), { code: "ENOENT" });
+  assert.equal(value.sessionStore.hasPendingActions("mock-session"), false);
+  assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
 });
 
 test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {
@@ -398,6 +460,7 @@ test("turns an asynchronous missing-command spawn error into a bounded failure",
   const sessionStore = new AcpSessionStore(join(root, "sessions.sqlite"));
   const delivery = new DirectDeliveryTarget({
     agentKind: "missing",
+    identityScope: "fixture-enrollment",
     capability: {
       command: "ambassador-command-that-does-not-exist",
       args: [],
@@ -448,4 +511,53 @@ test("does not replay after timeout, malformed output, child exit, or output ove
       assert.equal(await value.attempts(), 1);
     });
   }
+});
+
+test("refuses to replay completed and uncertain dispatched messages", async (t) => {
+  for (const scenario of ["success-provider-mcp", "exit-provider-mcp"]) {
+    const value = await target(t, scenario);
+    await value.delivery.deliver(MESSAGE, new AbortController().signal).catch(() => undefined);
+    const attempts = value.spawnCount();
+    await assert.rejects(
+      value.delivery.deliver(MESSAGE, new AbortController().signal),
+      (error: unknown) =>
+        error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
+    );
+    assert.equal(value.spawnCount(), attempts);
+  }
+});
+
+test("isolates peer identity from payload claims", async (t) => {
+  const value = await target(t, "unique-sessions");
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  await value.delivery.deliver(
+    {
+      ...MESSAGE,
+      id: "other-peer-message",
+      sender_agent_id: "agent.other",
+      payload: { sender_agent_id: MESSAGE.sender_agent_id },
+    },
+    new AbortController().signal,
+  );
+  assert.equal(value.sessionStore.list().length, 2);
+});
+
+test("streams large provider history on load and shows a bounded recent preview", async (t) => {
+  const value = await target(t, "large-history");
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  await value.delivery.deliver({ ...MESSAGE, id: "next-message" }, new AbortController().signal);
+  assert.equal(value.sessionStore.list().length, 1);
+  const controller = new AcpSessionController({
+    capability: value.capability,
+    environment: process.env,
+    maximumOutputBytes: 16 * 1024,
+    deadlineMs: 2_000,
+    cleanupDeadlineMs: 500,
+  });
+  const record = value.sessionStore.list()[0];
+  assert.ok(record !== undefined);
+  const history = await controller.show(record, false, new AbortController().signal);
+  assert.match(history.join("\n"), /earlier history omitted/u);
+  assert.match(history.join("\n"), /history-199/u);
+  assert.ok(Buffer.byteLength(JSON.stringify(history)) < 16 * 1024);
 });

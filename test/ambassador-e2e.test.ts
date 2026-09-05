@@ -207,7 +207,7 @@ test("stores received action results before acknowledgement and consumes them fr
     ],
   });
   assert.deepEqual(await restartedClient.callTool("get_inbox", {}), { count: 0, items: [] });
-  await assert.rejects(restartedClient.callTool("get_inbox", { limit: 1 }));
+  await assert.rejects(restartedClient.callTool("get_inbox", { limit: 0 }));
 });
 
 test("holds an ACP permission request for its owner's emailed answer", async (t) => {
@@ -373,7 +373,7 @@ test("returns a correlated action result from the target MCP tool to the request
   const restartedTarget = new TestMcpClient(restartedGateway.endpoint);
   await restartedTarget.initialize(OPENCLAW);
 
-  await assert.rejects(restartedTarget.callTool("get_inbox", { limit: 1 }));
+  await assert.rejects(restartedTarget.callTool("get_inbox", { limit: 0 }));
   const pendingActions = await restartedTarget.callTool("get_inbox", {});
   assert.equal(pendingActions.count, 1);
   assert.deepEqual(pendingActions.items, [
@@ -417,6 +417,62 @@ test("returns a correlated action result from the target MCP tool to the request
     status: "success",
     result: { phone_number: "+447700900001" },
   });
+});
+
+test("resumes saved outbound intent after restart and exposes its correlated result", async (t) => {
+  const value = await fixture(t);
+  const gateway = value.trackGateway(await openGatewayApplication(value.options));
+  const requesterEmail = "saved-intent-requester@fixture.test";
+  const targetEmail = "saved-intent-target@fixture.test";
+  const requester = await enrollWebhook(gateway, value.central, value.webhook.url, requesterEmail);
+  const target = value.central.seedClient(targetEmail);
+  const permission = await requester.callTool("request_permission", {
+    target_email: targetEmail,
+    action_type: "get_phone_number",
+    decision_options: "once_always",
+    action_payload: { reason: "exact saved request" },
+  });
+  assert.equal(
+    (permission.outbound_action as Record<string, unknown>).status,
+    "awaiting_permission",
+  );
+  await gateway.close();
+  const restarted = value.trackGateway(await openGatewayApplication(value.options));
+  const client = new TestMcpClient(restarted.endpoint);
+  await client.initialize(OPENCLAW);
+  const decision = await fetch(`${value.central.apiUrl}/api/permission_decision`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      token: value.central.permissionDecisionToken(String(permission.permission_id)),
+      decision: "allow_once",
+    }),
+  });
+  assert.equal(decision.status, 200);
+  await value.webhook.waitForWake();
+  const poll = await target.protectedFetch("/api/poll_messages?timeout=0");
+  const messages = (
+    (await poll.json()) as { messages: Array<{ payload: Record<string, unknown> }> }
+  ).messages;
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0]?.payload.payload, { reason: "exact saved request" });
+  const callId = messages[0]?.payload.call_id;
+  const submission = await target.protectedFetch("/api/submit_action_result", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      call_id: callId,
+      status: "success",
+      result: { phone_number: "+447700900002" },
+    }),
+  });
+  assert.equal(submission.status, 200);
+  await value.webhook.waitForWake();
+  const inbox = await client.callTool("get_inbox", {});
+  assert.equal(inbox.count, 1);
+  assert.equal((inbox.items as Record<string, unknown>[])[0]?.kind, "action_result");
+  assert.equal((inbox.items as Record<string, unknown>[])[0]?.call_id, callId);
+  assert.deepEqual(await client.callTool("get_inbox", {}), { count: 0, items: [] });
 });
 
 test("honestly loses a consumed pre-delivery body across restart", async (t) => {

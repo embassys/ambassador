@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import {
   CentralAgentPermissionCoordinator,
   type CentralAgentPermissionTransport,
 } from "../src/central-agent-permission.js";
+import { captureCentralMessages } from "../src/central-message-buffer.js";
 import type { CentralMessage } from "../src/central-rest.js";
 import type { AcpPermissionRequest } from "../src/direct-delivery.js";
 
@@ -145,4 +145,87 @@ test("maps a denied human answer", async () => {
   });
   assert.equal(await denied.approve(request, new AbortController().signal), "deny");
   assert.equal(pollCalls, 1);
+});
+
+test("starts receipt capture for every message before awaiting slower continuation work", {
+  timeout: 2_000,
+}, async () => {
+  const requestId = "20000000-0000-4000-8000-000000000004";
+  let release!: () => void;
+  const capturedNext = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const coordinator = new CentralAgentPermissionCoordinator({
+    captureMessage: async (value) => {
+      if (value.id === UNRELATED_ID) await capturedNext;
+      else release();
+    },
+    transport: {
+      async requestHumanInput() {
+        return response(requestId);
+      },
+      async pollRemoteMessages() {
+        return {
+          messages: [
+            message(UNRELATED_ID, { type: "action_call" }),
+            message(OUTCOME_ID, outcome(requestId, "allow_once")),
+          ],
+        };
+      },
+    },
+  });
+  assert.equal(await coordinator.approve(request, new AbortController().signal), "allow");
+});
+
+test("finishes other receipt captures before reporting a batch failure", async () => {
+  let finished = false;
+  await assert.rejects(
+    captureCentralMessages([message(UNRELATED_ID, {}), message(OUTCOME_ID, {})], async (value) => {
+      if (value.id === UNRELATED_ID) throw new Error("capture failed");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      finished = true;
+    }),
+    /capture failed/u,
+  );
+  assert.equal(finished, true);
+});
+
+test("captures receipt immediately and drains multiple large approval polls as bounded batches", async () => {
+  const captured: string[] = [];
+  let polls = 0;
+  const coordinator = new CentralAgentPermissionCoordinator({
+    pollIntervalMs: 1,
+    captureMessage: (value) => {
+      captured.push(value.id as string);
+    },
+    transport: {
+      async requestHumanInput() {
+        return response("20000000-0000-4000-8000-000000000003");
+      },
+      async pollRemoteMessages() {
+        polls += 1;
+        return {
+          messages:
+            polls <= 2
+              ? [message(`large.${polls}`, { type: "fixture", data: "x".repeat(300 * 1024) })]
+              : [
+                  message(
+                    OUTCOME_ID,
+                    outcome("20000000-0000-4000-8000-000000000003", "allow_once"),
+                  ),
+                ],
+        };
+      },
+    },
+  });
+  assert.equal(await coordinator.approve(request, new AbortController().signal), "allow");
+  assert.deepEqual(captured, ["large.1", "large.2", OUTCOME_ID]);
+  const drained: string[] = [];
+  for (;;) {
+    const batch = coordinator.takeBufferedMessages();
+    if (batch.length === 0) break;
+    assert.ok(Buffer.byteLength(JSON.stringify({ messages: batch })) <= 512 * 1024);
+    drained.push(...batch.map((value) => value.id as string));
+  }
+  assert.deepEqual(drained, captured);
 });

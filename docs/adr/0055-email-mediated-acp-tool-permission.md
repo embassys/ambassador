@@ -1,6 +1,6 @@
 # 0055 Email-mediated ACP tool permission
 
-Status: accepted
+Status: accepted; receipt capture and buffering amended by ADR 0056
 
 Date: 2026-09-04
 
@@ -40,8 +40,9 @@ Human response time does not count against the normal prompt or outer delivery
 deadline. Shutdown still cancels the wait and closes the provider process.
 
 The approval poll may receive unrelated central messages. Ambassador keeps at
-most 256 complete messages in bounded memory and returns them to the normal
-relay in arrival order after the current ACP turn. The correlated response is
+most 256 complete messages and 16 MiB in memory. It first encrypts eligible
+action calls and results at receipt, then drains the queue in arrival order in
+batches of at most 512 KiB after the current ACP turn. The correlated response is
 an internal control message: it is not prompted into the provider as a second
 business message. It still passes through the ID-only journal and is
 acknowledged only after the current delivery completes and the ACP permission
