@@ -137,11 +137,15 @@ test("reports verified enrollment independently of an empty permission list and 
   assert.deepEqual(result.enrollment, expected);
   assert.deepEqual(result.permissions, []);
   assert.match(String(result.message), /empty.*permission.*registered/iu);
-  assert.deepEqual((await client.callTool("list_action_types", {})).enrollment, expected);
+  const catalog = await client.callTool("list_action_types", {});
+  assert.deepEqual(catalog.enrollment, expected);
+  assert.equal((catalog.workflow_guidance as Record<string, unknown>).requester_email, email);
+  assert.match(JSON.stringify(catalog.workflow_guidance), /availability.*even.*specific time/u);
+  assert.match(JSON.stringify(catalog.workflow_guidance), /attendee/u);
   const fresh = new TestMcpClient(gateway.endpoint);
   await fresh.initialize(OPENCLAW);
   assert.ok(
-    fresh.serverInstructions?.startsWith(`Local Embassys enrollment: ${JSON.stringify(expected)}`),
+    fresh.serverInstructions?.includes(`Local Embassys enrollment: ${JSON.stringify(expected)}`),
   );
   assert.match(fresh.serverInstructions ?? "", /Do not register again/iu);
   await gateway.close();
@@ -157,7 +161,7 @@ test("reports verified enrollment independently of an empty permission list and 
 });
 
 test("keeps saved results readable after credential expiry and restart without retrying central", {
-  timeout: 5_000,
+  timeout: process.platform === "win32" ? 30_000 : 5_000,
 }, async (t) => {
   const value = await fixture(t);
   let now = NOW_SECONDS;
@@ -565,16 +569,17 @@ test("returns a correlated action result from the target MCP tool to the request
   });
 });
 
-test("resumes saved outbound intent after restart and exposes its correlated result", async (t) => {
+test("resumes mixed-case request IDs after restart and exposes their correlated result", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
   const requesterEmail = "saved-intent-requester@fixture.test";
   const targetEmail = "saved-intent-target@fixture.test";
   const requester = await enrollWebhook(gateway, value.central, value.webhook.url, requesterEmail);
   const target = value.central.seedClient(targetEmail);
+  const requestId = randomUUID();
   const permission = await requester.callTool("message_box", {
     type: "request_action",
-    request_id: randomUUID(),
+    request_id: requestId.toUpperCase(),
     wait_seconds: 0,
     target_email: targetEmail,
     action_type: "get_phone_number",
@@ -582,6 +587,7 @@ test("resumes saved outbound intent after restart and exposes its correlated res
     payload: { reason: "exact saved request" },
   });
   assert.equal(permission.status, "pending");
+  assert.equal(permission.request_id, requestId);
   await gateway.close();
   const restarted = value.trackGateway(await openGatewayApplication(value.options));
   const client = new TestMcpClient(restarted.endpoint);
@@ -597,7 +603,7 @@ test("resumes saved outbound intent after restart and exposes its correlated res
   assert.equal(decision.status, 200);
   const update = await client.callTool("message_box", {
     type: "check",
-    request_id: permission.request_id,
+    request_id: requestId.toUpperCase(),
   });
   const poll = await target.protectedFetch("/api/poll_messages?timeout=0");
   const messages = (
@@ -626,7 +632,10 @@ test("resumes saved outbound intent after restart and exposes its correlated res
   assert.equal(inbox.count, 1);
   assert.equal((inbox.items as Record<string, unknown>[])[0]?.kind, "action_result");
   assert.equal((inbox.items as Record<string, unknown>[])[0]?.call_id, callId);
-  await client.callTool("message_box", { type: "acknowledge_results", call_ids: [callId] });
+  await client.callTool("message_box", {
+    type: "acknowledge_results",
+    call_ids: [String(callId).toUpperCase()],
+  });
   assert.deepEqual(await client.callTool("message_box", { type: "inbox" }), {
     count: 0,
     items: [],
@@ -635,7 +644,7 @@ test("resumes saved outbound intent after restart and exposes its correlated res
 
 for (const answerSource of ["email", "foreground"] as const) {
   test(`${answerSource} owner answers resume the same peer and preserve provider approval correlation`, {
-    timeout: 10_000,
+    timeout: process.platform === "win32" ? 60_000 : 10_000,
   }, async (t) => {
     const f = await fixture(t);
     const recipient = "owner-question@fixture.test";

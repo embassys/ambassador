@@ -38,6 +38,8 @@ const WORKFLOW_REQUEST_TIMEOUT_MS = 640_000;
 const LOCAL_REQUEST_TIMEOUT_MS = 35_000;
 const SESSION_IDLE_MS = 30 * 60 * 1_000;
 const PROTOCOL_VERSION = "2025-06-18";
+const DISCOVERY_INSTRUCTIONS =
+  "Embassys is available through this Ambassador MCP integration. For Embassys registration with an email, use register_agent; no website URL is needed. Complete the emailed code with verify_email. To contact another person's agent, use list_action_types and message_box. Check current enrollment before registering again.";
 const SERVER_INSTRUCTIONS =
   "Embassys Ambassador connects this local agent to the Embassys agent network. A registered enrollment with an empty permissions list is still registered; no permissions have been granted yet. Do not register again or ask the user to reconfirm registration in that case. Use the verified enrollment email for this identity unless the user supplies a different address. For meetings with the user, include that email as an attendee when asking another agent to create the event; target_email selects the other agent and does not add the requester as an attendee. When not enrolled and the user asks to register or connect and gives an email, call register_agent immediately. After the emailed code arrives, call verify_email. Use message_box for actions, pending work, owner questions and results. request_action waits up to ten minutes; on timeout show its continuation and check again when the user asks. Omit wait_seconds for the default 600-second wait. Use a shorter wait only when the user asks or a known client timeout requires it; pending work alone is not a reason. If an action requires a reason, use the user's stated purpose or a neutral restatement such as Requested by the user to obtain this contact's phone number. A neutral restatement is sufficient unless the action schema requires a more specific purpose; never invent that purpose. The target person's human decides permissions; the caller cannot approve a denial on their behalf. Present the actual result data, then acknowledge its receipt. A successful background turn does not mean the user received the answer." +
   "\n" +
@@ -468,6 +470,7 @@ export class LocalMcpServer {
         capabilities: { tools: {} },
         instructions:
           [
+            DISCOVERY_INSTRUCTIONS,
             ...(this.router.enrollmentContext === undefined
               ? []
               : [`Local Embassys enrollment: ${JSON.stringify(this.router.enrollmentContext())}.`]),

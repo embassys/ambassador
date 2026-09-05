@@ -81,5 +81,8 @@ test("the opt-in channel proxies tools and sends a result to its own stdio conve
   });
   assert.match(JSON.stringify(accepted), /pending/u);
   release();
-  assert.match(JSON.stringify(await notification), /synthetic-channel-answer/u);
+  const received = (await notification) as { params: { content: string } };
+  assert.match(received.params.content, /synthetic-channel-answer/u);
+  assert.match(received.params.content, /```json\n\{\n/u);
+  assert.ok(received.params.content.indexOf("```json") < 120);
 });

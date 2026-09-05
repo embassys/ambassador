@@ -9,14 +9,15 @@ import { EncryptedRecordStore } from "./encrypted-record-store.js";
 import { LocalInbox } from "./local-inbox.js";
 import { serializeLocalToolResult } from "./local-tool-result.js";
 import type { CentralToolDefinition } from "./mcp-contract.js";
-import type { OutboundActions } from "./outbound-actions.js";
+import { type OutboundActions, OutboundNotSubmittedError } from "./outbound-actions.js";
 import { type OwnerQuestions, ownerAnswerSchema, ownerQuestionSchema } from "./owner-questions.js";
 import type { PendingActionInbox } from "./pending-action-inbox.js";
 import type { VerboseLogger } from "./verbose-log.js";
+import { workflowUuid } from "./workflow-uuid.js";
 
 export const MESSAGE_BOX_WAIT_MS = 600_000;
 const name = z.string().regex(/^[A-Za-z0-9._~-]{1,128}$/u);
-const uuid = z.uuid();
+const uuid = workflowUuid;
 const object = z.record(z.string(), z.unknown());
 const wait_seconds = z
   .number()
@@ -526,16 +527,22 @@ export class MessageBox {
         // cleanup failure must not turn that known success into uncertainty.
         throw error;
       }
+      const notSubmitted = error instanceof OutboundNotSubmittedError;
       const rejected =
-        error instanceof CentralRestError &&
-        (error.response?.notAccepted === true ||
-          ["invalid_arguments", "credential_expired", "central_authentication_failed"].includes(
-            error.code,
-          ));
+        notSubmitted ||
+        (error instanceof CentralRestError &&
+          (error.response?.notAccepted === true ||
+            ["invalid_arguments", "credential_expired", "central_authentication_failed"].includes(
+              error.code,
+            )));
       const status = rejected ? "rejected" : "uncertain";
       this.#save(
         this.#event({ ...operation, status }, status, {
-          error_code: error instanceof CentralRestError ? error.code : "submission_uncertain",
+          error_code: notSubmitted
+            ? "submission_not_sent"
+            : error instanceof CentralRestError
+              ? error.code
+              : "submission_uncertain",
         }),
       );
       if (signal.aborted) throw error;
@@ -591,6 +598,13 @@ export class MessageBox {
         ? {
             reason: "submission_uncertain",
             message: "The submission outcome is unknown. Do not send the action again.",
+          }
+        : {}),
+      ...(operation.events.some((event) => event.data.error_code === "submission_not_sent")
+        ? {
+            reason: "submission_not_sent",
+            message:
+              "The request was not sent because local preparation failed. Fix the local failure before starting a new request.",
           }
         : {}),
       continuation: {

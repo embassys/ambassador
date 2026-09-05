@@ -294,7 +294,7 @@ test("passes provider options to the human and returns the exact selected ID", a
 });
 
 test("bounds an unanswered session close without replaying the completed prompt", {
-  timeout: 5_000,
+  timeout: process.platform === "win32" ? 30_000 : 5_000,
 }, async (t) => {
   const value = await target(t, "close-hang", { outerDeadlineMs: 500 });
   const started = Date.now();

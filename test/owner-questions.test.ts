@@ -102,6 +102,43 @@ async function fixture(t: TestContext) {
   };
 }
 
+test("owner UUID case aliases preserve exact button values and send one question and continuation", async (t) => {
+  const f = await fixture(t);
+  const signal = new AbortController().signal;
+  const question = {
+    ...f.request,
+    input_type: "buttons",
+    options: [{ label: "Allow once", value: "Allow_ONCE" }],
+  };
+  await f.questions.ask(
+    { ...question, request_id: question.request_id.toUpperCase(), call_id: f.callId.toUpperCase() },
+    signal,
+  );
+  f.restart();
+  await f.questions.ask(question, signal);
+  assert.equal(f.sent.length, 1);
+  assert.deepEqual(f.sent[0]?.options, question.options);
+  const answer = {
+    request_id: randomUUID(),
+    question_id: question.request_id,
+    call_id: f.callId,
+    value: "Allow_ONCE",
+  };
+  assert.equal(
+    f.questions.answer({
+      ...answer,
+      request_id: answer.request_id.toUpperCase(),
+      question_id: answer.question_id.toUpperCase(),
+      call_id: f.callId.toUpperCase(),
+    }).status,
+    "answered",
+  );
+  f.restart();
+  f.questions.answer(answer);
+  assert.equal(f.continuations.length, 1);
+  assert.equal(f.continuations[0]?.payload.value, "Allow_ONCE");
+});
+
 test("owner question is durable, emails once and resumes the exact peer and pending call", async (t) => {
   const f = await fixture(t);
   const signal = new AbortController().signal;

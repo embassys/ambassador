@@ -199,6 +199,10 @@ supersede the initialization snapshot. Initialization for an expired credential
 still identifies the registered account and reports `credential_status:
 "expired"`; protected operations retain their normal expiry error. Only the
 allowlisted public identity fields are exposed. See [ADR 0062](adr/0062-explicit-local-enrollment-context.md).
+The local catalog response also includes `workflow_guidance`: the verified
+requester email and meeting guidance. It tells the agent to use actual returned
+availability before coordinated booking and to include the requester as an
+attendee. Central action definitions and submitted payloads remain unchanged.
 
 `message_box` is a strict discriminated union. Unknown fields fail validation.
 

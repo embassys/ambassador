@@ -5,6 +5,7 @@ import { assertNoCentralCredentialFields, isCentralRecord } from "./central-json
 import { type CentralMessage, type CentralRestClient, CentralRestError } from "./central-rest.js";
 import { EncryptedRecordStore } from "./encrypted-record-store.js";
 import type { PendingActionInbox } from "./pending-action-inbox.js";
+import { workflowUuid } from "./workflow-uuid.js";
 
 const button = z.strictObject({
   label: z.string().min(1).max(64),
@@ -12,8 +13,8 @@ const button = z.strictObject({
 });
 export const ownerQuestionSchema = z
   .strictObject({
-    request_id: z.uuid(),
-    call_id: z.uuid(),
+    request_id: workflowUuid,
+    call_id: workflowUuid,
     question: z.string().min(1).max(2_000),
     input_type: z.enum(["text", "buttons"]),
     options: z.array(button).min(1).max(10).optional(),
@@ -26,24 +27,24 @@ export const ownerQuestionSchema = z
   );
 export const ownerAnswerSchema = z
   .strictObject({
-    request_id: z.uuid(),
-    question_id: z.uuid(),
-    call_id: z.uuid(),
+    request_id: workflowUuid,
+    question_id: workflowUuid,
+    call_id: workflowUuid,
     text: z.string().min(1).max(4_000).optional(),
     value: z.string().min(1).max(64).optional(),
   })
   .refine((input) => (input.text === undefined) !== (input.value === undefined));
 const questionSchema = z.strictObject({
-  request_id: z.uuid(),
+  request_id: workflowUuid,
   fingerprint: z.string().length(64),
   input: ownerQuestionSchema,
-  source_message_id: z.uuid(),
+  source_message_id: workflowUuid,
   sender_agent_id: z.string().min(1).max(256),
   action_type: z.string().max(128),
   action_type_id: z.string().max(256).nullable().optional(),
   status: z.enum(["submitting", "waiting_for_owner", "answered", "uncertain", "rejected"]),
-  remote_request_id: z.uuid().optional(),
-  answer_request_id: z.uuid().optional(),
+  remote_request_id: workflowUuid.optional(),
+  answer_request_id: workflowUuid.optional(),
   answer_fingerprint: z.string().length(64).optional(),
   answer_created_at: z.iso.datetime().optional(),
   continuation_enqueued: z.boolean().optional(),
@@ -174,7 +175,7 @@ export class OwnerQuestions {
       return this.#response(prior);
     }
     const call = this.options.pending.get(input.call_id);
-    if (call === undefined || !z.uuid().safeParse(call.source_message_id).success)
+    if (call === undefined || !workflowUuid.safeParse(call.source_message_id).success)
       throw new OwnerQuestionError("action_call_not_pending");
     const active = this.#store.find(input.call_id);
     if (active !== undefined && active.status !== "answered" && active.status !== "rejected")

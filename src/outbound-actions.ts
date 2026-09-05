@@ -9,6 +9,7 @@ import {
 } from "./central-rest.js";
 import { EncryptedRecordStore, type RecordPage } from "./encrypted-record-store.js";
 import { McpContractError } from "./mcp-contract.js";
+import { workflowUuid } from "./workflow-uuid.js";
 
 const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -112,6 +113,13 @@ export class OutboundActionError extends Error {
   }
 }
 
+export class OutboundNotSubmittedError extends Error {
+  constructor(cause: unknown) {
+    super("The outbound request was not sent because local preparation failed", { cause });
+    this.name = "OutboundNotSubmittedError";
+  }
+}
+
 function identifier(value: Pick<OutboundAction, "target_email" | "action_type">): string {
   return JSON.stringify([value.target_email.toLowerCase(), value.action_type]);
 }
@@ -135,7 +143,7 @@ function parse(plaintext: Buffer): OutboundAction {
         ].includes(key),
     ) ||
     typeof value.operation_id !== "string" ||
-    !UUID.test(value.operation_id) ||
+    !workflowUuid.safeParse(value.operation_id).success ||
     typeof value.target_email !== "string" ||
     value.target_email.length > 254 ||
     !EMAIL.test(value.target_email) ||
@@ -254,12 +262,18 @@ export class OutboundActions {
       }
       let value: OutboundAction = {
         ...key,
-        operation_id: operationId ?? randomUUID(),
+        operation_id: workflowUuid.parse(operationId ?? randomUUID()),
         payload,
         status: "request_uncertain",
         created_at: new Date().toISOString(),
       };
-      this.#save(value);
+      try {
+        this.#save(value);
+      } catch (error) {
+        // No REST call has started. Later persistence failures must retain
+        // uncertainty, since central may already have accepted the request.
+        throw new OutboundNotSubmittedError(error);
+      }
       // A crash or lost response leaves a visible uncertainty marker, never an automatic retry.
       const response = await this.transport
         .requestPermission(normalized, signal)
