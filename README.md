@@ -13,8 +13,8 @@ agent over ACP v1 or to an authenticated webhook.
 npx --yes @embassys/ambassador@latest start
 ```
 
-- Keep that process open. It prints the MCP endpoint and ready-to-copy setup
-  commands for Codex, Claude Code, Hermes, and OpenClaw.
+- Keep that process open. It prints the MCP endpoint, diagnostic-log directory,
+  and setup commands for Codex, Claude Code, Hermes, and OpenClaw.
 - Add `http://127.0.0.1:8787/mcp` to the agent as a token-free Streamable HTTP
   MCP server. Follow the linked agent guide below for its command or UI steps.
 - Restart or reload the agent, then say: **Register me with Embassys using
@@ -39,14 +39,14 @@ ACP agent names, but treats reported versions as diagnostic metadata.
 After registration, ask **Check my Embassys inbox.** It shows action calls
 awaiting the user's answer and unread results returned by other identities.
 Embassys permission requests go to the grantor's registered email instead of
-their agent inbox. Returned results leave the inbox after Ambassador gives them
-to the agent.
+their agent inbox. Reading a result does not remove it. The agent sends the
+supplied receipt after accepting it.
 
 If a direct agent asks ACP for permission to execute a provider tool,
 Ambassador keeps that request open and asks that agent's owner through Embassys
 email.
 It continues only after the correlated decision returns through central
-polling; approval is passed to the provider as **allow once** when available.
+polling; the provider receives your exact selected option ID unchanged.
 
 The central integration uses the unversioned REST API at
 `https://mcp.embassys.ai`. Verification binds the central token to an
@@ -58,6 +58,28 @@ For the complete permission, action, and result flow, see
 exact action payload with a permission request and submit it once after approval.
 The inbox pages through pending calls, unread results, and outbound status.
 Each encrypted store allows 1 GiB; reads remain bounded.
+
+## Wait for a response
+
+The unpublished workflow candidate uses `message_box` for requests, checks,
+owner questions, replies and receipts. An initial request waits up to ten
+minutes for a related update. If it times out, ask the agent to check the same
+saved request again. The next check starts another wait without resubmitting
+the action. Configure the client tool timeout to at least 660 seconds, or use a
+shorter explicit wait where the client cannot hold the full request.
+
+OpenClaw's original-conversation extension and Claude Code's channel proxy are
+experimental. The foreground wait and inbox remain available. See the
+[client support matrix](docs/client-delivery.md) for tested behavior and setup.
+
+## Development logs
+
+The candidate writes request and response bodies even without `--verbose`.
+Credentials are redacted. Startup prints the exact directory: `diagnostics`
+inside the platform state directory listed below. Copy `events.jsonl` and its
+rotated files from that directory to export the log. Retention is bounded to
+four 8 MiB files, with bounded individual records. `clean` preserves these
+logs so a failed session can still be diagnosed.
 
 ## Inspect direct sessions
 
@@ -73,17 +95,23 @@ using `sessions delete <session-id>` or `sessions forget <session-id>`.
 
 ## Repeat a local registration test
 
-Stop the foreground Ambassador process, then reset local Ambassador state:
+Reset local Ambassador state:
 
 ```sh
 npx --yes @embassys/ambassador@latest clean
 ```
 
+If Ambassador is running, `clean` asks whether to stop it and clear local state.
+`start` also offers to stop the running instance before starting a new one.
+Both prompts default to No. Non-interactive commands require it to be stopped
+first. If the running version cannot accept the stop request, stop it in its
+terminal and retry.
+
 The command removes the local registration, encrypted credentials, delivery
 profile, webhook and internal control secrets, pending-action inbox,
 notification journal, received-action-result inbox, and saved outbound intents. It also removes
-interrupted state writes. It keeps only the empty owner-only state directory
-and singleton lock needed to prevent cleanup while Ambassador is running.
+interrupted state writes. It preserves development diagnostics and the
+owner-only directory and singleton lock needed to prevent concurrent cleanup.
 
 For a manual reset, move the entire local Ambassador state directory to Trash
 or to an owner-only backup after stopping Ambassador:
@@ -102,18 +130,19 @@ provider configuration or credentials.
 
 ## Implementation status
 
-The REST, DPoP, delivery, internal webhook-secret, and zero-configuration
-startup paths are implemented. The current source provides one agent-facing
-inbox for unanswered action calls and unread action results. Embassys emails
-permission requests to the grantor's human; the grantor's agent does not decide
-them. Action calls and results use separate encrypted local stores. The 0.2.17
-release added package-owned Codex and Claude Code adapters, printed agent
-setup, and bounded startup diagnostics. Live-central qualification has passed with real Codex and Claude Code,
-and with Hermes Agent 0.20.5 and OpenClaw 2026.8.2 in both delivery modes.
-Ambassador matches exact known client and ACP agent names while treating
-reported versions as observations. Gemini CLI and Antigravity are not active
-profiles; [ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md)
-records that decision.
+The current source includes the approved durable workflow redesign in
+[ADR 0061](docs/adr/0061-durable-workflows-and-client-delivery.md): independent
+receive, processing, provider and acknowledgement workers; exact action schemas;
+long waits; owner input; explicit result receipts; and development logs. This
+candidate has not been published. The `@latest` commands above install the
+published release; they do not install these working-tree changes.
+
+The published 0.2.18 baseline passed real Codex, Claude Code, Hermes and OpenClaw
+delivery qualification. Current candidate evidence and remaining release gates
+are recorded separately in [qualification](docs/qualification.md) and
+[the implementation plan](docs/implementation-plan.md). Gemini CLI and
+Antigravity remain inactive under
+[ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md).
 
 Published Ambassador releases through 0.2.9 have no Windows support claim.
 Published Ambassador 0.2.12 is qualified under
@@ -153,3 +182,11 @@ supported agents and webhook delivery for OpenClaw and Hermes.
 ## License
 
 MIT
+
+## Workflow candidate
+
+The unpublished ADR 0061 candidate uses one typed message_box for business
+operations, ten-minute foreground waits and explicit result receipts. It also
+adds durable owner questions and development body logs.
+See [client delivery](docs/client-delivery.md) for timeout settings, optional
+OpenClaw return, experimental Claude Code channels and qualification limits.

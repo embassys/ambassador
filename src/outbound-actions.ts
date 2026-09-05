@@ -4,6 +4,7 @@ import { assertNoCentralCredentialFields, isCentralRecord } from "./central-json
 import {
   type CentralMessage,
   type CentralRestClient,
+  CentralRestError,
   normalizePermissionRequest,
 } from "./central-rest.js";
 import { EncryptedRecordStore, type RecordPage } from "./encrypted-record-store.js";
@@ -13,6 +14,8 @@ const NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const STATUSES = [
+  "request_rejected",
+  "dispatch_rejected",
   "request_uncertain",
   "awaiting_permission",
   "ready",
@@ -31,6 +34,75 @@ export interface OutboundAction {
   readonly created_at: string;
   readonly permission_id?: string;
   readonly call_id?: string;
+  readonly rejection?: {
+    readonly reason: string;
+    readonly http_status?: number;
+    readonly retry_after_ms?: number;
+  };
+}
+
+const REJECTION_REASONS = [
+  "permission_missing",
+  "permission_pending",
+  "permission_denied",
+  "permission_expired",
+  "permission_spent",
+  "invalid_request",
+  "credential_expired",
+  "authentication_required",
+  "permission_required",
+  "target_or_action_missing",
+  "request_conflict",
+  "invalid_payload",
+  "rate_limited",
+] as const;
+
+function confirmedRejection(error: unknown): OutboundAction["rejection"] {
+  if (!(error instanceof CentralRestError)) return undefined;
+  if (error.code === "invalid_arguments") return { reason: "invalid_request" };
+  if (error.code === "credential_expired") return { reason: "credential_expired" };
+  if (error.code === "central_authentication_failed")
+    return { reason: "authentication_required", http_status: 401 };
+  if (error.response?.notAccepted !== true) return undefined;
+  const reason = error.code.startsWith("permission_")
+    ? error.code
+    : (
+        {
+          400: "invalid_request",
+          403: "permission_required",
+          404: "target_or_action_missing",
+          409: "request_conflict",
+          422: "invalid_payload",
+          429: "rate_limited",
+        } as Record<number, string>
+      )[error.response.httpStatus];
+  if (reason === undefined) return undefined;
+  return {
+    reason,
+    http_status: error.response.httpStatus,
+    ...(error.response.retryAfterMs === undefined
+      ? {}
+      : { retry_after_ms: error.response.retryAfterMs }),
+  };
+}
+
+function validRejection(value: unknown): boolean {
+  return (
+    isCentralRecord(value) &&
+    Object.keys(value).every((key) => ["reason", "http_status", "retry_after_ms"].includes(key)) &&
+    typeof value.reason === "string" &&
+    REJECTION_REASONS.some((reason) => reason === value.reason) &&
+    (value.http_status === undefined ||
+      (typeof value.http_status === "number" &&
+        Number.isInteger(value.http_status) &&
+        value.http_status >= 400 &&
+        value.http_status <= 499)) &&
+    (value.retry_after_ms === undefined ||
+      (typeof value.retry_after_ms === "number" &&
+        Number.isSafeInteger(value.retry_after_ms) &&
+        value.retry_after_ms >= 0 &&
+        value.retry_after_ms <= 86_400_000))
+  );
 }
 
 export class OutboundActionError extends Error {
@@ -59,6 +131,7 @@ function parse(plaintext: Buffer): OutboundAction {
           "created_at",
           "permission_id",
           "call_id",
+          "rejection",
         ].includes(key),
     ) ||
     typeof value.operation_id !== "string" ||
@@ -76,7 +149,11 @@ function parse(plaintext: Buffer): OutboundAction {
       (typeof value.permission_id !== "string" || !NAME.test(value.permission_id))) ||
     (value.call_id !== undefined &&
       (typeof value.call_id !== "string" || !UUID.test(value.call_id))) ||
-    (value.status !== "request_uncertain" && value.permission_id === undefined) ||
+    (!["request_uncertain", "request_rejected"].includes(value.status as string) &&
+      value.permission_id === undefined) ||
+    (value.status === "request_rejected" || value.status === "dispatch_rejected"
+      ? !validRejection(value.rejection)
+      : value.rejection !== undefined) ||
     (value.status === "submitted" && value.call_id === undefined)
   )
     throw new OutboundActionError();
@@ -136,6 +213,7 @@ export class OutboundActions {
       outbound_action: {
         operation_id: value.operation_id,
         status: value.status,
+        ...(value.rejection === undefined ? {} : { rejection: value.rejection }),
         ...(value.permission_id === undefined ? {} : { permission_id: value.permission_id }),
         ...(value.call_id === undefined ? {} : { call_id: value.call_id }),
       },
@@ -145,6 +223,7 @@ export class OutboundActions {
   request(
     arguments_: Record<string, unknown>,
     signal?: AbortSignal,
+    operationId?: string,
   ): Promise<Record<string, unknown>> {
     return this.#run(async () => {
       const { action_payload: payload, ...permissionArguments } = arguments_;
@@ -164,7 +243,10 @@ export class OutboundActions {
       signal?.throwIfAborted();
       const key = { target_email: normalized.target_email, action_type: actionType };
       const previous = this.#store.get(identifier(key));
-      if (previous !== undefined && previous.status !== "denied") {
+      if (
+        previous !== undefined &&
+        !["denied", "request_rejected", "dispatch_rejected"].includes(previous.status)
+      ) {
         if (canonical(previous.payload) !== canonical(payload)) throw new McpContractError();
         return this.#result(
           previous.status === "ready" ? await this.#dispatch(previous, signal) : previous,
@@ -172,14 +254,21 @@ export class OutboundActions {
       }
       let value: OutboundAction = {
         ...key,
-        operation_id: randomUUID(),
+        operation_id: operationId ?? randomUUID(),
         payload,
         status: "request_uncertain",
         created_at: new Date().toISOString(),
       };
       this.#save(value);
       // A crash or lost response leaves a visible uncertainty marker, never an automatic retry.
-      const response = await this.transport.requestPermission(normalized, signal);
+      const response = await this.transport
+        .requestPermission(normalized, signal)
+        .catch((error: unknown) => {
+          const rejection = confirmedRejection(error);
+          if (rejection !== undefined)
+            this.#save({ ...value, status: "request_rejected", rejection });
+          throw error;
+        });
       value = {
         ...value,
         permission_id: response.permission_id,
@@ -216,7 +305,13 @@ export class OutboundActions {
       };
       this.#save(submitted);
       return submitted;
-    } catch {
+    } catch (error) {
+      const rejection = confirmedRejection(error);
+      if (rejection !== undefined) {
+        const rejected: OutboundAction = { ...value, status: "dispatch_rejected", rejection };
+        this.#save(rejected);
+        return rejected;
+      }
       return uncertain;
     }
   }
@@ -258,6 +353,34 @@ export class OutboundActions {
 
   page(after = 0, limit = 50): RecordPage<OutboundAction> {
     return this.#store.page(after, limit);
+  }
+
+  continuePrepared(
+    target: string,
+    action: string,
+    operationId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    return this.#run(async () => {
+      const value = this.get(target, action);
+      if (value?.operation_id === operationId && value.status === "ready")
+        await this.#dispatch(value, signal);
+    });
+  }
+
+  forMessage(message: CentralMessage): OutboundAction | undefined {
+    const payload = message.payload;
+    const correlation =
+      payload.type === "permission_outcome" && typeof payload.permission_id === "string"
+        ? `permission:${payload.permission_id}`
+        : payload.type === "action_response" && typeof payload.call_id === "string"
+          ? `call:${payload.call_id}`
+          : undefined;
+    return correlation === undefined ? undefined : this.#store.find(correlation);
+  }
+
+  get(targetEmail: string, actionType: string): OutboundAction | undefined {
+    return this.#store.get(identifier({ target_email: targetEmail, action_type: actionType }));
   }
 
   close(): void {

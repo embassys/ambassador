@@ -69,7 +69,7 @@ export const PRODUCTION_AGENT_CAPABILITIES: readonly AgentCapability[] = [
     },
     direct: {
       command: "openclaw",
-      args: ["acp"],
+      args: ["acp", "--no-prefix-cwd"],
       agentInfo: { name: "openclaw-acp" },
       mcp: "provider_config",
       sessionRestore: "load",

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readCentralJson } from "../src/central-json.js";
 
 import {
   createVerboseLogger,
@@ -14,12 +15,16 @@ test("redacts credentials recursively while preserving useful verbose data", () 
     redactVerboseValue({
       authorization: `Bearer ${token}`,
       DPoP: token,
+      jwk: { kty: "EC", x: "public-coordinate", y: "other-coordinate" },
+      dpop_private_key_pkcs8: "encoded-private-material",
       nested: { verification_code: "123456", message: `token ${token}` },
       ordinary: "visible",
     }),
     {
       authorization: "[redacted]",
       DPoP: "[redacted]",
+      jwk: "[redacted]",
+      dpop_private_key_pkcs8: "[redacted]",
       nested: { verification_code: "[redacted]", message: "token [redacted]" },
       ordinary: "visible",
     },
@@ -72,10 +77,11 @@ test("traces central requests and responses without consuming or exposing creden
     body: JSON.stringify({ code: "123456", email: "person@example.test" }),
   });
 
-  assert.deepEqual(await response.json(), { token: "server-secret", result: "visible" });
+  assert.deepEqual(await readCentralJson(response), { token: "server-secret", result: "visible" });
   const combined = output.join("");
   assert.match(combined, /central\.request/u);
   assert.match(combined, /central\.response/u);
+  assert.match(combined, /visible/u);
   assert.match(combined, /person@example\.test/u);
   for (const secret of [
     "eyJheader.payload.signature",
@@ -85,5 +91,55 @@ test("traces central requests and responses without consuming or exposing creden
     "123456",
   ]) {
     assert.equal(combined.includes(secret), false);
+  }
+});
+
+test("verbose tracing leaves oversized response consumption to the bounded parser", async () => {
+  let readBytes = 0;
+  let cancelled = false;
+  const output: string[] = [];
+  const traced = traceFetch(
+    async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (readBytes === 8 * 1024 * 1024) {
+              controller.close();
+              return;
+            }
+            const chunk = new Uint8Array(64 * 1024).fill(120);
+            readBytes += chunk.length;
+            controller.enqueue(chunk);
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    createVerboseLogger((line) => output.push(line)),
+  );
+  const response = await traced("https://example.test/api");
+  assert.ok(readBytes <= 64 * 1024, `diagnostics consumed ${readBytes} bytes`);
+  await assert.rejects(readCentralJson(response));
+  assert.equal(cancelled, true);
+  assert.ok(readBytes <= 4 * 1024 * 1024 + 128 * 1024);
+  assert.ok(output.join("").length < 2_048);
+});
+
+test("verbose tracing never logs raw invalid or truncated JSON containing secrets", async () => {
+  for (const body of [
+    '{"verification_code":"private-code","value":',
+    JSON.stringify({ data: "x".repeat(70 * 1024), token: "private-token" }),
+  ]) {
+    const output: string[] = [];
+    const traced = traceFetch(
+      async () => new Response(body, { headers: { "content-type": "application/json" } }),
+      createVerboseLogger((line) => output.push(line)),
+    );
+    const response = await traced("https://example.test/api");
+    await readCentralJson(response).catch(() => undefined);
+    assert.doesNotMatch(output.join(""), /private-code|private-token/u);
+    assert.ok(output.join("").length < 2_048);
   }
 });

@@ -1,7 +1,7 @@
 # 0044 Local clean command
 
 Status: accepted; local result state amended by ADR 0051 and control state by
-ADR 0053
+ADR 0053; confirmed process stop amended by ADR 0058
 
 Date: 2026-09-03
 

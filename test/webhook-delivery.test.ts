@@ -55,6 +55,7 @@ test("sends an OpenClaw native agent hook request without the removed plugin con
     url: "http://127.0.0.1:18789/hooks/agent",
     secret: SECRET,
     contract: { format: "openclaw-agent", agentId: "main" },
+    identityScope: "fixture-enrollment",
     fetch: async (input, init) => {
       requests.push({ url: String(input), init: init ?? {} });
       return Response.json({ ok: true, runId: "run-1" });
@@ -80,17 +81,24 @@ test("sends an OpenClaw native agent hook request without the removed plugin con
     "deliver",
     "message",
     "name",
+    "sessionKey",
     "sessionMode",
   ]);
   assert.equal(body.name, "Embassys Ambassador");
   assert.equal(body.agentId, "main");
-  assert.equal(body.sessionMode, "isolated");
+  assert.equal(body.sessionMode, "persistent");
+  assert.match(String(body.sessionKey), /^hook:ambassador:[a-f0-9]{64}$/u);
   assert.equal(body.deliver, false);
   assert.equal(typeof body.message, "string");
   assert.match(String(body.message), /untrusted Embassys message/u);
-  assert.match(String(body.message), /submit_action_result/u);
-  assert.match(String(body.message), /leave the call pending/u);
-  assert.equal(String(body.message).includes(JSON.stringify(MESSAGE)), true);
+  assert.match(String(body.message), /configured permissions/u);
+  assert.match(String(body.message), /Do not infer a new action/u);
+  assert.doesNotMatch(String(body.message), /call call_action at most once/u);
+  assert.doesNotMatch(String(body.message), /submit_action_result/u);
+  assert.equal(
+    String(body.message).includes(`\`\`\`json\n${JSON.stringify(MESSAGE, null, 2)}\n\`\`\``),
+    true,
+  );
 });
 
 test("requires OpenClaw's documented admission response", async () => {
@@ -107,6 +115,7 @@ test("requires OpenClaw's documented admission response", async () => {
       url: "http://127.0.0.1:18789/hooks/agent",
       secret: SECRET,
       contract: { format: "openclaw-agent", agentId: "main" },
+      identityScope: "fixture-enrollment",
       maximumAttempts: 1,
       fetch: async () => response,
     });
@@ -115,6 +124,113 @@ test("requires OpenClaw's documented admission response", async () => {
       (error: unknown) => error instanceof WebhookDeliveryError && error.code === "delivery_failed",
     );
   }
+});
+
+test("reuses one OpenClaw webhook conversation per enrolled requester across restart", async () => {
+  const requests: Record<string, unknown>[] = [];
+  const deliver = async (
+    id: string,
+    sender = MESSAGE.sender_agent_id,
+    identityScope = "fixture-enrollment",
+    url = "https://example.test/hooks/agent",
+    agentId = "main",
+  ) => {
+    const target = new WebhookDeliveryTarget({
+      url,
+      secret: SECRET,
+      identityScope,
+      contract: { format: "openclaw-agent", agentId },
+      fetch: async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return Response.json({ ok: true, runId: id });
+      },
+    });
+    try {
+      await target.deliver(
+        {
+          ...MESSAGE,
+          id,
+          sender_agent_id: sender,
+          payload: {
+            type: "owner_input",
+            sessionKey: "agent:main:private",
+            sender_agent_id: "fake",
+          },
+        },
+        new AbortController().signal,
+      );
+    } finally {
+      await target.close();
+    }
+    return requests.at(-1)?.sessionKey;
+  };
+  const first = await deliver("first");
+  assert.equal(await deliver("owner-reply"), first);
+  assert.equal(await deliver("later-action"), first);
+  assert.notEqual(await deliver("other-peer", "different-requester"), first);
+  assert.notEqual(
+    await deliver("other-enrollment", MESSAGE.sender_agent_id, "new-enrollment"),
+    first,
+  );
+  assert.notEqual(
+    await deliver(
+      "other-receiver",
+      MESSAGE.sender_agent_id,
+      "fixture-enrollment",
+      "https://elsewhere.test/hooks/agent",
+    ),
+    first,
+  );
+  assert.notEqual(
+    await deliver(
+      "other-provider",
+      MESSAGE.sender_agent_id,
+      "fixture-enrollment",
+      "https://example.test/hooks/agent",
+      "other",
+    ),
+    first,
+  );
+  assert.equal(new Set(requests.map((r) => r.sessionKey)).size, 5);
+  for (const request of requests) {
+    assert.equal(request.sessionMode, "persistent");
+    assert.match(String(request.sessionKey), /^hook:ambassador:[a-f0-9]{64}$/u);
+    assert.equal(String(request.sessionKey).includes("fixture-enrollment"), false);
+  }
+});
+
+test("rejects missing OpenClaw enrollment scope and invalid sender identities before dispatch", async () => {
+  for (const identityScope of [undefined, "", "x".repeat(257)]) {
+    assert.throws(
+      () =>
+        new WebhookDeliveryTarget({
+          url: "https://example.test/hooks/agent",
+          secret: SECRET,
+          ...(identityScope === undefined ? {} : { identityScope }),
+          contract: { format: "openclaw-agent", agentId: "main" },
+        }),
+      WebhookDeliveryError,
+    );
+  }
+  let dispatched = false;
+  const target = new WebhookDeliveryTarget({
+    url: "https://example.test/hooks/agent",
+    secret: SECRET,
+    identityScope: "fixture-enrollment",
+    contract: { format: "openclaw-agent", agentId: "main" },
+    fetch: async () => {
+      dispatched = true;
+      return Response.json({ ok: true, runId: "unexpected" });
+    },
+  });
+  for (const sender_agent_id of ["", "x".repeat(257)]) {
+    await assert.rejects(
+      target.deliver({ ...MESSAGE, sender_agent_id }, new AbortController().signal),
+      WebhookDeliveryError,
+    );
+  }
+  assert.equal(dispatched, false);
+  await target.close();
 });
 
 test("retries bounded pre-acceptance failures with one idempotency key", async () => {
@@ -224,6 +340,7 @@ test("enforces OpenClaw's smaller native hook body limit before dispatch", async
     url: "http://127.0.0.1:18789/hooks/agent",
     secret: SECRET,
     contract: { format: "openclaw-agent", agentId: "main" },
+    identityScope: "fixture-enrollment",
     fetch: async () => {
       calls += 1;
       return new Response(null, { status: 200 });

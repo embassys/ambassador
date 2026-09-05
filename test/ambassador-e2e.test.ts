@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ import {
 import type { DeliveryTarget } from "../src/notification-relay.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
-import { TestMcpClient } from "./support/mcp-client.js";
+import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
 const NOW_SECONDS = 1_788_220_800;
@@ -112,6 +113,114 @@ async function enrollDirect(
   return client;
 }
 
+test("reports verified enrollment independently of an empty permission list and across restart", async (t) => {
+  const value = await fixture(t);
+  const gateway = value.trackGateway(await openGatewayApplication(value.options));
+  const bootstrap = new TestMcpClient(gateway.endpoint);
+  await bootstrap.initialize(OPENCLAW);
+  assert.match(bootstrap.serverInstructions ?? "", /"status":"not_enrolled"/u);
+  await assert.rejects(
+    bootstrap.callTool("get_my_permissions", {}),
+    (error: unknown) =>
+      error instanceof McpCallError && JSON.stringify(error.data).includes("not_enrolled"),
+  );
+  const email = "registered-no-grants@fixture.test";
+  const client = await enrollWebhook(gateway, value.central, value.webhook.url, email);
+  const result = await client.callTool("get_my_permissions", {});
+  const expected = {
+    status: "registered",
+    verified: true,
+    agent_id: "agent.000001",
+    email,
+    credential_status: "active",
+  };
+  assert.deepEqual(result.enrollment, expected);
+  assert.deepEqual(result.permissions, []);
+  assert.match(String(result.message), /empty.*permission.*registered/iu);
+  assert.deepEqual((await client.callTool("list_action_types", {})).enrollment, expected);
+  const fresh = new TestMcpClient(gateway.endpoint);
+  await fresh.initialize(OPENCLAW);
+  assert.ok(
+    fresh.serverInstructions?.startsWith(`Local Embassys enrollment: ${JSON.stringify(expected)}`),
+  );
+  assert.match(fresh.serverInstructions ?? "", /Do not register again/iu);
+  await gateway.close();
+  const reopened = value.trackGateway(await openGatewayApplication(value.options));
+  const restored = new TestMcpClient(reopened.endpoint);
+  await restored.initialize(OPENCLAW);
+  assert.ok(restored.serverInstructions?.includes(email));
+  assert.deepEqual(await restored.callTool("get_my_permissions", {}), result);
+  assert.equal(
+    value.central.requests().filter((request) => request.path === "/api/register_agent").length,
+    1,
+  );
+});
+
+test("keeps saved results readable after credential expiry and restart without retrying central", {
+  timeout: 5_000,
+}, async (t) => {
+  const value = await fixture(t);
+  let now = NOW_SECONDS;
+  const notices: Error[] = [];
+  let paused!: () => void;
+  const pause = new Promise<void>((resolve) => {
+    paused = resolve;
+  });
+  const options = {
+    ...value.options,
+    nowSeconds: () => now,
+    onRuntimeNotice: (error: Error) => {
+      notices.push(error);
+      paused();
+    },
+  };
+  const gateway = value.trackGateway(await openGatewayApplication(options));
+  const email = "expiry@fixture.test";
+  const client = await enrollWebhook(gateway, value.central, value.webhook.url, email);
+  const sender = value.central.seedClient("expiry-sender@fixture.test");
+  const callId = "10000000-0000-4000-8000-000000000055";
+  value.central.queueMessage(
+    email,
+    {
+      type: "action_response",
+      call_id: callId,
+      action_type: "get_phone_number",
+      status: "success",
+      result: { phone_number: "+447700900055" },
+    },
+    sender.email,
+  );
+  await value.webhook.waitForWake();
+  now += 100 * 24 * 60 * 60;
+  await assert.rejects(
+    client.callTool("list_action_types", {}),
+    (error: unknown) =>
+      error instanceof McpCallError && JSON.stringify(error.data).includes("credential_expired"),
+  );
+  value.central.queueMessage(email, { type: "expiry-wake" }, sender.email);
+  await pause;
+  const requestCount = value.central.requests().length;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(value.central.requests().length, requestCount);
+  assert.match(notices[0]?.message ?? "", /expired/iu);
+  await gateway.close();
+  const reopened = value.trackGateway(await openGatewayApplication(options));
+  assert.equal(value.central.requests().length, requestCount);
+  const reader = new TestMcpClient(reopened.endpoint);
+  await reader.initialize(OPENCLAW);
+  assert.match(reader.serverInstructions ?? "", /"status":"registered"/u);
+  assert.match(reader.serverInstructions ?? "", /"credential_status":"expired"/u);
+  assert.match(reader.serverInstructions ?? "", /expiry@fixture\.test/u);
+  const inbox = await reader.callTool("message_box", { type: "inbox" });
+  assert.equal(inbox.count, 1);
+  assert.equal((inbox.items as Array<Record<string, unknown>>)[0]?.call_id, callId);
+  await assert.rejects(
+    reader.callTool("get_my_permissions", {}),
+    (error: unknown) =>
+      error instanceof McpCallError && JSON.stringify(error.data).includes("credential_expired"),
+  );
+});
+
 test("registers by client capability, delivers the full webhook, then acknowledges centrally", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
@@ -128,11 +237,8 @@ test("registers by client capability, delivers the full webhook, then acknowledg
       "verify_email",
       "resend_verification",
       "list_action_types",
-      "request_permission",
-      "get_inbox",
-      "call_action",
-      "submit_action_result",
       "get_my_permissions",
+      "message_box",
     ],
   );
 
@@ -155,7 +261,10 @@ test("registers by client capability, delivers the full webhook, then acknowledg
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.equal(value.central.messageState(messageId), "acked");
-  assert.equal((await readFile(value.options.journalPath)).includes(Buffer.from(marker)), false);
+  assert.equal(
+    (await readFile(join(value.root, "notification-custody.sqlite"))).includes(Buffer.from(marker)),
+    false,
+  );
   assert.equal((await readFile(value.options.profilePath, "utf8")).includes(WEBHOOK_SECRET), false);
   await assert.rejects(client.callTool("poll_messages", { timeout: 0 }));
   await assert.rejects(client.callTool("ack_message", { message_id: messageId }));
@@ -192,7 +301,7 @@ test("stores received action results before acknowledgement and consumes them fr
   const restarted = value.trackGateway(await openGatewayApplication(value.options));
   const restartedClient = new TestMcpClient(restarted.endpoint);
   await restartedClient.initialize(OPENCLAW);
-  assert.deepEqual(await restartedClient.callTool("get_inbox", {}), {
+  assert.deepEqual(await restartedClient.callTool("message_box", { type: "inbox" }), {
     count: 1,
     items: [
       {
@@ -203,11 +312,22 @@ test("stores received action results before acknowledgement and consumes them fr
         status: "success",
         result: { phone_number: "+447700900001" },
         created_at: wake.ambassadorMessage.created_at,
+        receipt: {
+          tool: "message_box",
+          arguments: { type: "acknowledge_results", call_ids: [callId] },
+        },
       },
     ],
   });
-  assert.deepEqual(await restartedClient.callTool("get_inbox", {}), { count: 0, items: [] });
-  await assert.rejects(restartedClient.callTool("get_inbox", { limit: 0 }));
+  await restartedClient.callTool("message_box", {
+    type: "acknowledge_results",
+    call_ids: [callId],
+  });
+  assert.deepEqual(await restartedClient.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
+  await assert.rejects(restartedClient.callTool("message_box", { type: "inbox", limit: 0 }));
 });
 
 test("holds an ACP permission request for its owner's emailed answer", async (t) => {
@@ -215,7 +335,7 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
   const recipientEmail = "ambassador-acp-permission@fixture.test";
   const approver = value.central.seedClient("approver@fixture.test");
   const deliveredTypes: unknown[] = [];
-  let approvalResult: "allow" | "deny" | undefined;
+  let approvalResult: string | undefined;
   let finishApproval!: () => void;
   const approvalFinished = new Promise<void>((resolve) => {
     finishApproval = resolve;
@@ -223,7 +343,6 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
   const gateway = value.trackGateway(
     await openGatewayApplication({
       ...value.options,
-      centralAgentPermissionPollIntervalMs: 5,
       deliveryTargetFactory: (context) => ({
         async deliver(message, signal) {
           deliveredTypes.push(message.payload.type);
@@ -233,6 +352,15 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
                 agentKind: context.capability.kind,
                 message,
                 sessionId: "fixture-session",
+                options: [
+                  { optionId: "provider:once", name: "Run this once", kind: "allow_once" },
+                  {
+                    optionId: "provider:remember",
+                    name: "Always run this tool",
+                    kind: "allow_always",
+                  },
+                  { optionId: "provider:deny", name: "Skip this tool", kind: "reject_once" },
+                ],
                 toolCall: {
                   toolCallId: "fixture-tool-call",
                   title: "Run a shell command",
@@ -275,12 +403,12 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
     headers: JSON_HEADERS,
     body: JSON.stringify({
       token: value.central.humanInputResponseToken(humanInput?.requestId as string),
-      value: "allow_once",
+      value: "provider:remember",
     }),
   });
   assert.equal(decided.status, 200);
   await approvalFinished;
-  assert.equal(approvalResult, "allow");
+  assert.equal(approvalResult, "provider:remember");
 
   const outcomeMessageId = value.central.humanInputResponseMessageId(
     humanInput?.requestId as string,
@@ -323,7 +451,10 @@ test("returns a correlated action result from the target MCP tool to the request
   const permission = (await permissionResponse.json()) as Record<string, unknown>;
   assert.equal(typeof permission.permission_id, "string");
 
-  assert.deepEqual(await target.callTool("get_inbox", {}), { count: 0, items: [] });
+  assert.deepEqual(await target.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
 
   const decided = await fetch(`${value.central.apiUrl}/api/permission_decision`, {
     method: "POST",
@@ -334,7 +465,10 @@ test("returns a correlated action result from the target MCP tool to the request
     }),
   });
   assert.equal(decided.status, 200);
-  assert.deepEqual(await target.callTool("get_inbox", {}), { count: 0, items: [] });
+  assert.deepEqual(await target.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
   const requesterPermissionPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterPermissionMessages = (
     (await requesterPermissionPoll.json()) as { messages: Array<Record<string, unknown>> }
@@ -373,20 +507,24 @@ test("returns a correlated action result from the target MCP tool to the request
   const restartedTarget = new TestMcpClient(restartedGateway.endpoint);
   await restartedTarget.initialize(OPENCLAW);
 
-  await assert.rejects(restartedTarget.callTool("get_inbox", { limit: 0 }));
-  const pendingActions = await restartedTarget.callTool("get_inbox", {});
+  await assert.rejects(restartedTarget.callTool("message_box", { type: "inbox", limit: 0 }));
+  const pendingActions = await restartedTarget.callTool("message_box", { type: "inbox" });
   assert.equal(pendingActions.count, 1);
   assert.deepEqual(pendingActions.items, [
     {
       kind: "action_call",
       call_id: action.call_id,
+      source_message_id: action.message_id,
+      action_type_id: actionWake.ambassadorMessage.action_type_id,
       sender_agent_id: actionWake.ambassadorMessage.sender_agent_id,
       action_type: "get_phone_number",
       payload: { reason: "deterministic result round trip" },
       created_at: actionWake.ambassadorMessage.created_at,
       response: {
-        tool: "submit_action_result",
+        tool: "message_box",
         required: {
+          type: "submit_action_result",
+          request_id: { type: "string", format: "uuid" },
           call_id: action.call_id,
           status: ["success", "error"],
           result: { type: "object" },
@@ -394,16 +532,24 @@ test("returns a correlated action result from the target MCP tool to the request
       },
     },
   ]);
-  assert.deepEqual((await restartedTarget.callTool("get_inbox", {})).items, pendingActions.items);
+  assert.deepEqual(
+    (await restartedTarget.callTool("message_box", { type: "inbox" })).items,
+    pendingActions.items,
+  );
 
-  const submitted = await restartedTarget.callTool("submit_action_result", {
+  const submitted = await restartedTarget.callTool("message_box", {
+    type: "submit_action_result",
+    request_id: randomUUID(),
     call_id: action.call_id,
     result: { phone_number: "+447700900001" },
     status: "success",
   });
   assert.equal(submitted.call_id, action.call_id);
   assert.equal(submitted.status, "completed");
-  assert.deepEqual(await restartedTarget.callTool("get_inbox", {}), { count: 0, items: [] });
+  assert.deepEqual(await restartedTarget.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
 
   const requesterResultPoll = await requester.protectedFetch("/api/poll_messages?timeout=0");
   const requesterResultMessages = (
@@ -426,16 +572,16 @@ test("resumes saved outbound intent after restart and exposes its correlated res
   const targetEmail = "saved-intent-target@fixture.test";
   const requester = await enrollWebhook(gateway, value.central, value.webhook.url, requesterEmail);
   const target = value.central.seedClient(targetEmail);
-  const permission = await requester.callTool("request_permission", {
+  const permission = await requester.callTool("message_box", {
+    type: "request_action",
+    request_id: randomUUID(),
+    wait_seconds: 0,
     target_email: targetEmail,
     action_type: "get_phone_number",
     decision_options: "once_always",
-    action_payload: { reason: "exact saved request" },
+    payload: { reason: "exact saved request" },
   });
-  assert.equal(
-    (permission.outbound_action as Record<string, unknown>).status,
-    "awaiting_permission",
-  );
+  assert.equal(permission.status, "pending");
   await gateway.close();
   const restarted = value.trackGateway(await openGatewayApplication(value.options));
   const client = new TestMcpClient(restarted.endpoint);
@@ -449,7 +595,10 @@ test("resumes saved outbound intent after restart and exposes its correlated res
     }),
   });
   assert.equal(decision.status, 200);
-  await value.webhook.waitForWake();
+  const update = await client.callTool("message_box", {
+    type: "check",
+    request_id: permission.request_id,
+  });
   const poll = await target.protectedFetch("/api/poll_messages?timeout=0");
   const messages = (
     (await poll.json()) as { messages: Array<{ payload: Record<string, unknown> }> }
@@ -467,15 +616,164 @@ test("resumes saved outbound intent after restart and exposes its correlated res
     }),
   });
   assert.equal(submission.status, 200);
-  await value.webhook.waitForWake();
-  const inbox = await client.callTool("get_inbox", {});
+  const result = await client.callTool("message_box", {
+    type: "check",
+    request_id: permission.request_id,
+    cursor: update.cursor,
+  });
+  assert.match(JSON.stringify(result), /447700900002/u);
+  const inbox = await client.callTool("message_box", { type: "inbox" });
   assert.equal(inbox.count, 1);
   assert.equal((inbox.items as Record<string, unknown>[])[0]?.kind, "action_result");
   assert.equal((inbox.items as Record<string, unknown>[])[0]?.call_id, callId);
-  assert.deepEqual(await client.callTool("get_inbox", {}), { count: 0, items: [] });
+  await client.callTool("message_box", { type: "acknowledge_results", call_ids: [callId] });
+  assert.deepEqual(await client.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
 });
 
-test("honestly loses a consumed pre-delivery body across restart", async (t) => {
+for (const answerSource of ["email", "foreground"] as const) {
+  test(`${answerSource} owner answers resume the same peer and preserve provider approval correlation`, {
+    timeout: 10_000,
+  }, async (t) => {
+    const f = await fixture(t);
+    const recipient = "owner-question@fixture.test";
+    const peer = f.central.seedClient("question-peer@fixture.test");
+    const callId = randomUUID();
+    const questionId = randomUUID();
+    let approvalRequestId: string | undefined;
+    let approvalSourceId: string | undefined;
+    let firstPeer: string | undefined;
+    let resumed!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      resumed = resolve;
+    });
+    const gateway = f.trackGateway(
+      await openGatewayApplication({
+        ...f.options,
+        centralFetch: async (input, init) => {
+          const response = await fetch(input, init);
+          if (String(input).endsWith("/api/get_human_input")) {
+            const body = JSON.parse(String(init?.body)) as {
+              input_type?: string;
+              message_id?: string;
+            };
+            if (body.input_type === "buttons") {
+              approvalSourceId = body.message_id;
+              const result = (await response.clone().json()) as { request_id?: string };
+              approvalRequestId = result.request_id;
+            }
+          }
+          return response;
+        },
+        deliveryTargetFactory: (context) => ({
+          async deliver(message, signal) {
+            if (message.payload.type === "action_call") {
+              firstPeer = message.sender_agent_id;
+              const client = new TestMcpClient(context.endpoint);
+              await client.initialize(CODEX);
+              const response = await client.callTool("message_box", {
+                type: "ask_owner",
+                request_id: questionId,
+                call_id: callId,
+                question: "Which synthetic number should I return?",
+                input_type: "text",
+              });
+              assert.equal(response.status, "waiting_for_owner");
+            } else if (message.payload.type === "owner_input") {
+              assert.equal(message.sender_agent_id, firstPeer);
+              assert.equal(message.payload.call_id, callId);
+              assert.equal(message.payload.text, "synthetic-owner-answer");
+              if (answerSource === "foreground") {
+                assert.equal(
+                  await context.approvePermission(
+                    {
+                      agentKind: "codex",
+                      message,
+                      sessionId: randomUUID(),
+                      options: [
+                        { optionId: "permit-once", name: "Allow once", kind: "allow_once" },
+                      ],
+                      toolCall: { toolCallId: "resume-tool", title: "Read synthetic contact" },
+                    },
+                    signal,
+                  ),
+                  "permit-once",
+                );
+              }
+              resumed();
+            }
+            return { status: "completed" };
+          },
+          async close() {},
+        }),
+      }),
+    );
+    const owner = await enrollDirect(gateway, f.central, recipient);
+    const sourceId = f.central.queueMessage(
+      recipient,
+      {
+        type: "action_call",
+        call_id: callId,
+        action_type: "get_phone_number",
+        payload: { reason: "test owner input" },
+      },
+      peer.email,
+    );
+    let question: { requestId: string; messageId: string } | undefined;
+    for (let attempt = 0; attempt < 200 && question === undefined; attempt++) {
+      question = f.central.pendingHumanInputRequest(recipient);
+      if (question === undefined) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(question?.messageId, sourceId);
+    assert.ok(question);
+    if (answerSource === "foreground") {
+      const answer = await owner.callTool("message_box", {
+        type: "answer_owner",
+        request_id: randomUUID(),
+        question_id: questionId,
+        call_id: callId,
+        text: "synthetic-owner-answer",
+      });
+      assert.equal(answer.status, "answered");
+      for (let attempt = 0; attempt < 200 && approvalSourceId === undefined; attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(approvalSourceId, sourceId);
+      for (let attempt = 0; attempt < 200 && approvalRequestId === undefined; attempt++)
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.ok(approvalRequestId);
+      const approval = await fetch(`${f.central.apiUrl}/api/human_input_response`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          token: f.central.humanInputResponseToken(approvalRequestId),
+          value: "permit-once",
+        }),
+      });
+      assert.equal(approval.status, 200);
+    } else {
+      const answer = await fetch(`${f.central.apiUrl}/api/human_input_response`, {
+        method: "POST",
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          token: f.central.humanInputResponseToken(question.requestId),
+          text: "synthetic-owner-answer",
+        }),
+      });
+      assert.equal(answer.status, 200);
+    }
+    await finished;
+    const status = await owner.callTool("message_box", {
+      type: "check_owner",
+      request_id: questionId,
+    });
+    assert.equal(status.status, "answered");
+    assert.equal((await owner.callTool("message_box", { type: "inbox" })).count, 1);
+  });
+}
+
+test("retains custody but never replays a dispatched action after restart", async (t) => {
   const value = await fixture(t);
   let firstDeliveries = 0;
   const blocking: DeliveryTarget = {
@@ -501,7 +799,9 @@ test("honestly loses a consumed pre-delivery body across restart", async (t) => 
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.equal(firstDeliveries, 1);
-  assert.equal(value.central.messageState(lostId), "delivered");
+  for (let attempt = 0; attempt < 100 && value.central.messageState(lostId) !== "acked"; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(value.central.messageState(lostId), "acked");
   await first.close();
 
   let secondDeliveries = 0;
@@ -519,5 +819,5 @@ test("honestly loses a consumed pre-delivery body across restart", async (t) => 
   );
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(secondDeliveries, 0);
-  assert.equal(value.central.messageState(lostId), "delivered");
+  assert.equal(value.central.messageState(lostId), "acked");
 });

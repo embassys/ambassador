@@ -1,6 +1,7 @@
 # 0055 Email-mediated ACP tool permission
 
-Status: accepted; receipt capture and buffering amended by ADR 0056
+Status: accepted; receipt capture and buffering amended by ADR 0056; option
+presentation and selection superseded by ADR 0057
 
 Date: 2026-09-04
 

@@ -45,8 +45,7 @@ and loads tools from normal Hermes configuration. It passes no extra MCP
 servers. The incoming message does not return to the registration chat.
 Ambassador does not disable built-in tools or request permission bypass. If
 Hermes asks to use a tool, Ambassador emails you at your registered address and keeps the
-request pending until the decision arrives through Embassys. An approval is
-passed to Hermes as **allow once** when available.
+request pending until the decision arrives through Embassys. Ambassador presents the provider's exact choices and returns your selected option unchanged.
 
 ## Inspect sessions
 
@@ -108,3 +107,8 @@ retrieving results, see [Request and answer an action](action-workflow.md).
 Provider compaction manages context; sessions with no unfinished work become
 eligible for cleanup after 30 idle days. `sessions show` labels a truncated
 recent preview when provider history is large.
+
+For the unpublished workflow candidate, configure the provider tool timeout
+above 640 seconds or use an explicit shorter wait. Requests and later checks
+use message_box, and results remain until receipt. See
+[Client delivery and qualification](client-delivery.md).

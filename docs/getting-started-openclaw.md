@@ -52,12 +52,13 @@ Later, you can ask:
 
 ## Direct delivery
 
-Ambassador launches `openclaw acp` for incoming messages. OpenClaw does not
+Ambassador launches `openclaw acp --no-prefix-cwd` for incoming messages, keeping
+the working-directory banner out of the conversation. OpenClaw does not
 receive extra MCP configuration through ACP, so keep the MCP entry above
 enabled. Direct messages from the same remote identity reuse a persistent session
 within your enrollment and working directory. The registration chat remains separate. Ambassador does not disable built-in tools or request
 permission bypass. If OpenClaw asks to use a tool, Ambassador emails you at your registered address and keeps the request pending until the decision arrives through
-Embassys. An approval is passed to OpenClaw as **allow once** when available.
+Embassys. Ambassador presents the provider's exact choices and returns your selected option unchanged.
 
 ## Inspect sessions
 
@@ -86,7 +87,9 @@ Embassys. An approval is passed to OpenClaw as **allow once** when available.
        token: "PASTE_AMBASSADOR_SECRET_HERE",
        path: "/hooks",
        allowedAgentIds: ["main"],
-       allowRequestSessionKey: false,
+       allowRequestSessionKey: true,
+       allowedSessionKeyPrefixes: ["hook:ambassador:"],
+       defaultSessionKey: "hook:ambassador:ingress",
      },
    }
    ```
@@ -104,6 +107,10 @@ Embassys. An approval is passed to OpenClaw as **allow once** when available.
 
 The registration tool sends only `delivery.url`, never the secret. OpenClaw
 keeps the secret in owner-only configuration. A remote receiver must use HTTPS.
+Ambassador supplies a stable session key per enrollment and requester, so later
+messages and owner replies reuse that requester's conversation. The fixed
+default key only satisfies OpenClaw's configuration policy; Ambassador never
+uses it to combine requesters. Existing isolated histories are not merged.
 For a clean local registration test, see
 [Reset local test state](development-reset.md).
 
@@ -115,3 +122,8 @@ retrieving results, see [Request and answer an action](action-workflow.md).
 Provider compaction manages context; sessions with no unfinished work become
 eligible for cleanup after 30 idle days. `sessions show` labels a truncated
 recent preview when provider history is large.
+
+For the unpublished workflow candidate, configure the provider tool timeout
+above 640 seconds or use an explicit shorter wait. Requests and later checks
+use message_box, and results remain until receipt. See
+[Client delivery and qualification](client-delivery.md).

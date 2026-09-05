@@ -1,6 +1,7 @@
 # 0053 Live session inspection
 
-Status: accepted; bounded recent-history preview amended by ADR 0056
+Status: accepted; bounded recent-history preview amended by ADR 0056 and
+private process control by ADR 0058
 
 Date: 2026-09-04
 

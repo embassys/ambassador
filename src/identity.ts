@@ -9,7 +9,9 @@ import type { CredentialStore } from "./credential-store.js";
 export type { CredentialStore } from "./credential-store.js";
 
 export class IdentityError extends Error {
-  constructor(readonly code: "already_enrolled" | "not_enrolled" | "verification_busy") {
+  constructor(
+    readonly code: "already_enrolled" | "not_enrolled" | "verification_busy" | "credential_expired",
+  ) {
     super(code);
     this.name = "IdentityError";
   }
@@ -35,7 +37,9 @@ export class GatewayIdentity {
     return new GatewayIdentity(
       store,
       nowSeconds,
-      stored === undefined ? undefined : parseCentralCredential(stored, nowSeconds),
+      stored === undefined
+        ? undefined
+        : parseCentralCredential(stored, nowSeconds, { allowExpired: true }),
     );
   }
 
@@ -43,11 +47,32 @@ export class GatewayIdentity {
     return this.#credential !== undefined;
   }
 
+  get enrollment(): Record<string, string | boolean> {
+    if (this.#credential === undefined) return { status: "not_enrolled" };
+    return {
+      status: "registered",
+      verified: true,
+      agent_id: this.#credential.token.subject,
+      email: this.#credential.token.email,
+      credential_status: this.expired ? "expired" : "active",
+    };
+  }
+
   credential(): LoadedCentralCredential {
+    const credential = this.localCredential();
+    if (this.expired) throw new IdentityError("credential_expired");
+    return credential;
+  }
+
+  get expired(): boolean {
+    return (
+      this.#credential !== undefined &&
+      this.#credential.token.expiresAt <= Math.floor(this.nowSeconds())
+    );
+  }
+
+  localCredential(): LoadedCentralCredential {
     if (this.#credential === undefined) throw new IdentityError("not_enrolled");
-    if (this.#credential.token.expiresAt <= Math.floor(this.nowSeconds())) {
-      throw new IdentityError("not_enrolled");
-    }
     return this.#credential;
   }
 

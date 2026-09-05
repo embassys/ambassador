@@ -189,7 +189,9 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       throw new Error("The credential key path is invalid");
     }
     this.#credentialScope = credentialScope;
-    this.#validatePlaintext = options.validatePlaintext ?? parseCentralCredential;
+    this.#validatePlaintext =
+      options.validatePlaintext ??
+      ((value) => parseCentralCredential(value, undefined, { allowExpired: true }));
     this.#platform = options.platform ?? process.platform;
     if (this.#platform === "win32") {
       this.#windowsAccessControl =

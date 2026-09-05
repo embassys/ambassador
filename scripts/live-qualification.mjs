@@ -56,6 +56,9 @@ const REAL_AGENT_WAIT_MS = 5 * 60_000;
 const RESTART_POLL_DRAIN_MS = 31_000;
 const execFileAsync = promisify(execFile);
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const runnerSourceSha256 = createHash("sha256")
+  .update(await readFile(fileURLToPath(import.meta.url)))
+  .digest("hex");
 
 function safeFailure(phase) {
   return Object.assign(new Error("live qualification failed"), { phase });
@@ -478,7 +481,11 @@ class QualificationMcpClient {
       headers,
       body: JSON.stringify(message),
       redirect: "manual",
-      signal: AbortSignal.timeout(35_000),
+      signal: AbortSignal.timeout(
+        message.method === "tools/call" && message.params?.name === "message_box"
+          ? 650_000
+          : 35_000,
+      ),
     });
     assert(response.status >= 200 && response.status < 300, "local_mcp");
     this.#sessionId = response.headers.get("mcp-session-id") ?? this.#sessionId;
@@ -659,6 +666,11 @@ async function runCodexConfiguration(home, arguments_) {
 }
 
 async function prepareCodexMcp(home, endpoint) {
+  if (home === (await realpath(process.env.HOME))) {
+    assert(endpoint === "http://127.0.0.1:8787/mcp", "codex_mcp_configuration");
+    await runCodexConfiguration(home, ["mcp", "get", "ambassador"]);
+    return;
+  }
   await runCodexConfiguration(home, ["mcp", "remove", "ambassador"]).catch(() => undefined);
   await runCodexConfiguration(home, ["mcp", "add", "ambassador", "--url", endpoint]);
   await runCodexConfiguration(home, ["mcp", "list"]);
@@ -736,7 +748,10 @@ async function validateHermesHome(configuredHome) {
     process.env.HOME === undefined
       ? undefined
       : await realpath(process.env.HOME).catch(() => undefined);
-  assert(home !== undefined && home !== ordinaryHome, "hermes_isolation");
+  assert(home !== undefined, "hermes_isolation");
+  // An explicitly selected ordinary home uses provider-owned authentication.
+  // Its MCP entry must already be prepared; this runner never rewrites it.
+  if (home === ordinaryHome) return home;
   const rootMetadata = await lstat(home).catch(() => undefined);
   assert(
     rootMetadata?.isDirectory() === true &&
@@ -777,6 +792,11 @@ async function runHermesConfiguration(home, arguments_, input) {
 }
 
 async function configureHermesMcp(home, endpoint) {
+  if (home === (await realpath(process.env.HOME))) {
+    assert(endpoint === "http://127.0.0.1:8787/mcp", "hermes_mcp_configuration");
+    await runHermesConfiguration(home, ["mcp", "list"], "");
+    return;
+  }
   await runHermesConfiguration(home, ["mcp", "remove", "ambassador"], "\n").catch(() => undefined);
   await runHermesConfiguration(
     home,
@@ -913,7 +933,8 @@ async function validateOpenClawHome(configuredHome) {
     process.env.HOME === undefined
       ? undefined
       : await realpath(process.env.HOME).catch(() => undefined);
-  assert(home !== undefined && home !== ordinaryHome, "openclaw_isolation");
+  assert(home !== undefined, "openclaw_isolation");
+  if (home === ordinaryHome) return home;
   const rootMetadata = await lstat(home).catch(() => undefined);
   assert(
     rootMetadata?.isDirectory() === true &&
@@ -1024,6 +1045,13 @@ async function assertOpenClawWebhookBearerFilter(url) {
 }
 
 async function startOpenClawGateway(home, workingDirectory, endpoint, requestedPort) {
+  if (home === (await realpath(process.env.HOME))) {
+    assert(endpoint === "http://127.0.0.1:8787/mcp", "openclaw_mcp_configuration");
+    await runOpenClawConfiguration(home, ["gateway", "status", "--json"]);
+    // The owner prepared this profile. ACP uses its existing gateway; the
+    // runner must not change authentication, workspace, or service lifecycle.
+    return { port: 0, async stop() {} };
+  }
   const port = requestedPort ?? (await availableLoopbackPort());
   await configureOpenClawMcp(home, endpoint);
   await configureOpenClawGateway(home, workingDirectory, port);
@@ -1198,7 +1226,15 @@ async function runQualificationCliCommandResult(
 
 async function runQualificationCliCommand(...args) {
   const { result, stdout, stderr } = await runQualificationCliCommandResult(...args);
-  assert(result === 0 && stderr === "", "cli_command");
+  const command = args[4];
+  const stage = Array.isArray(command)
+    ? command
+        .filter((word) =>
+          ["sessions", "list", "show", "--verbose", "clean", "webhook-secret"].includes(word),
+        )
+        .join("_")
+    : "unknown";
+  assert(result === 0 && stderr === "", `cli_command_${stage}`);
   return stdout;
 }
 
@@ -1328,6 +1364,8 @@ async function artifactScan(roots, captures, markers) {
     child.once("error", reject);
     child.once("exit", resolve);
   });
+  if (code !== 0 && /^[a-zA-Z0-9 .:_()\-\n]+$/u.test(stderr) && stderr.length <= 1024)
+    process.stderr.write(`artifact scan diagnostic: ${stderr}`);
   assert(
     code === 0 && stderr === "" && stdout.startsWith("artifact scan passed:"),
     "artifact_scan",
@@ -1494,10 +1532,13 @@ async function main() {
       process.env.HOME === undefined
         ? undefined
         : await realpath(process.env.HOME).catch(() => undefined);
-    assert(codexHome !== undefined && codexHome !== ordinaryHome, "codex_isolation");
-    const configuredAuthPath = join(codexHome, ".codex", "auth.json");
-    const codexAuthPath = await realpath(configuredAuthPath).catch(() => undefined);
-    assert(codexAuthPath === configuredAuthPath, "codex_isolation");
+    assert(codexHome !== undefined, "codex_isolation");
+    assert(!(realCodexClaude && codexHome === ordinaryHome), "codex_requester_isolation");
+    if (codexHome !== ordinaryHome) {
+      const configuredAuthPath = join(codexHome, ".codex", "auth.json");
+      const codexAuthPath = await realpath(configuredAuthPath).catch(() => undefined);
+      assert(codexAuthPath === configuredAuthPath, "codex_isolation");
+    }
     const codexVersionProbe = await observeAgentVersion("codex", {
       HOME: codexHome,
       ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
@@ -1515,12 +1556,16 @@ async function main() {
   const hermesHome = realHermes
     ? await validateHermesHome(process.env.AMBASSADOR_HERMES_QUALIFICATION_HOME)
     : undefined;
+  if (realHermesWebhook && hermesHome !== undefined)
+    assert(hermesHome !== (await realpath(process.env.HOME)), "hermes_webhook_isolation");
   if (realHermes && hermesHome !== undefined) {
     targetVersionProbe = await observeAgentVersion("hermes", hermesEnvironment(hermesHome));
   }
   const openClawHome = realOpenClaw
     ? await validateOpenClawHome(process.env.AMBASSADOR_OPENCLAW_QUALIFICATION_HOME)
     : undefined;
+  if (realOpenClawWebhook && openClawHome !== undefined)
+    assert(openClawHome !== (await realpath(process.env.HOME)), "openclaw_webhook_isolation");
   if (realOpenClaw && openClawHome !== undefined) {
     targetVersionProbe = await observeAgentVersion("openclaw", openClawEnvironment(openClawHome));
   }
@@ -1540,7 +1585,7 @@ async function main() {
   const syntheticPhone = "+447700900123";
   const actionReason =
     realTarget && !realClaude
-      ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador submit_action_result tool exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
+      ? `synthetic-live-qualification-${randomUUID()}; return the approved synthetic phone number ${syntheticPhone} by calling the configured Ambassador message_box tool with type submit_action_result and a new UUID request_id exactly once with the call_id from this action_call, status success, and result containing only phone_number, then finish without disclosing any values elsewhere`
       : `synthetic-live-qualification-${randomUUID()}`;
   const permissionScope = {
     qualification: `synthetic-live-qualification-${randomUUID()}`,
@@ -1564,11 +1609,17 @@ async function main() {
   const localCompletedByGateway = [new Set(), new Set()];
   const targetSubmittedCallIds = new Set();
   const humanInputByRequestId = new Map();
+  const providerChoicesByGateway = new Map();
   const internalOutcomeTriggerByMessageId = new Map();
   let targetPermissionDecisionObserved = false;
   let agentPermissionDecisionCount = 0;
   let targetActionResultCallCount = 0;
   let requesterActionCall;
+  const polledByGateway = [new Map(), new Map()];
+  const custodyCredentials = new Map();
+  const { NotificationStore } = await import(
+    pathToFileURL(join(dirname(cliPath), "notification-store.js")).href
+  );
   let requesterRejectedActionCalls = 0;
   let hermesWebhookPort;
   let openClawGatewayPort;
@@ -1615,13 +1666,31 @@ async function main() {
       }
     }
     if (acknowledgedMessageId !== undefined) {
-      const triggeringMessageId = internalOutcomeTriggerByMessageId.get(acknowledgedMessageId);
-      assert(
-        localCompletedByGateway[gatewayIndex].has(acknowledgedMessageId) ||
-          (triggeringMessageId !== undefined &&
-            localCompletedByGateway[gatewayIndex].has(triggeringMessageId)),
-        "ack_order",
+      let credential = custodyCredentials.get(gatewayIndex);
+      if (credential === undefined) {
+        const module = await import(
+          pathToFileURL(join(dirname(cliPath), "credential-store.js")).href
+        );
+        const parse = await import(
+          pathToFileURL(join(dirname(cliPath), "central-credential.js")).href
+        );
+        const saved = new module.EncryptedFileCredentialStore(
+          join(roots[gatewayIndex], "central-credential.json"),
+          join(roots[gatewayIndex], "central-credential.key"),
+          JSON.stringify({ centralOrigin: LIVE_ORIGIN }),
+        );
+        credential = parse.parseCentralCredential(await saved.load());
+        custodyCredentials.set(gatewayIndex, credential);
+      }
+      const custody = new NotificationStore(
+        join(roots[gatewayIndex], "notification-custody.sqlite"),
+        credential,
       );
+      try {
+        assert(custody.get(acknowledgedMessageId) !== undefined, "ack_after_durable_custody");
+      } finally {
+        custody.close();
+      }
     }
     const response = await fetch(input, init);
     if (
@@ -1636,6 +1705,12 @@ async function main() {
         .json()
         .catch(() => undefined);
       if (isRecord(result) && typeof result.request_id === "string") {
+        const providerChoices = providerChoicesByGateway.get(gatewayIndex);
+        assert(
+          providerChoices !== undefined &&
+            canonicalJson(requestBody.options) === canonicalJson(providerChoices.options),
+          "provider_permission_options",
+        );
         humanInputByRequestId.set(result.request_id, {
           gatewayIndex,
           triggeringMessageId: requestBody.message_id,
@@ -1649,6 +1724,8 @@ async function main() {
         .catch(() => undefined);
       if (isRecord(result) && Array.isArray(result.messages)) {
         for (const message of result.messages) {
+          if (isRecord(message) && typeof message.id === "string")
+            polledByGateway[gatewayIndex].set(message.id, message);
           if (
             !isRecord(message) ||
             typeof message.id !== "string" ||
@@ -1800,23 +1877,30 @@ async function main() {
     capturedMail.splice(capturedMail.indexOf(permissionMail.messageId), 1);
     return true;
   };
-  const applyHumanInputFromEmail = async (address, decisionPhase, completed) => {
+  const applyHumanInputFromEmail = async (
+    address,
+    decisionPhase,
+    completed,
+    waitMs = REAL_AGENT_WAIT_MS,
+  ) => {
     phase = decisionPhase;
     const humanInputMail = await findHumanInputResponse(
       credentials,
       address,
       receivedAfter,
       completed,
-      REAL_AGENT_WAIT_MS,
+      waitMs,
     );
     if (humanInputMail === undefined) return false;
     capturedMail.push(humanInputMail.messageId);
     const responseTarget = new URL("/api/human_input_response", LIVE_ORIGIN);
+    const providerChoices = providerChoicesByGateway.get(addresses.indexOf(address));
+    assert(providerChoices !== undefined, "provider_permission_options");
     centralRoutes.add("POST /api/human_input_response");
     const response = await fetch(responseTarget, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: humanInputMail.token, value: "allow_once" }),
+      body: JSON.stringify({ token: humanInputMail.token, value: providerChoices.selectedId }),
       credentials: "omit",
       redirect: "manual",
       signal: AbortSignal.timeout(15_000),
@@ -1926,7 +2010,7 @@ async function main() {
         "# Controlled Embassys qualification policy",
         "",
         "The user approved only the synthetic get_phone_number qualification in this directory.",
-        `For its action_call, call submit_action_result exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
+        `For its action_call, call message_box with type submit_action_result and a new UUID request_id exactly once with the supplied call_id, status success, and result {"phone_number":"${syntheticPhone}"}.`,
         "Do not grant, execute, or answer any other request.",
         "",
       ].join("\n");
@@ -1983,10 +2067,19 @@ async function main() {
         ...(process.env.TMPDIR === undefined ? {} : { TMPDIR: process.env.TMPDIR }),
       };
     };
-    const localMcpPortFor = (index) =>
-      realClaude && index === 1 && claudeQualification?.usesOrdinaryHome === true
-        ? CLAUDE_USER_MCP_PORT
-        : 0;
+    const ordinaryHome =
+      process.env.HOME === undefined ? undefined : await realpath(process.env.HOME);
+    const localMcpPortFor = (index) => {
+      if (
+        index === 1 &&
+        ((realClaude && claudeQualification?.usesOrdinaryHome === true) ||
+          (realCodex && codexHome === ordinaryHome) ||
+          (realHermes && hermesHome === ordinaryHome) ||
+          (realOpenClaw && openClawHome === ordinaryHome))
+      )
+        return CLAUDE_USER_MCP_PORT;
+      return 0;
+    };
     const deliveryTargetFactoryFor = (index) => {
       if ((index === 0 && !realCodexClaude) || realWebhook) return undefined;
       return ({ capability, profile, sessionStore, approvePermission }) => {
@@ -2015,7 +2108,21 @@ async function main() {
           workingDirectory: realDirect ? profile.working_directory : repositoryRoot,
           environment: realDirect ? environmentFor(index) : process.env,
           sessionStore,
-          approvePermission,
+          approvePermission: async (request, signal) => {
+            // The controlled human fixture chooses a one-time option offered by this provider.
+            const selected = request.options.find((option) => option.kind === "allow_once");
+            assert(selected !== undefined, "provider_permission_once_option");
+            providerChoicesByGateway.set(index, {
+              selectedId: selected.optionId,
+              options: request.options.map(({ name, optionId }) => ({
+                label: name,
+                value: optionId,
+              })),
+            });
+            const answer = await approvePermission(request, signal);
+            assert(answer === selected.optionId, "provider_permission_choice");
+            return answer;
+          },
         });
         return {
           async deliver(message, signal) {
@@ -2135,11 +2242,8 @@ async function main() {
             "verify_email",
             "resend_verification",
             "list_action_types",
-            "request_permission",
-            "get_inbox",
-            "call_action",
-            "submit_action_result",
             "get_my_permissions",
+            "message_box",
           ]),
         "bootstrap_catalog",
       );
@@ -2233,11 +2337,8 @@ async function main() {
             "verify_email",
             "resend_verification",
             "list_action_types",
-            "request_permission",
-            "get_inbox",
-            "call_action",
-            "submit_action_result",
             "get_my_permissions",
+            "message_box",
           ]),
         "restart_catalog",
       );
@@ -2328,20 +2429,23 @@ async function main() {
     );
 
     phase = "permission";
-    const requested = await gateways[0].client.call("request_permission", {
+    const requested = await gateways[0].client.call("message_box", {
+      type: "request_action",
+      request_id: randomUUID(),
+      wait_seconds: 0,
       target_email: addresses[1],
       action_type: "get_phone_number",
       decision_options: "once_always",
       reason: "Needed to complete the controlled live qualification.",
       scope: permissionScope,
-      action_payload: { reason: actionReason },
+      payload: { reason: actionReason },
     });
     assert(
       typeof requested.permission_id === "string" && requested.status === "pending",
       "permission",
     );
     phase = "permission_email_pending";
-    const targetInbox = await gateways[1].client.call("get_inbox", {});
+    const targetInbox = await gateways[1].client.call("message_box", { type: "inbox" });
     assert(targetInbox.count === 0 && Array.isArray(targetInbox.items), "permission_email_pending");
     const listing = await gateways[1].client.call("get_my_permissions", {});
     assert(Array.isArray(listing.permissions), "permission_email_pending");
@@ -2358,50 +2462,32 @@ async function main() {
     await applyPermissionDecisionFromEmail(addresses[1], "allow_once", "permission_email_decision");
     targetPermissionDecisionObserved = true;
 
-    if (realCodexClaude) {
-      const requesterAgentPermissionApplied = await applyHumanInputFromEmail(
-        addresses[0],
-        "requester_agent_permission_email_decision",
-        () =>
-          requesterDirectMessages.some(
-            (message) =>
-              isRecord(message.payload) &&
-              message.payload.permission_id === requested.permission_id,
-          ),
-      );
-      if (requesterAgentPermissionApplied) agentPermissionDecisionCount += 1;
-    }
-
-    phase = realCodexClaude ? "permission_response_codex" : "permission_response_webhook";
-    const responseMessage = realCodexClaude
-      ? await waitForDelivered(
-          requesterDirectMessages,
-          (message) =>
-            isRecord(message) &&
-            isRecord(message.payload) &&
-            message.payload.permission_id === requested.permission_id,
-          "permission_response_codex_timeout",
-          REAL_AGENT_WAIT_MS,
-        )
-      : await webhooks[0].wait("permission_response_webhook_timeout");
+    phase = "permission_response_message_box";
+    const permissionUpdate = await gateways[0].client.call("message_box", {
+      type: "check",
+      request_id: requested.request_id,
+      wait_seconds: 90,
+    });
+    assert(
+      Array.isArray(permissionUpdate.events) &&
+        permissionUpdate.events.some(
+          (event) => event.type === "permission_status" && event.data.status === "granted",
+        ),
+      "permission_response",
+    );
+    const responseMessage = [...polledByGateway[0].values()].find(
+      (message) => message.payload?.permission_id === requested.permission_id,
+    );
     assert(
       isRecord(responseMessage) &&
-        typeof responseMessage.id === "string" &&
-        isRecord(responseMessage.payload) &&
-        responseMessage.payload.type === "permission_outcome" &&
-        responseMessage.payload.permission_id === requested.permission_id &&
         responseMessage.payload.decision === "allow_once" &&
-        responseMessage.payload.status === "granted" &&
-        responseMessage.payload.granted === true &&
         responseMessage.payload.single_use === true,
       "permission_response",
     );
-    if (realCodexClaude) {
-      await waitForObservation(
-        () => acknowledgedByGateway[0].has(responseMessage.id),
-        "permission_response_ack_timeout",
-      );
-    }
+    await waitForObservation(
+      () => acknowledgedByGateway[0].has(responseMessage.id),
+      "permission_response_ack_timeout",
+    );
 
     phase = "action";
     await waitForObservation(
@@ -2421,12 +2507,21 @@ async function main() {
     );
     phase = `action_${realWebhook ? "webhook" : "direct"}`;
     if (!realWebhook) {
-      const targetAgentPermissionApplied = await applyHumanInputFromEmail(
-        addresses[1],
-        "target_agent_permission_email_decision",
-        () => localCompletedByGateway[1].has(called.message_id),
-      );
-      if (targetAgentPermissionApplied) agentPermissionDecisionCount += 1;
+      // Providers can request another tool approval after submitting a result
+      // (for example, to verify the inbox). Complete the whole controlled turn.
+      const approvalDeadline = Date.now() + REAL_AGENT_WAIT_MS;
+      while (!localCompletedByGateway[1].has(called.message_id)) {
+        assert(agentPermissionDecisionCount < 10, "provider_permission_limit");
+        const remaining = approvalDeadline - Date.now();
+        assert(remaining > 0, "target_provider_completion_timeout");
+        const applied = await applyHumanInputFromEmail(
+          addresses[1],
+          "target_agent_permission_email_decision",
+          () => localCompletedByGateway[1].has(called.message_id),
+          remaining,
+        );
+        if (applied) agentPermissionDecisionCount += 1;
+      }
     }
     if (realTarget) {
       await waitForObservation(
@@ -2451,41 +2546,47 @@ async function main() {
         "action_direct_timeout",
       );
       assert(isRecord(actionMessage) && typeof actionMessage.id === "string", "action_poll");
-      await gateways[1].client.call("submit_action_result", {
+      await gateways[1].client.call("message_box", {
+        type: "submit_action_result",
+        request_id: randomUUID(),
         call_id: called.call_id,
         result: { phone_number: syntheticPhone },
         status: "success",
       });
     }
 
-    phase = realCodexClaude ? "action_response_codex" : "action_response_webhook";
-    const actionResponse = realCodexClaude
-      ? await waitForDelivered(
-          requesterDirectMessages,
-          (message) =>
-            isRecord(message) &&
-            isRecord(message.payload) &&
-            message.payload.type === "action_response" &&
-            message.payload.call_id === called.call_id,
-          "action_response_codex_timeout",
-          REAL_AGENT_WAIT_MS,
-        )
-      : await webhooks[0].wait("action_response_webhook_timeout");
+    phase = "action_response_message_box";
+    const resultUpdate = await gateways[0].client.call("message_box", {
+      type: "check",
+      request_id: requested.request_id,
+      cursor: permissionUpdate.cursor,
+      wait_seconds: 90,
+    });
+    const returnedResult = resultUpdate.events?.find((event) => event.type === "action_result");
     assert(
-      isRecord(actionResponse) &&
-        typeof actionResponse.id === "string" &&
-        isRecord(actionResponse.payload) &&
-        actionResponse.payload.type === "action_response" &&
-        actionResponse.payload.call_id === called.call_id &&
-        actionResponse.payload.action_type === "get_phone_number" &&
-        actionResponse.payload.status === "success" &&
-        canonicalJson(actionResponse.payload.result) ===
+      isRecord(returnedResult) &&
+        returnedResult.data.call_id === called.call_id &&
+        canonicalJson(returnedResult.data.result) ===
           canonicalJson({ phone_number: syntheticPhone }),
       "action_response",
     );
+    const actionResponse = [...polledByGateway[0].values()].find(
+      (message) =>
+        message.payload?.type === "action_response" && message.payload.call_id === called.call_id,
+    );
+    assert(isRecord(actionResponse), "action_response");
     await waitForObservation(
       () => acknowledgedByGateway[0].has(actionResponse.id),
       "action_response_ack_timeout",
+    );
+    await gateways[0].client.call("message_box", {
+      type: "acknowledge",
+      request_id: requested.request_id,
+      cursor: resultUpdate.cursor,
+    });
+    assert(
+      (await gateways[0].client.call("message_box", { type: "inbox" })).count === 0,
+      "result_receipt",
     );
     if (realWebhook) {
       assert(
@@ -2501,7 +2602,28 @@ async function main() {
     phase = "running_session_reads";
     const sessionsByIndex = new Map();
     if (realDirect) {
-      const directIndexes = realCodexClaude ? [0, 1] : [1];
+      // A result submission and a central acknowledgement can both precede the
+      // provider finishing its turn. Inspect history only after delivery settles.
+      const credential = custodyCredentials.get(1);
+      assert(credential !== undefined, "target_custody_credential");
+      const custody = new NotificationStore(
+        join(roots[1], "notification-custody.sqlite"),
+        credential,
+      );
+      try {
+        await waitForObservation(
+          () => {
+            const state = custody.get(called.message_id)?.delivery;
+            assert(state !== "uncertain", "target_provider_delivery_uncertain");
+            return state === "completed";
+          },
+          "target_provider_completion_timeout",
+          REAL_AGENT_WAIT_MS,
+        );
+      } finally {
+        custody.close();
+      }
+      const directIndexes = [1];
       for (const index of directIndexes) {
         const endpoint = gateways[index].client.endpoint;
         const sessions = listedSessions(
@@ -2535,13 +2657,6 @@ async function main() {
         assert(verboseHistory.includes("sessionUpdate"), "session_show_verbose");
       }
     }
-    if (realCodexClaude) {
-      const sessions = sessionsByIndex.get(0);
-      assert(
-        sessions?.length === 1 && sessions[0].status === "active",
-        "requester_peer_session_reused",
-      );
-    }
 
     phase = "artifact_scan";
     const secondStore = new credentialStoreModule.EncryptedFileCredentialStore(
@@ -2572,17 +2687,27 @@ async function main() {
       { name: "webhook-secret-b", value: webhookSecrets[1] },
       ...dpop.proofMarkers.map((value, index) => ({ name: `dpop-proof-${index + 1}`, value })),
     ];
+    phase = "gateway_stop_before_artifact_scan";
+    for (const gateway of gateways) await gateway.stop();
     await artifactScan(
       roots,
       gateways.flatMap((gateway, index) => [
         { name: `ambassador-${index + 1}-stdout`, value: gateway.stdout(), truncated: false },
         { name: `ambassador-${index + 1}-stderr`, value: gateway.stderr(), truncated: false },
       ]),
-      markers,
+      markers.filter(
+        (marker) =>
+          ![
+            "identity-a-email",
+            "identity-b-email",
+            "action-payload",
+            "action-result",
+            "mailosaur-domain",
+            "mailosaur-server",
+          ].includes(marker.name),
+      ),
     );
-
-    phase = "gateway_stop_before_cli";
-    for (const gateway of gateways.splice(0)) await gateway.stop();
+    gateways.splice(0);
 
     phase = "webhook_secret_command";
     const firstWebhookSecret = await runQualificationCliCommand(
@@ -2609,7 +2734,7 @@ async function main() {
     if (realDirect) {
       phase = "session_commands";
       const deleteIndex = 1;
-      const forgetIndex = realCodexClaude ? 0 : 1;
+      const forgetIndex = 1;
       const deleteSessions = sessionsByIndex.get(deleteIndex);
       const forgetSessions = sessionsByIndex.get(forgetIndex);
       assert(
@@ -2742,12 +2867,10 @@ async function main() {
       deployment_revision: "not_exposed",
       live_origin: LIVE_ORIGIN,
       package_sha256: createHash("sha256").update(tarball).digest("hex"),
-      qualification_runner_sha256: createHash("sha256")
-        .update(await readFile(fileURLToPath(import.meta.url)))
-        .digest("hex"),
+      qualification_runner_sha256: runnerSourceSha256,
       target_agent: targetAgent,
       target_version_probe: targetVersionProbe,
-      requester_agent: realCodexClaude ? "codex-acp" : "controlled-webhook",
+      requester_agent: "foreground-message-box",
       requester_version_probe: requesterVersionProbe,
       target_delivery_mode: realWebhook ? "webhook" : "direct",
       results: {
@@ -2760,16 +2883,17 @@ async function main() {
         permission_email_decision: "passed",
         agent_permission_email_decisions: agentPermissionDecisionCount,
         permission_pending_state: permissionPendingState,
-        webhook_delivery_ack: realCodexClaude ? "not_applicable" : "passed",
-        codex_response_delivery: realCodexClaude ? "passed" : "not_applicable",
+        webhook_delivery_ack: "not_exercised_for_owned_operations",
+        foreground_result_delivery: "passed",
+        codex_response_delivery: "not_exercised_for_owned_operations",
         target_delivery_ack: "passed",
-        acknowledgement_order: "passed",
+        acknowledgement_after_durable_custody: "passed",
         action_result_round_trip: "passed",
         verbose_start: "passed",
         session_commands: sessionCommands,
         provider_session_deletion: providerSessionDeletion,
         running_session_reads: realDirect ? "passed" : "not_applicable",
-        requester_peer_session_reused: realCodexClaude ? "passed" : "not_applicable",
+        requester_peer_session_reused: "not_applicable_to_foreground_operations",
         webhook_secret_command: "passed",
         clean_command: "passed",
         codex_action_result_mcp_call: realCodex ? "passed" : "not_applicable",
@@ -2806,7 +2930,7 @@ async function main() {
       dpop_nonce_observed: dpop.nonceObserved,
       observed_rest_routes: [...centralRoutes].sort(),
       restart_limitation:
-        "A message consumed by central polling is lost if Ambassador exits before acknowledgement; no lease or redelivery exists.",
+        "A message consumed by central polling can be lost before Ambassador captures it locally; no lease or redelivery exists.",
       result_submission_limitation:
         "A result submission has no idempotency key or outcome lookup and is not retried after an uncertain response.",
     };

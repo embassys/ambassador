@@ -94,6 +94,21 @@ test("round trips one central credential across store instances", async (t) => {
   assert.ok((await restarted.load()) === CENTRAL_JWT);
 });
 
+test("opens an encrypted expired identity without replacing its key or token", async (t) => {
+  const item = await fixture(t);
+  const expired = currentCredential(
+    "expired@fixture.test",
+    "agent.expired",
+    Math.floor(Date.now() / 1_000) - 31 * 24 * 60 * 60,
+  );
+  const store = credentialStore(item.path, item.keyPath);
+  await store.save(expired);
+  const before = await readFile(item.path);
+  const restarted = credentialStore(item.path, item.keyPath);
+  assert.equal(await restarted.load(), expired);
+  assert.deepEqual(await readFile(item.path), before);
+});
+
 test("writes only the strict cryptographic envelope and no plaintext", async (t) => {
   const item = await fixture(t);
   await credentialStore(item.path, item.keyPath).save(CENTRAL_JWT);

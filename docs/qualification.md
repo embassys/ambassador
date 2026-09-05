@@ -3,6 +3,519 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## OpenClaw persistent webhook qualification
+
+On 2026-09-05, OpenClaw 2026.8.2 accepted three controlled permission-status
+notifications through its real agent hook. Two messages from one requester,
+delivered through newly constructed targets, both used provider session
+`a5b72812-008f-4858-a91f-5dd6dcb44193`. Another requester used
+`34f15d20-e298-499b-8932-51c1ea4031fd`. Gateway history contained the exact
+message IDs. Each run reached `status: done` with `hasActiveRun: false`.
+These were status-only notifications and OpenClaw correctly suppressed its
+`NO_REPLY` output. They did not require a visible assistant answer.
+
+This qualifies ADR 0063's persistent webhook routing. It does not qualify the
+separate native extension's return to an initiating desktop conversation.
+The test temporarily enabled request session keys under the restricted
+`hook:ambassador:` prefix, then restored the owner's hook settings through
+OpenClaw's configuration API. A first test attempt incorrectly waited for a
+visible answer; its failure and the corrected completion check are preserved.
+Evidence is in `.build/production-review/openclaw-webhook-peers-final/`.
+The full local check passes 339 tests with seven expected skips.
+
+## OpenClaw message presentation and requester conversations
+
+On 2026-09-05, the user requested removal of the working-directory banner,
+readable JSON and confirmation that messages from one requester share a
+conversation. The fixed direct command now uses OpenClaw's documented
+`--no-prefix-cwd` option. Each prompt retains a short trust boundary and a
+message-specific cue, followed by the complete JSON in an indented code block.
+The canonical working directory and enrollment-scoped peer binding are unchanged.
+
+A real OpenClaw ACP check delivered two synthetic permission-status messages
+from `qualification.requester-a`, closing and reopening both the delivery target
+and SQLite store between them. Both used session
+`18d61c77-b8b5-48af-8664-b27353877e93`. A different requester received session
+`642d83b1-f6c7-4c50-a01f-ddaff2d892b5`. ACP history and the gateway's actual
+`chat.history` confirmed both first-requester messages, complete formatted JSON
+and no working-directory banner. The Mac app visibly rendered the new format.
+These were status-only notifications; no central requests, calendar changes,
+provider configuration changes or approvals were needed.
+
+The earlier busy-calendar retest also used one session,
+`f2410cfd-a0e1-46f4-8a1a-313deea473e0`, for availability, booking and both owner
+replies. Separate qualification runs deliberately used fresh enrollment scopes
+and working directories, creating separate conversations. Existing histories
+are not merged. These observations cover direct ACP delivery. The later
+webhook qualification above replaces the previous isolated hook contract.
+
+Regression coverage now verifies same-requester reuse across store restart,
+owner replies and later actions; separate requesters and enrollments; full JSON
+round trips; and embedded newlines or code fences remaining JSON data. The full
+check passes 337 tests with seven expected skips, and the production build
+passes. Evidence and the desktop screenshot are under
+`.build/production-review/openclaw-readable-peer/`.
+
+## Claude desktop enrollment and busy-calendar follow-up
+
+The user authorized Mac Calendar for the follow-up on 2026-09-05. The controlled
+central fixture enrolled `claude-desktop@fixture.test` and `alex@fixture.test`;
+the receiving agent was real OpenClaw ACP using its normal provider tools.
+The test calendar was the local On My Mac calendar named `Calendar`, with the
+owned event `Alex busy - Ambassador test` on 8 September from 14:00 to 16:00
+Europe/London. No calendar MCP fixture was configured for these runs.
+
+The first fresh conversation after ADR 0062 used the original natural meeting
+request without a registration reminder. Claude read the catalog and current
+permissions, recognized the existing enrollment, and requested free/busy data
+before booking. Its initial `request_action` omitted `wait_seconds`, using the
+600-second default. This passed the enrollment observation.
+
+The meeting itself failed. OpenClaw asked its owner for a one-time free/busy
+approval. The test operator selected its exact `allow_once` value through the
+normal owner-answer tool. OpenClaw resumed and submitted a successful result
+containing only `{"decision":"allow_once"}`, without reading Calendar. Claude
+noticed the missing availability but offered unverified 14:00, 14:30 and 15:30
+slots. The operator stopped the conversation before any create request.
+One action and one permission grant were observed; no calendar write occurred.
+The observation is a provider/workflow failure, not a deployed-central incident.
+
+The failed conversation is `local_c4ac87af-bef0-4574-9681-62283299a1e6`.
+Evidence, runtime digests and its screenshot are under
+`.build/production-review/claude-openclaw-meeting-busy/`.
+
+The follow-up fix keeps per-message prompts short and moves shared workflow
+instructions to MCP initialization. It explicitly separates owner approval from
+execution and actual result data, and requires scheduling to check availability
+before offering a slot. Regressions cover the retained cues, complete untrusted
+payloads, unknown message types and enrollment context. The full check passes
+335 tests with seven expected skips; the build passes. These prompt regressions
+do not prove model compliance or validate arbitrary result shapes. API
+[issue 6](https://github.com/embassys/agent2agent/issues/6) requests result schemas;
+no API code changed.
+
+The next fresh conversation, `local_637aadd3-7f14-4246-9c9a-299ba9f648aa`,
+used the same initial prompt. OpenClaw read the authorized Mac Calendar and
+returned the actual 14:00–16:00 busy interval. Claude identified that there was
+no overlap and offered alternatives. The only scheduling answer was ordinary
+wording: "4–4:30 works for me. Please book it."
+
+OpenClaw created `Catch-up` on 8 September from 16:00 to 16:30 in the local
+`Calendar`, with the description `30-minute catch-up`. Mac Calendar refused
+attendee setup because Contacts had no personal card. OpenClaw saved an owner
+question and resumed after the operator selected its exact
+`keep_without_invite` option. It returned `created: true`, empty attendees and
+`attendee_invitation_sent: false`. Independent Calendar inspection confirmed
+the event, time, description and absent invitees. This proves a local booking,
+not a delivered invitation or a complete meeting on both calendars.
+
+Claude used explicit 60-second waits, then created its own five-minute check-in
+after the booking remained pending. The ordinary follow-up "Has it been booked?
+Please also cancel that check-in." retrieved the saved result and cancelled
+the provider loop; the UI showed `Stopped loop`. The result was acknowledged
+without resubmitting the action. The run recorded two central-accepted actions,
+two permission grants and two result submissions. The final response reported
+the local booking and invitation limitation. Screenshots, full accessibility
+text, tool logs, runtime digests and assertions are in
+`.build/production-review/claude-openclaw-meeting-busy-retest/`.
+
+This run exposed two remaining guidance gaps. The outgoing booking omitted the
+requester's attendee address, and Claude scheduled a check-in without being
+asked. The final candidate explicitly includes the verified requester email
+when asking a peer to create a meeting involving the requester, while preserving
+any user-supplied override. It also tells the client not to schedule background
+checks unless the user asks. These are model instructions, not server-enforced
+result or scheduling guarantees. No Calendar or Contacts account setup was
+changed to get past the invitation limitation.
+
+The final attendee/refusal check used the natural prompt "Can you arrange a
+30-minute catch-up with alex@fixture.test next Tuesday at 4:30pm London time?
+Please coordinate with his agent." In fresh conversation
+`local_6f556e5b-f0eb-4771-bd34-fd7bf7c97f02`, Claude submitted the correct
+registered requester email as the attendee without asking for registration.
+The fixture deliberately denied the create permission. No action was
+dispatched, no provider prompt ran and no second event was created. Claude
+reported the refusal, but incorrectly suggested that the caller could approve
+it. The remote owner's decision is required. It also requested creation for
+the explicit time without a preceding availability call. These observations
+remain qualification gaps; the check qualifies attendee selection and refusal
+enforcement only. Artifacts are under
+`.build/production-review/claude-openclaw-meeting-attendee/`.
+
+All controlled gateways stopped and temporary OpenClaw MCP entries were
+restored. The two owned Calendar events were removed after saving evidence;
+the final Calendar inspection was empty again for that day. The provider
+check-in was cancelled before teardown. The final candidate passes all 335
+default-suite tests with seven expected skips and a production build.
+
+## Claude desktop meeting coordination
+
+Two fresh Claude desktop Code conversations with Sonnet 5 and MCP client
+2.1.260 used the same prompt on 2026-09-05:
+
+> Can you arrange a 30-minute catch-up with alex@fixture.test next Tuesday
+> afternoon? I'm free between 2 and 4 London time. Please coordinate with his
+> agent.
+
+Both callers were already enrolled. The target was real OpenClaw ACP 2026.8.2
+using its configured Codex backend 0.153.1. Central and the intended calendar
+were local fixtures. The calendar contained busy intervals at 14:00–15:00 and
+15:30–16:00 Europe/London on 2026-09-08, leaving 15:00–15:30 as the shared slot.
+Its two MCP tools read availability and store test events without sending email.
+A preflight verified the busy intervals and rejected a conflicting write.
+
+Neither run qualifies meeting coordination. In the first, Claude interpreted
+`permissions: []` as an unenrolled identity, despite the authenticated request
+succeeding. The human corrected the registration email in ordinary language.
+Claude nevertheless used the desktop account's email in the attendee list and
+submitted `create_calendar_event` for 14:00 without reading availability. The
+target asked its owner to approve that exact booking without first consulting
+the calendar. The test owner declined; the target returned `owner_denied` with
+no event or invitations created. A subsequent ordinary request to check
+availability and correct the invitation address encountered the fixture catalog
+bug described below. Claude tried several payload variants before stopping at
+the human's request. No event was stored.
+
+The fixture incorrectly appended a second action type when `get_human_input`
+used a known action name. Its empty schema then invalidated subsequent catalog
+reads. Current central revision
+`708f205bfaee5010eb86fcfae55967fb5d02071c` resolves an existing name first in
+`main.py`'s human-input operation. A failing regression reproduced the mismatch;
+the fixture now uses the same lookup. Repeated phone, booking and availability
+owner questions preserve the catalog. The full check passes 331 tests with
+seven expected skips. No production runtime or API code changed.
+
+The repeat used the corrected fixture and the same initial prompt. Claude asked
+about the `.test` contact and again assumed registration was required. The human
+confirmed the test contact, supplied the enrolled invitation email and asked
+for a time both parties were free. Claude then requested availability first,
+using a 60-second wait and a three-hour search range that contained the stated
+two-hour window. Permissions and action transport completed normally.
+
+The receiving OpenClaw agent consulted the Mac's native Calendar through its
+normal provider tools, rather than the supplied `meeting_calendar` MCP fixture.
+It returned `busy: []` and claimed the window was free. The fixture received no
+calendar calls, so this is not valid availability evidence. The test setup did
+not establish that the provider saw and selected the intended calendar. The
+run was stopped after this was noticed. Claude had received the result and
+submitted a booking request with the corrected attendee address; its target
+turn was cancelled before any calendar-write tool call was observed. No booking
+result was returned and the fixture stored no event. Claude's later connection
+errors were caused by this deliberate shutdown, not an unexplained service
+failure. The desktop conversation was then explicitly stopped.
+
+Evidence and screenshots are under
+`.build/production-review/claude-openclaw-meeting/` and
+`.build/production-review/claude-openclaw-meeting-repeat/`. Both directories
+record runtime digests, tool calls and calendar state. The first conversation
+is `local_50627d90-be64-46ef-bc95-f135fa9f231a`; the repeat is
+`local_2c01efe3-5dda-4396-9f2d-29bbabf6c57a`. Both owned fixtures stopped and their
+temporary OpenClaw MCP entries were removed. These are failed qualification
+runs with useful findings, not a successful scheduling demonstration. Before
+repeating, qualify the target calendar binding and keep fixture work from
+falling through to unrelated provider calendars.
+
+## User-operated Codex desktop registration and phone request
+
+On 2026-09-05, the user operated a fresh Codex desktop conversation against
+the candidate's local MCP endpoint. The recorded MCP client was
+`codex-mcp-client` 0.153.1. Computer control refuses access to this desktop app,
+so the user supplied the conversation transcript; no independently captured UI
+screenshot or model identity is claimed.
+
+The actual first prompt was "Register me with Embassys using
+codex-desktop@fixture.test". Codex asked for a website address. After the user
+said "it's a tool you have access to", Codex called `register_agent`, asked for
+the fixture verification code and completed `verify_email`. The existing tool
+description already names Embassys and explicitly says not to ask for a website
+URL. No registration call reached Ambassador before the hint. This records a
+discovery or tool-selection failure; the gateway log cannot establish what
+metadata the model saw on that first turn.
+
+The user then asked "get the phone number of openclaw-contact@fixture.test from
+his agent." Codex selected `get_phone_number` and supplied the payload reason
+"The user requested your phone number from your agent." It did not ask the user
+for another reason. That is a neutral description of the request, not a more
+specific purpose. The separate permission request omitted its optional reason.
+It returned pending at 17:41:41 UTC; the controlled fixture granted it five
+seconds later, and Ambassador dispatched the action at 17:41:47 UTC.
+
+Real OpenClaw ACP 2026.8.2 asked its owner for the missing number. The fixture
+answered through `answer_owner`; OpenClaw resumed the same peer session and
+returned exactly `+447700900627`. The user's transcript shows the number in
+the initiating Codex chat. Logs show one permission grant, one accepted action,
+one result, final acknowledgement and two completed OpenClaw turns. Codex chose
+50-second budgets for both its request and follow-up check despite a configured
+660-second client timeout. This does not qualify a full ten-minute desktop wait.
+
+Two logged errors need distinct attribution. The requester's `not_enrolled`
+error came from the read-only test setup check before the user's conversation.
+OpenClaw encountered `central_response_invalid` when a later catalog read
+contained two entries named `get_phone_number`; the fixture's human-input path
+had appended the second entry. OpenClaw still completed the pending call. The
+subsequent meeting test traced this to the fixture. Central revision
+`708f205bfaee5010eb86fcfae55967fb5d02071c` reuses an existing action type for a
+human-input request. The fixture now does the same, with a regression covering
+repeated questions for phone, booking and availability actions. No API or
+production catalog code changed.
+
+Both providers were real; central, permission approval, the owner answer and
+phone number were controlled test data. Evidence, runtime digests and the
+user-observed transcript are under
+`.build/production-review/codex-openclaw-registration/`. Request UUID is
+`8b66e147-94a2-4acf-a9cf-163e588c3510`. The initial prompt in `observations.json`
+was the proposed combined prompt, not the user's actual split prompts, which
+are recorded separately. Test processes stopped and both temporary provider
+MCP entries were removed; the original OpenClaw gateway remained healthy.
+
+## Claude desktop with an ordinary short request
+
+On 2026-09-05, a fresh Claude desktop Code conversation with Sonnet 5 and
+client version 2.1.260 received only this initial prompt:
+
+> Can you get the phone number of openclaw-contact@fixture.test from his agent?
+
+The caller was enrolled with no existing grants. Claude discovered the action
+catalog and read its permissions successfully, then asked for a reason and
+whether the caller was registered. The reason is required by the action schema.
+The registration question was unnecessary after a successful authenticated
+permissions read. The only human answers were "To contact him." and "Yes, I'm
+already registered." No tool names, request IDs, wait instructions or receipt
+instructions were supplied in the conversation.
+
+Claude generated its own request UUID, selected `get_phone_number`, submitted
+the exact reason and used the default 600-second initial wait. After the
+permission grant, it acknowledged progress and checked the same request with
+an explicit `wait_seconds: 60`. This shorter model-selected follow-up is a UX
+finding; the ten-minute default does not guarantee that an agent will retain it.
+
+Real OpenClaw ACP 2026.8.2, using its configured Codex backend 0.153.1, asked
+its owner for the number. The controlled owner supplied "My phone number is
++447700900583. You can share it." through `answer_owner`. OpenClaw resumed the
+same peer session and submitted that exact number. Claude displayed it in the
+initiating desktop conversation and acknowledged the final result. The record
+contains one accepted action, one result, two completed OpenClaw turns and no
+observed tool errors. The fixture granted permission after five seconds.
+
+Both model agents were real. Central and the owner answer were controlled
+fixtures, and the number was synthetic. This is one observed short-prompt run,
+not deployed-central evidence or a full ten-minute desktop timeout test. No
+production code or MCP instructions changed for this run. The test processes
+stopped, both fixture ports were released, the temporary OpenClaw MCP entry was
+removed and the existing gateway remained healthy.
+
+The screenshots, UI transcripts, observations and runtime digests are under
+`.build/production-review/claude-openclaw-natural/`. Request UUID is
+`908fe53e-b8e5-4872-8bea-22fd592e634d`. The final screenshot SHA-256 is
+`97c4ec1a857c376aa7786d11c3f2d35d07dd855f646ba2a07d94a281a6554305`.
+The initial clarification screenshot SHA-256 is
+`a29ef7a262a7e289e0f31c04110d42ae9924d217038f135c001a34f3dbeac44d`.
+
+## Claude desktop to real OpenClaw follow-up
+
+On 2026-09-05, Claude desktop Code mode with Sonnet 5 and client version
+2.1.260 requested a synthetic contact from real OpenClaw ACP 2026.8.2 using its
+configured Codex backend. This run used the local central fixture. Both model
+agents were real; it is not another deployed-central qualification.
+
+The first attempt exposed a foreground owner-answer bug: `answer_owner` saved
+the answer but did not schedule the pending provider continuation. A failing
+end-to-end regression reproduced the stall. The fix durably queues that local
+continuation, wakes delivery, repairs an interrupted handoff after restart and
+keeps local delivery IDs out of central acknowledgement. Provider approvals
+during that continuation refer to the original central action notification.
+Regressions also cover duplicate answers, a later question, completed calls and
+uncertain delivery. The current full check passes 330 tests with zero failures
+and seven expected platform/opt-in skips; the production build passes.
+
+The repeat completed one action and one result. OpenClaw asked its owner for
+the contact, received the exact synthetic record through `answer_owner`, resumed
+the same peer session and submitted the result. Claude displayed all three
+returned fields and acknowledged the original request in the initiating desktop
+conversation. OpenClaw initially used a fresh UUID for its own submission
+receipt; Ambassador rejected it with `operation_not_found`, and OpenClaw corrected
+the receipt without resubmitting the action. Both provider turns completed.
+
+The screenshot and observations are retained under
+`.build/production-review/claude-openclaw-desktop/`. Request UUID is
+`abb87222-9766-4160-9798-090bd3e1ed0c`. The screenshot SHA-256 is
+`6c39164436d89dd12cf6ef7fa442adb8ef93de9cdd3920c076a4b963f83886cf`.
+This real run did not request ACP tool approval; the additional original-message
+approval correlation fix has deterministic coverage. It does not qualify a full
+ten-minute desktop timeout or OpenClaw native desktop injection.
+
+## ADR 0061 durable workflow candidate
+
+The earlier unpublished candidate was tested on macOS arm64 with Node 26.7.0 and pnpm
+11.22.0 on 2026-09-05. These runs do not qualify the minimum supported Node
+version or Windows. `pnpm check` passes 325 tests with no failures and seven
+expected skips: four Windows access-control cases and three opt-in lanes. Both
+clean-installed package lanes and the ten-minute lane passed separately. The
+locked linux/amd64 Docker REST fixture passed its six Python tests.
+
+The actual SDK/Streamable HTTP request waited 600.011 seconds, then returned a
+continuation for the same saved action. A subsequent check did not resubmit it.
+This timed test used a controlled central fixture, not a desktop model client.
+
+A clean-installed candidate with SHA-256
+`5b51c757bf8904cf7bc47e79bd08386cfc25df5f5dae2558c13d2062db10d79e`
+passed the controlled live REST workflow against `https://mcp.embassys.ai`.
+Registration, verification, encrypted restart, DPoP positive and negative cases,
+exact email permission and ACP option values, one action/result exchange,
+foreground result receipt, custody-before-ack ordering, log credential scanning,
+mail cleanup and local cleanup passed. The target ACP agent was a fixture.
+Reviewed central revision was
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its revision.
+Runner SHA-256 was
+`9a73ec4e42121c865d0d8022173e07eda59020c17731e27b07f48137642bb359`.
+
+The final fallback candidate
+`2ffc568dd1551202b22ecd1def1cf60c3e6ef6489ee5a11e40f279157f2cb9ba`
+then passed the complete real Claude ACP workflow against the deployed service.
+Two exact provider approvals were answered through the disposable email flow.
+One action result, foreground presentation/receipt, running session reads,
+provider-session deletion, clean, artifact scanning and mail cleanup passed.
+The executed runner's startup digest was
+`f00b9c85392232a29bffbedf22cf7e47530a71c31961cbc61204d3856657d1b6`.
+That run's report hashed the script at completion while another test change was
+being prepared; its startup digest is recorded separately. Subsequent reports
+capture the runner digest at startup. The earlier blocked attempt answered only
+one approval; its owned test process was stopped before rerunning this corrected
+workflow. It is not counted as a pass.
+
+The same candidate passed the full real Codex ACP action flow after a temporary
+Ambassador MCP entry was prepared in the ordinary provider profile. Its runner
+startup SHA-256 was
+`49c8c07fa2db23c03bc1bc0e86b9df3c54026c42b1979f255e942579ef6e923e`.
+The action, exact result, receipt, running session reads, provider deletion,
+artifact scan and mail/local cleanup passed. Codex did not request a separate
+ACP tool approval in this run; the real Claude run covers that path. The
+previously absent Codex MCP entry was removed and its absence verified afterward.
+
+Hermes 0.20.5 also passed the same candidate's deployed REST action flow, exact
+result and receipt, running session reads, metadata cleanup, artifact scan and
+mail/local cleanup. Provider history deletion remains explicitly unsupported.
+Its runner startup SHA-256 was
+`f7b7246ba9985748c65a4f79d41cde5ea1fdc440c4f5a43c3746337415959b58`.
+The temporary MCP entry was removed afterward. Authentication stayed in the
+ordinary provider profile throughout; no credential copies were made.
+
+OpenClaw 2026.8.2 passed the same candidate's full deployed REST action flow
+using the existing, explicitly authorized gateway profile. Its runner startup
+SHA-256 was
+`dda425fd08bb647dd3d04dd372d1dec3bc2d4fa3e0091133d113b6f7693084ff`.
+The real ACP agent submitted exactly one action result. Foreground delivery and
+receipt, custody-before-ack, running session reads, metadata cleanup, artifact
+scan and mail/local cleanup passed. Provider history deletion is unsupported.
+The temporary MCP entry was removed and its absence verified afterward; the
+original gateway remained healthy.
+
+### Real desktop checks
+
+The owner authorized temporary OpenClaw profile configuration and gateway
+restarts. OpenClaw 2026.8.2 used its Codex backend. Two desktop conversations
+submitted distinct synthetic requests through the real installed MCP tools.
+Each result appeared once in the correct gateway history, with no cross-routing.
+A fresh pair also completed after Ambassador restarted without an OpenClaw
+restart. These checks found and fixed missing startup activation, distinct
+native MCP hook names, separate service/tool activation instances and stale MCP
+connections. Deterministic regressions cover those boundaries.
+
+The OpenClaw desktop sometimes retained “Waiting for a response” after the
+backend turn and injection had completed. Those conversations included desktop
+and public RPC submissions, which may have affected display behavior. Earlier
+answers became visible after a gateway reconnect. A final fresh, desktop-only
+retest was blocked when the Mac locked again; the cause of the stale display
+remains unconfirmed. Gateway acceptance therefore does not qualify immediate
+UI presentation. The final extension preserves foreground waits and treats
+`chat.inject` as acceptance: final results remain unread in Ambassador until an
+explicit agent receipt. Native return remains experimental. The observed ×2
+badge in repeated tests combined identical synthetic answers from separate
+requests; history checks, rather than that badge, establish per-request counts.
+
+Claude desktop 1.46388.4 **Code** mode, using Sonnet 5, passed a read-only MCP probe
+and a complete controlled request/result/receipt test. The UI showed the exact
+synthetic phone number and marker, followed by acknowledgement of the matching
+request UUID. The combined final fixture recorded three accepted actions,
+three result submissions, no unintended ACP deliveries and no errors. This
+qualifies that desktop Code path with a short response; it does not qualify
+Claude's Chat/Cowork mode, the experimental Claude Code channel, or a full
+600-second desktop timeout.
+
+The separate generic ACP probe did not pass its four-provider matrix. OpenClaw,
+Hermes and Claude completed turns without a successful probe attributed to that
+profile; Codex reached the recall assertion and failed it. The two webhook cases
+had no configured qualification receiver. These are failed qualification gates,
+not evidence of working provider modes. The runner now attributes observed MCP
+calls to the provider it is actually testing and records bounded client names;
+a delegated backend name can no longer falsely credit a later provider case.
+Real action-flow qualification takes precedence over assumptions from this
+synthetic probe. Earlier published-version evidence below is not a pass for this
+candidate.
+
+Temporary OpenClaw plugin paths, its entry and the added MCP server were removed
+and verified absent. The gateway was restarted with its existing service
+definition. Only the six ID-only routes created by these tests were removed.
+No provider credentials were copied or changed.
+
+The final native fallback candidate has SHA-256
+`2ffc568dd1551202b22ecd1def1cf60c3e6ef6489ee5a11e40f279157f2cb9ba`.
+The preceding desktop run used the reconnect candidate; the final changes keep
+wait arguments unchanged and retain results after native acceptance. Their
+regressions pass. Full release qualification is still tracked in
+[the implementation plan](implementation-plan.md).
+
+## ADR 0058 confirmed process stop
+
+On 2026-09-05, `pnpm check` passed with 274 tests, six expected opt-in skips,
+and no failures. The new coverage exercises both commands' confirmation text,
+explicit Yes, default No, end of input, cancellation, non-interactive refusal,
+authenticated shutdown, process replacement during confirmation, and a shutdown
+that does not release the lock. The production build also passed.
+
+The compiled CLI then ran in separate macOS terminals against disposable local
+state. Confirming `start` shut down the original foreground process, released
+its SQLite lock, and started the replacement on the same port. Confirming
+`clean` shut down that replacement and cleared local state. Both stopped
+processes and the cleaning command exited successfully. This check used the
+existing internal state and port overrides, made no central requests, and did
+not start a provider. The changes have not been published.
+
+## ADR 0057 production review candidate
+
+On 2026-09-05, the local production review candidate passed `pnpm check`:
+267 tests passed, six opt-in tests were skipped, and none failed. Coverage
+includes repeated MCP connection churn, active-request preservation, exact ACP
+permission choices, credential expiry and restart, bounded session close,
+confirmed outbound rejection, and oversized verbose responses.
+
+The candidate still carries version 0.2.18 and has not been published. Its
+tarball SHA-256 is
+`76f0dbb969304db19825afc95a41c6cd852e5fbf707aab0c31db04eae07ab0b1`.
+A clean installation outside the repository passed the installed-package
+runtime test. The production dependency audit found no known vulnerabilities;
+all 141 audited package signatures verified, with none missing or invalid.
+
+The same installed artifact passed controlled live qualification against
+`https://mcp.embassys.ai` with a mock ACP agent and a controlled webhook
+receiver. The runner asserted that the email request contained the agent's
+actual option labels and IDs in order, and that the selected ID reached ACP
+unchanged. Registration, email verification, encrypted restart, DPoP positive
+and negative checks, the permission decision, saved outbound intent, the action
+result round trip, acknowledgement order, verbose redaction, artifact scanning,
+and mail cleanup passed. The runner SHA-256 was
+`8c261309e9b860da4bc56217ccc0a44909a2c40fd957954ce75a65dd8f1f205d`.
+Reviewed central revision remained
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its
+revision.
+
+This run did not repeat qualification with real Codex, Claude Code, Hermes,
+or OpenClaw. Their previous evidence below predates ADR 0057. Central message
+recovery, credential renewal, and listener exhaustion remain unresolved in
+[API issues 1](https://github.com/embassys/agent2agent/issues/1),
+[2](https://github.com/embassys/agent2agent/issues/2), and
+[3](https://github.com/embassys/agent2agent/issues/3). No API code was changed.
+
 ## 0.2.18 published artifact
 
 On 2026-09-05, [PR 37](https://github.com/embassys/ambassador/pull/37)

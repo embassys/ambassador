@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -160,6 +160,8 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
         await mkdtemp(join(tmpdir(), "ambassador-agent-qualification-")),
       );
       const observedMcpProfiles = new Set();
+      let activeProfile;
+      const observedClientNames = new Map();
       const mcp = new LocalMcpServer({
         async listTools() {
           return [
@@ -175,6 +177,11 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           ];
         },
         async callTool(name, arguments_, _signal, clientInfo) {
+          if (activeProfile !== undefined && typeof clientInfo?.name === "string") {
+            const names = observedClientNames.get(activeProfile) ?? new Set();
+            if (names.size < 8) names.add(clientInfo.name.slice(0, 128));
+            observedClientNames.set(activeProfile, names);
+          }
           const resolved = resolveAgentCapability(clientInfo, PRODUCTION_AGENT_CAPABILITIES);
           if (
             name !== "get_my_permissions" ||
@@ -183,13 +190,16 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
           ) {
             throw new Error("qualification MCP call failed");
           }
-          observedMcpProfiles.add(resolved.profile.kind);
+          // The harness executes one provider at a time. A host may delegate
+          // MCP to another backend; its client name must not credit a later case.
+          if (activeProfile !== undefined) observedMcpProfiles.add(activeProfile);
           return { permissions: [] };
         },
       });
       try {
         await mcp.listen();
         for (const profile of PRODUCTION_AGENT_CAPABILITIES) {
+          activeProfile = profile.kind;
           const workingDirectory = join(qualificationRoot, profile.kind);
           await mkdir(workingDirectory, { mode: 0o700 });
           const versionProbe = await observeAgentVersion(profile.kind);
@@ -213,6 +223,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
                 url,
                 secret,
                 contract: profile.webhook,
+                identityScope: "local-provider-qualification",
               });
               await target.deliver(
                 {
@@ -233,9 +244,22 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
 
           let directTarget;
           let sessionStore;
+          let directStage = "startup";
+          const startedAt = Date.now();
+          let providerTextObserved = false;
           try {
             if (profile.direct === undefined) throw new Error("direct unavailable");
             const marker = `synthetic-${randomUUID()}`;
+            const policy = [
+              "# Controlled Ambassador qualification",
+              "The user authorized this read-only local test.",
+              "For a synthetic qualification message in this directory, follow its qualification_request.",
+              "The first message asks for exactly one configured Ambassador get_my_permissions call and remembering a synthetic marker.",
+              "The second message asks to repeat that marker without tools. Do not perform other actions.",
+              "",
+            ].join("\n");
+            await writeFile(join(workingDirectory, "AGENTS.md"), policy, { mode: 0o600 });
+            await writeFile(join(workingDirectory, "CLAUDE.md"), policy, { mode: 0o600 });
             let recalling = false;
             let recalled = false;
             let recentText = "";
@@ -248,8 +272,17 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               environment: process.env,
               sessionStore,
               // Synthetic read-only qualification never grants an unexpected provider tool.
-              approvePermission: async () => "deny",
+              approvePermission: async () => {
+                throw new Error(
+                  "unexpected provider tool permission during read-only qualification",
+                );
+              },
               log(event, value) {
+                if (
+                  event === "acp.update" &&
+                  value?.update?.sessionUpdate === "agent_message_chunk"
+                )
+                  providerTextObserved = true;
                 if (
                   recalling &&
                   event === "acp.update" &&
@@ -261,6 +294,7 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
                 }
               },
             });
+            directStage = "first_turn";
             await directTarget.deliver(
               {
                 id: `qualification-${profile.kind}-direct`,
@@ -274,7 +308,12 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               },
               new AbortController().signal,
             );
+            if (!observedMcpProfiles.has(profile.kind)) {
+              directStage = "mcp_probe_missing";
+              throw new Error("qualification MCP call was not observed");
+            }
             recalling = true;
+            directStage = "recall_turn";
             await directTarget.deliver(
               {
                 id: `qualification-${profile.kind}-second-turn`,
@@ -288,14 +327,30 @@ if (process.env.AMBASSADOR_QUALIFY_CONFIRM !== CONFIRMATION) {
               },
               new AbortController().signal,
             );
+            directStage = "recall_validation";
             if (sessionStore.list().length !== 1) throw new Error("peer session was not reused");
             if (!recalled) throw new Error("peer context was not recalled");
             if (!observedMcpProfiles.has(profile.kind)) {
               throw new Error("qualification MCP call was not observed");
             }
-            report.cases.push({ name: `${profile.kind}-direct`, status: "passed" });
-          } catch {
-            report.cases.push({ name: `${profile.kind}-direct`, status: "failed" });
+            report.cases.push({
+              name: `${profile.kind}-direct`,
+              status: "passed",
+              duration_ms: Date.now() - startedAt,
+            });
+          } catch (error) {
+            report.cases.push({
+              name: `${profile.kind}-direct`,
+              status: "failed",
+              stage: directStage,
+              provider_text_observed: providerTextObserved,
+              mcp_observed: observedMcpProfiles.has(profile.kind),
+              mcp_client_names: [...(observedClientNames.get(profile.kind) ?? [])],
+              duration_ms: Date.now() - startedAt,
+              ...(typeof error?.code === "string" && /^[a-z_]{1,48}$/u.test(error.code)
+                ? { code: error.code }
+                : {}),
+            });
           } finally {
             await directTarget?.close().catch(() => undefined);
             if (sessionStore !== undefined && profile.direct !== undefined) {

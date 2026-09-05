@@ -3,11 +3,15 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import type { Readable } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { AcpSessionStore } from "./acp-session-store.js";
 import { capabilityForKind, type DirectAgentCapability } from "./agent-capabilities.js";
 import { AmbassadorOptionsError, parseAmbassadorCommand } from "./ambassador-options.js";
 import type { CredentialStore } from "./credential-store.js";
+import { DiagnosticLog } from "./diagnostic-log.js";
 import { AcpSessionController, type AcpSessionDeleteResult } from "./direct-delivery.js";
 import { GatewayError } from "./errors.js";
 import {
@@ -25,12 +29,13 @@ import {
 import { clearLocalGatewayState } from "./local-state-cleaner.js";
 import type { DeliveryTarget } from "./notification-relay.js";
 import { ProcessLock } from "./process-lock.js";
-import { createVerboseLogger } from "./verbose-log.js";
+import { createVerboseLogger, describeVerboseError, type VerboseLogger } from "./verbose-log.js";
 import { EncryptedFileWebhookSecretStore } from "./webhook-secret-store.js";
 
 export interface CliIo {
+  readonly stdin?: Readable & { readonly isTTY?: boolean };
   readonly stdout: Pick<NodeJS.WriteStream, "write">;
-  readonly stderr: Pick<NodeJS.WriteStream, "write">;
+  readonly stderr: Pick<NodeJS.WriteStream, "write"> & Partial<Pick<NodeJS.WriteStream, "isTTY">>;
 }
 
 export interface CliTestOverrides {
@@ -47,6 +52,7 @@ export interface CliTestOverrides {
   ) => Pick<AcpSessionController, "show" | "delete">;
   readonly localControlSecretStore?: LocalControlSecretStore;
   readonly localControlMcpEndpoint?: string;
+  readonly processStopDeadlineMs?: number;
 }
 
 export interface CliContext {
@@ -81,6 +87,112 @@ async function waitForAbort(signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolveWait) =>
     signal.addEventListener("abort", () => resolveWait(), { once: true }),
   );
+}
+
+function interactive(io: CliIo): boolean {
+  return io.stdin?.isTTY === true && io.stderr.isTTY === true;
+}
+
+export async function confirmStopRunning(
+  command: "start" | "clean",
+  io: CliIo,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const input = io.stdin;
+  if (input === undefined || !interactive(io) || signal.aborted) return false;
+  const terminal = createInterface({ input, terminal: false, crlfDelay: Infinity });
+  return await new Promise<boolean>((resolveAnswer) => {
+    let settled = false;
+    const abort = (): void => finish(false);
+    const finish = (answer: boolean): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", abort);
+      input.off("error", abort);
+      terminal.close();
+      input.pause();
+      io.stderr.write("\n");
+      resolveAnswer(answer);
+    };
+    terminal.once("line", (answer) => finish(/^(y|yes)$/iu.test(answer.trim())));
+    terminal.once("close", () => finish(false));
+    input.once("error", abort);
+    signal.addEventListener("abort", abort, { once: true });
+    const next = command === "clean" ? "clear local Ambassador state" : "start a new instance";
+    io.stderr.write(`Ambassador is already running. Stop it and ${next}? [y/N] `);
+    if (signal.aborted) finish(false);
+  });
+}
+
+async function acquireCommandLock(
+  command: "start" | "clean",
+  context: CliContext,
+  paths: ReturnType<typeof pathsForStateDirectory>,
+  signal: AbortSignal,
+): Promise<ProcessLock> {
+  try {
+    return await ProcessLock.acquire(paths.lockPath);
+  } catch (error) {
+    if (!(error instanceof GatewayError) || error.code !== "daemon_running") throw error;
+    if (!interactive(context.io)) throw error;
+  }
+
+  let client: LocalControlClient;
+  let instanceId: string;
+  try {
+    const store =
+      context.testOverrides?.localControlSecretStore ??
+      new EncryptedFileLocalControlSecretStore(
+        paths.localControlSecretPath,
+        paths.localControlSecretKeyPath,
+      );
+    const secret = await store.load();
+    if (secret === undefined) throw new Error("Local control unavailable");
+    client = new LocalControlClient(
+      context.testOverrides?.localControlMcpEndpoint ?? "http://127.0.0.1:8787/mcp",
+      secret,
+    );
+    instanceId = await client.getProcessInstance(signal);
+  } catch {
+    throw new GatewayError(
+      "process_stop_unavailable",
+      "Ambassador is running but could not be reached. Stop it in its terminal and try again",
+      7,
+    );
+  }
+  if (!(await confirmStopRunning(command, context.io, signal))) {
+    throw new GatewayError("daemon_running", "Ambassador left running", 7);
+  }
+  signal.throwIfAborted();
+  context.io.stderr.write("Stopping Ambassador...\n");
+  try {
+    await client.stopProcess(instanceId, signal);
+  } catch {
+    throw new GatewayError(
+      "process_stop_failed",
+      "Ambassador could not be stopped safely. Stop it in its terminal and try again",
+      7,
+    );
+  }
+
+  const deadline = performance.now() + (context.testOverrides?.processStopDeadlineMs ?? 30_000);
+  while (true) {
+    signal.throwIfAborted();
+    try {
+      return await ProcessLock.acquire(paths.lockPath);
+    } catch (error) {
+      if (!(error instanceof GatewayError) || error.code !== "daemon_running") throw error;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) {
+        throw new GatewayError(
+          "process_stop_timeout",
+          "Ambassador did not release its lock in time. Wait for it to stop and try again",
+          7,
+        );
+      }
+      await delay(Math.min(100, remaining), undefined, { signal });
+    }
+  }
 }
 
 export function startupGuide(endpoint: string): string {
@@ -261,12 +373,17 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
   }
   if (command.command === "clean") {
     let lock: ProcessLock | undefined;
+    const ownedSignal = context.signal === undefined ? processSignal() : undefined;
+    const signal = context.signal ?? ownedSignal?.signal;
+    if (signal === undefined) throw new Error("Ambassador signal is unavailable");
     try {
-      lock = await ProcessLock.acquire(paths.lockPath);
+      lock = await acquireCommandLock("clean", context, paths, signal);
+      signal.throwIfAborted();
       await clearLocalGatewayState(paths.stateDirectory, paths.lockPath);
       context.io.stdout.write("Ambassador local state cleared\n");
       return 0;
     } catch (error) {
+      if (signal.aborted) return 0;
       if (error instanceof GatewayError) {
         context.io.stderr.write(`${error.message}\n`);
         return error.exitCode;
@@ -275,20 +392,36 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       return 7;
     } finally {
       await lock?.release().catch(() => undefined);
+      ownedSignal?.close();
     }
   }
   if (command.command !== "start") throw new AmbassadorOptionsError();
   let lock: ProcessLock | undefined;
   let application: RunningGatewayApplication | undefined;
   const ownedSignal = context.signal === undefined ? processSignal() : undefined;
-  const signal = context.signal ?? ownedSignal?.signal;
-  if (signal === undefined) throw new Error("Ambassador signal is unavailable");
-  const log = command.verbose
+  const externalSignal = context.signal ?? ownedSignal?.signal;
+  if (externalSignal === undefined) throw new Error("Ambassador signal is unavailable");
+  const stopController = new AbortController();
+  const signal = AbortSignal.any([externalSignal, stopController.signal]);
+  let diagnostics: DiagnosticLog | undefined;
+  const consoleLog = command.verbose
     ? createVerboseLogger((value) => context.io.stderr.write(value))
     : undefined;
+  const log: VerboseLogger = (event, data) => {
+    diagnostics?.log(event, data);
+    consoleLog?.(event, data);
+  };
 
   try {
-    lock = await ProcessLock.acquire(paths.lockPath);
+    lock = await acquireCommandLock("start", context, paths, signal);
+    signal.throwIfAborted();
+    diagnostics = new DiagnosticLog(join(paths.stateDirectory, "diagnostics"), {
+      onNotice: (notice) => context.io.stderr.write(`${notice}\n`),
+    });
+    log("gateway.starting");
+    context.io.stdout.write(
+      `Development diagnostic logs: ${diagnostics.directory}\nRequest and response bodies are retained with credentials redacted.\n`,
+    );
     if (command.verbose) context.io.stderr.write(verboseWarning());
     application = await openGatewayApplication({
       journalPath: paths.journalPath,
@@ -306,10 +439,12 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       workingDirectory: context.cwd,
       environment: context.env,
       signal,
+      onStopRequested: () => stopController.abort(),
       onRuntimeNotice: (notice) => {
+        log("gateway.notice", { message: notice.message });
         context.io.stderr.write(`${notice.message}\n`);
       },
-      ...(log === undefined ? {} : { log }),
+      log,
       ...(context.testOverrides === undefined
         ? {}
         : {
@@ -343,6 +478,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
           }),
     });
     context.io.stdout.write(startupGuide(application.endpoint));
+    log("gateway.started", { endpoint: application.endpoint });
     const failure = await Promise.race([
       waitForAbort(signal).then(() => undefined),
       application.failure,
@@ -350,6 +486,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     if (failure !== undefined) throw failure;
     return 0;
   } catch (error) {
+    log("gateway.error", { error: describeVerboseError(error), interrupted: signal.aborted });
     if (signal.aborted) return 0;
     if (error instanceof AmbassadorOptionsError) {
       context.io.stderr.write(`${error.message}\n`);
@@ -365,6 +502,8 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
     return 7;
   } finally {
     await application?.close().catch(() => undefined);
+    log("gateway.stopped");
+    await diagnostics?.close();
     await lock?.release().catch(() => undefined);
     ownedSignal?.close();
   }
@@ -381,7 +520,7 @@ function isMainModule(): boolean {
 
 if (isMainModule()) {
   process.exitCode = await runCli(process.argv.slice(2), {
-    io: { stdout: process.stdout, stderr: process.stderr },
+    io: { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr },
     env: process.env,
     cwd: process.cwd(),
   });

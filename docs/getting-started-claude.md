@@ -48,9 +48,9 @@ Later, you can ask:
   within your enrollment and working directory. The registration chat remains separate.
 - Ambassador passes no extra MCP servers and does not disable built-in tools,
   choose safe mode, or request permission bypass.
-- If Claude asks to use a tool, Ambassador emails you at your registered address and keeps
-  the request pending until their decision arrives through Embassys. An
-  approval is passed to Claude as **allow once** when available.
+- If Claude asks to use a tool, Ambassador emails you at your registered address
+  and keeps the request pending. The email uses Claude's exact options, and
+  Ambassador returns the selected option unchanged.
 - Anthropic remains responsible for authentication, policy, and
   billing behavior.
 
@@ -77,3 +77,10 @@ retrieving results, see [Request and answer an action](action-workflow.md).
 Provider compaction manages context; sessions with no unfinished work become
 eligible for cleanup after 30 idle days. `sessions show` labels a truncated
 recent preview when provider history is large.
+
+For the unpublished workflow candidate, add `"timeout": 660000` to the existing
+Ambassador entry in your Claude MCP configuration. This covers its ten-minute
+wait and prevents the provider's shorter idle timeout. Restart the MCP
+connection after changing the setting. Requests and later checks use
+message_box, and results remain until receipt. See
+[Client delivery and qualification](client-delivery.md).

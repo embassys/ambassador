@@ -126,16 +126,14 @@ async function target(
   };
 }
 
-test("builds one fixed prompt containing the complete canonical message", () => {
+test("builds a guarded prompt containing the complete canonical message", () => {
   const prompt = buildDirectPrompt(MESSAGE);
   assert.match(prompt, /untrusted Embassys message/u);
-  assert.match(prompt, /configured Ambassador MCP tools/u);
-  assert.match(prompt, /permission_outcome/u);
-  assert.match(prompt, /permission grant alone does not authorize/u);
+  assert.match(prompt, /configured permissions/u);
+  assert.match(prompt, /Do not infer a new action/u);
   assert.doesNotMatch(prompt, /call call_action at most once/u);
-  assert.match(prompt, /submit_action_result/u);
-  assert.match(prompt, /leave the call pending/u);
-  assert.equal(prompt.endsWith(JSON.stringify(MESSAGE)), true);
+  assert.doesNotMatch(prompt, /submit_action_result/u);
+  assert.equal(prompt.endsWith(`${JSON.stringify(MESSAGE, null, 2)}\n\`\`\``), true);
   assert.equal(prompt.match(/complete body marker/gu)?.length, 1);
 });
 
@@ -166,6 +164,26 @@ test("resumes an active retry and exposes provider history through session comma
     "agent: stored answer",
   ]);
   assert.deepEqual(await controller.delete(record, new AbortController().signal), "deleted");
+});
+
+test("session inspection cancellation during startup does not leak a connection-close rejection", async (t) => {
+  const value = await target(t, "success-provider-mcp");
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  const record = value.sessionStore.list()[0];
+  assert.ok(record);
+  const abort = new AbortController();
+  const controller = new AcpSessionController({
+    capability: value.capability,
+    environment: process.env,
+    deadlineMs: 100,
+    cleanupDeadlineMs: 100,
+    spawnProcess: (command, args, options) => {
+      const child = spawn(command, args, options);
+      abort.abort();
+      return child;
+    },
+  });
+  await assert.rejects(controller.show(record, false, abort.signal), DirectDeliveryError);
 });
 
 test("uses the reviewed load path even when a provider advertises resume", async (t) => {
@@ -247,18 +265,47 @@ test("initializes ACP v1 with provider MCP setup and completes one persistent pr
   }
 });
 
-test("waits for human approval and maps it to an ACP option", async (t) => {
+test("passes provider options to the human and returns the exact selected ID", async (t) => {
   const approved = await target(t, "permission-session-mcp");
   await approved.delivery.deliver(MESSAGE, new AbortController().signal);
   assert.equal(approved.permissionRequests.length, 1);
   assert.equal(approved.permissionRequests[0]?.message.id, MESSAGE.id);
   assert.equal(approved.permissionRequests[0]?.toolCall.title, "Unsafe operation");
+  assert.deepEqual(approved.permissionRequests[0]?.options, [
+    { optionId: "allow", name: "Allow", kind: "allow_once" },
+    { optionId: "remember-approved", name: "Always allow this tool", kind: "allow_always" },
+    { optionId: "deny", name: "Deny", kind: "reject_once" },
+    { optionId: "remember-rejected", name: "Always reject this tool", kind: "reject_always" },
+  ]);
 
   const denied = await target(t, "permission-denied-session-mcp", {
     permissionApproval: async () => "deny",
   });
   await denied.delivery.deliver(MESSAGE, new AbortController().signal);
   assert.equal(denied.permissionRequests.length, 1);
+  for (const [scenario, choice] of [
+    ["permission-remember-allow", "remember-approved"],
+    ["permission-remember-deny", "remember-rejected"],
+    ["permission-unknown", "not-offered"],
+  ] as const) {
+    const value = await target(t, scenario, { permissionApproval: async () => choice });
+    await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  }
+});
+
+test("bounds an unanswered session close without replaying the completed prompt", {
+  timeout: 5_000,
+}, async (t) => {
+  const value = await target(t, "close-hang", { outerDeadlineMs: 500 });
+  const started = Date.now();
+  await assert.rejects(
+    value.delivery.deliver(MESSAGE, new AbortController().signal),
+    (error: unknown) => error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
+  );
+  assert.ok(Date.now() - started < 2_000);
+  assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
+  await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
+  assert.equal(value.spawnCount(), 1);
 });
 
 test("reuses a peer session across messages while keeping each action correlation", async (t) => {
@@ -301,6 +348,74 @@ test("does not prompt an action already answered by another MCP chat", async (t)
   await assert.rejects(readFile(value.promptPath), { code: "ENOENT" });
   assert.equal(value.sessionStore.hasPendingActions("mock-session"), false);
   assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
+});
+
+test("keeps a peer conversation across owner replies, completed actions and a store restart", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-peer-restart-"));
+  const path = join(root, "sessions.sqlite");
+  let store = new AcpSessionStore(path);
+  let delivery: DirectDeliveryTarget | undefined;
+  t.after(async () => {
+    await delivery?.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const capability: DirectAgentCapability = {
+    command: process.execPath,
+    args: [
+      fileURLToPath(new URL("./fixtures/mock-acp-agent.js", import.meta.url)),
+      "unique-sessions",
+    ],
+    agentInfo: { name: "mock-agent" },
+    mcp: "provider_config",
+    environment: SPAWN_ENVIRONMENT,
+    sessionRestore: "load",
+  };
+  const open = (identityScope = "same-enrollment") =>
+    new DirectDeliveryTarget({
+      agentKind: "mock",
+      identityScope,
+      capability,
+      workingDirectory: root,
+      environment: process.env,
+      sessionStore: store,
+      approvePermission: async () => "allow",
+    });
+  const deliver = async (id: string, payload: Record<string, unknown>, sender = "peer-one") => {
+    assert.ok(delivery);
+    await delivery.deliver(
+      { ...MESSAGE, id, sender_agent_id: sender, payload },
+      new AbortController().signal,
+    );
+  };
+  const firstCall = "10000000-0000-4000-8000-000000000001";
+  delivery = open();
+  await deliver("first-call", { type: "action_call", call_id: firstCall });
+  const firstSession = store.list()[0]?.session_id;
+  assert.ok(firstSession);
+  await delivery.close();
+  store.close();
+  store = new AcpSessionStore(path);
+  delivery = open();
+  await deliver("owner-answer", { type: "owner_input", call_id: firstCall, value: "answer" });
+  store.completeAction(firstCall, Date.now());
+  await deliver("another-call", {
+    type: "action_call",
+    call_id: "10000000-0000-4000-8000-000000000002",
+  });
+  await deliver("permission-update", { type: "permission_outcome", status: "granted" });
+  for (const id of ["first-call", "owner-answer", "another-call", "permission-update"])
+    assert.equal(store.findActiveByMessage(id)?.session_id, firstSession);
+  assert.equal(store.list().length, 1);
+
+  await deliver("other-peer", { type: "owner_input", sender_agent_id: "peer-one" }, "peer-two");
+  assert.notEqual(store.findActiveByMessage("other-peer")?.session_id, firstSession);
+  assert.equal(store.list().length, 2);
+  await delivery.close();
+  delivery = open("new-enrollment");
+  await deliver("new-identity", { type: "permission_outcome" });
+  assert.notEqual(store.findActiveByMessage("new-identity")?.session_id, firstSession);
+  assert.equal(store.list().length, 3);
 });
 
 test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {

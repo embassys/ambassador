@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, link, lstat, mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   type AgentCapability,
@@ -291,7 +292,13 @@ export class DeliveryProfileStore {
 
   async #safeExistingFile(path: string): Promise<boolean> {
     try {
-      const status = await lstat(path);
+      let status = await lstat(path);
+      // Atomic creation briefly has two links until the committed writer removes its temp name.
+      // Never read through the extra link, and fail closed if it remains after this bounded wait.
+      for (let attempt = 0; status.isFile() && status.nlink === 2 && attempt < 10; attempt++) {
+        await delay(5);
+        status = await lstat(path);
+      }
       if (!status.isFile() || status.isSymbolicLink() || status.nlink !== 1) {
         throw failure("profile_store_failed");
       }

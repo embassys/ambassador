@@ -12,14 +12,17 @@ import {
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { AcpSessionStore } from "../src/acp-session-store.js";
 import { capabilityForKind } from "../src/agent-capabilities.js";
 import { serializeCentralCredential } from "../src/central-credential.js";
 import { CentralEnrollmentClient } from "../src/central-enrollment.js";
-import { runCli } from "../src/cli.js";
+import { confirmStopRunning, runCli } from "../src/cli.js";
 import { createDeliveryProfile, DeliveryProfileStore } from "../src/delivery-profile.js";
 import { DirectDeliveryError } from "../src/direct-delivery.js";
+import { LocalMcpServer } from "../src/local-mcp.js";
 import { ProcessLock } from "../src/process-lock.js";
 import { WebhookDeliveryError } from "../src/webhook-delivery.js";
 import { startFakeCentral } from "./support/fake-central.js";
@@ -57,6 +60,264 @@ function captureIo() {
     stderr: () => stderr,
   };
 }
+
+function captureTerminal() {
+  const output = captureIo();
+  const stdin = Object.assign(new PassThrough(), { isTTY: true });
+  return {
+    ...output,
+    stdin,
+    io: { ...output.io, stdin, stderr: { ...output.io.stderr, isTTY: true } },
+  };
+}
+
+async function waitForOutput(output: () => string, pattern: RegExp): Promise<string> {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const match = pattern.exec(output());
+    if (match !== null) return match[1] ?? match[0];
+    await delay(10);
+  }
+  assert.fail("Expected CLI output did not arrive");
+}
+
+test("process-stop confirmation requires an explicit terminal yes", async () => {
+  for (const command of ["start", "clean"] as const) {
+    for (const [answer, expected] of [
+      ["y", true],
+      [" YES ", true],
+      ["", false],
+      ["no", false],
+      ["anything", false],
+    ] as const) {
+      const output = captureTerminal();
+      const result = confirmStopRunning(command, output.io, new AbortController().signal);
+      assert.match(output.stderr(), /Ambassador is already running/u);
+      assert.match(output.stderr(), /\[y\/N\]/u);
+      assert.match(
+        output.stderr(),
+        command === "clean" ? /clear local Ambassador state/u : /start a new instance/u,
+      );
+      output.stdin.write(`${answer}\n`);
+      assert.equal(await result, expected);
+      output.stdin.destroy();
+    }
+    for (const mode of ["eof", "abort", "noninteractive"] as const) {
+      const output = captureTerminal();
+      const controller = new AbortController();
+      if (mode === "noninteractive") output.stdin.isTTY = false;
+      const result = confirmStopRunning(command, output.io, controller.signal);
+      if (mode === "eof") output.stdin.end();
+      else if (mode === "abort") controller.abort();
+      else output.stdin.end("yes\n");
+      assert.equal(await result, false);
+      if (mode === "noninteractive") assert.equal(output.stderr(), "");
+      output.stdin.destroy();
+    }
+  }
+});
+
+for (const command of ["start", "clean"] as const) {
+  test(`${command} stops the running instance after confirmation and then proceeds`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "ambassador-stop-proceed-"));
+    const controllers = [new AbortController(), new AbortController()] as const;
+    const runs: Promise<number>[] = [];
+    const output = captureTerminal();
+    t.after(async () => {
+      for (const controller of controllers) controller.abort();
+      output.stdin.destroy();
+      await Promise.all(runs);
+      await rm(root, { recursive: true, force: true });
+    });
+    const originalOutput = captureIo();
+    const overrides = {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+      localMcpPort: 0,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+    };
+    const original = runCli(["start"], {
+      io: originalOutput.io,
+      env: {},
+      cwd: root,
+      signal: controllers[0]?.signal,
+      testOverrides: overrides,
+    });
+    runs.push(original);
+    const endpoint = await waitForOutput(
+      originalOutput.stdout,
+      /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+    );
+    const residuePath = join(root, "test-residue.txt");
+    await writeFile(residuePath, "preserve until clean owns the lock");
+    const replacement = runCli([command], {
+      io: output.io,
+      env: {},
+      cwd: root,
+      signal: controllers[1]?.signal,
+      testOverrides: {
+        ...overrides,
+        localMcpPort: Number(new URL(endpoint).port),
+        localControlMcpEndpoint: endpoint,
+      },
+    });
+    runs.push(replacement);
+    await waitForOutput(output.stderr, /\[y\/N\]/u);
+    assert.equal(await readFile(residuePath, "utf8"), "preserve until clean owns the lock");
+    assert.equal((await fetch(endpoint)).status, 400);
+    output.stdin.write("yes\n");
+    assert.equal(await original, 0);
+    assert.equal(controllers[0]?.signal.aborted, false);
+    if (command === "clean") {
+      assert.equal(await replacement, 0);
+      assert.deepEqual(await readdir(root), ["ambassador.lock", "diagnostics"]);
+      assert.equal(output.stdout(), "Ambassador local state cleared\n");
+    } else {
+      await waitForOutput(output.stdout, /MCP endpoint: /u);
+      assert.equal(await readFile(residuePath, "utf8"), "preserve until clean owns the lock");
+      const client = new TestMcpClient(endpoint);
+      await client.initialize();
+      assert.ok((await client.listTools()).some(({ name }) => name === "register_agent"));
+      controllers[1]?.abort();
+      assert.equal(await replacement, 0);
+    }
+    assert.match(output.stderr(), /Stopping Ambassador/u);
+    assert.equal(output.stderr().includes(await TEST_LOCAL_CONTROL_SECRET_STORE.load()), false);
+  });
+}
+
+test("declining clean leaves the original process and local state intact", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-decline-stop-"));
+  const controller = new AbortController();
+  const output = captureTerminal();
+  const originalOutput = captureIo();
+  const overrides = {
+    centralOrigin: "http://127.0.0.1:1",
+    stateRoot: root,
+    localMcpPort: 0,
+    localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+  };
+  const original = runCli(["start"], {
+    io: originalOutput.io,
+    env: {},
+    cwd: root,
+    signal: controller.signal,
+    testOverrides: overrides,
+  });
+  t.after(async () => {
+    controller.abort();
+    output.stdin.destroy();
+    await original;
+    await rm(root, { recursive: true, force: true });
+  });
+  const endpoint = await waitForOutput(
+    originalOutput.stdout,
+    /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+  );
+  await writeFile(join(root, "keep.txt"), "keep");
+  const cleaning = runCli(["clean"], {
+    io: output.io,
+    env: {},
+    cwd: root,
+    testOverrides: { ...overrides, localControlMcpEndpoint: endpoint },
+  });
+  await waitForOutput(output.stderr, /\[y\/N\]/u);
+  output.stdin.write("\n");
+  assert.equal(await cleaning, 7);
+  assert.match(output.stderr(), /Ambassador left running/u);
+  assert.equal(await readFile(join(root, "keep.txt"), "utf8"), "keep");
+  assert.equal((await fetch(endpoint)).status, 400);
+});
+
+test("clean waits for the lock and leaves state untouched when shutdown does not finish", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-stop-timeout-"));
+  const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
+  const output = captureTerminal();
+  let stops = 0;
+  const server = new LocalMcpServer(
+    { listTools: async () => [], callTool: async () => ({}) },
+    {
+      port: 0,
+      control: {
+        secret: await TEST_LOCAL_CONTROL_SECRET_STORE.load(),
+        sessions: { list: () => [], show: () => [] },
+        stop: () => {
+          stops += 1;
+        },
+      },
+    },
+  );
+  await server.listen();
+  t.after(async () => {
+    output.stdin.destroy();
+    await server.close();
+    await lock.release();
+    await rm(root, { recursive: true, force: true });
+  });
+  await writeFile(join(root, "keep.txt"), "keep");
+  const cleaning = runCli(["clean"], {
+    io: output.io,
+    env: {},
+    cwd: root,
+    testOverrides: {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+      localControlMcpEndpoint: server.endpoint,
+      processStopDeadlineMs: 40,
+    },
+  });
+  await waitForOutput(output.stderr, /\[y\/N\]/u);
+  output.stdin.write("y\n");
+  assert.equal(await cleaning, 7);
+  assert.equal(stops, 1);
+  assert.equal(await readFile(join(root, "keep.txt"), "utf8"), "keep");
+  assert.match(output.stderr(), /did not release its lock/u);
+});
+
+test("a confirmation for an old instance cannot stop its replacement", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-stop-changed-instance-"));
+  const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
+  const output = captureTerminal();
+  let stops = 0;
+  const control = {
+    secret: await TEST_LOCAL_CONTROL_SECRET_STORE.load(),
+    sessions: { list: () => [], show: () => [] },
+    stop: () => {
+      stops += 1;
+    },
+  };
+  const router = { listTools: async () => [], callTool: async () => ({}) };
+  let server = new LocalMcpServer(router, { port: 0, control });
+  await server.listen();
+  t.after(async () => {
+    output.stdin.destroy();
+    await server.close();
+    await lock.release();
+    await rm(root, { recursive: true, force: true });
+  });
+  await writeFile(join(root, "keep.txt"), "keep");
+  const endpoint = server.endpoint;
+  const cleaning = runCli(["clean"], {
+    io: output.io,
+    env: {},
+    cwd: root,
+    testOverrides: {
+      centralOrigin: "http://127.0.0.1:1",
+      stateRoot: root,
+      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+      localControlMcpEndpoint: endpoint,
+    },
+  });
+  await waitForOutput(output.stderr, /\[y\/N\]/u);
+  await server.close();
+  server = new LocalMcpServer(router, { port: Number(new URL(endpoint).port), control });
+  await server.listen();
+  output.stdin.write("yes\n");
+  assert.equal(await cleaning, 7);
+  assert.equal(stops, 0);
+  assert.equal(await readFile(join(root, "keep.txt"), "utf8"), "keep");
+  assert.match(output.stderr(), /could not be stopped safely/u);
+});
 
 test("creates and prints one stable webhook secret without taking the gateway lock", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-webhook-secret-cli-"));
@@ -146,11 +407,8 @@ test("starts and serves MCP with no options or environment variables", async (t)
       "verify_email",
       "resend_verification",
       "list_action_types",
-      "request_permission",
-      "get_inbox",
-      "call_action",
-      "submit_action_result",
       "get_my_permissions",
+      "message_box",
     ],
   );
   await assert.rejects(
@@ -165,58 +423,66 @@ test("starts and serves MCP with no options or environment variables", async (t)
   assert.equal(stderr, "");
 });
 
-test("starts with bounded redacted verbose diagnostics", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "ambassador-verbose-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const central = await startFakeCentral(t);
-  const controller = new AbortController();
-  t.after(() => controller.abort());
-  const output = captureIo();
-  const running = runCli(["start", "--verbose"], {
-    io: output.io,
-    env: {},
-    cwd: root,
-    signal: controller.signal,
-    testOverrides: {
-      centralOrigin: central.apiUrl,
-      stateRoot: root,
-      localMcpPort: 0,
-      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
-    },
-  });
+for (const verbose of [false, true])
+  test(`starts with persistent redacted diagnostics, verbose=${verbose}`, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "ambassador-verbose-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const central = await startFakeCentral(t);
+    const controller = new AbortController();
+    t.after(() => controller.abort());
+    const output = captureIo();
+    const running = runCli(verbose ? ["start", "--verbose"] : ["start"], {
+      io: output.io,
+      env: {},
+      cwd: root,
+      signal: controller.signal,
+      testOverrides: {
+        centralOrigin: central.apiUrl,
+        stateRoot: root,
+        localMcpPort: 0,
+        localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+      },
+    });
 
-  let endpoint: string | undefined;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(output.stdout())?.[1];
-    if (endpoint !== undefined) break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.ok(endpoint !== undefined);
-  const client = new TestMcpClient(endpoint);
-  await client.initialize({ name: "codex-mcp-client", version: "qualification" });
-  await client.callTool("register_agent", { email: "verbose@fixture.test" });
-  await assert.rejects(
-    client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
-    (error: unknown) =>
-      error instanceof McpCallError &&
-      error.serverMessage.includes("does not accept '+' email aliases") &&
-      (error.data as { code?: unknown; source?: unknown } | undefined)?.code ===
-        "unsupported_email_format" &&
-      (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
-        "central_enrollment",
-  );
-  assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
-  assert.match(output.stderr(), /mcp\.tool\.request/u);
-  assert.match(output.stderr(), /central\.request/u);
-  assert.match(output.stderr(), /central\.response/u);
-  assert.match(output.stderr(), /mcp\.tool\.error/u);
-  assert.match(output.stderr(), /"source":"central_enrollment"/u);
-  assert.match(output.stderr(), /"error_code":"unsupported_email_format"/u);
-  assert.match(output.stderr(), /"status":422/u);
-  assert.doesNotMatch(output.stderr(), /Bearer\s+(?!\[redacted\])/u);
-  controller.abort();
-  assert.equal(await running, 0);
-});
+    let endpoint: string | undefined;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(output.stdout())?.[1];
+      if (endpoint !== undefined) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(endpoint !== undefined);
+    const client = new TestMcpClient(endpoint);
+    await client.initialize({ name: "codex-mcp-client", version: "qualification" });
+    await client.callTool("register_agent", { email: "verbose@fixture.test" });
+    await assert.rejects(
+      client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
+      (error: unknown) =>
+        error instanceof McpCallError &&
+        error.serverMessage.includes("does not accept '+' email aliases") &&
+        (error.data as { code?: unknown; source?: unknown } | undefined)?.code ===
+          "unsupported_email_format" &&
+        (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
+          "central_enrollment",
+    );
+    if (verbose) {
+      assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
+      assert.match(output.stderr(), /mcp\.tool\.request/u);
+      assert.match(output.stderr(), /central\.request/u);
+      assert.match(output.stderr(), /central\.response/u);
+      assert.match(output.stderr(), /mcp\.tool\.error/u);
+      assert.match(output.stderr(), /"source":"central_enrollment"/u);
+      assert.match(output.stderr(), /"error_code":"unsupported_email_format"/u);
+      assert.match(output.stderr(), /"status":422/u);
+      assert.doesNotMatch(output.stderr(), /Bearer\s+(?!\[redacted\])/u);
+    } else assert.equal(output.stderr(), "");
+    assert.match(output.stdout(), /Development diagnostic logs:/u);
+    controller.abort();
+    assert.equal(await running, 0);
+    const logs = await readFile(join(root, "diagnostics", "events.jsonl"), "utf8");
+    assert.match(logs, /central\.request/u);
+    assert.match(logs, /verbose@fixture.test/u);
+    assert.match(logs, /gateway\.stopped/u);
+  });
 
 test("lists, shows, deletes, and forgets persisted ACP sessions while stopped", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-sessions-cli-"));
@@ -422,7 +688,7 @@ test("explains when the local MCP port is already in use", async (t) => {
     }),
     7,
   );
-  assert.equal(output.stdout(), "");
+  assert.match(output.stdout(), /Development diagnostic logs:/u);
   assert.equal(
     output.stderr(),
     `Ambassador could not bind its local MCP endpoint because 127.0.0.1:${address.port} is already in use\n`,
@@ -432,7 +698,7 @@ test("explains when the local MCP port is already in use", async (t) => {
 test("explains invalid local state and gives the supported reset command", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-invalid-state-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await writeFile(join(root, "notifications.sqlite"), "not a database");
+  await writeFile(join(root, "central-credential.json"), "not an encrypted credential");
   const output = captureIo();
 
   assert.equal(
@@ -450,10 +716,10 @@ test("explains invalid local state and gives the supported reset command", async
     }),
     7,
   );
-  assert.equal(output.stdout(), "");
+  assert.match(output.stdout(), /Development diagnostic logs:/u);
   assert.equal(
     output.stderr(),
-    "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again\n",
+    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `npx --yes @embassys/ambassador@latest clean`\n",
   );
 });
 

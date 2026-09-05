@@ -57,7 +57,8 @@ test("pages a combined inbox larger than one MCP response without losing unread 
   const second = inbox.get({ cursor: first.next_cursor });
   assert.equal(second.count, 1);
   assert.equal(second.items[0]?.kind, "action_result");
-  assert.equal(results.list().length, 0);
+  assert.equal(results.list().length, 1);
+  assert.deepEqual(inbox.get({ cursor: first.next_cursor }).items, second.items);
   assert.equal(calls.list().length, 1);
 });
 

@@ -25,6 +25,14 @@ scope on your own.
 
 ## Project rules
 
+- ADR 0061 is the user's approved delivery cutover. It supersedes the older
+  serial polling, ephemeral control-message custody, separate business tools,
+  console-only diagnostics and prohibition on native origin bridges below.
+  Implement the typed message box, independent durable receiver, structured
+  owner input and qualified client-specific delivery. Read
+  `docs/workflow-test-plan.md` before changing those boundaries. API work remains
+  issue-only, and publication is not authorized.
+
 - The product and public npm package are `@embassys/ambassador`. The public
   binary is `ambassador`. Do not keep the old package or binary as aliases.
 - One foreground Ambassador process owns one enrolled central identity and one
@@ -35,6 +43,11 @@ scope on your own.
 - `clean` accepts no options. It clears local Ambassador enrollment and
   delivery state only after proving the foreground process is stopped. It does
   not call central or change agent/provider configuration.
+- When `start` or `clean` finds a running Ambassador, an interactive terminal
+  asks whether to stop it and proceed, with No as the default. Stop only the
+  authenticated process instance the user confirmed, then acquire its released
+  singleton lock. Non-interactive commands refuse. Do not force shutdown or
+  stop an unrelated process occupying the port. See ADR 0058.
 - Session commands are `sessions list`, `sessions show <session-id>` with an
   optional `--verbose`, `sessions delete <session-id>`, and `sessions forget
   <session-id>`. `list` and `show` work through the authenticated private
@@ -66,7 +79,7 @@ scope on your own.
   encrypted receiver secret with `ambassador webhook-secret`. The secret value
   never enters MCP. The gateway sends the complete validated central message
   with the profile's fixed authentication. A `2xx` transfers responsibility to
-  the webhook receiver, after which the gateway acknowledges central.
+  the webhook receiver, while central acknowledgement follows durable Ambassador custody independently.
 - Direct mode makes Ambassador an ACP v1 client. It launches and controls the
   selected local agent and submits the complete message as an ACP prompt. It
   does not attempt to call back through the MCP connection that registered the
@@ -75,14 +88,25 @@ scope on your own.
   `agentInfo.version` as diagnostic metadata. Attempt the fixed profile and let
   startup, initialization, session, or delivery incompatibility fail through
   the normal bounded error path.
-- MCP remains the agent-to-Ambassador tool channel. Do not expose delivery
-  control through local `poll_messages` or `ack_message` tools after the
-  cutover. Expose the exact central `submit_action_result` operation for the
-  target of an action call. Expose unanswered action calls and unread action
-  results and saved outbound action status through paginated `get_inbox`. Embassys permission decisions
-  belong to the human email flow in ADR 0054; do not expose a local decision
-  tool or project them into `get_inbox`. Do not treat the inbox as general chat
-  or delivery control.
+- MCP remains the agent-to-Ambassador tool channel. Expose six stable tools:
+  register_agent, verify_email, resend_verification, list_action_types,
+  get_my_permissions and message_box. The typed message box replaces separate
+  business tools and provides actions, permission-only requests, results,
+  owner questions/answers, durable checks, inbox pages and explicit receipts.
+  Reads never consume results. No local poll_messages, ack_message, permission
+  decision, arbitrary conversation or delivery-control tool is exposed.
+- Initial business calls and repeated user-driven checks wait up to 600 seconds.
+  Timeout returns the same operation's continuation, never a scheduled retry.
+  Permit an explicit shorter wait and keep wait capacity separate from ordinary
+  tools. Stream supported MCP SSE responses without buffering the whole call.
+- One independent receiver captures bounded batches durably. Processing,
+  provider delivery and central acknowledgements run independently. ACP approval
+  uses the shared encrypted response mailbox, never a competing central poller.
+- Optional native return bridges capture destinations from trusted provider
+  context and observe saved operations. OpenClaw uses reviewed chat.inject;
+  Claude Code channels remain experimental. Hermes native return requires
+  qualified origin and busy-session semantics. Never claim a desktop displayed
+  a result from an HTTP acknowledgement alone.
 - Direct-agent work is a persistent gateway-managed ACP session. It is not the
   exact chat in which registration happened. All supported agents load
   Ambassador MCP and other tools from normal provider configuration; send an
@@ -90,20 +114,23 @@ scope on your own.
 - Keep provider built-in tools enabled and do not request safe mode, restricted
   mode, or permission bypass. When ACP requests tool permission, keep the ACP
   request open, call central `get_human_input` using the triggering message ID,
-  consume the correlated `human_input_response` from `poll_messages`, and map
-  `allow_once` to the provider's narrowest positive option. Do not auto-approve
-  and do not use `request_permission` for the provider approval.
+  send the provider's exact option names and IDs as the API button labels and
+  values, consume the correlated `human_input_response` from `poll_messages`,
+  and return the selected option ID unchanged. Reject choices that cannot fit
+  the deployed API bounds; do not reinterpret approval kind or scope. Do not
+  auto-approve and do not use `request_permission` for the provider approval.
 - Reuse ACP sessions per central-issued remote identity, scoped to enrollment,
   fixed provider, and canonical working directory. Track message dispatch and
   each action separately; never replay a dispatched or uncertain message. Keep
   unfinished work active, clean idle sessions after 30 days in bounded batches,
   and delegate model compaction to the provider as defined by ADR 0056.
-- Keep the notification journal ID-only. The only local body-persistence
-  exceptions are ADR 0046's encrypted pending-action inbox, ADR 0051's encrypted
-  received-result inbox, and ADR 0056's encrypted explicit outbound intent.
-  Each store has a 1 GiB ciphertext quota with bounded indexed reads. Use new
-  schemas directly; existing state and migration are out of scope. Keep every
-  other central message body in bounded memory; do not invent server redelivery.
+- Encrypted stores hold notification custody, pending calls, received results,
+  outbound intent, operation events, owner questions and human-input responses.
+  Each has a 1 GiB ciphertext quota and bounded indexed reads. Persist dispatch
+  and receipt intent before external handoffs. Never replay uncertain prompts
+  or mutations. Native route journals contain IDs and delivery state only.
+  Use new schemas directly; migration is out of scope. Local custody cannot
+  invent server redelivery or recover an HTTP response lost before receipt.
 - The gateway follows the current
   [`embassys/agent2agent`](https://github.com/embassys/agent2agent) REST service
   at `https://mcp.embassys.ai`. Review current server code and live behavior
@@ -116,12 +143,13 @@ scope on your own.
   `/api/verify_email`, and `/api/resend_verification`. Registration is
   email-based. Verification sends the generated P-256 public JWK in the JSON
   body and intercepts the returned token before generic result handling.
-- `request_permission` accepts the deployed target and permission-name selector
-  pairs plus optional email decision menu, reason, and scope. A new request
-  emails the grantor's human and queues no request to the grantor's agent.
-  Local `action_payload` optionally saves exact outbound intent and never enters
-  the central permission request. A grant alone supplies no action payload.
-  Ambassador never handles an emailed decision token in normal operation.
+- The existing REST request_permission contract remains unchanged.
+  message_box request_action saves exact outbound payload locally and requests
+  the exact catalog action name. Validate the catalog schema without coercion,
+  defaults or name mapping. Permission-only requests contain no action payload.
+  A new permission request emails the grantor's human and queues no request to
+  the grantor's agent. A grant alone supplies no action payload. Ambassador
+  never handles emailed decision tokens in normal operation.
 - Protected central requests send `Authorization: Bearer <token>` and a
   separate `DPoP: <proof>` header. A nonce is optional and is used only after
   the server supplies one.
@@ -129,10 +157,14 @@ scope on your own.
   encrypted credential. Never put either value in MCP arguments or results,
   URLs, SQLite, diagnostics, metrics, logs, temporary files, crash artifacts,
   or support bundles.
-- Verbose diagnostics are console-only and may include bounded message, MCP,
-  and REST data after mandatory credential redaction. Never print
-  authorization, DPoP material, nonces, tokens, verification codes, private
-  keys, cookies, or webhook secrets.
+- Development diagnostics always retain bounded request/response bodies and
+  workflow events after credential redaction. Print the log directory at startup;
+  rotate four files of at most 8 MiB, bound each record to 64 KiB, and preserve
+  logs during clean. Verbose also prints to the console. Never log authorization,
+  DPoP material, nonces, tokens, verification codes, private keys, cookies,
+  webhook secrets or provider credentials. Logs are not recovery state.
+  The user approved this detailed retention for the upcoming development release
+  on 2026-09-05. Review retention separately for later production releases.
 - Do not add old-client support, central MCP fallbacks, speculative versioned
   routes, credential migration, activation, token reissue, leases, general
   conversations or replies, or central outcome lookup unless the current
@@ -141,8 +173,9 @@ scope on your own.
   `Origin` before parsing a request. The `/mcp` route trusts the owner's
   local-machine boundary, does not use bearer authentication, and rejects
   supplied `Authorization` headers. ADR 0053's non-MCP control route accepts
-  only bounded session reads, rejects every Origin, and requires Ambassador's
-  generated encrypted internal bearer secret.
+  bounded session reads and ADR 0058's instance-specific status and stop
+  operations, rejects every Origin, and requires Ambassador's generated
+  encrypted internal bearer secret.
 - Generate the central credential's encryption material internally and keep it
   in a separate owner-only state file. Never send it to an agent or accept it
   through CLI, MCP, or the environment.

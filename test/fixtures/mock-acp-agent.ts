@@ -108,7 +108,11 @@ const app = acp
     }
     return {};
   })
-  .onRequest(acp.methods.agent.session.close, () => ({}))
+  .onRequest(acp.methods.agent.session.close, async () => {
+    if (scenario === "close-hang") return await new Promise<never>(() => undefined);
+    if (scenario === "close-error") throw new Error("close failed");
+    return {};
+  })
   .onRequest(acp.methods.agent.session.delete, () => ({}))
   .onRequest(acp.methods.agent.session.prompt, async (context) => {
     if (promptPath !== undefined) await writeFile(promptPath, "dispatched", "utf8");
@@ -141,10 +145,23 @@ const app = acp
         },
         options: [
           { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "remember-approved", name: "Always allow this tool", kind: "allow_always" },
           { optionId: "deny", name: "Deny", kind: "reject_once" },
+          { optionId: "remember-rejected", name: "Always reject this tool", kind: "reject_always" },
         ],
       });
-      const expected = scenario.startsWith("permission-denied") ? "deny" : "allow";
+      if (scenario === "permission-unknown") {
+        if (response.outcome.outcome !== "cancelled") throw new Error("unknown choice selected");
+        return { stopReason: "end_turn" };
+      }
+      const expected =
+        scenario === "permission-remember-allow"
+          ? "remember-approved"
+          : scenario === "permission-remember-deny"
+            ? "remember-rejected"
+            : scenario.startsWith("permission-denied")
+              ? "deny"
+              : "allow";
       if (response.outcome.outcome !== "selected" || response.outcome.optionId !== expected) {
         throw new Error("permission decision did not match the fixture");
       }
