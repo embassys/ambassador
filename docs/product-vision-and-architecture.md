@@ -179,5 +179,6 @@ Remote waiting-for-owner progress is not currently published to callers.
 is part of this implementation.
 
 GUI development, arbitrary agent commands, general conversations, provider
-credential management, central MCP discovery, publication and automatic
-installation remain outside scope.
+credential management, central MCP discovery and automatic installation remain
+outside scope. The user authorized the 0.2.19 development release through the
+existing publication workflow, with the limits recorded in ADR 0015.

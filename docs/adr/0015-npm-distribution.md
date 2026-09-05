@@ -202,6 +202,27 @@ then passed clean installation, installed runtime, artifact scanning,
 vulnerability auditing, and all 141 package signature checks. The final artifact
 digests are recorded in the qualification document.
 
+On 2026-09-05, after reviewing the remaining client limitations, the user
+explicitly directed creation and merge of the production-review PR and another
+release. Version 0.2.19 includes ADRs 0057 through 0063, the durable message box,
+independent reception, owner-answer continuation, exact action validation,
+ten-minute waits, detailed development logs and optional conversation return.
+
+The user authorized this development release with the disclosed OpenClaw
+native duplicate-display limitation, pending user confirmation of Codex's
+first-turn discovery, and unfinished real calendar invitation qualification.
+These remain follow-up work, not passing qualification claims. OpenClaw native
+return stays opt-in and experimental. Foreground waits remain the default.
+Hermes native return and standalone Claude Chat/Cowork remain unsupported.
+Detailed request/response retention keeps ADR 0059's mandatory credential
+redaction. No API code, dependency or publication-tooling change is authorized.
+
+The runtime candidate passed all current Linux, macOS, Windows, package and
+Docker CI gates plus the recorded real-provider and deployed REST tests.
+The final versioned artifact must pass PR and main-branch gates, then publish
+through the existing OIDC job. Verify the registry artifact independently after
+publication. Existing-state migration is outside this development cutover.
+
 Versions 0.2.0 through 0.2.6 under the old package name are historical
 development publications. They are not a fallback or migration source. A new
 publication requires separate user approval.
@@ -237,7 +258,7 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
-0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, 0.2.17, and 0.2.18 releases described above. Later
+0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, 0.2.17, 0.2.18, and 0.2.19 releases described above. Later
 publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned

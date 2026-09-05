@@ -1,6 +1,6 @@
 # Ambassador protocol
 
-Status: delivery cutover in progress; current work is listed in
+Status: 0.2.19 development cutover; qualification follow-ups are listed in
 [Current work](implementation-plan.md)
 
 [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) is the approved
@@ -754,9 +754,11 @@ in-memory inspection and encrypted workflow records.
 
 Optional original-conversation return is separate from this incoming execution
 profile. The OpenClaw provider extension captures the logical session key in a
-trusted tool hook. Its ID-only route journal lives in provider state. It checks
-the existing operation, injects the returned data through reviewed `chat.inject`,
-and then acknowledges the event. The API appends to the current history behind
+trusted tool hook. Its ID-only route journal lives in provider state. It defers
+while the foreground turn is active, checks the existing operation and injects
+returned data through reviewed `chat.inject`. Provider acceptance can advance
+nonterminal status events; final results remain unread until an explicit agent
+receipt. The API appends to the current history behind
 that logical key, including after a reset; it does not pin an old history instance.
 Ambiguous injection is not repeated. A missing route leaves the result unread.
 
