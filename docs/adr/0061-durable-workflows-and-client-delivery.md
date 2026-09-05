@@ -33,6 +33,14 @@ ADR 0060's typed `message_box` replaces separate business tools. Add explicit
 owner questions and answers. Keep enrollment, catalog discovery, and current
 permission listing immediate. Every mutation has a caller request UUID and an
 exact input fingerprint persisted before submission. Checks reuse that UUID.
+UUID spelling is case-insensitive. Canonicalize local workflow IDs to lowercase
+before fingerprints, store lookups and native conversation binding. Use the
+same UUID validation for public request IDs and the outbound store, including
+modern UUID versions. Payload text, button values, provider conversation keys
+and opaque pagination cursors keep their exact spelling. A failure to persist
+outbound intent before any REST call is a confirmed local rejection with
+`submission_not_sent`. Failures after submission starts remain uncertain and
+must never trigger automatic resubmission.
 Results survive reads and disconnects until explicit client receipt. This
 receipt means client acceptance, never proof that a human read the answer.
 

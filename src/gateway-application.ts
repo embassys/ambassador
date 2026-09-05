@@ -731,6 +731,11 @@ export async function openGatewayApplication(
           case "list_action_types":
             result = {
               enrollment: identity.enrollment,
+              workflow_guidance: {
+                requester_email: identity.enrollment.email,
+                meetings:
+                  "For a coordinated meeting, get actual availability through a supported catalog action before requesting creation, even when the user proposes a specific time. Include requester_email as an attendee unless the user explicitly supplies another address; the agent provider's account email is not the Embassys requester identity. The target person's human decides permission. A denial must not be offered to the requester for approval.",
+              },
               action_types: await requireRest().listActionTypes(signal),
             };
             break;

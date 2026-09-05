@@ -3,6 +3,70 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Codex request UUID regression
+
+The user-operated Codex desktop test on 2026-09-05 submitted request
+`8719E7BB-A799-4410-BB26-BBC80921D6CC`. Public validation accepted this valid
+uppercase UUID, but the outbound store accepted only lowercase UUID versions
+1–5. Saving intent failed before any permission or action POST. The workflow
+incorrectly reported uncertain delivery, and an inbox read returned no item.
+Evidence is `.build/production-review/codex-uppercase-uuid-failure.jsonl`.
+
+Local workflow IDs now use one canonical UUID schema before fingerprints,
+storage and native conversation binding. Five regression cases failed before
+the correction, covering uppercase and mixed-case version 7 requests, native
+return correlation, owner answers and exhausted outbound storage. The focused
+28-test suite then passed. Repeated checks and changed-case retries retain one
+operation across restart; exact owner button values remain unchanged. A local
+failure before outbound persistence now reports `submission_not_sent`.
+The controlled desktop retest remains required.
+
+## Claude ten-minute wait and late result
+
+Claude desktop Code 2.1.260 completed a real 600-second tool wait on 2026-09-05.
+The earlier run failed after five minutes because its MCP client received no
+response or progress. Request-linked MCP progress corrected that idle timeout.
+The repeated call began at 19:04:26.974 UTC and returned pending after
+600,001 ms. Claude ended its turn and offered to check later. It did not start
+another check until the operator typed the ordinary follow-up, "Any news?".
+
+The controlled central service granted permission after the wait ended. Real
+OpenClaw ACP 2026.8.2 requested its owner's phone number, received the synthetic
+answer through the normal owner-answer flow and returned `+447700900742`.
+Claude checked the same request, displayed that number and acknowledged the
+result. There was one permission grant and one accepted action. Claude first
+made a malformed UUID, which validation rejected, then corrected it before
+the accepted request. It also asked for a purpose rather than using a neutral
+restatement. These are retained model-behavior observations.
+
+The conversation is `local_19ee2fc0-c887-4212-9a2a-cbe997014d2c`.
+Observations, diagnostics and screenshots are in
+`.build/production-review/claude-ten-minute-progress/`.
+
+## Claude channel return
+
+Claude Code CLI 2.1.261, shown in the desktop app through Remote Control,
+received a delayed result in its original conversation without human follow-up.
+The prompt was "Can you get the phone number of native-peer-1@fixture.test
+from his agent?". The initial request returned pending. Thirty seconds later,
+the channel delivered the exact result, Claude displayed `+447700900321` and
+sent its receipt. Central and the recipient were controlled fixtures.
+
+The stdio channel must forward Ambassador's server instructions as well as its
+tool schemas. The first attempt omitted those instructions and the model chose
+an unrelated tool. After correction, two fresh conversations completed; the
+second also verified the short trust cue and indented JSON. The desktop's
+channel card displays this text literally rather than rendering Markdown code
+fences. It collapses the body by default. Claude still described the grant as
+the agent's approval, although the permission belonged to the target's human.
+
+The final conversation is `session_01MkqdHk1ywDjWuqyWMAhfbd`, backed by CLI
+session `8a186614-6c61-436c-ac92-3e00b9e5f678`. Evidence includes
+`.build/production-review/channel-final-observations.json`,
+`channel-final-logs/` and `channel-final-formatted-result.jpg` in that directory.
+This qualifies the experimental CLI channel and its Remote Control display.
+Standalone Claude Chat and Cowork are separate, unqualified clients.
+
 ## OpenClaw persistent webhook qualification
 
 On 2026-09-05, OpenClaw 2026.8.2 accepted three controlled permission-status

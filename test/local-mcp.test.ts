@@ -66,6 +66,7 @@ test("held message_box calls stream POST keepalives and leave ordinary tools ava
     }
     return { status: "completed" };
   };
+  backend.enrollmentContext = () => ({ status: "registered", email: "a".repeat(254) });
   backend.listTools = async () => [
     { name: "message_box", inputSchema: { type: "object" } },
     { name: "echo", inputSchema: { type: "object" } },
@@ -78,6 +79,12 @@ test("held message_box calls stream POST keepalives and leave ordinary tools ava
   const transport = new StreamableHTTPClientTransport(new URL(server.endpoint));
   await client.connect(transport);
   assert.equal(client.getServerVersion()?.title, "Embassys Ambassador");
+  const discovery = client.getInstructions()?.slice(0, 512) ?? "";
+  assert.match(discovery, /Embassys/u);
+  assert.match(discovery, /register_agent/u);
+  assert.match(discovery, /verify_email/u);
+  assert.match(discovery, /message_box/u);
+  assert.match(discovery, /website URL/u);
   t.after(() => client.close());
   const headers = {
     "content-type": "application/json",

@@ -31,9 +31,7 @@ test("direct conversation presentation includes result values without internal w
 
 test("native delivery uses captured conversation context, persists receipt and never submits an action", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-native-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const store = new NativeRouteStore(join(root, "routes.sqlite"));
-  t.after(() => store.close());
   const requestId = randomUUID();
   const cursor = randomUUID();
   const calls: Record<string, unknown>[] = [];
@@ -63,10 +61,15 @@ test("native delivery uses captured conversation context, persists receipt and n
       return "displayed";
     },
   });
-  t.after(() => bridge.close());
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  bridge.bind(requestId.toUpperCase(), "trusted-session");
   bridge.bind(requestId, "trusted-session");
   assert.throws(() => bridge.bind(requestId, "another-session"));
-  await bridge.observe(requestId);
+  await bridge.observe(requestId.toUpperCase());
   assert.equal(delivered.length, 1);
   assert.match(delivered[0] ?? "", /synthetic-number/u);
   assert.deepEqual(
@@ -121,9 +124,7 @@ test("an ambiguous native injection is never replayed and does not acknowledge t
 
 test("queued native injection retains the inbox result and unavailable conversations cannot redirect it", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-native-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const store = new NativeRouteStore(join(root, "routes.sqlite"));
-  t.after(() => store.close());
   let calls = 0;
   const bridge = new NativeConversationBridge({
     store,
@@ -138,7 +139,11 @@ test("queued native injection retains the inbox result and unavailable conversat
     },
     deliver: async (conversation) => (conversation === "queued" ? "accepted" : "unavailable"),
   });
-  t.after(() => bridge.close());
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
   const queued = randomUUID();
   const missing = randomUUID();
   bridge.bind(queued, "queued");
@@ -152,9 +157,7 @@ test("queued native injection retains the inbox result and unavailable conversat
 
 test("a queued progress notification keeps observing until the final result, which remains unread", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-native-progress-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const store = new NativeRouteStore(join(root, "routes.sqlite"));
-  t.after(() => store.close());
   const id = randomUUID();
   let checks = 0;
   let receipts = 0;
@@ -179,7 +182,11 @@ test("a queued progress notification keeps observing until the final result, whi
       return "accepted";
     },
   });
-  t.after(() => bridge.close());
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
   bridge.bind(id, "original");
   await bridge.observe(id);
   assert.equal(notifications, 2);
@@ -189,9 +196,7 @@ test("a queued progress notification keeps observing until the final result, whi
 
 test("an expired central credential pauses native observation without a hot retry loop", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-native-expiry-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const store = new NativeRouteStore(join(root, "routes.sqlite"));
-  t.after(() => store.close());
   const id = randomUUID();
   let checks = 0;
   const bridge = new NativeConversationBridge({
@@ -204,7 +209,11 @@ test("an expired central credential pauses native observation without a hot retr
       throw new Error("No delivery expected");
     },
   });
-  t.after(() => bridge.close());
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
   bridge.bind(id, "original");
   await bridge.observe(id);
   assert.equal(checks, 1);

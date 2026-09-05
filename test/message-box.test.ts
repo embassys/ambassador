@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import Database from "better-sqlite3";
 import { ActionResultInbox } from "../src/action-result-inbox.js";
 import { parseCentralCredential } from "../src/central-credential.js";
 import type { CentralMessage } from "../src/central-rest.js";
@@ -157,6 +158,67 @@ const request = () => ({
   target_email: "peer@example.test",
   action_type: "lookup",
   payload: { query: "saved private intent" },
+});
+
+for (const id of ["8719E7BB-A799-4410-BB26-BBC80921D6CC", "01990acb-C3a4-7d21-A827-Ddee789af321"]) {
+  test(`request UUID ${id} retains one operation across case changes, restart and receipt`, async (t) => {
+    const f = await fixture(t);
+    const signal = new AbortController().signal;
+    const input = { ...request(), request_id: id, wait_seconds: 0 };
+    const accepted = await f.box.call(input, signal);
+    assert.equal(accepted.status, "pending");
+    assert.equal(accepted.request_id, id.toLowerCase());
+    assert.equal(f.requests, 1);
+    const inbox = await f.box.call({ type: "inbox" }, signal);
+    assert.equal((inbox.items as Record<string, unknown>[])[0]?.operation_id, id.toLowerCase());
+    await f.restart();
+    await f.box.call({ ...input, request_id: id.toLowerCase() }, signal);
+    assert.equal(f.requests, 1);
+    await assert.rejects(f.box.call({ ...input, payload: { query: "changed intent" } }, signal), {
+      code: "request_id_conflict",
+    });
+    await f.capture(f.outcome);
+    await f.capture(f.result());
+    const result = await f.box.call({ type: "check", request_id: id.toUpperCase() }, signal);
+    assert.equal(result.status, "completed");
+    assert.equal(f.calls, 1);
+    await f.box.call(
+      { type: "acknowledge", request_id: id, cursor: String(result.cursor).toUpperCase() },
+      signal,
+    );
+    const repeat = await f.box.call(
+      { type: "check", request_id: id.toLowerCase(), wait_seconds: 0 },
+      signal,
+    );
+    assert.deepEqual(repeat.events, []);
+    assert.equal(f.requests, 1);
+    assert.equal(f.calls, 1);
+  });
+}
+
+test("a full outbound store reports that nothing was sent, without uncertain delivery or retry", async (t) => {
+  const f = await fixture(t);
+  const database = new Database(join(f.root, "outbound.sqlite"));
+  database.prepare("UPDATE usage SET bytes = ? WHERE id = 1").run(1024 ** 3);
+  database.close();
+  const signal = new AbortController().signal;
+  const input = { ...request(), wait_seconds: 0 };
+  const result = await f.box.call(input, signal);
+  assert.equal(result.status, "rejected");
+  assert.equal(result.reason, "submission_not_sent");
+  assert.match(String(result.message), /not sent.*local/u);
+  assert.equal(
+    (result.events as { data: { error_code: string } }[])[0]?.data.error_code,
+    "submission_not_sent",
+  );
+  await f.restart();
+  assert.equal(
+    (await f.box.call({ type: "check", request_id: input.request_id }, signal)).status,
+    "rejected",
+  );
+  await f.box.call(input, signal);
+  assert.equal(f.requests, 0);
+  assert.equal(f.calls, 0);
 });
 
 test("inbox reconciles a completed reply after interruption before pending-call cleanup", async (t) => {
