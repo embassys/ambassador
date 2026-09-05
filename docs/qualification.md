@@ -3,6 +3,18 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## Current candidate checks
+
+Commit `a59a20c` passed all required check, package and Docker jobs in
+[CI run 33987740754](https://github.com/embassys/ambassador/actions/runs/33987740754)
+on 2026-09-05. CI used the minimum supported Node 24.19.0 on Linux, macOS and
+Windows. Native Windows file-permission checks and production/signature audits
+passed. The local check passed 346 tests with seven expected platform/opt-in
+skips; the production build and clean-installed Node package fixture passed.
+The earlier Windows cleanup/timing failures remain recorded in run
+33986057962; the corrected run 33987036651 also passed before the final native
+observer change. No release gate was waived. The candidate is unpublished.
+
 ## Codex request UUID regression
 
 The user-operated Codex desktop test on 2026-09-05 submitted request
@@ -19,7 +31,66 @@ return correlation, owner answers and exhausted outbound storage. The focused
 28-test suite then passed. Repeated checks and changed-case retries retain one
 operation across restart; exact owner button values remain unchanged. A local
 failure before outbound persistence now reports `submission_not_sent`.
-The controlled desktop retest remains required.
+The user-operated desktop retest registered and verified
+`codex-desktop@fixture.test`, then submitted request
+`e28d9c37-cb60-4f83-a4e6-954b7d294c16` at 19:22:12 UTC. It supplied a neutral
+reason for the action and permission request and used the default wait. The
+permission was granted, one action was accepted, and a subsequent check returned
+`+447700900321`. Codex acknowledged the result at 19:22:25. The controlled
+central and recipient recorded no delivery errors. This confirms the MCP
+exchange; confirmation that the first-turn website question disappeared and the
+final number appeared in the desktop is still pending from the user. Evidence
+is `.build/production-review/codex-uuid-fixed-observations.json` and
+`codex-uuid-fixed-logs/`. The temporary Codex MCP entry was removed afterward.
+
+## OpenClaw foreground overlap
+
+A fresh OpenClaw Mac 2026.8.2 conversation using the Codex backend reproduced
+the stale waiting view on 2026-09-05. The short prompt requested a fixture
+contact's phone number. Ambassador completed the action and received the
+foreground receipt, but history contained both a native injected answer and
+the model's answer while the app still showed work in progress. The answer
+became visible after a gateway reconnect. This was a desktop-only request;
+the earlier mixed desktop/RPC test was not the cause of that observation.
+Evidence is `native-desktop-stale.jpg`, `native-desktop-final-history.json` and
+`native-desktop-after-reconnect.jpg` under `.build/production-review/`.
+
+With the extension disabled, a fresh desktop request completed and visibly
+displayed `+447700900322` without a reconnect. The observer was then changed to
+check the provider's active-run metadata, defer while busy and reread the
+operation after the turn ends. Tests first reproduced a foreground receipt
+arriving while observation was deferred, and shutdown/restart while busy.
+
+The corrected extension passed a fresh ordinary-prompt desktop request in
+conversation `2f26821f-56f8-44d7-a705-399c8a1c9f54`. The foreground received and
+acknowledged `+447700900321`, the app finished normally, and history contained
+exactly one assistant answer with that number. The observer marked the route
+completed without injecting another answer. The agent initially selected the
+fixture catalog's synthetic ID instead of its name; validation rejected it,
+and the agent corrected the selector before any central submission. Evidence is
+`native-idle-foreground-final.jpg`, `native-idle-foreground-history.json` and
+`native-desktop-final-logs/`. The control screenshot is
+`native-foreground-only-final.jpg`. Central and recipients were controlled
+fixtures. This qualifies the observed foreground overlap correction; it does
+not establish an atomic activity-check/injection guarantee.
+
+A second fresh conversation, `b708d2b2-382f-480a-9883-b7e50cbb9045`, requested
+the other fixture contact and added the ordinary preference, "If there's no
+answer after 20 seconds, just tell me we're waiting." The agent used a 20-second
+wait and ended its turn with a waiting reply. At 30 seconds the delayed result
+arrived, and the extension displayed `+447700900322` in that idle conversation
+without another user message. The desktop showed a “×2” badge on the result and
+hid the earlier waiting text. Gateway history contained exactly one injected
+answer and the original waiting reply. Leaving and reopening the conversation
+did not repair the display. This is a remaining provider UI discrepancy;
+Ambassador did not repeat the action or consume the result. A separate check
+confirmed one unread result and its explicit receipt.
+
+Evidence is `native-idle-late-final.jpg`, `native-idle-late-history.json`,
+`native-idle-late-after-navigation.jpg` and `native-idle-late-unread.json` under
+`.build/production-review/`. The extension therefore remains experimental,
+with foreground waits as the default. After the tests, the temporary MCP and
+extension entries were removed from the owner's profile and the fixture stopped.
 
 ## Claude ten-minute wait and late result
 
