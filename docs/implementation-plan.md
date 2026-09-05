@@ -2,7 +2,9 @@
 
 The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md)
 and requested implementation, regression coverage and live end-to-end testing.
-The candidate is unpublished; API work remains issue-only.
+The user authorized PR creation, merge and the 0.2.19 development release on
+2026-09-05 after reviewing the remaining limitations. Publication is pending
+the final artifact and CI gates. API work remains issue-only.
 
 Implemented:
 
@@ -92,12 +94,12 @@ OpenClaw reuses a requester history across target recreation; Hermes completes
 the owner-question/result flow but its receiver creates a new session for each
 webhook delivery. Hermes direct mode provides Ambassador-managed peer sessions.
 
-Remaining qualification work before release:
+Follow-up qualification retained for this development release:
 
 - Confirm the user-operated Codex desktop no longer needs a website/tool hint
   and displays the returned number. The completed MCP exchange is recorded in
   [qualification](qualification.md); it does not alone prove the opening UI.
-- Resolve or accept the remaining OpenClaw native-display limitation. The
+- Resolve the remaining OpenClaw native-display limitation. The
   corrected foreground deferral passed a fresh desktop-only test with one
   visible answer. Idle return also appeared automatically, but the app showed
   a duplicate badge and obscured the waiting reply despite one saved native
@@ -105,10 +107,12 @@ Remaining qualification work before release:
   label and foreground default; do not claim exactly-once desktop presentation.
 - Retest delivered calendar invitations after the owner supplies a configured
   test calendar and consenting recipient. The local event is already verified.
-- Complete the release artifact gates, then raise the PR, merge
-  and publish under the user's existing authorization. The owner approved
-  detailed development request/response retention with credential redaction in
-  ADR 0059. No version bump or publication has happened yet.
+
+Release work: qualify the versioned artifact, pass PR and main-branch CI, publish
+0.2.19 through the existing OIDC workflow and independently verify the npm
+artifact. The owner approved detailed development request/response retention
+with credential redaction in ADR 0059 and release with the limits above in
+ADR 0015.
 
 API follow-ups are [1](https://github.com/embassys/agent2agent/issues/1),
 [2](https://github.com/embassys/agent2agent/issues/2),

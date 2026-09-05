@@ -61,7 +61,7 @@ Each encrypted store allows 1 GiB; reads remain bounded.
 
 ## Wait for a response
 
-The unpublished workflow candidate uses `message_box` for requests, checks,
+The 0.2.19 development release uses `message_box` for requests, checks,
 owner questions, replies and receipts. An initial request waits up to ten
 minutes for a related update. If it times out, ask the agent to check the same
 saved request again. The next check starts another wait without resubmitting
@@ -133,14 +133,18 @@ provider configuration or credentials.
 The current source includes the approved durable workflow redesign in
 [ADR 0061](docs/adr/0061-durable-workflows-and-client-delivery.md): independent
 receive, processing, provider and acknowledgement workers; exact action schemas;
-long waits; owner input; explicit result receipts; and development logs. This
-candidate has not been published. The `@latest` commands above install the
-published release; they do not install these working-tree changes.
+long waits; owner input; explicit result receipts; and development logs.
+Version 0.2.19 is a development release with the client limits below.
+The `@latest` commands install the latest published npm release.
 
-The published 0.2.18 baseline passed real Codex, Claude Code, Hermes and OpenClaw
-delivery qualification. Current candidate evidence and remaining release gates
-are recorded separately in [qualification](docs/qualification.md) and
-[the implementation plan](docs/implementation-plan.md). Gemini CLI and
+The current runtime passed real Codex, Claude Code, Hermes and OpenClaw ACP
+qualification, plus real OpenClaw and Hermes webhook checks. OpenClaw native
+return remains experimental because its desktop can show a duplicate badge
+despite one saved answer. Codex first-turn discovery and actual calendar
+invitation delivery still need follow-up observations. Hermes native return and
+standalone Claude Chat/Cowork are unsupported. See
+[client delivery](docs/client-delivery.md), [qualification](docs/qualification.md)
+and [the implementation plan](docs/implementation-plan.md). Gemini CLI and
 Antigravity remain inactive under
 [ADR 0043](docs/adr/0043-remove-gemini-and-defer-antigravity.md).
 
@@ -183,9 +187,9 @@ supported agents and webhook delivery for OpenClaw and Hermes.
 
 MIT
 
-## Workflow candidate
+## Development workflow
 
-The unpublished ADR 0061 candidate uses one typed message_box for business
+The 0.2.19 development release uses one typed message_box for business
 operations, ten-minute foreground waits and explicit result receipts. It also
 adds durable owner questions and development body logs.
 See [client delivery](docs/client-delivery.md) for timeout settings, optional

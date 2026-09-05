@@ -1,6 +1,6 @@
 # Client delivery and qualification
 
-This describes the unpublished ADR 0061 candidate. Configuration does not prove
+This describes the ADR 0061 development release, version 0.2.19. Configuration does not prove
 that a client displayed a result. Evidence belongs in [qualification](qualification.md).
 
 | Client | Implemented path | Current qualification |

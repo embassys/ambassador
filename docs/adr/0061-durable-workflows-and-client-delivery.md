@@ -171,8 +171,10 @@ The user approved the holistic proposal and requested implementation of all
 parts, regression coverage for edge cases, and proper live end-to-end testing.
 This amends ADRs 0037, 0038, 0039, 0052, 0055, 0056, 0059 and 0060 where their
 polling, custody, tool, protocol or delivery requirements conflict. It permits
-the reviewed opt-in native bridges; it does not authorize publication, arbitrary
-provider commands, provider credential access, or central API code changes.
+the reviewed opt-in native bridges. The user separately authorized the 0.2.19
+development release on 2026-09-05 with the limits recorded in ADR 0015. Arbitrary
+provider commands, provider credential access and central API code changes
+remain outside scope.
 
 See [workflow test plan](../workflow-test-plan.md) for required coverage and
 [current work](../implementation-plan.md) for actual completion status.

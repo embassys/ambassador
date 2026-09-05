@@ -31,7 +31,9 @@ scope on your own.
   Implement the typed message box, independent durable receiver, structured
   owner input and qualified client-specific delivery. Read
   `docs/workflow-test-plan.md` before changing those boundaries. API work remains
-  issue-only, and publication is not authorized.
+  issue-only. On 2026-09-05 the user authorized the 0.2.19 development release
+  after reviewing the remaining client limits. Keep those limits documented and
+  require all release CI gates before publication. Later releases need approval.
 
 - The product and public npm package are `@embassys/ambassador`. The public
   binary is `ambassador`. Do not keep the old package or binary as aliases.
