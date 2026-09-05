@@ -48,6 +48,20 @@ The approval deadline test leaves room for Windows process startup while keeping
 the simulated human wait longer than both deadlines. These are test changes;
 the release runtime and public CLI contract did not change during qualification.
 
+The same 0.2.18 candidate then passed a fresh combined Codex-to-Claude run
+using runner SHA-256
+`2fd191868b8edf181b71de8ac3c911fd1d4c24c7a0bbd3306ff4ca57d3480f32`.
+Its clean install resolved Codex ACP 1.10.0 / Codex 0.153.4 and Claude ACP
+0.75.0 / Claude Agent SDK 0.3.257. The controlled harness initiated the request
+and applied the disposable email decisions. Ambassador dispatched the saved
+payload once with zero rejected action calls; real Claude submitted the
+correlated result exactly once. Real Codex processed the permission outcome and
+action response in one peer session. One ACP own-human email approval, both
+agents' running session reads, stopped session deletion and forgetting,
+acknowledgement order, verbose redaction, artifact scanning, mail cleanup, and
+`clean` passed. Host Claude reported 2.1.261; the separate host Codex version
+probe remained unavailable and did not gate its package-owned adapter.
+
 ## ADR 0056 combined Codex-to-Claude live qualification
 
 On 2026-09-05, the combined live flow passed with real Codex and Claude against
