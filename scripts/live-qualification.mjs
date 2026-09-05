@@ -1160,7 +1160,7 @@ async function startGateway(
   };
 }
 
-async function runQualificationCliCommand(
+async function runQualificationCliCommandResult(
   packed,
   stateRoot,
   environment,
@@ -1193,6 +1193,11 @@ async function runQualificationCliCommand(
       ...(localControlMcpEndpoint === undefined ? {} : { localControlMcpEndpoint }),
     },
   });
+  return { result, stdout, stderr };
+}
+
+async function runQualificationCliCommand(...args) {
+  const { result, stdout, stderr } = await runQualificationCliCommandResult(...args);
   assert(result === 0 && stderr === "", "cli_command");
   return stdout;
 }
@@ -2082,10 +2087,12 @@ async function main() {
         phase = "codex_mcp_configuration";
         await prepareCodexMcp(codexHome, gateways[index].client.endpoint);
       }
-      if (realHermesWebhook && index === 1) {
+      if (realHermes && index === 1) {
         assert(hermesHome !== undefined, "hermes_isolation");
         phase = "hermes_mcp_configuration";
         await configureHermesMcp(hermesHome, gateways[index].client.endpoint);
+      }
+      if (realHermesWebhook && index === 1) {
         phase = "hermes_webhook_setup";
         const hermesWebhook = await startHermesWebhook(
           hermesHome,
@@ -2234,13 +2241,16 @@ async function main() {
           ]),
         "restart_catalog",
       );
+      if (realHermes && index === 1) {
+        assert(hermesHome !== undefined, "hermes_isolation");
+        phase = "hermes_mcp_configuration";
+        await configureHermesMcp(hermesHome, gateways[index].client.endpoint);
+      }
       if (realHermesWebhook && index === 1) {
         assert(
           hermesHome !== undefined && Number.isSafeInteger(hermesWebhookPort),
           "hermes_webhook_setup",
         );
-        phase = "hermes_mcp_configuration";
-        await configureHermesMcp(hermesHome, gateways[index].client.endpoint);
         phase = "hermes_webhook_setup";
         hermesWebhooks.push(
           await startHermesWebhook(
@@ -2593,6 +2603,7 @@ async function main() {
     );
 
     let sessionCommands = "not_applicable";
+    let providerSessionDeletion = "not_applicable";
     if (realDirect) {
       phase = "session_commands";
       const deleteIndex = 1;
@@ -2603,22 +2614,36 @@ async function main() {
         deleteSessions?.[0] !== undefined && forgetSessions?.[0] !== undefined,
         "session_list",
       );
-      const deleted = await runQualificationCliCommand(
+      const deleted = await runQualificationCliCommandResult(
         packed,
         roots[deleteIndex],
         environmentFor(deleteIndex),
         workingDirectoryFor(deleteIndex),
         ["sessions", "delete", deleteSessions[0].session_id],
       );
-      assert(deleted.includes("deleted session"), "session_delete");
-      const forgotten = await runQualificationCliCommand(
-        packed,
-        roots[forgetIndex],
-        environmentFor(forgetIndex),
-        workingDirectoryFor(forgetIndex),
-        ["sessions", "forget", forgetSessions[0].session_id],
+      const unsupported =
+        deleted.result === 5 &&
+        deleted.stdout === "" &&
+        deleted.stderr ===
+          "This agent cannot delete provider sessions; use `ambassador sessions forget` to remove only Ambassador metadata\n";
+      assert(
+        unsupported ||
+          (deleted.result === 0 &&
+            deleted.stderr === "" &&
+            deleted.stdout.includes("deleted session")),
+        "session_delete",
       );
-      assert(forgotten.includes("forgot session"), "session_forget");
+      providerSessionDeletion = unsupported ? "unsupported" : "passed";
+      if (realCodexClaude || unsupported) {
+        const forgotten = await runQualificationCliCommand(
+          packed,
+          roots[forgetIndex],
+          environmentFor(forgetIndex),
+          workingDirectoryFor(forgetIndex),
+          ["sessions", "forget", forgetSessions[0].session_id],
+        );
+        assert(forgotten.includes("forgot session"), "session_forget");
+      }
       sessionCommands = "passed";
     }
 
@@ -2736,6 +2761,7 @@ async function main() {
         action_result_round_trip: "passed",
         verbose_start: "passed",
         session_commands: sessionCommands,
+        provider_session_deletion: providerSessionDeletion,
         running_session_reads: realDirect ? "passed" : "not_applicable",
         requester_peer_session_reused: realCodexClaude ? "passed" : "not_applicable",
         webhook_secret_command: "passed",
