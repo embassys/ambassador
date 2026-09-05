@@ -3,8 +3,8 @@
 The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md)
 and requested implementation, regression coverage and live end-to-end testing.
 The user authorized PR creation, merge and the 0.2.19 development release on
-2026-09-05 after reviewing the remaining limitations. Publication is pending
-the final artifact and CI gates. API work remains issue-only.
+2026-09-05 after reviewing the remaining limitations. The release retains the
+final artifact and CI gates. API work remains issue-only.
 
 Implemented:
 
@@ -108,11 +108,13 @@ Follow-up qualification retained for this development release:
 - Retest delivered calendar invitations after the owner supplies a configured
   test calendar and consenting recipient. The local event is already verified.
 
-Release work: qualify the versioned artifact, pass PR and main-branch CI, publish
-0.2.19 through the existing OIDC workflow and independently verify the npm
-artifact. The owner approved detailed development request/response retention
-with credential redaction in ADR 0059 and release with the limits above in
-ADR 0015.
+The approved release procedure requires the versioned artifact, PR and
+main-branch CI to pass before OIDC publication, followed by independent registry
+verification. [PR 39](https://github.com/embassys/ambassador/pull/39) contains the
+release change. Final publication status and artifact verification are recorded
+in the [0.2.19 release](https://github.com/embassys/ambassador/releases/tag/v0.2.19).
+The owner approved detailed development request/response retention with
+credential redaction in ADR 0059 and release with the limits above in ADR 0015.
 
 API follow-ups are [1](https://github.com/embassys/agent2agent/issues/1),
 [2](https://github.com/embassys/agent2agent/issues/2),
