@@ -5,10 +5,10 @@ that a client displayed a result. Evidence belongs in [qualification](qualificat
 
 | Client | Implemented path | Current qualification |
 | --- | --- | --- |
-| OpenClaw | Foreground wait; experimental hook bridge to the captured logical session key | Real ACP action flow, two-conversation history routing and reconnect pass; immediate desktop display remains unqualified |
-| Hermes CLI/gateway | Foreground wait and durable inbox/check | Real ACP action flow passes; native return deferred pending a trusted gateway routing key and idle-only injection |
-| Codex | Foreground wait and later check | Real ACP action flow and 600-second SDK/HTTP wait pass; actual Codex foreground conversation still requires qualification |
-| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP action flow and desktop Code request/result/receipt pass; experimental channel remains unqualified |
+| OpenClaw | Foreground wait; experimental hook bridge to the captured logical session key | Real ACP, two-conversation history routing and foreground deferral pass. Idle return appears, but the desktop shows a duplicate badge despite one saved answer |
+| Hermes CLI/gateway | Foreground wait and durable inbox/check | Real ACP and current real webhook action/result/receipt pass; native return deferred pending a trusted gateway routing key and idle-only injection |
+| Codex | Foreground wait and later check | Real ACP and corrected desktop MCP registration/result/receipt pass; user confirmation of first-turn discovery and final UI remains pending |
+| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP flow, a full ten-minute desktop Code wait with later result/receipt, and CLI channel return shown through Remote Control pass |
 | Claude Desktop | No inherited Claude Code support claim | Separate transport, registration/executor and UI qualification required |
 
 ## Configure the foreground wait
@@ -67,17 +67,27 @@ that the desktop rendered it. A terminal result remains unread in Ambassador
 until the agent sends its explicit receipt. A session reset can replace the history behind the same logical
 session key; the bridge does not claim to pin an old history instance.
 
-A controlled test on OpenClaw 2026.8.2 used the owner's approved current profile
-and its Codex backend. Requests from two desktop conversations reached Ambassador,
-received exact synthetic results, and returned once to each matching history.
-A later pair passed after Ambassador restarted without an OpenClaw restart.
-The mixed desktop/RPC test conversations stayed on “Waiting for a response”
-even though gateway history contained the completed tool turn and injected
-answer. Earlier answers became visible after a gateway reconnect. A fresh
-desktop-only retest was blocked by the Mac locking; the cause remains
-unconfirmed. Native delivery therefore remains experimental:
-preserve the foreground wait and retain final results until an explicit receipt.
-Do not label `chat.inject` acceptance as verified desktop display.
+Controlled tests on OpenClaw 2026.8.2 used the owner's approved current profile
+and Codex backend. Requests from two desktop conversations received exact
+synthetic results and returned once to each matching history, including after
+Ambassador restarted. A fresh desktop-only test reproduced a stale working view
+when foreground and native delivery overlapped.
+
+The observer now defers to an active foreground turn and rereads the operation
+after it ends, so a foreground receipt can prevent another native answer. A
+fresh desktop test of that correction finished normally, displayed the exact
+number and retained one answer in history. A separate short-wait test ended its
+foreground turn, then displayed the delayed native result without user follow-up.
+The desktop showed a “×2” duplicate badge and obscured the earlier waiting text,
+although gateway history contained one native answer and the original waiting
+reply. Ordinary navigation did not clear that display discrepancy. The result
+remained unread in Ambassador, with its receipt available.
+
+Native return remains experimental because of this provider UI behavior. The
+activity check and injection are also separate calls; there is no atomic display
+guarantee. Preserve foreground waits and retain final results until an explicit
+receipt. These tests qualify observed paths, not general exactly-once desktop
+presentation. Screenshots and history evidence are in [qualification](qualification.md).
 
 A missing destination leaves the result unread. An interrupted injection is
 uncertain and is never repeated automatically. Events over the native delivery

@@ -36,11 +36,12 @@ resubmission. Deterministic regression cases cover owner continuation,
 duplicate replies, partial operation bindings, ambiguous delivery, receipt,
 cancellation and provider failure. See [workflow tests](workflow-test-plan.md).
 
-Current checks pass: 340 deterministic tests, and the production build passes. The
-preceding candidate passed the two clean-installed package
-lanes, and six Docker fixture tests. Seven default-suite skips are four Windows
-access-control cases and three separately invoked qualification cases. The
-ten-minute test and both packaged lanes have been run explicitly.
+Current local checks pass: 346 tests and the production build. Seven default-suite
+skips are four Windows access-control cases and three separately invoked
+qualification cases. The ten-minute test and both clean-installed package lanes
+have run explicitly. Commit `a59a20c`, including the native observer correction,
+passed all Linux, macOS, Windows and Docker CI gates on Node 24.19.0, including
+native Windows file-permission checks, package installation and audits.
 
 Testing exposed and fixed JWK leakage into diagnostic bodies, a transient
 atomic profile-write race, cancellation rejection handling during ACP startup,
@@ -64,55 +65,50 @@ passed two provider approvals. Codex and Claude passed provider history
 deletion; Hermes and OpenClaw explicitly report it unsupported. All temporary
 provider MCP entries and the OpenClaw extension settings were restored.
 
-OpenClaw's real hooks returned each synthetic result once to the correct history
-in two desktop conversations, including after an Ambassador restart. These
-mixed desktop/RPC conversations sometimes retained a stale waiting view. A
-fresh desktop-only retest was blocked when the Mac locked again. Native return
-remains experimental; the extension preserves waits and leaves final results
-unread until an explicit receipt.
+The user-operated Codex retest completed registration, one accepted phone action,
+exact result and receipt after fixing UUID normalization and pre-submission
+errors. Its opening website question still needs a fresh UI observation from the
+user. Discovery guidance now fits within the first 512 initialization characters.
+The successful request supplied the same neutral purpose in the action payload
+and permission reason. Exact catalog names and schemas remain authoritative.
 
-Remaining implementation and qualification work:
+Claude desktop Code completed a full 600-second wait, ended its turn on timeout,
+and displayed the late result from real OpenClaw after the ordinary follow-up
+"Any news?". The experimental Claude Code CLI channel also delivered a delayed
+result without follow-up, visible through Remote Control. Neither observation
+qualifies standalone Claude Chat or Cowork. Those clients and Hermes native
+return remain unsupported in this candidate; the matrix states their limits.
 
-- Meeting coordination exposed failures in the real Claude desktop/OpenClaw
-  tests in [qualification](qualification.md). Explicit enrollment context now
-  passes a fresh desktop observation. The user authorized Mac Calendar and a
-  14:00–16:00 busy block for the follow-up. The first follow-up returned an
-  approval decision instead of calendar data; guidance now distinguishes
-  approval from execution and requires actual availability before scheduling.
-  A later run verified the busy block, a real 16:00–16:30 local event and the
-  late result in the original conversation. Invitation delivery failed because
-  Mac Calendar required a personal Contacts card; the owner kept the event
-  without an invite. The final attendee/refusal test selected the correct
-  requester email and enforced denial before dispatch. Correct the model's
-  advice about who may approve a denied request, qualify availability checking
-  for explicit-time bookings, and retest invitation delivery with a configured
-  test calendar. Check short desktop waits and unsought provider check-ins;
-  neither is a qualified default ten-minute desktop wait.
-- Resolve the Codex first-turn discovery failure observed during user-operated
-  registration. Existing tool instructions already name Embassys and reject a
-  website-URL question; check initial tool visibility and discovery metadata.
-  Retest with short uncoached prompts. Record a consistent policy for neutral
-  request reasons and supply an explicit permission reason when appropriate.
-- Improve and repeat ordinary short-prompt qualification. Claude completed a
-  real desktop-to-OpenClaw exchange after two ordinary answers, but asked an
-  enrolled caller to reconfirm registration and selected a 60-second follow-up
-  wait. The new enrollment guidance removed that question in a fresh meeting
-  test, whose initial request used the default wait. Repeat the short phone
-  request without adding technical instructions to the user prompt.
-  The observed run and its limits are in [qualification](qualification.md).
-- Repeat OpenClaw native display checks in fresh desktop-only conversations,
-  then qualify the remaining native failure cases in the workflow test plan.
-- Claude desktop Code mode passed the exact result and receipt flow against a
-  controlled fixture. The user-operated Codex desktop registration and result
-  flow also completed after a discovery hint; its client selected 50-second
-  waits. Qualify full ten-minute desktop waits, the experimental Claude Code channel and Claude
-  Chat/Cowork separately. Hermes native return remains deferred for the
-  public API limitations in [client delivery](client-delivery.md).
-- Qualify the current real webhook modes, the minimum supported Node version
-  and Windows. Earlier published-version passes do not qualify this candidate.
-- Pass the remaining release gates before publication. The user approved
-  detailed request/response retention for this development release; ADR 0059
-  records that decision.
+Meeting tests now cover enrollment with no grants, actual Mac Calendar busy
+intervals, a local booking, and later availability/attendee/denial corrections.
+A fresh explicit-time request checked availability first, included the verified
+requester and accurately explained the target owner's denial. The target used
+owner-provided availability in that final test. Actual invitation delivery still
+requires a configured calendar account and consenting test recipient. No provider
+account or personal Contacts card was changed to bypass that limitation.
+
+Current real webhook qualification passes for both OpenClaw and Hermes.
+OpenClaw reuses a requester history across target recreation; Hermes completes
+the owner-question/result flow but its receiver creates a new session for each
+webhook delivery. Hermes direct mode provides Ambassador-managed peer sessions.
+
+Remaining qualification work before release:
+
+- Confirm the user-operated Codex desktop no longer needs a website/tool hint
+  and displays the returned number. The completed MCP exchange is recorded in
+  [qualification](qualification.md); it does not alone prove the opening UI.
+- Resolve or accept the remaining OpenClaw native-display limitation. The
+  corrected foreground deferral passed a fresh desktop-only test with one
+  visible answer. Idle return also appeared automatically, but the app showed
+  a duplicate badge and obscured the waiting reply despite one saved native
+  answer. The result remained unread and recoverable. Preserve the experimental
+  label and foreground default; do not claim exactly-once desktop presentation.
+- Retest delivered calendar invitations after the owner supplies a configured
+  test calendar and consenting recipient. The local event is already verified.
+- Complete the release artifact gates, then raise the PR, merge
+  and publish under the user's existing authorization. The owner approved
+  detailed development request/response retention with credential redaction in
+  ADR 0059. No version bump or publication has happened yet.
 
 API follow-ups are [1](https://github.com/embassys/agent2agent/issues/1),
 [2](https://github.com/embassys/agent2agent/issues/2),

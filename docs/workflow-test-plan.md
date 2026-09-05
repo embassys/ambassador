@@ -23,7 +23,7 @@ real email or provider side effects; controlled live runs prove actual behavior.
 
 ## Executed regressions
 
-The full local check currently passes 340 tests with seven expected platform or
+The full local check currently passes 346 tests with seven expected platform or
 opt-in skips. Both clean-installed Node and Docker REST lanes pass separately.
 The Docker fixture's six Python tests pass on its locked linux/amd64 platform.
 A separate real SDK/Streamable HTTP call waited 600.011 seconds before returning
@@ -43,7 +43,9 @@ The new regressions cover the supplied stalls and failures found during testing:
   recovery.
 - `message-box.test.ts` covers interrupted bindings, prepared dispatch recovery,
   cancellation, durable receipts and completed replies left in the pending inbox
-  by interruption.
+  by interruption. It also covers uppercase and version 7 UUIDs, case-insensitive
+  idempotency across restart, payload conflicts and definite failure before any
+  submission. The public gateway fixture exercises uppercase IDs and receipts.
 - `owner-questions.test.ts` and `ambassador-e2e.test.ts` cover exact owner/call
   correlation, answer-before-response, duplicate owner replies and continuation.
   The real desktop follow-up adds foreground-answer scheduling, interrupted
@@ -73,6 +75,8 @@ The new regressions cover the supplied stalls and failures found during testing:
 - Native bridge, OpenClaw hook and Claude channel tests cover trusted routes,
   concurrent observers, uncertain injection, acknowledgement semantics, separate
   OpenClaw service/tool activation and reconnection after a server restart.
+  They also cover foreground activity during an observer wait, a foreground
+  receipt before the turn ends, shutdown while busy and later idle delivery.
 - `webhook-delivery.test.ts` covers persistent OpenClaw requester keys across
   target recreation, separate enrollment/provider/receiver scopes, untrusted
   body routing fields and invalid scope or sender rejection before dispatch.
