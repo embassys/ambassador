@@ -224,7 +224,7 @@ exception described above, then approved 0.2.7 for the zero-configuration
 startup correction. The user then approved 0.2.8 with the qualification gaps
 and probe behavior recorded above. The user then approved the conditional
 0.2.9 release described above, followed by the conditional 0.2.10, 0.2.11,
-0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, and 0.2.17 releases described above. Later
+0.2.12, 0.2.13, 0.2.14, 0.2.15, 0.2.16, 0.2.17, and 0.2.18 releases described above. Later
 publications still require explicit approval after qualification.
 
 The user also approved changing public installation guidance from a pinned

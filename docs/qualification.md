@@ -3,6 +3,51 @@
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
+## 0.2.18 release candidate
+
+On 2026-09-05, the clean-installed 0.2.18 candidate passed the remaining
+Hermes and OpenClaw delivery matrix against `https://mcp.embassys.ai`.
+The tarball SHA-256 was
+`f8ab69e84187afe718f38a1755d4b8664bc266e020240b750c6e1df6234c9392`.
+A fresh pack after the qualification-harness fixes produced the same bytes.
+Reviewed central revision remained
+`708f205bfaee5010eb86fcfae55967fb5d02071c`; the deployment does not expose its
+revision.
+
+| Provider | Mode | Action round trip | Result submissions | Session commands |
+| --- | --- | --- | --- | --- |
+| Hermes | Direct | Passed | 1 | Running reads and stopped metadata cleanup passed; provider deletion unsupported |
+| Hermes | Webhook | Passed | 1 | Not applicable |
+| OpenClaw | Direct | Passed | 1 | Running reads and stopped metadata cleanup passed; provider deletion unsupported |
+| OpenClaw | Webhook | Passed | 1 | Not applicable |
+
+Every run used disposable identities and an isolated provider configuration.
+Registration, verification, encrypted restart, DPoP checks, emailed permission,
+saved outbound intent, acknowledgement order, artifact scanning, mail cleanup,
+and local cleanup passed. Webhook cases also passed the native authentication
+and custody checks. These four runs did not request ACP human approval; the
+combined Codex-to-Claude evidence below covers that flow.
+
+Hermes direct used runner SHA-256
+`374ee5d5f02bd55e7f180188d99f615404a16713b34588e2f4aebb7c21da1fb2`;
+Hermes webhook used
+`c76a0a9ba729eb18591316c05a5b85d53571a060a2886d667a6c3aeffceeb9f0`;
+both OpenClaw modes used
+`2fd191868b8edf181b71de8ac3c911fd1d4c24c7a0bbd3306ff4ca57d3480f32`.
+The runner now configures Hermes MCP in both modes, expects only the action
+message at the target webhook under the email-permission contract, and keeps
+the provider gateway available while Ambassador's stopped-only session commands
+run. Earlier attempts completed the action exchange but failed these later
+harness assertions; fresh complete runs passed after correction.
+
+The full local check passed 249 tests with six expected skips. CI run
+`33957758524` passed all Linux, macOS, Windows, Docker, package, and audit gates.
+The packed test now stops both gateway instances before removing state, including
+after a failed assertion, and allows Windows state initialization to finish.
+The approval deadline test leaves room for Windows process startup while keeping
+the simulated human wait longer than both deadlines. These are test changes;
+the release runtime and public CLI contract did not change during qualification.
+
 ## ADR 0056 combined Codex-to-Claude live qualification
 
 On 2026-09-05, the combined live flow passed with real Codex and Claude against
