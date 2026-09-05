@@ -108,3 +108,49 @@ test("encrypts the internal control secret and keeps it stable", async (t) => {
   assert.equal(await second.load(), created);
   assert.equal((await readFile(path)).includes(Buffer.from(created)), false);
 });
+
+test("stops only the authenticated process instance named by the caller", async (t) => {
+  let stops = 0;
+  const server = new LocalMcpServer(router, {
+    port: 0,
+    control: {
+      secret: SECRET,
+      sessions: { list: () => [], show: () => [] },
+      stop: () => {
+        stops += 1;
+      },
+    },
+  });
+  await server.listen();
+  t.after(() => server.close());
+  const client = new LocalControlClient(server.endpoint, SECRET);
+  const instanceId = await client.getProcessInstance();
+  assert.match(instanceId, /^[0-9a-f-]{36}$/u);
+  await assert.rejects(client.stopProcess("00000000-0000-4000-8000-000000000000"));
+  await assert.rejects(
+    new LocalControlClient(server.endpoint, "f".repeat(64)).stopProcess(instanceId),
+  );
+  const url = new URL("/_ambassador/control", server.endpoint);
+  for (const invalid of [
+    { origin: "http://127.0.0.1:1", body: { operation: "process.stop", instance_id: instanceId } },
+    { body: { operation: "process.stop", instance_id: instanceId, force: true } },
+    { body: { operation: "process.stop" } },
+  ]) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${SECRET}`,
+        "content-type": "application/json",
+        ...("origin" in invalid ? { origin: invalid.origin } : {}),
+      },
+      body: JSON.stringify(invalid.body),
+    });
+    assert.equal(response.ok, false);
+    await response.body?.cancel();
+  }
+  assert.equal(stops, 0);
+  await client.stopProcess(instanceId);
+  assert.equal(stops, 1);
+  await client.stopProcess(instanceId);
+  assert.equal(stops, 1);
+});

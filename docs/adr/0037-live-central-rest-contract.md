@@ -1,7 +1,7 @@
 # 0037 Central REST integration
 
 Status: accepted; local delivery, encrypted action persistence, and permission
-decisions amended by ADRs 0038, 0046, 0051, and 0054
+decisions amended by ADRs 0038, 0046, 0051, 0054, and 0057
 
 Date: 2026-09-01
 
@@ -97,10 +97,9 @@ copy central action types into new MCP tools.
 For a new permission, central emails the grantor a confirmation page and does
 not queue a `permission_request` to the grantor's agent. The page is read-only
 on `GET` so mail scanners cannot make a decision; its form applies the human's
-choice. Central then queues `permission_outcome` to the requester. For a
-granted outcome, the fixed local-delivery prompt maps `grantor_email` and
-`action_type` into one `call_action` attempt without forwarding outcome-only
-fields. Ambassador does not expose the deployed legacy
+choice. Central then queues `permission_outcome` to the requester. A granted outcome is status only. Under ADRs 0056 and 0057, Ambassador
+dispatches an explicitly saved action payload at most once. Direct and webhook
+providers must not invent or submit a payload from an outcome notification. Ambassador does not expose the deployed legacy
 `respond_to_permission` route, project pending permission requests into its
 inbox, poll email, or submit emailed decision tokens in production.
 
@@ -113,7 +112,7 @@ new approval email.
 ACP provider-tool approval uses the distinct `get_human_input` route. Central
 emails the authenticated agent's own owner and later queues a
 `human_input_response` back to that agent. Ambassador correlates the request to
-the triggering message, offers allow-once and deny, and waits through
+the triggering message, presents the provider's exact options, and waits through
 `poll_messages?timeout=0`. It does not use `get_human_input_status` or expose
 this internal control operation as a local MCP tool.
 

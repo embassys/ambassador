@@ -26,7 +26,7 @@ export async function clearLocalGatewayState(
   ]);
   const entries = await readdir(root);
   for (const name of entries) {
-    if (lockArtifacts.has(name)) continue;
+    if (lockArtifacts.has(name) || name === "diagnostics") continue;
     try {
       await rm(join(root, name), { recursive: true });
     } catch (error) {

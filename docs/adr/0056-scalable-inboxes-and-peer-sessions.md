@@ -1,6 +1,6 @@
 # 0056 Scalable inboxes and persistent peer sessions
 
-Status: accepted
+Status: accepted; confirmed rejection states amended by ADR 0057
 
 Date: 2026-09-05
 
@@ -48,6 +48,9 @@ history replay except for OpenClaw's reviewed profile, which requires load.
 OpenClaw 2026.8.2 restores its ACP-to-gateway session mapping from its ledger
 in `loadSession`; a fresh process's `resumeSession` does not restore that mapping.
 Select this path through the fixed capability registry, without runtime fallback.
+The fixed invocation includes `--no-prefix-cwd`, OpenClaw's documented display
+option. The user requested hiding that implementation detail on 2026-09-05.
+The canonical session working directory and peer scope remain unchanged.
 Bound individual replay events and retain only bounded history
 for inspection. Never infer a peer binding from a message payload.
 

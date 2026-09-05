@@ -29,6 +29,25 @@ test("loads one current bound credential without exposing mutable state", async 
   assert.equal(identity.credential().serialized, serialized);
 });
 
+test("keeps the identity and local key readable after expiry while refusing protected use", async () => {
+  let now = FIXTURE_NOW_SECONDS;
+  const store = memoryStore(currentCredential());
+  const identity = await GatewayIdentity.open(store, () => now);
+  const original = identity.credential();
+  now = original.token.expiresAt;
+  assert.equal(identity.enrolled, true);
+  assert.equal(identity.expired, true);
+  assert.equal(identity.localCredential().keyThumbprint, original.keyThumbprint);
+  assert.throws(
+    () => identity.credential(),
+    (error: unknown) => error instanceof IdentityError && error.code === "credential_expired",
+  );
+  const reopened = await GatewayIdentity.open(store, () => now);
+  assert.equal(reopened.expired, true);
+  assert.equal(reopened.localCredential().serialized, original.serialized);
+  assert.deepEqual(store.saved, []);
+});
+
 test("persists the atomic credential before enabling the identity", async () => {
   const store = memoryStore();
   const identity = await GatewayIdentity.open(store, () => FIXTURE_NOW_SECONDS);

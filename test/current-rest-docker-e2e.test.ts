@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -124,7 +125,7 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   const endpoint = await waitForEndpoint(() => stdout);
   const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
-  const email = "packed-current@fixture.test";
+  const email = `packed-${randomUUID()}@fixture.test`;
   assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
   await client.callTool("register_agent", {
     email,
@@ -149,14 +150,25 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
       "verify_email",
       "resend_verification",
       "list_action_types",
-      "request_permission",
-      "get_inbox",
-      "call_action",
-      "submit_action_result",
       "get_my_permissions",
+      "message_box",
     ],
   );
   assert.equal(Array.isArray((await client.callTool("list_action_types", {})).action_types), true);
+  assert.deepEqual(await client.callTool("message_box", { type: "inbox" }), {
+    count: 0,
+    items: [],
+  });
+  await assert.rejects(
+    client.callTool("message_box", {
+      type: "request_action",
+      request_id: "10000000-0000-4000-8000-000000000099",
+      target_email: "another@fixture.test",
+      action_type: "invented_calendar_action",
+      payload: {},
+      wait_seconds: 0,
+    }),
+  );
 
   controller.abort();
   assert.equal(await running, 0);

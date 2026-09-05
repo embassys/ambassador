@@ -1,5 +1,158 @@
 # Current work
 
+The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md)
+and requested implementation, regression coverage and live end-to-end testing.
+The user authorized PR creation, merge and the 0.2.19 development release on
+2026-09-05 after reviewing the remaining limitations. The release retains the
+final artifact and CI gates. API work remains issue-only.
+
+Implemented:
+
+- Independent encrypted notification custody, processing, provider delivery and
+  acknowledgement workers, with one shared owner/ACP answer receiver.
+- Six-tool MCP catalog with typed message_box, exact catalog/schema validation,
+  owner questions and answers, explicit receipts and durable repeated checks.
+- Streamable HTTP streaming and the installed SDK's current stateless protocol
+  path, separate wait capacity, cancellation and restart recovery.
+- Rotating development request/response logs with credential redaction and
+  preservation through clean.
+- Opt-in OpenClaw return extension and experimental Claude Code channel proxy.
+  Hermes uses foreground waits until its public APIs support a trusted gateway
+  destination and injection without unwanted interruption.
+- Explicit public enrollment context in MCP initialization, catalog and current
+  permissions responses. An empty grant list no longer implies missing
+  registration. Resumed identities and expired credentials retain that context.
+- Short delivery prompts with message-specific cues and complete payloads.
+  Shared workflow guidance loads through MCP initialization. JSON is indented
+  inside a code block; OpenClaw direct prompts omit the directory banner.
+  A real-provider restart check confirms reuse of the incoming requester
+  conversation, with separate conversations for different requesters.
+- OpenClaw webhook delivery uses enrollment-scoped persistent requester keys.
+  Real hooks reused the same provider history after recreating the delivery
+  target, and separated a different requester. Temporary hook settings were
+  restored. See ADR 0063 and the recorded qualification.
+
+The real 600-second SDK/HTTP wait passed at 600.011 seconds using a controlled
+central fixture, followed by a check that continued the same action without
+resubmission. Deterministic regression cases cover owner continuation,
+duplicate replies, partial operation bindings, ambiguous delivery, receipt,
+cancellation and provider failure. See [workflow tests](workflow-test-plan.md).
+
+Current local checks pass: 346 tests and the production build. Seven default-suite
+skips are four Windows access-control cases and three separately invoked
+qualification cases. The ten-minute test and both clean-installed package lanes
+have run explicitly. Commit `a59a20c`, including the native observer correction,
+passed all Linux, macOS, Windows and Docker CI gates on Node 24.19.0, including
+native Windows file-permission checks, package installation and audits.
+
+Testing exposed and fixed JWK leakage into diagnostic bodies, a transient
+atomic profile-write race, cancellation rejection handling during ACP startup,
+interrupted prepared-action continuation, and stale pending inbox entries after
+a reply had already completed. OpenClaw qualification also found separate
+service/tool activation instances, native hook naming differences and stale MCP
+connections after Ambassador restarted; all have regression coverage.
+
+A subsequent real Claude desktop-to-OpenClaw test found and fixed the missing
+foreground owner-answer continuation. Answers now enqueue durable local work,
+recover interrupted handoffs, preserve the active question and use the original
+central notification for any later provider approval. The repeated desktop run
+displayed the exact result and acknowledged it after OpenClaw resumed from the
+owner answer. It used a controlled central fixture. See the screenshot evidence
+in [qualification](qualification.md).
+
+The final runtime candidate passed the deployed REST action flow with real
+Claude, Codex, Hermes and OpenClaw ACP targets. Each passed exact result and
+receipt, running session reads, artifact scanning and cleanup. Claude also
+passed two provider approvals. Codex and Claude passed provider history
+deletion; Hermes and OpenClaw explicitly report it unsupported. All temporary
+provider MCP entries and the OpenClaw extension settings were restored.
+
+The user-operated Codex retest completed registration, one accepted phone action,
+exact result and receipt after fixing UUID normalization and pre-submission
+errors. Its opening website question still needs a fresh UI observation from the
+user. Discovery guidance now fits within the first 512 initialization characters.
+The successful request supplied the same neutral purpose in the action payload
+and permission reason. Exact catalog names and schemas remain authoritative.
+
+Claude desktop Code completed a full 600-second wait, ended its turn on timeout,
+and displayed the late result from real OpenClaw after the ordinary follow-up
+"Any news?". The experimental Claude Code CLI channel also delivered a delayed
+result without follow-up, visible through Remote Control. Neither observation
+qualifies standalone Claude Chat or Cowork. Those clients and Hermes native
+return remain unsupported in this candidate; the matrix states their limits.
+
+Meeting tests now cover enrollment with no grants, actual Mac Calendar busy
+intervals, a local booking, and later availability/attendee/denial corrections.
+A fresh explicit-time request checked availability first, included the verified
+requester and accurately explained the target owner's denial. The target used
+owner-provided availability in that final test. Actual invitation delivery still
+requires a configured calendar account and consenting test recipient. No provider
+account or personal Contacts card was changed to bypass that limitation.
+
+Current real webhook qualification passes for both OpenClaw and Hermes.
+OpenClaw reuses a requester history across target recreation; Hermes completes
+the owner-question/result flow but its receiver creates a new session for each
+webhook delivery. Hermes direct mode provides Ambassador-managed peer sessions.
+
+Follow-up qualification retained for this development release:
+
+- Confirm the user-operated Codex desktop no longer needs a website/tool hint
+  and displays the returned number. The completed MCP exchange is recorded in
+  [qualification](qualification.md); it does not alone prove the opening UI.
+- Resolve the remaining OpenClaw native-display limitation. The
+  corrected foreground deferral passed a fresh desktop-only test with one
+  visible answer. Idle return also appeared automatically, but the app showed
+  a duplicate badge and obscured the waiting reply despite one saved native
+  answer. The result remained unread and recoverable. Preserve the experimental
+  label and foreground default; do not claim exactly-once desktop presentation.
+- Retest delivered calendar invitations after the owner supplies a configured
+  test calendar and consenting recipient. The local event is already verified.
+
+The approved release procedure requires the versioned artifact, PR and
+main-branch CI to pass before OIDC publication, followed by independent registry
+verification. [PR 39](https://github.com/embassys/ambassador/pull/39) contains the
+release change. Final publication status and artifact verification are recorded
+in the [0.2.19 release](https://github.com/embassys/ambassador/releases/tag/v0.2.19).
+The owner approved detailed development request/response retention with
+credential redaction in ADR 0059 and release with the limits above in ADR 0015.
+
+API follow-ups are [1](https://github.com/embassys/agent2agent/issues/1),
+[2](https://github.com/embassys/agent2agent/issues/2),
+[3](https://github.com/embassys/agent2agent/issues/3),
+[4](https://github.com/embassys/agent2agent/issues/4) for uncertain submissions,
+[5](https://github.com/embassys/agent2agent/issues/5) for correlated remote
+waiting-for-owner progress, and
+[6](https://github.com/embassys/agent2agent/issues/6) for action result schemas.
+No API code changed.
+
+## Earlier implementation and release evidence
+
+The records below describe earlier candidates and the published 0.2.18 baseline.
+They do not qualify ADR 0061's new workflow or original-conversation return.
+
+ADR 0058's confirmed process stop is implemented. `start` and `clean` ask in an
+interactive terminal before stopping the authenticated instance, then acquire
+its released lock before proceeding. The full local check passed 274 tests
+with six expected skips. Separate terminal processes also passed confirmed
+start replacement and cleanup. Refusal, cancellation, a changed instance, and
+shutdown timeout have deterministic coverage. These changes are unpublished.
+
+ADR 0057's Ambassador changes are implemented: shared delivery intent
+instructions, MCP session reclamation, exact provider approval choices, local
+access after credential expiry, bounded ACP close, recoverable confirmed
+outbound rejection, and bounded verbose response reads. Regression tests, the
+full local check, a clean-installed package test, and controlled live REST
+qualification passed. The live run used a mock ACP agent and a controlled
+webhook receiver; the real-provider matrix has not been repeated for these
+changes. See [Delivery qualification](qualification.md) for candidate evidence.
+
+The user requested API issues instead of server code changes. Message custody
+and batch bounds are in [API issue 1](https://github.com/embassys/agent2agent/issues/1),
+credential renewal in [API issue 2](https://github.com/embassys/agent2agent/issues/2),
+and listener lifecycle in [API issue 3](https://github.com/embassys/agent2agent/issues/3).
+These remain production limitations. No API code was changed, and the
+Ambassador changes have not been published.
+
 ADR 0056 is implemented and qualified. Indexed encrypted stores allow 1 GiB
 each, `get_inbox` pages safely, receipt capture covers approval polling, and
 saved outbound intent dispatches the exact requested payload after a grant.
@@ -20,8 +173,8 @@ The independently downloaded npm artifact matched the qualified candidate and
 passed clean-install, runtime, artifact, vulnerability, and signature checks.
 The user deferred further Windows fixes to a separate pull request; no further
 Windows change or release-gate exception was needed after the merge.
-Approval-option mapping remains deferred by the user; central recovery remains
-server work.
+ADR 0057 replaces the deferred approval mapping with exact provider choices;
+central recovery remains server work.
 
 Phase 3B is complete. ADR 0050's common ACP policy, public Codex and Claude
 adapters, persistent session lifecycle, session commands, verbose diagnostics,

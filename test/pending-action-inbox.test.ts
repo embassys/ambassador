@@ -21,7 +21,7 @@ function credential(email = "inbox@fixture.test") {
 
 function actionMessage(callId = FIRST_CALL_ID, marker = "private-action-payload"): CentralMessage {
   return {
-    id: `message.${callId.slice(-1)}`,
+    id: `message.${callId}`,
     sender_agent_id: "agent.requester",
     action_type_id: "action.get_phone_number",
     payload: {
@@ -53,6 +53,8 @@ test("encrypts unanswered action calls and removes them only after completion", 
   assert.equal(first.capture(actionMessage()), false);
   assert.deepEqual(first.list(), [
     {
+      source_message_id: `message.${FIRST_CALL_ID}`,
+      action_type_id: "action.get_phone_number",
       call_id: FIRST_CALL_ID,
       sender_agent_id: "agent.requester",
       action_type: "get_phone_number",

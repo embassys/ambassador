@@ -7,6 +7,8 @@ const CALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 const ACTION_NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 
 export interface PendingActionCall {
+  readonly source_message_id?: string;
+  readonly action_type_id?: string | null;
   readonly call_id: string;
   readonly sender_agent_id: string;
   readonly action_type: string;
@@ -25,8 +27,14 @@ function invalidInbox(): PendingActionInboxError {
   return new PendingActionInboxError();
 }
 
-function exactKeys(value: Record<string, unknown>, required: readonly string[]): boolean {
-  const names = Object.keys(value).sort();
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const names = Object.keys(value)
+    .filter((key) => !optional.includes(key))
+    .sort();
   const expected = [...required].sort();
   return names.length === expected.length && expected.every((name, index) => names[index] === name);
 }
@@ -45,7 +53,11 @@ function pendingActionFromMessage(message: CentralMessage): PendingActionCall | 
     message.sender_agent_id.length > 256 ||
     typeof message.created_at !== "string" ||
     message.created_at.length < 1 ||
-    message.created_at.length > 128
+    message.created_at.length > 128 ||
+    (message.id !== undefined &&
+      (typeof message.id !== "string" || message.id.length < 1 || message.id.length > 256)) ||
+    (message.action_type_id != null &&
+      (typeof message.action_type_id !== "string" || message.action_type_id.length > 256))
   ) {
     throw invalidInbox();
   }
@@ -55,6 +67,8 @@ function pendingActionFromMessage(message: CentralMessage): PendingActionCall | 
     throw invalidInbox();
   }
   return {
+    ...(message.id === undefined ? {} : { source_message_id: message.id }),
+    ...(message.action_type_id === undefined ? {} : { action_type_id: message.action_type_id }),
     call_id: message.payload.call_id,
     sender_agent_id: message.sender_agent_id,
     action_type: message.payload.action_type,
@@ -72,11 +86,19 @@ function parsePendingAction(plaintext: Buffer): PendingActionCall {
   }
   if (
     !isCentralRecord(value) ||
-    !exactKeys(value, ["call_id", "sender_agent_id", "action_type", "payload", "created_at"])
+    !exactKeys(
+      value,
+      ["call_id", "sender_agent_id", "action_type", "payload", "created_at"],
+      ["source_message_id", "action_type_id"],
+    )
   ) {
     throw invalidInbox();
   }
   return pendingActionFromMessage({
+    ...(value.source_message_id === undefined ? {} : { id: value.source_message_id as string }),
+    ...(value.action_type_id === undefined
+      ? {}
+      : { action_type_id: value.action_type_id as string | null }),
     sender_agent_id: value.sender_agent_id as string,
     payload: {
       type: "action_call",
@@ -107,7 +129,16 @@ export class PendingActionInbox {
 
   capture(message: CentralMessage): boolean {
     const value = pendingActionFromMessage(message);
-    return value === undefined ? false : this.#store.put(value);
+    return value === undefined
+      ? false
+      : this.#store.put(
+          value,
+          value.source_message_id === undefined ? {} : { correlation: value.source_message_id },
+        );
+  }
+
+  forMessage(messageId: string): PendingActionCall | undefined {
+    return this.#store.find(messageId);
   }
 
   get(callId: string): PendingActionCall | undefined {

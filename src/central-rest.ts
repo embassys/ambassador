@@ -32,14 +32,27 @@ const FORBIDDEN_ARGUMENT_NAMES = new Set([
 ]);
 
 export type CentralRestErrorCode =
+  | "credential_expired"
   | "central_authentication_failed"
   | "central_request_failed"
   | "central_request_rejected"
   | "central_response_invalid"
+  | "permission_missing"
+  | "permission_pending"
+  | "permission_denied"
+  | "permission_expired"
+  | "permission_spent"
   | "invalid_arguments";
 
 export class CentralRestError extends Error {
-  constructor(readonly code: CentralRestErrorCode) {
+  constructor(
+    readonly code: CentralRestErrorCode,
+    readonly response?: {
+      readonly httpStatus: number;
+      readonly notAccepted: boolean;
+      readonly retryAfterMs?: number;
+    },
+  ) {
     super("Central REST operation failed");
     this.name = "CentralRestError";
   }
@@ -88,17 +101,17 @@ export interface CentralHumanInputOption {
 export interface CentralHumanInputRequest {
   readonly permission_type: string;
   readonly request: string;
-  readonly input_type: "buttons";
-  readonly options: readonly CentralHumanInputOption[];
+  readonly input_type: "buttons" | "text";
+  readonly options?: readonly CentralHumanInputOption[];
   readonly message_id: string;
 }
 
 export interface CentralHumanInputRequestResult extends Record<string, unknown> {
   readonly request_id: string;
   readonly status: "pending";
-  readonly input_type: "buttons";
+  readonly input_type: "buttons" | "text";
   readonly message: string;
-  readonly options: readonly CentralHumanInputOption[];
+  readonly options: readonly CentralHumanInputOption[] | null;
 }
 
 export interface CentralRestClientOptions {
@@ -167,94 +180,9 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
     inputSchema: objectSchema({}),
   },
   {
-    name: "request_permission",
-    description:
-      "Use this Embassys Ambassador tool when the user wants permission to perform an action for another registered identity. Embassys emails that identity's human owner, who decides asynchronously; their agent does not approve the request. Supply target_email, message_id, or both when they identify the same grantor; message_id takes precedence. Use exactly one permission name. Check already_granted before waiting for email approval. Include action_payload only when the user also wants that exact action submitted after approval; Ambassador saves and dispatches it, so do not separately call call_action for the same intent.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        target_email: {
-          type: "string",
-          minLength: 3,
-          maxLength: 254,
-          description: "Email of the identity whose human owner will decide.",
-        },
-        message_id: {
-          type: "string",
-          format: "uuid",
-          description: "Message from which Embassys should infer the other identity.",
-        },
-        action_type: { type: "string", minLength: 1, maxLength: 128 },
-        permission_type: {
-          type: "string",
-          minLength: 1,
-          maxLength: 128,
-          description: "Alias for action_type; use exactly one of them.",
-        },
-        decision_options: {
-          type: "string",
-          enum: ["accept_deny", "once_always"],
-          default: "accept_deny",
-          description: "Buttons offered to the human in the approval email.",
-        },
-        reason: {
-          type: "string",
-          maxLength: 500,
-          description: "Human-readable reason shown in the approval email.",
-        },
-        scope: { anyOf: [{ type: "object" }, { type: "null" }] },
-        action_payload: {
-          type: "object",
-          description:
-            "Optional exact action payload to save encrypted locally and submit once after permission is granted. Requires target_email and no message_id. Omit for permission only. Inspect status through get_inbox; do not also call call_action for this intent.",
-        },
-      },
-      allOf: [
-        { anyOf: [{ required: ["target_email"] }, { required: ["message_id"] }] },
-        { oneOf: [{ required: ["action_type"] }, { required: ["permission_type"] }] },
-      ],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "get_inbox",
-    description:
-      "Check unanswered action calls, unread action results, and saved outbound action status. Use next_cursor to retrieve further pages. Only results included in a successful response are marked read. Embassys permission decisions remain in the human email flow.",
-    inputSchema: objectSchema({
-      limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
-      cursor: { type: "string", minLength: 1, maxLength: 128 },
-    }),
-  },
-  {
-    name: "call_action",
-    description:
-      "Use this Embassys Ambassador tool when the user asks to perform an Embassys action for another identity and the required permission is already granted. Deliver the action request with its payload.",
-    inputSchema: objectSchema(
-      {
-        target_email: { type: "string", minLength: 3, maxLength: 254 },
-        action_type: { type: "string", minLength: 1, maxLength: 128 },
-        payload: { type: "object" },
-      },
-      ["target_email", "action_type", "payload"],
-    ),
-  },
-  {
-    name: "submit_action_result",
-    description:
-      "Use this Embassys Ambassador tool after the user or agent has an answer for one received action call. Return one correlated success or error result using that call ID; this is not a general chat reply tool.",
-    inputSchema: objectSchema(
-      {
-        call_id: { type: "string", format: "uuid" },
-        result: { type: "object" },
-        status: { type: "string", enum: ["success", "error"] },
-      },
-      ["call_id", "result", "status"],
-    ),
-  },
-  {
     name: "get_my_permissions",
     description:
-      "Use this Embassys Ambassador tool when the user asks about all their Embassys permissions, including requests they made and requests made to them. List every permission involving the enrolled identity.",
+      "Read the verified Embassys enrollment identity and all its permissions, including requests made by or to it. A successful response confirms registration even when permissions is empty. Use enrollment.email for the registered identity; do not infer registration state from the permission count.",
     inputSchema: objectSchema({}),
   },
 ] as const;
@@ -513,35 +441,36 @@ export class CentralRestClient {
     signal?: AbortSignal,
   ): Promise<CentralHumanInputRequestResult> {
     if (
-      !exactKeys(arguments_, [
-        "permission_type",
-        "request",
-        "input_type",
-        "options",
-        "message_id",
-      ]) ||
-      arguments_.input_type !== "buttons" ||
-      !Array.isArray(arguments_.options) ||
-      arguments_.options.length < 1 ||
-      arguments_.options.length > 10
-    ) {
+      !exactKeys(
+        arguments_,
+        ["permission_type", "request", "input_type", "message_id"],
+        ["options"],
+      ) ||
+      !["buttons", "text"].includes(arguments_.input_type) ||
+      (arguments_.input_type === "buttons"
+        ? !Array.isArray(arguments_.options) ||
+          arguments_.options.length < 1 ||
+          arguments_.options.length > 10
+        : arguments_.options !== undefined)
+    )
       throw failure("invalid_arguments");
-    }
-    const options = arguments_.options.map((option) => {
-      try {
-        return humanInputOption(option);
-      } catch {
-        throw failure("invalid_arguments");
-      }
-    });
-    if (new Set(options.map(({ value }) => value)).size !== options.length) {
+    const options =
+      arguments_.input_type === "text"
+        ? null
+        : (arguments_.options ?? []).map((option) => {
+            try {
+              return humanInputOption(option);
+            } catch {
+              throw failure("invalid_arguments");
+            }
+          });
+    if (options !== null && new Set(options.map(({ value }) => value)).size !== options.length)
       throw failure("invalid_arguments");
-    }
     const body = {
       permission_type: requestPermissionName(arguments_.permission_type),
       request: requestHumanInputText(arguments_.request, 2_000),
-      input_type: "buttons" as const,
-      options,
+      input_type: arguments_.input_type,
+      ...(options === null ? {} : { options }),
       message_id: requestUuid(arguments_.message_id),
     };
     const result = await this.#request("POST", "/api/get_human_input", body, signal);
@@ -550,24 +479,21 @@ export class CentralRestClient {
       typeof result.request_id !== "string" ||
       !UUID.test(result.request_id) ||
       result.status !== "pending" ||
-      result.input_type !== "buttons" ||
+      result.input_type !== arguments_.input_type ||
       typeof result.message !== "string" ||
       result.message.length > 512 ||
-      !Array.isArray(result.options) ||
-      result.options.length !== options.length
-    ) {
+      (options === null ? result.options !== null : !Array.isArray(result.options))
+    )
       throw failure("central_response_invalid");
-    }
-    const normalizedOptions = result.options.map(humanInputOption);
-    if (JSON.stringify(normalizedOptions) !== JSON.stringify(options)) {
+    const returned = options === null ? null : (result.options as unknown[]).map(humanInputOption);
+    if (JSON.stringify(returned) !== JSON.stringify(options))
       throw failure("central_response_invalid");
-    }
     return {
       request_id: result.request_id,
       status: "pending",
-      input_type: "buttons",
+      input_type: arguments_.input_type,
       message: result.message,
-      options: normalizedOptions,
+      options: returned,
     };
   }
 
@@ -719,6 +645,9 @@ export class CentralRestClient {
       );
     } catch (error) {
       if (error instanceof CentralProtectedTransportError) {
+        if (error.code === "central_protected_credential_expired") {
+          throw failure("credential_expired");
+        }
         if (error.code === "central_protected_authentication_failed") {
           throw failure("central_authentication_failed");
         }
@@ -729,9 +658,50 @@ export class CentralRestClient {
       throw failure("central_request_failed");
     }
     if (!response.ok) {
-      await cancel(response);
-      throw failure(
-        response.status === 401 ? "central_authentication_failed" : "central_request_rejected",
+      // These statuses occur before acceptance in the reviewed mutation handlers.
+      // Unknown statuses and server errors can follow committed writes.
+      const rejectedStatuses =
+        path === "/api/request_permission"
+          ? [400, 403, 404, 409, 422, 429]
+          : path === "/api/call_action"
+            ? [400, 403, 404, 422, 429]
+            : [];
+      const retryAfter = response.headers.get("retry-after");
+      const retryAfterMs =
+        response.status === 429 && retryAfter !== null && /^\d{1,5}$/u.test(retryAfter)
+          ? Math.min(Number(retryAfter) * 1_000, 24 * 60 * 60 * 1_000)
+          : undefined;
+      let rejection: unknown;
+      try {
+        rejection = await readCentralJson(response, 64 * 1024);
+      } catch {
+        await cancel(response);
+      }
+      const permissionReason =
+        path === "/api/call_action" &&
+        response.status === 403 &&
+        isCentralRecord(rejection) &&
+        typeof rejection.detail === "string"
+          ? (
+              {
+                "No permission exists for this action": "permission_missing",
+                "Permission is pending, not granted": "permission_pending",
+                "Permission is denied, not granted": "permission_denied",
+                "Permission has expired": "permission_expired",
+                "This permission was granted for a single use, which has already been spent. Request permission again.":
+                  "permission_spent",
+              } as Record<string, CentralRestErrorCode>
+            )[rejection.detail]
+          : undefined;
+      throw new CentralRestError(
+        response.status === 401
+          ? "central_authentication_failed"
+          : (permissionReason ?? "central_request_rejected"),
+        {
+          httpStatus: response.status,
+          notAccepted: rejectedStatuses.includes(response.status),
+          ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+        },
       );
     }
     try {

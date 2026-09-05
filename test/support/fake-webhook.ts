@@ -73,12 +73,12 @@ export async function startFakeWebhook(
       let ambassadorMessage = body;
       if (options.contract === "openclaw-agent") {
         const prompt = body.message;
-        const marker = "\nEmbassys message JSON:\n";
+        const marker = "\n```json\n";
         const markerIndex = typeof prompt === "string" ? prompt.lastIndexOf(marker) : -1;
         try {
           ambassadorMessage =
-            markerIndex >= 0
-              ? (JSON.parse((prompt as string).slice(markerIndex + marker.length)) as Record<
+            markerIndex >= 0 && typeof prompt === "string" && prompt.endsWith("\n```")
+              ? (JSON.parse(prompt.slice(markerIndex + marker.length, -4)) as Record<
                   string,
                   unknown
                 >)
@@ -87,10 +87,13 @@ export async function startFakeWebhook(
           ambassadorMessage = {};
         }
         if (
-          Object.keys(body).sort().join(",") !== "agentId,deliver,message,name,sessionMode" ||
+          Object.keys(body).sort().join(",") !==
+            "agentId,deliver,message,name,sessionKey,sessionMode" ||
           body.name !== "Embassys Ambassador" ||
           body.agentId !== "main" ||
-          body.sessionMode !== "isolated" ||
+          body.sessionMode !== "persistent" ||
+          typeof body.sessionKey !== "string" ||
+          !/^hook:ambassador:[a-f0-9]{64}$/u.test(body.sessionKey) ||
           body.deliver !== false ||
           request.headers.authorization !== `Bearer ${options.secret}` ||
           typeof ambassadorMessage.id !== "string" ||

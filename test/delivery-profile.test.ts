@@ -1,8 +1,20 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { PRODUCTION_AGENT_CAPABILITIES } from "../src/agent-capabilities.js";
 import {
@@ -141,6 +153,27 @@ test("concurrent writers cannot replace the first committed profile", async (t) 
       JSON.stringify(stored) === JSON.stringify(webhook),
     true,
   );
+});
+
+test("profile readers wait for atomic link cleanup but reject a persistent extra link", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-profile-link-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = join(root, "profile.json");
+  const store = new DeliveryProfileStore(path);
+  const profile = {
+    version: 1 as const,
+    mode: "webhook" as const,
+    agent_kind: "openclaw",
+    url: "https://agent.example.test/embassys",
+  };
+  await store.save(profile);
+  const temporary = join(root, "profile.tmp");
+  await link(path, temporary);
+  const cleanup = delay(10).then(() => unlink(temporary));
+  assert.deepEqual(await store.load(), profile);
+  await cleanup;
+  await link(path, temporary);
+  await assert.rejects(store.load(), { code: "profile_store_failed" });
 });
 
 test("enforces native Windows DACLs on the profile and state directory", {

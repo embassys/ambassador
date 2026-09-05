@@ -1,6 +1,7 @@
 # 0039 Zero-configuration local start
 
-Status: accepted; local reset amended by ADR 0044
+Status: accepted; local reset amended by ADR 0044 and confirmed process stop
+by ADR 0058
 
 Date: 2026-09-03
 

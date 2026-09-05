@@ -301,6 +301,7 @@ function parseToken(
   accessToken: string,
   keyThumbprint: string,
   nowSeconds: () => number,
+  allowExpired: boolean,
 ): CentralTokenClaims {
   if (
     !ASCII_TOKEN.test(accessToken) ||
@@ -336,7 +337,7 @@ function parseToken(
     now < 0 ||
     issuedAt < 0 ||
     expiresAt <= issuedAt ||
-    expiresAt <= now
+    (!allowExpired && expiresAt <= now)
   ) {
     invalid();
   }
@@ -378,6 +379,7 @@ export function serializeCentralCredential(record: CentralCredentialRecord): str
 export function parseCentralCredential(
   value: string | CentralCredentialRecord | unknown,
   nowSeconds: () => number = () => Date.now() / 1_000,
+  options: { readonly allowExpired?: boolean } = {},
 ): LoadedCentralCredential {
   let parsed: unknown = value;
   if (typeof value === "string") {
@@ -388,7 +390,12 @@ export function parseCentralCredential(
   const privateKey = importPrivateKey(record.dpop_private_key_pkcs8);
   const publicJwk = publicJwkFromPrivateKey(privateKey);
   const keyThumbprint = centralJwkThumbprint(publicJwk);
-  const token = parseToken(record.access_token, keyThumbprint, nowSeconds);
+  const token = parseToken(
+    record.access_token,
+    keyThumbprint,
+    nowSeconds,
+    options.allowExpired === true,
+  );
   const serialized = serializeCentralCredential(record);
   return { record, serialized, privateKey, publicJwk, keyThumbprint, token };
 }
