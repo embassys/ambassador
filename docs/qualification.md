@@ -13,7 +13,15 @@ passed. The local check passed 346 tests with seven expected platform/opt-in
 skips; the production build and clean-installed Node package fixture passed.
 The earlier Windows cleanup/timing failures remain recorded in run
 33986057962; the corrected run 33987036651 also passed before the final native
-observer change. No release gate was waived. The candidate is unpublished.
+observer change. No CI gate was waived. These checks preceded publication.
+
+The user then authorized the 0.2.19 development release with the client limits
+below. Its clean-installed artifact passed the Node REST fixture and production
+audit. All 140 registry dependencies passed signature verification; only the
+unpublished local package lacked registry metadata. The packaged runtime and
+OpenClaw extension matched the live-qualified candidate byte for byte.
+The [0.2.19 release record](https://github.com/embassys/ambassador/releases/tag/v0.2.19)
+contains the final registry digests and independent post-publication checks.
 
 ## Codex request UUID regression
 
