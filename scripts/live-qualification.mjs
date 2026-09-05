@@ -2582,8 +2582,6 @@ async function main() {
     );
 
     phase = "gateway_stop_before_cli";
-    for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
-    for (const gateway of openClawGateways.splice(0)) await gateway.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
 
     phase = "webhook_secret_command";
@@ -2650,6 +2648,10 @@ async function main() {
       }
       sessionCommands = "passed";
     }
+
+    phase = "provider_stop_after_cli";
+    for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
+    for (const gateway of openClawGateways.splice(0)) await gateway.stop();
 
     phase = "verbose_start";
     const verboseGateway = await startGateway(
