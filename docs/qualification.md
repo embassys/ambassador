@@ -67,6 +67,32 @@ session `8a186614-6c61-436c-ac92-3e00b9e5f678`. Evidence includes
 This qualifies the experimental CLI channel and its Remote Control display.
 Standalone Claude Chat and Cowork are separate, unqualified clients.
 
+## Explicit-time meeting coordination
+
+The later explicit-time meeting retest used the ordinary prompt, "Can you
+arrange a 30-minute catch-up with alex@fixture.test next Tuesday at 4:30pm London
+time? Please coordinate with his agent." Initialization guidance alone failed:
+Claude skipped availability and selected its provider account email. The target
+human's denial prevented creation. Evidence for that attempt is in
+`.build/production-review/claude-meeting-explicit-final/`.
+
+After adding local workflow guidance beside the catalog, a fresh Claude Code
+desktop 2.1.260 conversation requested free/busy data first. OpenClaw lacked the
+requested primary-calendar data and asked its owner. The operator supplied the
+user's test constraint: busy 14:00–16:00 Europe/London on 8 September, free at
+16:30. OpenClaw returned the intervals with an explicit owner-provided source.
+Claude then requested 16:30–17:00 and included the verified requester email,
+`claude-desktop@fixture.test`, as an attendee. The fixture denied creation.
+Claude stated that nothing was booked and that the decision belonged to Alex's
+owner. Only the availability action was dispatched. Both workflow results were
+acknowledged.
+
+That conversation is `local_1af56c5a-c3a3-4915-be5b-abed0bb18a2c`. Evidence and
+its screenshot are in `.build/production-review/claude-meeting-catalog-guidance/`.
+This qualifies the observed availability, attendee and denial sequence. It used
+owner-provided availability and a controlled central service. Actual invitation
+delivery still requires a configured calendar account and consenting recipient.
+
 ## OpenClaw persistent webhook qualification
 
 On 2026-09-05, OpenClaw 2026.8.2 accepted three controlled permission-status
@@ -86,6 +112,36 @@ OpenClaw's configuration API. A first test attempt incorrectly waited for a
 visible answer; its failure and the corrected completion check are preserved.
 Evidence is in `.build/production-review/openclaw-webhook-peers-final/`.
 The full local check passes 339 tests with seven expected skips.
+
+## Hermes webhook qualification
+
+The current candidate completed an action through the installed Hermes webhook
+gateway on 2026-09-05. The test used the owner's normal provider authentication,
+a temporary loopback-only route with bearer and HMAC V2 validation, and a
+controlled central service. Preflight confirmed that the gateway was stopped,
+no other platforms were enabled and no scheduled jobs existed.
+
+Hermes requested the missing phone number through `ask_owner`. The operator's
+authorized fixture answer triggered a second webhook delivery, and Hermes
+returned `+447700900743` through `submit_action_result`. The requester received
+that exact value and sent its receipt. Hermes initially omitted the mutation
+request UUID; validation rejected it and the model corrected the call without
+duplicating a central submission. The receiver creates a separate session per
+webhook delivery. This does not qualify requester-session reuse in Hermes
+webhook mode; use direct mode for Ambassador-managed peer sessions.
+
+Two setup attempts are retained. The first used the fixture's old clock and
+correctly failed the receiver's timestamp window. The second configured MCP
+before its listener existed, so the provider declined to save it. The final run
+used a current fixture clock and verified the MCP entry after the listener was
+ready. Cleanup required confirming removal through the provider CLI; its MCP
+entry, route and webhook configuration were then restored, and the gateway was
+stopped. Provider credentials were neither copied nor changed.
+
+Evidence is `.build/production-review/hermes-webhook-final/`. The earlier
+`hermes-webhook-current-profile/` and `hermes-webhook-clock-fixed/` directories
+retain the setup failures. These are controlled test results, not live central
+service qualification.
 
 ## OpenClaw message presentation and requester conversations
 

@@ -38,6 +38,18 @@ export default {
         const bridge = new NativeConversationBridge({
           store,
           presentation: "assistant_message",
+          async isConversationIdle(sessionKey, signal) {
+            const history = await callGatewayFromCli(
+              "chat.history",
+              { timeout: "15000" },
+              { sessionKey, limit: 1 },
+              { signal, progress: false, sharedStateMode: "read-only" },
+            );
+            const info = history.sessionInfo;
+            if (info?.key !== sessionKey || typeof info.hasActiveRun !== "boolean")
+              throw new Error("Conversation activity could not be confirmed");
+            return !info.hasActiveRun;
+          },
           async callBox(input, signal) {
             return client.call(input, signal);
           },

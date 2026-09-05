@@ -153,6 +153,7 @@ export class NativeConversationBridge {
       ) => Promise<"displayed" | "accepted" | "unavailable">;
       notice?: (code: string) => void;
       presentation?: "assistant_message" | "agent_input";
+      isConversationIdle?: (conversationId: string, signal: AbortSignal) => Promise<boolean>;
     },
   ) {}
 
@@ -220,6 +221,13 @@ export class NativeConversationBridge {
           this.options.store.put(route);
           if (route.terminal) return;
         }
+        if (
+          this.options.isConversationIdle !== undefined &&
+          !(await this.options.isConversationIdle(route.conversation_id, signal))
+        ) {
+          await delay(1_000, undefined, { signal });
+          continue;
+        }
         const update = await this.options.callBox(
           { type: "check", request_id: id, wait_seconds: 600 },
           signal,
@@ -236,6 +244,16 @@ export class NativeConversationBridge {
           continue;
         }
         if (!workflowUuid.safeParse(update.cursor).success) throw new Error("Invalid event cursor");
+        if (
+          this.options.isConversationIdle !== undefined &&
+          !(await this.options.isConversationIdle(route.conversation_id, signal))
+        ) {
+          // A foreground turn may have started during the long poll. Let it
+          // finish, then reread the operation so its receipt wins over this
+          // cached update. Nothing has been injected or acknowledged here.
+          await delay(1_000, undefined, { signal });
+          continue;
+        }
         const body =
           this.options.presentation === "assistant_message"
             ? conversationUpdateText(update)

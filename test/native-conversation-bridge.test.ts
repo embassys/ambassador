@@ -218,3 +218,102 @@ test("an expired central credential pauses native observation without a hot retr
   await bridge.observe(id);
   assert.equal(checks, 1);
 });
+
+test("native return yields to an active foreground turn and rereads its receipt before injection", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-native-foreground-"));
+  const store = new NativeRouteStore(join(root, "routes.sqlite"));
+  const id = randomUUID();
+  let checks = 0;
+  let idleChecks = 0;
+  let delivered = 0;
+  const bridge = new NativeConversationBridge({
+    store,
+    async isConversationIdle(conversation) {
+      assert.equal(conversation, "original");
+      // A user starts a turn while the native observer waits for the result.
+      // The foreground consumes and acknowledges it before ending that turn.
+      return ++idleChecks !== 2;
+    },
+    async callBox(input) {
+      assert.equal(input.type, "check");
+      return {
+        request_id: id,
+        status: "completed",
+        cursor: randomUUID(),
+        events: ++checks === 1 ? [{ type: "action_result" }] : [],
+      };
+    },
+    async deliver() {
+      delivered++;
+      return "accepted";
+    },
+  });
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  bridge.bind(id, "original");
+  await bridge.observe(id);
+  assert.equal(checks, 2);
+  assert.equal(delivered, 0);
+  assert.equal(store.get(id)?.status, "completed");
+});
+
+test("shutdown during an active conversation preserves the route for a later idle delivery", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-native-busy-restart-"));
+  const path = join(root, "routes.sqlite");
+  let store = new NativeRouteStore(path);
+  const id = randomUUID();
+  let busy = true;
+  let checked!: () => void;
+  const activityChecked = new Promise<void>((resolve) => {
+    checked = resolve;
+  });
+  let calls = 0;
+  let delivered = 0;
+  const options = {
+    get store() {
+      return store;
+    },
+    async isConversationIdle() {
+      checked();
+      return !busy;
+    },
+    async callBox(input: Record<string, unknown>) {
+      assert.equal(input.type, "check");
+      calls++;
+      return {
+        request_id: id,
+        status: "completed",
+        cursor: randomUUID(),
+        events: [{ type: "action_result" }],
+      };
+    },
+    async deliver() {
+      delivered++;
+      return "accepted" as const;
+    },
+  };
+  let bridge = new NativeConversationBridge(options);
+  t.after(async () => {
+    await bridge.close();
+    store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  bridge.bind(id, "original");
+  const waiting = bridge.observe(id);
+  await activityChecked;
+  await bridge.close();
+  await waiting;
+  assert.equal(calls, 0);
+  assert.equal(store.get(id)?.status, "waiting");
+  store.close();
+  store = new NativeRouteStore(path);
+  busy = false;
+  bridge = new NativeConversationBridge(options);
+  await bridge.resume();
+  assert.equal(calls, 1);
+  assert.equal(delivered, 1);
+  assert.equal(store.get(id)?.status, "accepted");
+});
