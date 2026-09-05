@@ -2488,7 +2488,11 @@ async function main() {
       "action_response_ack_timeout",
     );
     if (realWebhook) {
-      assert(webhookAcceptedByGateway[1].size >= 2, "target_webhook_custody");
+      assert(
+        webhookAcceptedByGateway[1].size === 1 &&
+          webhookAcceptedByGateway[1].has(called.message_id),
+        "target_webhook_custody",
+      );
     }
     if (realTarget) {
       assert(targetActionResultCallCount === 1, "target_action_result_count");
