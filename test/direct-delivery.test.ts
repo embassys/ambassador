@@ -305,10 +305,11 @@ test("does not prompt an action already answered by another MCP chat", async (t)
 
 test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {
   const value = await target(t, "permission-session-mcp", {
-    promptDeadlineMs: 50,
-    outerDeadlineMs: 250,
+    promptDeadlineMs: 1_000,
+    outerDeadlineMs: 4_000,
     permissionApproval: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Leave time for process startup on Windows while exceeding both deadlines.
+      await new Promise((resolve) => setTimeout(resolve, 4_500));
       return "allow";
     },
   });
