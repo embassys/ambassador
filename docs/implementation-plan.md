@@ -71,7 +71,7 @@ issue-only. These items do not authorize another release.
   The new candidate adds platform-specific appearance, the supplied branding,
   light/dark/system preferences and guarded OpenClaw setup. Both provider helpers
   support checking, repair and disconnect of app-owned entries. The full check
-  passes 402 tests with seven expected skips. Two requests through the packaged
+  passes 403 tests with seven expected skips. Two requests through the packaged
   app, deployed central API and real Claude executor passed exact synthetic result
   and receipt; the first completed turn was seen in the native app and survived
   restart. Live tests found and fixed repeated tool-summary rows and an enrolled
@@ -83,6 +83,9 @@ issue-only. These items do not authorize another release.
   and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
   including the macOS background resource gate. A live diagnostic export also
   passed body-inclusion and credential-redaction checks.
+  Controls now use the OS accent with contrast checks, compact macOS buttons
+  and a segmented theme selector, plus Windows/Linux control sizing. The UI
+  remains web-rendered in the approved Electron host; no new toolkit was added.
   Codex/Hermes helpers, native
   Windows/Linux qualification, signed distribution, trusted engine selection and
   API-dependent owner screens remain open. See the desktop plan for evidence

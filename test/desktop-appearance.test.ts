@@ -3,8 +3,35 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DesktopAppearance, windowAppearance } from "../src/desktop/appearance.js";
+import { controlPalette, DesktopAppearance, windowAppearance } from "../src/desktop/appearance.js";
 import { parseDesktopCommand } from "../src/desktop/protocol.js";
+
+test("system accents keep readable button labels and links in both themes", () => {
+  const luminance = (hex: string) => {
+    const channels = [1, 3, 5].map(
+      (offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255,
+    );
+    const linear = channels.map((value) =>
+      value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4,
+    );
+    const [red = 0, green = 0, blue = 0] = linear;
+    return red * 0.2126 + green * 0.7152 + blue * 0.0722;
+  };
+  const contrast = (a: string, b: string) => {
+    const [lighter = 0, darker = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (lighter + 0.05) / (darker + 0.05);
+  };
+  for (const dark of [false, true]) {
+    for (const accent of ["A850C4FF", "ffffffff", "000000ff", "ffff00ff", "777777ff", "007affff"]) {
+      const palette = controlPalette(accent, dark);
+      assert.equal(palette.accent, `#${accent.slice(0, 6).toLowerCase()}`);
+      assert.ok(contrast(palette.accent, palette.accentText) >= 4.5);
+      assert.ok(contrast(palette.link, dark ? "#29292c" : "#f5f5f7") >= 4.5);
+    }
+  }
+  for (const invalid of [undefined, "", "var(--remote)", "#fff", "112233", "11223300"])
+    assert.equal(controlPalette(invalid, false).accent, "#007aff");
+});
 
 test("desktop appearance follows the platform and respects reduced transparency", () => {
   assert.equal(windowAppearance("darwin", false, false).titleBarStyle, "hiddenInset");

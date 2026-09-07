@@ -9,6 +9,42 @@ export const appearanceSchema = z.enum(["system", "light", "dark"]);
 export type Appearance = z.infer<typeof appearanceSchema>;
 const settings = z.strictObject({ appearance: appearanceSchema });
 
+type RGB = [number, number, number];
+function luminance(rgb: RGB): number {
+  const weights: RGB = [0.2126, 0.7152, 0.0722];
+  return weights.reduce((sum, weight, index) => {
+    const channel = rgb[index] ?? 0;
+    const value = channel / 255;
+    const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    return sum + linear * weight;
+  }, 0);
+}
+function contrast(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+function hex(rgb: RGB): string {
+  return `#${rgb.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Electron supplies RGBA; only opaque system colours enter the renderer. */
+export function controlPalette(rawAccent: string | undefined, dark: boolean) {
+  const accent = rawAccent && /^[0-9a-f]{6}ff$/i.test(rawAccent) ? rawAccent : "007affff";
+  const rgb = [0, 2, 4].map((offset) =>
+    Number.parseInt(accent.slice(offset, offset + 2), 16),
+  ) as RGB;
+  const brightness = luminance(rgb);
+  const accentText = contrast(brightness, 1) >= contrast(brightness, 0) ? "#ffffff" : "#000000";
+  const background = luminance(dark ? [41, 41, 44] : [245, 245, 247]);
+  let link = rgb;
+  // Preserve the accent hue while bringing link contrast above 4.5:1.
+  for (let step = 1; contrast(luminance(link), background) < 4.5 && step <= 20; step++) {
+    link = rgb.map((channel) =>
+      Math.round(channel + (((dark ? 255 : 0) - channel) * step) / 20),
+    ) as RGB;
+  }
+  return { accent: hex(rgb), accentText, link: hex(link) };
+}
+
 export function windowAppearance(platform: string, dark: boolean, reducedTransparency: boolean) {
   return {
     backgroundColor: dark ? "#1e1e20" : "#f5f5f7",
