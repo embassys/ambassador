@@ -71,12 +71,12 @@ while the desktop owner flow is qualified.
   an unknown menu name. Do not adopt that fallback. Unknown options must remain
   unavailable until the server supplies an authoritative menu. Provider input
   buttons should continue to use their exact supplied labels and values.
-- Revocation emits a new `permission_revoked` payload. Ambassador currently
-  delivers it as a generic message; its operation-correlation and desktop
-  permission-notification paths recognize `permission_outcome` only. Add an
-  explicit revocation contract and tests, including revocation while dispatch
-  is pending and after submission. Revocation must not cancel already completed
-  work or cause a new permission request automatically. Track with
+- Revocation emits a new `permission_revoked` payload. ADR 0069 now handles it
+  explicitly, rejects undispatched matching work and emits a desktop permission
+  notification. Fixture and controlled live checks pass, including the revoked
+  permission-list record. Completed and uncertain submissions are not replayed,
+  and revocation never creates a permission request automatically. Full audit
+  history and recoverable owner mutations remain in
   [issue 9](https://github.com/embassys/agent2agent/issues/9).
 - Browser push is not a recoverable owner event stream, and there is no native
   APNs/WNS token contract. Qualify browser push separately and retain native
@@ -94,7 +94,7 @@ while the desktop owner flow is qualified.
 
 ## Next integration order
 
-Update: ADR 0068 implements steps 1–2. Controlled live owner login, all read-only
+Update: ADR 0068 implements steps 1–2; ADR 0069 completes step 4. Controlled live owner login, all read-only
 views, session rotation, restart and sign-out passed through the packaged worker.
 Native Mac account entry and view checks also passed. See the final evidence in
 [the desktop plan](desktop-app-plan.md). The contract findings above still apply.
