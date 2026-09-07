@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
+import { suggestedInstancePort } from "../../src/desktop/instance-defaults.js";
 import type { LoginItemState } from "../../src/desktop/login-item.js";
 import type {
   DesktopCommand,
@@ -24,7 +25,7 @@ interface Session {
 }
 interface Setup {
   endpoint: string;
-  guides: { name: string; instruction: string; note: string }[];
+  guides: { name: string; instruction: string; note: string; connect?: "claude_code" }[];
 }
 declare global {
   interface Window {
@@ -130,8 +131,10 @@ function App() {
   const [chooseLocation, setChooseLocation] = useState(false);
   const createRequest = useRef(crypto.randomUUID());
   const [setup, setSetup] = useState<Setup>();
+  const [connectionMessage, setConnectionMessage] = useState("");
   const [newName, setNewName] = useState("");
-  const [newPort, setNewPort] = useState("8788");
+  const [newPort, setNewPort] = useState("");
+  const proposedPort = newPort || String(suggestedInstancePort(snapshot?.instances ?? []));
   const [loading, setLoading] = useState(false);
   const viewGeneration = useRef(0);
 
@@ -165,6 +168,7 @@ function App() {
     let current = true;
     viewGeneration.current++;
     setHistory(undefined);
+    setConnectionMessage("");
     setExportPreview(undefined);
     setExportSaved(false);
     setLogs(undefined);
@@ -213,7 +217,7 @@ function App() {
       ) {
         setSelectedId(result.createdInstanceId);
         setNewName("");
-        setNewPort(String(Math.min(command.port + 1, 65535)));
+        setNewPort("");
         createRequest.current = crypto.randomUUID();
       }
       await refresh();
@@ -221,6 +225,27 @@ function App() {
       setError(cause instanceof Error ? cause.message : "The operation could not finish.");
     } finally {
       setBusy(false);
+    }
+  }
+  async function connectClaude() {
+    if (!id) return;
+    const generation = ++viewGeneration.current;
+    setBusy(true);
+    setConnectionMessage("");
+    try {
+      const result = (await call({
+        type: "connect_agent",
+        instanceId: id,
+        provider: "claude_code",
+      })) as { message: string };
+      if (generation === viewGeneration.current) setConnectionMessage(result.message);
+    } catch {
+      if (generation === viewGeneration.current)
+        setConnectionMessage(
+          "Setup could not finish. Review Claude Code's settings before trying again.",
+        );
+    } finally {
+      if (generation === viewGeneration.current) setBusy(false);
     }
   }
   async function copy(text: string, key: string) {
@@ -336,7 +361,7 @@ function App() {
   const running = selected?.runtime.state === "running";
   const endpoint = selected ? `http://127.0.0.1:${selected.port}/mcp` : "";
   const currentPage = pages.find((item) => item.id === page) ?? {
-    label: "Ambassador",
+    label: "Embassys",
     description: "Your local workspace",
   };
 
@@ -344,8 +369,8 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">A</div>
-          <span>Ambassador</span>
+          <div className="brand-mark">E</div>
+          <span>Embassys</span>
         </div>
         <div className="workspace-label">YOUR WORKSPACE</div>
         <nav aria-label="Main navigation">
@@ -414,7 +439,7 @@ function App() {
             {page === "attention" && (
               <>
                 <section className="welcome-card">
-                  <div className="eyebrow">MEET YOUR AMBASSADOR</div>
+                  <div className="eyebrow">WELCOME TO EMBASSYS</div>
                   <h2>
                     Your agents.
                     <br />
@@ -470,7 +495,7 @@ function App() {
                     <div className="step-number">2</div>
                     <div>
                       <h4>Connect an agent</h4>
-                      <p>Add Ambassador to the agent you already use.</p>
+                      <p>Add Embassys to the agent you already use.</p>
                     </div>
                     <button type="button" className="text-button" onClick={() => setPage("agents")}>
                       Set up
@@ -509,10 +534,15 @@ function App() {
                   </button>
                 </div>
                 <p className="body-note">
-                  Use the setup instructions below. Automatic connection and verification will be
-                  added next. For multiple instances, use separate provider profiles so requests
-                  reach the intended identity.
+                  Connect Claude Code here, or follow the instructions for another agent. For
+                  multiple instances, use separate provider profiles so requests reach the intended
+                  identity. Saving a connection does not verify a conversation.
                 </p>
+                {connectionMessage && (
+                  <p className="quiet-note" role="status">
+                    {connectionMessage}
+                  </p>
+                )}
                 {loading ? (
                   <p>Loading setup instructions…</p>
                 ) : (
@@ -523,10 +553,25 @@ function App() {
                           <div className={`agent-avatar color-${index}`}>{guide.name[0]}</div>
                           <div>
                             <h3>{guide.name}</h3>
-                            <span className="muted-text">Manual setup</span>
+                            <span className="muted-text">
+                              {guide.connect ? "Guided setup" : "Manual setup"}
+                            </span>
                           </div>
                         </div>
                         <p>{guide.note}</p>
+                        {guide.connect && (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy || !running}
+                            onClick={() => void connectClaude()}
+                          >
+                            Connect Claude Code
+                          </button>
+                        )}
+                        {guide.connect && !running && (
+                          <p className="body-note">Start this instance from Settings to connect.</p>
+                        )}
                         <details>
                           <summary>Setup instructions</summary>
                           <pre>{guide.instruction}</pre>
@@ -585,7 +630,7 @@ function App() {
                         <>
                           <p className="body-note">
                             {history.source === "archive"
-                              ? "Saved by Ambassador"
+                              ? "Saved by Embassys"
                               : "Provider preview"}
                           </p>
                           {history.warnings.map((warning) => (
@@ -981,7 +1026,7 @@ function App() {
                         type: "create",
                         requestId: createRequest.current,
                         name: newName,
-                        port: Number(newPort),
+                        port: Number(proposedPort),
                         chooseLocation,
                       });
                     }}
@@ -1005,7 +1050,7 @@ function App() {
                         type="number"
                         min={1024}
                         max={65535}
-                        value={newPort}
+                        value={proposedPort}
                         onChange={(event) => {
                           setNewPort(event.target.value);
                           createRequest.current = crypto.randomUUID();
@@ -1034,7 +1079,7 @@ function App() {
                   </label>
                 </section>
                 <p className="body-note">
-                  Closing the window keeps Ambassador in the menu bar. Quit Ambassador stops its
+                  Closing the window keeps Embassys in the menu bar. Quit Embassys stops its
                   servers. Updates and account recovery will follow in later development stages.
                 </p>
               </>

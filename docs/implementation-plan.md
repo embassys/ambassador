@@ -45,18 +45,15 @@ issue-only. These items do not authorize another release.
 - [ ] Production logging policy. Decide retention before a production rollout.
   Detailed request/response body logs with credential redaction are approved for
   development; that approval does not settle the production policy.
-- [ ] Multiple local instances and versions. Add a way to choose a local port,
-  state location and process name so different Ambassador versions can run at
-  the same time. Record the CLI and isolation design in an ADR before writing
-  tests and implementation. Each instance needs separate enrollment,
-  credentials, locks, workflow state, sessions and logs. Route MCP setup,
-  native bridges, session commands and confirmed stop/clean to the selected
-  instance, with Host/Origin checks matching its loopback port. Cover port and
-  state collisions, restart, and stopping or cleaning one instance while another
-  continues. The current public CLI remains fixed to port 8787 and its default
-  state directory; internal test overrides are not a supported user option.
+- [ ] Multiple engine versions and provider isolation. Embassys now supports
+  named instances with separate ports, locations, credentials, locks, workflow
+  state and logs under ADR 0064. Finish trusted engine-version selection and
+  provider configuration isolation. Qualify MCP setup and native return against
+  the selected instance, including concurrent providers and independent stop/clean.
+  The published CLI remains fixed to its original port and state location; no
+  new CLI selectors or migration are planned.
 
-- [ ] Implement the approved desktop app under ADR 0064. The
+- [ ] Implement the approved Embassys desktop app under ADR 0064. The
   [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
   agent setup, conversations, approvals, notifications, isolated instances and
   central API requirements. The [plan](desktop-app-plan.md) defines delivery
@@ -67,10 +64,14 @@ issue-only. These items do not authorize another release.
   instance/log-export/Clean-review checks passed. Searchable diagnostics, exclusive
   Clean previews, encrypted visible-history capture, bounded background workers
   and launch-at-login controls are implemented. The unsigned Mac build leaves
-  login startup unavailable. Baseline Mac memory/CPU checks pass; connection
-  helpers, import, enrolled resource/native-provider qualification and API-dependent screens
-  remain open. See the desktop plan for measured
-  progress. Owner API features depend on server issues 7–10.
+  login startup unavailable. The app is named Embassys; CLI import and migration
+  are outside scope. Native archive display, custom storage selection and guarded
+  Claude Code setup passed with isolated test data. Native testing also caught
+  and fixed a hidden process after keyboard Quit and a reused port suggestion.
+  The current local check passes 395 tests with seven expected skips. Remaining
+  work includes the other provider helpers, repair/disconnect, enrolled resource
+  and native-provider qualification, signed distribution and API-dependent screens.
+  See the desktop plan for measured progress. Owner API features depend on server issues 7–10.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

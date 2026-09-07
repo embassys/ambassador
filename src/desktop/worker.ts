@@ -47,7 +47,7 @@ process.on("message", (raw: unknown) => {
       return;
     }
     const instance = initial.data.instance;
-    process.title = `Ambassador: ${instance.name}`;
+    process.title = `Embassys: ${instance.name}`;
     gateway = new DesktopGateway({
       ...instance,
       environment: process.env,

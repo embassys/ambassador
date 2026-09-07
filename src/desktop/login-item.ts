@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { link, lstat, mkdir, open, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 
-const loginName = "com.embassys.ambassador.development";
+const loginName = "com.embassys.desktop.development";
 export interface LoginItemState {
   readonly canChange: boolean;
   readonly configured: boolean;
@@ -45,8 +45,8 @@ export function linuxLoginEntry(executable: string): string {
     "[Desktop Entry]",
     "Type=Application",
     "Version=1.0",
-    "Name=Ambassador Development",
-    "Comment=Run your enabled Ambassador servers in the background",
+    "Name=Embassys",
+    "Comment=Run your enabled Embassys servers in the background",
     `Exec="${argument}" --background`,
     "Terminal=false",
     "StartupNotify=false",
@@ -137,7 +137,7 @@ export class DesktopLoginItem {
         const contents = await this.#linuxContents();
         if (contents !== undefined && contents !== linuxLoginEntry(this.options.executable))
           return this.#unavailable(
-            "The startup entry was changed outside Ambassador. Review it in your system's startup settings.",
+            "The startup entry was changed outside Embassys. Review it in your system's startup settings.",
           );
         return {
           canChange: true,
@@ -145,7 +145,7 @@ export class DesktopLoginItem {
           enabled: contents !== undefined,
           message: contents
             ? "Configured for your desktop session. Your desktop may also have a startup override."
-            : "Ambassador will open only when you launch it.",
+            : "Embassys will open only when you launch it.",
         };
       }
       const value = this.options.native?.read(this.#nativeOptions());
@@ -168,14 +168,14 @@ export class DesktopLoginItem {
         configured: value.openAtLogin || pending,
         enabled,
         message: pending
-          ? "Allow Ambassador in System Settings → General → Login Items."
+          ? "Allow Embassys in System Settings → General → Login Items."
           : value.openAtLogin && !enabled
             ? this.options.platform === "win32"
               ? "Startup is disabled or unavailable in Windows startup settings."
               : "Startup is disabled or unavailable in System Settings."
             : enabled
               ? "Enabled servers will start in the background when you sign in."
-              : "Ambassador will open only when you launch it.",
+              : "Embassys will open only when you launch it.",
       };
     } catch {
       return this.#unavailable(

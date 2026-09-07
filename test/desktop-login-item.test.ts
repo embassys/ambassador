@@ -11,7 +11,7 @@ test("Windows startup reads and writes the same fixed executable and arguments",
   const item = new DesktopLoginItem({
     platform: "win32",
     packaged: true,
-    executable: "C:\\Program Files\\Ambassador.exe",
+    executable: "C:\\Program Files\\Embassys.exe",
     native: {
       read(options) {
         reads.push(options);
@@ -27,11 +27,11 @@ test("Windows startup reads and writes the same fixed executable and arguments",
   assert.equal(state.enabled, false);
   assert.match(state.message, /Windows/);
   await item.set(false);
-  assert.deepEqual(reads[0], { path: "C:\\Program Files\\Ambassador.exe", args: ["--background"] });
+  assert.deepEqual(reads[0], { path: "C:\\Program Files\\Embassys.exe", args: ["--background"] });
   assert.deepEqual(writes[0], {
-    path: "C:\\Program Files\\Ambassador.exe",
+    path: "C:\\Program Files\\Embassys.exe",
     args: ["--background"],
-    name: "com.embassys.ambassador.development",
+    name: "com.embassys.desktop.development",
     openAtLogin: false,
   });
 });
@@ -81,7 +81,7 @@ test("Linux startup creates and removes only its own entry", async (t) => {
   const item = new DesktopLoginItem({
     platform: "linux",
     packaged: true,
-    executable: "/opt/Ambassador/bin/app",
+    executable: "/opt/Embassys/bin/app",
     configurationDirectory: root,
   });
   assert.equal((await item.read()).enabled, false);
@@ -89,7 +89,7 @@ test("Linux startup creates and removes only its own entry", async (t) => {
   await item.set(true);
   await item.set(true);
   assert.equal((await item.read()).enabled, true);
-  const file = join(root, "autostart/com.embassys.ambassador.development.desktop");
+  const file = join(root, "autostart/com.embassys.desktop.development.desktop");
   const entry = await readFile(file, "utf8");
   assert.match(entry, /--background/);
   await writeFile(file, `${entry}X-User-Change=true\n`);
@@ -111,7 +111,7 @@ test("Linux startup rejects aliases and invalid executable syntax", async (t) =>
     configurationDirectory: root,
   });
   await item.set(true);
-  const path = join(root, "autostart/com.embassys.ambassador.development.desktop");
+  const path = join(root, "autostart/com.embassys.desktop.development.desktop");
   const target = join(root, "unrelated");
   await writeFile(target, "preserve");
   await rm(path);

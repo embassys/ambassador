@@ -1,7 +1,8 @@
-# Ambassador desktop development
+# Embassys desktop development
 
-This private workspace implements the first stage of
-[ADR 0064](../docs/adr/0064-desktop-application.md). The public npm CLI is unchanged.
+This private workspace implements the desktop app approved in
+[ADR 0064](../docs/adr/0064-desktop-application.md). Embassys replaces the CLI experience and creates fresh app-owned instances. CLI
+import and migration are outside scope; existing installations are left untouched.
 
 ## Build and run
 
@@ -9,11 +10,11 @@ From the repository root with the approved Node/pnpm toolchain:
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm --filter @embassys/ambassador-desktop run typecheck
-pnpm --filter @embassys/ambassador-desktop run build
-pnpm --filter @embassys/ambassador-desktop run verify
-pnpm --filter @embassys/ambassador-desktop run verify:host
-pnpm --filter @embassys/ambassador-desktop run start
+pnpm --filter @embassys/desktop run typecheck
+pnpm --filter @embassys/desktop run build
+pnpm --filter @embassys/desktop run verify
+pnpm --filter @embassys/desktop run verify:host
+pnpm --filter @embassys/desktop run start
 ```
 
 `build` downloads official Node 24.19.0 and verifies its published SHA-256,
@@ -39,14 +40,21 @@ run `verify:package` to repeat the check against the packaged application binary
   diagnostics. The first instance uses port 8787. An occupied port produces an
   error; it does not stop the process using it.
 - Explicit Stop and Clean controls. Clean confirms in a native dialog and
-  requires the state lock. It preserves logs and provider configuration.
-- Manual setup guidance, existing managed-session queries and bounded provider
-  history previews, plus recent redacted diagnostic records.
+  retains the state lock during identity and work-count review. It preserves logs and provider configuration.
+- Reviewed Claude Code setup through its installed CLI, with the tool timeout saved
+  and existing connections preserved. Other providers have manual guidance.
+- Encrypted visible conversation archives and labelled
+  provider history previews. Bodies are retained for 30 days within a 1 GiB cap.
+- Searchable, paged diagnostics with native export preview/save and folder reveal.
+- Native storage-location selection, bounded worker restart and opt-in startup
+  settings. Startup remains unavailable in the unsigned Mac preview.
+- Workers release idle resources. The packaged unenrolled Mac background host
+  measured 165 MiB and 0.10% of one CPU core; enrolled workloads remain unqualified.
 
 App sign-in, the owner inbox, permission decisions and push delivery depend on
 central contracts in issues 7–10. Their screens disclose that they are unavailable.
-Automatic connection, CLI import, transcript archiving, log export, alternative
-engine versions, location selection and update/install integration remain in the
+Other automatic provider helpers, connection repair/disconnect, alternative engine
+versions, signed distribution and update/install integration remain in the
 [implementation plan](../docs/desktop-app-plan.md).
 
 ## Boundaries

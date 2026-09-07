@@ -16,17 +16,14 @@ if (measureMemory && process.platform !== "darwin")
   throw new Error("Physical-footprint qualification currently requires macOS.");
 const packageDirectory = fileURLToPath(
   new URL(
-    `../../.build/desktop/packages/${process.platform === "linux" ? "AmbassadorDevelopment" : "Ambassador Development"}-${process.platform}-${process.arch}/`,
+    `../../.build/desktop/packages/Embassys-${process.platform}-${process.arch}/`,
     import.meta.url,
   ),
 );
 const executable = packaged
   ? process.platform === "darwin"
-    ? join(packageDirectory, "Ambassador Development.app/Contents/MacOS/AmbassadorDevelopment")
-    : join(
-        packageDirectory,
-        process.platform === "win32" ? "AmbassadorDevelopment.exe" : "AmbassadorDevelopment",
-      )
+    ? join(packageDirectory, "Embassys.app/Contents/MacOS/Embassys")
+    : join(packageDirectory, process.platform === "win32" ? "Embassys.exe" : "Embassys")
   : (await import("electron")).default;
 const applicationArguments = packaged ? [] : [application];
 const root = await mkdtemp(join(tmpdir(), "ambassador-host-probe-"));
@@ -105,7 +102,7 @@ try {
     const owned = rows.filter((row) => ids.has(row.pid));
     // Electron may prewarm a renderer even without a BrowserWindow. Count it
     // in physical memory; a process label is not evidence of a visible window.
-    assert.equal(owned.filter((row) => row.command.startsWith("Ambassador: ")).length, 1);
+    assert.equal(owned.filter((row) => row.command.startsWith("Embassys: ")).length, 1);
     const output = join(application, "..", "host-footprint.json");
     const footprint = spawnSync(
       "/usr/bin/footprint",

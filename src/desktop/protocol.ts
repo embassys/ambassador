@@ -68,6 +68,11 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("export_save"), ...selected, previewId: instanceId }),
   z.strictObject({ type: z.literal("setup"), ...selected }),
+  z.strictObject({
+    type: z.literal("connect_agent"),
+    ...selected,
+    provider: z.literal("claude_code"),
+  }),
 ]);
 export type DesktopCommand = z.infer<typeof commandSchema>;
 export function parseDesktopCommand(value: unknown): DesktopCommand {

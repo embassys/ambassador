@@ -28,24 +28,24 @@ jobs:
           corepack install
           test "$(pnpm --version)" = 11.22.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @embassys/ambassador-desktop run typecheck
+      - run: pnpm --filter @embassys/desktop run typecheck
       - run: pnpm run test:build
       - run: node desktop/scripts/verify-tests.mjs
-      - run: pnpm --filter @embassys/ambassador-desktop run build
-      - run: pnpm --filter @embassys/ambassador-desktop run verify
-      - run: pnpm --filter @embassys/ambassador-desktop run package
+      - run: pnpm --filter @embassys/desktop run build
+      - run: pnpm --filter @embassys/desktop run verify
+      - run: pnpm --filter @embassys/desktop run package
       - name: Verify packaged host startup and shutdown
         if: runner.os != 'Linux'
-        run: pnpm --filter @embassys/ambassador-desktop run verify:package
+        run: pnpm --filter @embassys/desktop run verify:package
       - name: Verify packaged host under a Linux test display
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sandbox_helper="$GITHUB_WORKSPACE/.build/desktop/packages/AmbassadorDevelopment-linux-x64/chrome-sandbox"
+          sandbox_helper="$GITHUB_WORKSPACE/.build/desktop/packages/Embassys-linux-x64/chrome-sandbox"
           test -f "$sandbox_helper" && test ! -L "$sandbox_helper"
           sudo chown root:root "$sandbox_helper"
           sudo chmod 4755 "$sandbox_helper"
-          xvfb-run -a pnpm --filter @embassys/ambassador-desktop run verify:package
+          xvfb-run -a pnpm --filter @embassys/desktop run verify:package
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-evidence-${{ matrix.os }}

@@ -15,23 +15,26 @@ import {
   shell,
   Tray,
 } from "electron";
+import { ClaudeSetup, runClaudeSetup } from "../../src/desktop/claude-setup.js";
 import {
   prepareSupportExport,
   type SupportExport,
   saveSupportExport,
 } from "../../src/desktop/diagnostics.js";
 import { DesktopInstances } from "../../src/desktop/instances.js";
+import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
 import {
   type DesktopCommand,
   type DesktopInstance,
   parseDesktopCommand,
 } from "../../src/desktop/protocol.js";
+import { DesktopQuitLifecycle } from "../../src/desktop/quit-lifecycle.js";
 import { SupervisedGateway } from "../../src/desktop/supervisor.js";
 import { DesktopWindowLifecycle } from "../../src/desktop/window-lifecycle.js";
 import { DesktopGatewayClient } from "../../src/desktop/worker-client.js";
 
-app.setName("Ambassador Development");
+app.setName("Embassys");
 protocol.registerSchemesAsPrivileged([
   { scheme: "ambassador", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -43,8 +46,21 @@ let tray: Tray | undefined;
 let instances: DesktopInstances;
 let loginItem: DesktopLoginItem;
 const workers = new Map<string, SupervisedGateway>();
+const setupTasks = new Map<Promise<void>, AbortController>();
 const windowLifecycle = new DesktopWindowLifecycle(openWindow);
-let quitting = false;
+const quitLifecycle = new DesktopQuitLifecycle({
+  stop: async () => {
+    const activeSetup = [...setupTasks];
+    for (const [, abort] of activeSetup) abort.abort();
+    await Promise.all([
+      ...[...workers.values()].map((worker) => worker.close()),
+      Promise.allSettled(activeSetup.map(([task]) => task)),
+    ]);
+    workers.clear();
+  },
+  quit: () => app.quit(),
+  failed: showError,
+});
 let pendingChanges = false;
 let busy = false;
 let initialLaunch = true;
@@ -79,7 +95,7 @@ function changed(): void {
   pendingChanges = true;
   setTimeout(() => {
     pendingChanges = false;
-    if (!quitting) {
+    if (!quitLifecycle.stopping) {
       window?.webContents.send("ambassador:changed");
       updateMenu();
     }
@@ -120,6 +136,7 @@ async function execute(input: unknown): Promise<unknown> {
     "export_save",
     "history_delete",
     "set_launch_at_login",
+    "connect_agent",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
@@ -159,6 +176,67 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
   }
   const instance = instances.list().find((item) => item.id === command.instanceId);
   if (!instance) throw new Error("This instance is no longer available.");
+  if (command.type === "connect_agent") {
+    if (workers.get(instance.id)?.snapshot().state !== "running")
+      return {
+        state: "unavailable",
+        message: "Start this instance's server before connecting Claude Code.",
+      };
+    const environment = desktopLaunchEnvironment(
+      process.env,
+      dirname(nodePath),
+      app.getPath("home"),
+    );
+    const configurationDirectory = environment.CLAUDE_CONFIG_DIR;
+    if (configurationDirectory && !isAbsolute(configurationDirectory))
+      return {
+        state: "unavailable",
+        message:
+          "Claude Code's configuration location is relative. Use its manual setup instructions.",
+      };
+    const configurationPath = join(configurationDirectory || app.getPath("home"), ".claude.json");
+    const setup = new ClaudeSetup({
+      configurationPath,
+      workingDirectory: instance.workingDirectory,
+      run: (args) => {
+        const abort = new AbortController();
+        const task = runClaudeSetup(args, instance.workingDirectory, environment, abort.signal);
+        setupTasks.set(task, abort);
+        void task.finally(() => setupTasks.delete(task)).catch(() => undefined);
+        return task;
+      },
+    });
+    const preview = await setup.prepare(instance.port);
+    if (!preview.previewId) return preview;
+    const choice = await dialog.showMessageBox({
+      type: "question",
+      message: `Connect Claude Code to ${instance.name}?`,
+      detail: `Add the ambassador MCP entry for http://127.0.0.1:${instance.port}/mcp to ${configurationPath}. This applies across your Claude Code projects. Tool calls may wait up to eleven minutes. Existing entries are preserved. Reload Claude Code afterward.`,
+      buttons: ["Cancel", "Connect Claude Code"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice.response !== 1)
+      return {
+        state: "cancelled",
+        message: "Setup cancelled. Claude Code's settings were left untouched.",
+      };
+    if (quitLifecycle.stopping || workers.get(instance.id)?.snapshot().state !== "running")
+      return {
+        state: "unavailable",
+        message: "The server stopped during setup. Start it and review the connection again.",
+      };
+    try {
+      return await setup.apply(preview.previewId);
+    } catch {
+      return {
+        state: "unavailable",
+        message:
+          "The reviewed settings changed or expired. Review the connection again before applying it.",
+      };
+    }
+  }
   if (command.type === "history_delete") {
     const choice = await dialog.showMessageBox({
       type: "warning",
@@ -211,7 +289,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     }
     const selection = await dialog.showSaveDialog({
       title: "Save diagnostic export",
-      defaultPath: `ambassador-diagnostics-${new Date().toISOString().replace(/[:.]/gu, "-")}.jsonl`,
+      defaultPath: `embassys-diagnostics-${new Date().toISOString().replace(/[:.]/gu, "-")}.jsonl`,
       filters: [{ name: "Diagnostic log", extensions: ["jsonl"] }],
     });
     if (selection.canceled || !selection.filePath) return { saved: false };
@@ -292,8 +370,9 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         },
         {
           name: "Claude Code",
-          instruction: `claude mcp add --transport http --scope user ambassador http://127.0.0.1:${instance.port}/mcp`,
-          note: "Set the MCP timeout to 660000 ms and reload Claude Code. Standalone Chat and Cowork need separate qualification.",
+          connect: "claude_code",
+          instruction: `claude mcp add-json --scope user ambassador '{"type":"http","url":"http://127.0.0.1:${instance.port}/mcp","timeout":660000}'`,
+          note: "Connect adds this instance to your Claude Code user configuration after review. An existing connection is never replaced. Reload Claude Code afterward. Standalone Chat and Cowork need separate qualification.",
         },
         {
           name: "OpenClaw",
@@ -323,11 +402,11 @@ function trusted(event: Electron.IpcMainInvokeEvent): boolean {
 }
 
 function showWindow(): void {
-  if (!quitting) windowLifecycle.requestOpen();
+  if (!quitLifecycle.stopping) windowLifecycle.requestOpen();
 }
 
 function openWindow(): void {
-  if (quitting) return;
+  if (quitLifecycle.stopping) return;
   if (window && !window.isDestroyed()) {
     window.show();
     window.focus();
@@ -338,7 +417,7 @@ function openWindow(): void {
     height: 780,
     minWidth: 800,
     minHeight: 570,
-    title: "Ambassador",
+    title: "Embassys",
     backgroundColor: "#f7f8fa",
     show: false,
     webPreferences: {
@@ -364,7 +443,7 @@ function updateMenu(): void {
   if (!tray) return;
   const records = instances.list();
   const items: Electron.MenuItemConstructorOptions[] = [
-    { label: "Open Ambassador", click: showWindow },
+    { label: "Open Embassys", click: showWindow },
     { type: "separator" },
     ...records.map((record) => ({
       label: `${record.name} · ${workers.get(record.id)?.snapshot().state ?? "stopped"}`,
@@ -384,7 +463,7 @@ function updateMenu(): void {
       ],
     })),
     { type: "separator" },
-    { label: "Quit Ambassador", click: () => app.quit() },
+    { label: "Quit Embassys", click: () => app.quit() },
   ];
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
@@ -393,7 +472,7 @@ function showError(): void {
   showWindow();
   void dialog.showMessageBox({
     type: "error",
-    message: "Ambassador could not finish that operation.",
+    message: "Embassys could not finish that operation.",
     detail: "Check the selected instance and its Diagnostics view.",
   });
 }
@@ -410,18 +489,7 @@ else {
     /* Background workers remain owned by the tray host. */
   });
   app.on("before-quit", (event) => {
-    if (quitting) return;
-    event.preventDefault();
-    quitting = true;
-    void Promise.all([...workers.values()].map((worker) => worker.close()))
-      .then(() => {
-        workers.clear();
-        app.quit();
-      })
-      .catch(() => {
-        quitting = false;
-        showError();
-      });
+    if (quitLifecycle.request()) event.preventDefault();
   });
   void app.whenReady().then(async () => {
     try {
@@ -485,9 +553,9 @@ else {
       const pixels = Buffer.alloc(22 * 22 * 4);
       for (let y = 2; y < 20; y++) {
         for (let x = 1; x < 21; x++) {
-          const distance = Math.abs(x - 10.5);
-          const edge = (y - 2) * 0.52;
-          if (distance <= edge && (distance >= edge - 3.5 || (y >= 13 && y <= 15))) {
+          const stem = x >= 4 && x <= 7;
+          const bar = x >= 4 && x <= 17 && (y <= 4 || y >= 17 || (y >= 9 && y <= 12));
+          if (stem || bar) {
             pixels[(y * 22 + x) * 4 + 3] = 255;
           }
         }
@@ -495,14 +563,14 @@ else {
       const icon = nativeImage.createFromBitmap(pixels, { width: 22, height: 22 });
       icon.setTemplateImage(true);
       tray = new Tray(icon);
-      tray.setToolTip("Ambassador");
+      tray.setToolTip("Embassys");
       tray.on("click", showWindow);
       updateMenu();
       const openedAtLogin =
         process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin;
       windowLifecycle.ready(process.argv.includes("--background") || openedAtLogin);
       for (const instance of instances.list()) {
-        if (quitting) break;
+        if (quitLifecycle.stopping) break;
         if (instance.enabled)
           await getWorker(instance)
             .request({ type: "start", instanceId: instance.id })
@@ -511,8 +579,8 @@ else {
       initialLaunch = false;
     } catch {
       dialog.showErrorBox(
-        "Ambassador could not open",
-        "The application data or bundled runtime is unavailable. No existing Ambassador process was stopped.",
+        "Embassys could not open",
+        "The application data or bundled runtime is unavailable. No existing Embassys process was stopped.",
       );
       app.quit();
     }
