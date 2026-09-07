@@ -256,6 +256,11 @@ native form entry, banner display/click and Windows/Linux notification behavior
 remain unqualified. Local evidence is saved under
 `.build/desktop-design/live-development-flows.json` and
 `.build/desktop-design/development-final-check.log`.
+Code `e800b84` passed the desktop tests, package builds and actual packaged-host
+startup/shutdown probes on macOS, Windows and Linux in
+[run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
+This does not qualify native forms, OS banner display or provider behavior on
+those systems.
 
 - Complete Codex and Hermes configuration helpers after the requested parser
   dependency decision; qualify each helper on its supported native systems.

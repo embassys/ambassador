@@ -96,6 +96,9 @@ issue-only. These items do not authorize another release.
   Native registration form and OS banner checks await an unlocked Mac; event
   delivery alone does not qualify visible notification display. Latest regression
   checks pass 420 tests with seven expected platform skips.
+  Code `e800b84` also passes desktop tests, package builds and actual host probes
+  on macOS, Windows and Linux in
+  [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
   Codex/Hermes helpers, native
   Windows/Linux qualification, signed distribution, trusted engine selection and
   API-dependent owner screens remain open. See the desktop plan for evidence
