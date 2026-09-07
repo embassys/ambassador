@@ -684,16 +684,30 @@ the resend countdown and visible extra radio circles. Both local work markers
 survived. All test locks were released and the temporary account profiles were
 removed after confirmed sign-out.
 
+With the final Account sign-in screen open, the usual Personal instance stopped
+and no providers active, macOS physical footprint settled at 154.3 MiB across
+five processes. A ten-second sample measured no additional CPU time. This is an
+idle visible-window measurement, not a signed-in workload or provider budget.
+The extracted development DMG also passed its checksum, inventory and isolated
+real MCP worker checks.
+
 Local evidence is in `.build/desktop-design/owner-live-qualification.json`,
 `owner-realm-qualification.json`, `owner-native-qualification.json`,
 `.build/owner-final-check.log` and `.build/owner-ui-tests.log`.
+The visible-window resource sample is in
+`.build/desktop-design/owner-visible-resources.json`.
+Runtime code `f3b5cfd` passes all three desktop CI jobs in
+[run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469):
+macOS, Windows and Linux regression checks, packaging, extracted distribution,
+and actual host startup/shutdown. The Windows suite exercises the real file
+access-control helper for owner session transitions.
 Actual packaged host lifecycle and isolated-runtime checks also passed. This does
 not qualify native Windows/Linux account UI, in-app decisions, full owner history,
 recovery of agent credentials, a durable owner event feed or native remote push.
 No server code changed and no release was published.
 
 
-Final code `31531b2` passes 435 regression tests with seven expected
+Earlier code `31531b2` passes 435 regression tests with seven expected
 platform/qualification skips, plus all nine desktop parser/artifact tests.
 Root and desktop type checks pass. Lint reports only the two pre-existing
 optional-chain suggestions in visible-transcripts.ts. One parallel verification
