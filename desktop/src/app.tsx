@@ -4,6 +4,7 @@ import type { controlPalette } from "../../src/desktop/appearance.js";
 import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
 import { suggestedInstancePort } from "../../src/desktop/instance-defaults.js";
 import type { LoginItemState } from "../../src/desktop/login-item.js";
+import type { OwnerSnapshot } from "../../src/desktop/owner-protocol.js";
 import type {
   DesktopCommand,
   DesktopInstance,
@@ -11,6 +12,7 @@ import type {
 } from "../../src/desktop/protocol.js";
 import type { GatewayOverview } from "../../src/gateway-application.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
+import { Account } from "./account.js";
 import { Activity, Permissions } from "./agent-status.js";
 import { Registration } from "./registration.js";
 
@@ -30,7 +32,7 @@ interface AppSnapshot {
   appVersion: string;
   build: string;
   loginItem: LoginItemState;
-  owner: { status: string; message: string };
+  owner: OwnerSnapshot;
   instances: (DesktopInstance & { runtime: GatewaySnapshot })[];
 }
 interface Session {
@@ -59,6 +61,7 @@ declare global {
 }
 
 const paths = {
+  account: "M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-3a8 8 0 0 1 16 0v3",
   registration: "M3 5h18v14H3zM3 6l9 7 9-7",
   attention: "M12 3 3 7v6c0 4 9 8 9 8s9-4 9-8V7L12 3ZM12 8v5m0 3h.01",
   conversations: "M21 11a8 8 0 0 1-8 8H6l-4 3V11a9 9 0 1 1 19 0ZM7 9h10M7 13h6",
@@ -71,6 +74,7 @@ const paths = {
   server: "M3 3h18v7H3zM3 14h18v7H3zM7 6h.01M7 17h.01M11 6h6M11 17h6",
 } as const;
 type Page =
+  | "account"
   | "attention"
   | "registration"
   | "conversations"
@@ -96,6 +100,11 @@ function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) 
   );
 }
 const pages: { id: Page; label: string; description: string }[] = [
+  {
+    id: "account",
+    label: "Account",
+    description: "Your requests, permissions and central message history.",
+  },
   { id: "attention", label: "Attention", description: "Requests and questions that need you." },
   {
     id: "registration",
@@ -535,9 +544,9 @@ function App() {
             <h1>{currentPage.label}</h1>
             <p>{currentPage.description}</p>
           </div>
-          <span className={`toolbar-status ${running ? "is-running" : ""}`}>
-            <span className={`status-dot ${running ? "green" : "amber"}`} />
-            {selected?.name ?? "Workspace"}
+          <span className={`toolbar-status ${page !== "account" && running ? "is-running" : ""}`}>
+            {page !== "account" && <span className={`status-dot ${running ? "green" : "amber"}`} />}
+            {page === "account" ? "Owner account" : (selected?.name ?? "Workspace")}
           </span>
         </header>
         {error && (
@@ -704,12 +713,15 @@ function App() {
                   <div className="quiet-note">
                     <Icon name="attention" size={18} />
                     <span>
-                      This preview supports first-time registration. Returning-user sign-in and
-                      central recovery are not available yet.
+                      Use Account to sign in to an existing account. Restoring a reset local agent
+                      is not supported yet.
                     </span>
                   </div>
                 </>
               ))}
+            {page === "account" && snapshot && (
+              <Account snapshot={snapshot.owner} call={call} changed={refresh} />
+            )}
             {page === "registration" && selected && (
               <Registration
                 key={`${selected.id}-${running}`}
@@ -1290,8 +1302,8 @@ function App() {
                     <div>
                       <strong>Register this instance</strong>
                       <p>
-                        First-time registration is available in the app. Returning-user sign-in and
-                        identity recovery need central support.
+                        Register a new agent for this local server. Account sign-in is separate from
+                        local agent registration and recovery.
                       </p>
                     </div>
                     <button
@@ -1300,6 +1312,18 @@ function App() {
                       onClick={() => setPage("registration")}
                     >
                       Open registration
+                    </button>
+                  </div>
+                  <div className="settings-row">
+                    <div>
+                      <strong>Owner account</strong>
+                      <p>
+                        {snapshot?.owner.email ??
+                          "Sign in to see account requests and permissions."}
+                      </p>
+                    </div>
+                    <button type="button" className="secondary" onClick={() => setPage("account")}>
+                      Open account
                     </button>
                   </div>
                 </section>

@@ -27,16 +27,20 @@ it does not make every control an operating-system widget.
 The complete product needs central API changes. In particular, agent email
 registration is not returning-user login, an agent credential must not authorize
 the owner's decisions, and a push notification must not be the only copy of a
-request. Build an owner account API and recoverable event delivery before calling
-this a production-ready replacement for the CLI.
+request. The deployed owner account API supplies part of this boundary;
+recoverable decisions and event delivery are still needed before a production release.
 
 The user approved an interim development flow under
 [ADR 0065](adr/0065-desktop-development-registration.md). First-time registration
 now uses an app form and a fixed executor choice. The app can read agent-scoped
 permissions and local work, and show optional OS notifications for locally
-observed events. These features use the existing agent API. Returning-user login,
-app decisions, complete owner history, revocation and remote push still depend
-on the contracts below.
+observed events. These features use the existing agent API.
+[ADR 0068](adr/0068-desktop-owner-account-views.md) adds returning-owner sign-in
+and read-only requests, permissions and central message snapshots through the
+deployed owner API. The owner session has separate encrypted custody in a bundled
+Node worker. Signing out leaves local servers running because the API has no
+executor binding to revoke. App decisions, complete owner history, local identity
+recovery, revocation controls and remote push still depend on the contracts below.
 
 ## Scope and proposed changes to the current target
 

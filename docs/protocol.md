@@ -16,8 +16,10 @@ The approved desktop work in [ADR 0064](adr/0064-desktop-application.md) adds
 private owner controls and isolated fresh instances in the Embassys app. CLI
 import and migration are outside scope. Its
 [design](desktop-app-design.md) records the new boundaries and required central
-contracts. Those contracts are not deployed API routes; the CLI protocol below
-remains the published baseline until the corresponding implementation is qualified.
+contracts. [ADR 0068](adr/0068-desktop-owner-account-views.md) now qualifies the
+deployed `/api/app` login/session and read-only account routes through a separate
+desktop owner worker. Owner commands never enter MCP or the gateway's private
+control route. The CLI protocol below remains the published baseline.
 
 ## Startup
 

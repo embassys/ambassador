@@ -241,7 +241,8 @@ unenrolled. The permission view distinguishes failed reads from empty lists;
 local work is paged without consuming results or restarting a stopped server.
 OS banners are opt-in, generic, coalesced and deduplicated across restart. They
 include provider-tool approval requests after the email submission succeeds.
-No app approval, returning-user login or remote push has been added.
+That first pass did not add app approval, returning-user login or remote push.
+ADR 0068's later owner sign-in and account views are recorded below.
 
 The 2026-09-07 regression run passes 420 tests with seven platform skips.
 Desktop typechecking, package inspection and the actual packaged Mac host probe
@@ -262,14 +263,14 @@ startup/shutdown probes on macOS, Windows and Linux in
 This does not qualify native forms, OS banner display or provider behavior on
 those systems.
 
-- Complete Codex and Hermes configuration helpers after the requested parser
-  dependency decision; qualify each helper on its supported native systems.
+- Qualify the completed Codex and Hermes helpers beyond macOS arm64.
 - Qualify the platform control refinements on native Windows/Linux desktops,
   including tray behavior and provider setup. A system-widget UI would need a
   separately approved toolkit prototype; none has been selected or installed.
 - Qualify active-provider resource use and native Windows/Linux resource budgets.
-- Integrate owner sign-in, decisions, permissions and push when API issues 7–10
-  provide the accepted contracts. Recovery issues 1–6 remain release risks.
+- Complete owner decisions, recovery, revocation handling and native push as the
+  remaining contracts in API issues 7–10 become available. Owner sign-in and
+  read-only account views now use the deployed APIs. Issues 1–6 remain release risks.
 - Complete trusted engine selection, signed installers/updates and installed
   launch-at-login qualification. These need trusted builds and signing inputs.
 
@@ -635,6 +636,61 @@ app observations in this task. These tests qualify the setup helpers, not anothe
 live central action exchange. The earlier central polling failure remains open.
 The [new web app review](desktop-web-app-review-2026-09-07.md) records owner APIs
 that are now deployed and the remaining recovery, pagination and decision gaps.
+
+## Owner account integration, 2026-09-07
+
+ADR 0068 implements the approved next step using web app source `a9cb3d3` and
+central source `a8c0e77`. Account sign-in, code verification, serialized session
+refresh and sign-out run in a separate bundled Node worker. Its atomic encrypted
+session file and process lock live outside the gateway instances. The app exposes
+no owner credential through renderer IPC, agent tools, logs or provider settings.
+One-use exchanges save an uncertainty marker before submission and are never
+automatically repeated after a lost response or restart.
+
+The Account screen shows pending requests, permissions in both directions and
+central message history. These are bounded read-only snapshots, with visible
+server limits and explicit refresh. Questions and options remain text; decisions
+and answers continue through email or the ordinary web app. Reads do not consume
+messages or results. Sign-out leaves local servers running. Selecting, stopping
+or cleaning a local instance does not select or clear the owner account.
+
+Regression checks pass 453 tests with seven expected skips. A further focused
+regression proves that Clean preserves the shared owner session and another
+instance's work; all 19 owner tests pass. Twelve desktop
+artifact/parser/rendering tests pass, as do root and desktop typechecking.
+New coverage includes code errors and cooldowns, account context changes,
+concurrent refresh, missing responses, failed local saves, restart, token realms,
+expired sessions, offline reads, malformed/oversized data, encoded JSON columns,
+private IPC, linked files and log redaction. Rendered agent text is escaped;
+unknown permission menus never become guessed decision buttons.
+
+Controlled live tests through the packaged owner worker passed email login,
+wrong/valid codes, profile, requests, both permission directions, message history,
+restart and real refresh rotation. The test advanced only the local refresh
+deadline to exercise rotation without waiting fifteen minutes. Three concurrent
+reads caused one refresh submission. Sign-out invalidated the session at central
+and remained signed out after restart. A valid agent DPoP request still returned
+200; agent credentials on the owner route and owner credentials on the agent
+route both returned 401. The missing explicit server guard for other malformed
+app claims remains a separate contract follow-up, not a claimed client fix.
+
+Native Mac tests used two disposable instances and the existing synthetic
+Mailosaur identity. Email/code entry, rejected-code feedback, live permission and
+message views, instance switching, keyboard Quit and app restart passed. Owner
+sign-out cleared account views while the selected server kept running; explicit
+Stop then stopped that server. Light/dark forms and segmented navigation were
+inspected. Testing corrected stale onboarding copy, transient request feedback,
+the resend countdown and visible extra radio circles. Both local work markers
+survived. All test locks were released and the temporary account profiles were
+removed after confirmed sign-out.
+
+Local evidence is in `.build/desktop-design/owner-live-qualification.json`,
+`owner-realm-qualification.json`, `owner-native-qualification.json`,
+`.build/owner-final-check.log` and `.build/owner-ui-tests.log`.
+Actual packaged host lifecycle and isolated-runtime checks also passed. This does
+not qualify native Windows/Linux account UI, in-app decisions, full owner history,
+recovery of agent credentials, a durable owner event feed or native remote push.
+No server code changed and no release was published.
 
 
 Final code `31531b2` passes 435 regression tests with seven expected
