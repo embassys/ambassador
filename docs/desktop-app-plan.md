@@ -5,6 +5,46 @@ Status: approved implementation sequence under [ADR 0064](adr/0064-desktop-appli
 Date: 2026-09-07. The user authorized implementation and the recommended desktop
 stack. Central implementation, new public CLI flags and release remain separate.
 
+## Progress on 2026-09-07
+
+The approved design was pushed to main in `3a60187`. Initial implementation is
+on `codex/desktop-app`; this is not a release candidate.
+
+- Implemented the private Electron/React workspace, versioned IPC, standalone
+  Node worker, private instance registry and start/stop/clean service boundary.
+  Added views for manual agent setup, existing sessions/history previews, recent
+  diagnostic events and instance settings. Owner-dependent views state that they
+  are unavailable.
+- Built an unsigned macOS Apple silicon package with official Node 24.19.0 and
+  the existing engine, including its native SQLite and bundled ACP dependencies.
+  The unpacked app is about 991 MiB. The Codex and Claude native dependencies
+  account for about 462 MiB; do not claim a small installer yet.
+- Passed the bundled runtime/MCP probe with an isolated executable path. Passed
+  actual Electron host startup, duplicate launch and shutdown using a temporary
+  profile, both from the development bundle and the packaged macOS app. A failing startup check caught a top-level ESM readiness deadlock;
+  the host now registers an asynchronous readiness callback.
+- Full repository validation passed: 355 tests passed, 7 environment-dependent
+  tests skipped, no failures. Nine desktop foundation/worker cases cover IPC
+  bounds, isolated real MCP servers, stop/clean, port and lock conflicts, registry
+  races/corruption, storage binding and parent-disconnect shutdown. Desktop
+  typechecking also passed.
+- Added a macOS/Windows/Linux CI build and host-probe workflow. These remote jobs
+  and native UI/provider qualification have not yet been observed. The local Mac
+  was locked when computer control attempted to inspect the window. No screenshot,
+  menu-bar display, accessibility or hidden-window performance pass is claimed.
+- Opened API issues [7](https://github.com/embassys/agent2agent/issues/7),
+  [8](https://github.com/embassys/agent2agent/issues/8),
+  [9](https://github.com/embassys/agent2agent/issues/9) and
+  [10](https://github.com/embassys/agent2agent/issues/10). Existing recovery issues
+  1–6 remain in scope. No API code changed.
+
+Next: inspect and qualify the native window/tray, complete provider crash cleanup
+and shutdown races, then add connection helpers and history/diagnostic services.
+Custom storage selection, engine-version selection, CLI import, automatic agent
+configuration and detailed unresolved-work counts in Clean remain outstanding.
+The initial Clean dialog warns about local work loss but does not count it yet.
+The nine tests are a foundation, not completion of the full matrix below.
+
 ## Delivery sequence
 
 Build one complete request flow before expanding the screens. The first useful
@@ -250,11 +290,12 @@ resource decisions. D4/D5 block a reliable production workflow. D6 blocks comple
 permission history/revocation. D7 blocks native remote push. D8 blocks full result
 validation and remote progress. Preserve these gates even if the UI is finished.
 
-## Inputs needed from the owner
+## Remaining owner and release inputs
 
-- Approval of the recommended shell and proposed architecture amendments before
-  installing desktop dependencies or changing the implementation.
-- A decision on conversation/history and production diagnostic retention.
+The shell, architecture, development diagnostics and proposed visible-history
+retention were approved on 2026-09-07. Remaining inputs are:
+
+- A production diagnostic retention policy.
 - Access through normal release infrastructure to Apple signing/APNs and Windows
   signing/push registration, plus a decision on distribution channels.
 - A confirmed first-release OS/architecture matrix and real devices/providers

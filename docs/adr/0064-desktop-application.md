@@ -65,3 +65,16 @@ build dependencies stay outside the public CLI's production dependency graph.
 Write boundary tests before implementation. Cross-platform compilation and mock
 tests do not qualify a real desktop/provider combination. Signed installers,
 native OS behavior and central owner/recovery contracts remain release gates.
+
+## Initial desktop build choices
+
+The private desktop workspace uses Electron 44.2.0, React/React DOM 19.2.8,
+esbuild 0.28.2 and Electron Packager 20.3.0. React type packages are development
+only. These implement the approved shell and component UI; they do not change
+the CLI's production dependencies or public package. Existing pnpm release-age
+and build-script restrictions still apply. Builds record the standalone Node
+runtime version and engine digest. Local packaging downloads official Node 24.19.0 at build time and verifies its
+SHA-256 against Node's published manifest. It rebuilds SQLite under that runtime
+and tests the worker with an isolated executable path. The deployment workspace
+is separate from the source checkout. Production distribution still needs
+signed components and native qualification of the complete runtime matrix.

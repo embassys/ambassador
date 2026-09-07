@@ -147,3 +147,28 @@ a new ID; old permissions cannot be assumed to authorize that replacement.
 The server needs an owner-verified recovery contract that distinguishes token
 renewal with the existing key from recovery after losing it. Recovery cannot
 restore local data that the owner deleted.
+
+
+## Desktop owner account and notifications
+
+The user approved ADR 0064 on 2026-09-07. The desktop engine and shell can be
+built locally; agent enrollment tokens do not authorize the new owner UI.
+The following issues define server work without changing the API here:
+
+- [Issue 7](https://github.com/embassys/agent2agent/issues/7) covers email sign-in,
+  returning owners, owner sessions and device/executor binding. Identity recovery
+  continues in issue 2; this does not replace existing agent identities.
+- [Issue 8](https://github.com/embassys/agent2agent/issues/8) covers the owner inbox,
+  exact decisions and answers, email/app races, and resumable owner observation.
+  The owner feed must not consume execution messages. Issues 1, 3 and 4 remain
+  prerequisites for custody, bounded listening and uncertain submission recovery.
+- [Issue 9](https://github.com/embassys/agent2agent/issues/9) covers permission
+  history, current grants and authoritative revocation.
+- [Issue 10](https://github.com/embassys/agent2agent/issues/10) covers device push
+  registration and dispatch for saved requests. Push prompts a current-state
+  fetch; it is not the request store or an approval channel.
+
+Until deployed contracts pass qualification, the development app labels sign-in,
+owner requests and permissions as unavailable. It does not impersonate an owner
+through the current agent REST API or treat an empty local inbox as an account
+with no pending requests.
