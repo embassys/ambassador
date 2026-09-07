@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sandbox_helper="$GITHUB_WORKSPACE/.build/desktop/packages/Ambassador Development-linux-x64/chrome-sandbox"
+          sandbox_helper="$GITHUB_WORKSPACE/.build/desktop/packages/AmbassadorDevelopment-linux-x64/chrome-sandbox"
           test -f "$sandbox_helper" && test ! -L "$sandbox_helper"
           sudo chown root:root "$sandbox_helper"
           sudo chmod 4755 "$sandbox_helper"

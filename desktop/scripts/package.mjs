@@ -7,7 +7,9 @@ const manifest = JSON.parse(await readFile(`${application}/build-manifest.json`,
 const paths = await packager({
   dir: application,
   out: fileURLToPath(new URL("../../.build/desktop/packages", import.meta.url)),
-  name: "Ambassador Development",
+  // Ubuntu's sandbox launcher splits executable paths containing spaces.
+  // Keep the native display name, but use a space-free Linux install directory.
+  name: process.platform === "linux" ? "AmbassadorDevelopment" : "Ambassador Development",
   executableName: "AmbassadorDevelopment",
   appBundleId: "com.embassys.ambassador.development",
   appCategoryType: "public.app-category.productivity",
