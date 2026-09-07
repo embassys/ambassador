@@ -25,10 +25,13 @@ const text = (value: string) => ({
 
 test("visible transcripts normalize chunks, exclude reasoning and replay, and survive restart encrypted", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-visible-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "visible.sqlite");
   const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
   let archive = new VisibleTranscripts(path, credential);
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
   archive.begin("session-1", message);
   archive.update(message.id, 1, text("The number "));
   archive.update(message.id, 1, text("The number "));
@@ -59,10 +62,12 @@ test("visible transcripts normalize chunks, exclude reasoning and replay, and su
 
 test("large text paginates without splitting Unicode, and interrupted turns remain visibly partial", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-visible-pages-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
   const archive = new VisibleTranscripts(join(root, "visible.sqlite"), credential);
-  t.after(() => archive.close());
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
   archive.begin("session", message);
   const value = "🙂á".repeat(50_000);
   archive.update(message.id, 1, text(value));
@@ -83,14 +88,16 @@ test("large text paginates without splitting Unicode, and interrupted turns rema
 
 test("retention removes settled bodies, keeps a gap, and does not evict an active turn", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-visible-retention-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   let now = Date.parse("2026-09-07T10:00:00Z");
   const archive = new VisibleTranscripts(
     join(root, "visible.sqlite"),
     parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS),
     { now: () => now },
   );
-  t.after(() => archive.close());
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
   archive.begin("session", message);
   archive.update(message.id, 1, text("settled old body"));
   archive.finish(message.id, "complete");
@@ -106,10 +113,13 @@ test("retention removes settled bodies, keeps a gap, and does not evict an activ
 
 test("quota failure records a durable gap without altering workflow or hiding a failure", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-visible-quota-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "visible.sqlite");
   const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
   let archive = new VisibleTranscripts(path, credential, { maximumBytes: 4000 });
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
   archive.begin("session", message);
   assert.equal(archive.update(message.id, 1, text("x".repeat(20_000))), false);
   assert.ok(archive.page("session").warnings.length > 0);
