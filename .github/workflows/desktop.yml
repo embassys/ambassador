@@ -39,7 +39,13 @@ jobs:
         run: pnpm --filter @embassys/ambassador-desktop run verify:package
       - name: Verify packaged host under a Linux test display
         if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm --filter @embassys/ambassador-desktop run verify:package
+        shell: bash
+        run: |
+          sandbox_helper="$GITHUB_WORKSPACE/.build/desktop/packages/Ambassador Development-linux-x64/chrome-sandbox"
+          test -f "$sandbox_helper" && test ! -L "$sandbox_helper"
+          sudo chown root:root "$sandbox_helper"
+          sudo chmod 4755 "$sandbox_helper"
+          xvfb-run -a pnpm --filter @embassys/ambassador-desktop run verify:package
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-evidence-${{ matrix.os }}

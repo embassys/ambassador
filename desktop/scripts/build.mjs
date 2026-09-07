@@ -152,6 +152,8 @@ await writeFile(
     {
       name: "ambassador-development",
       productName: "Ambassador Development",
+      author: "Embassys",
+      description: "Manage your Embassys agents, requests and local server.",
       version: desktop.version,
       private: true,
       type: "module",
