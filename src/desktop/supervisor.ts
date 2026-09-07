@@ -1,9 +1,9 @@
-import type { DesktopCommand, GatewaySnapshot } from "./protocol.js";
+import type { GatewaySnapshot, WorkerCommand } from "./protocol.js";
 
 interface GatewayProcess {
   available(): boolean;
   snapshot(): GatewaySnapshot;
-  request(command: DesktopCommand): Promise<unknown>;
+  request(command: WorkerCommand): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -18,11 +18,13 @@ export class SupervisedGateway {
   #error: string | undefined;
   #retired: GatewaySnapshot | undefined;
   #reviewId: string | undefined;
+  #handedOff = false;
   constructor(
     readonly options: {
       id: string;
       create(changed: () => void): GatewayProcess;
       onChange?: () => void;
+      onHandoff?: () => void;
       schedule?: (callback: () => void, delay: number) => () => void;
     },
   ) {}
@@ -47,6 +49,15 @@ export class SupervisedGateway {
       const generation = ++this.#generation;
       this.#client = this.options.create(() => {
         if (generation !== this.#generation) return;
+        if (this.#client?.snapshot().stopReason === "handoff") {
+          this.#wanted = false;
+          this.#cancel?.();
+          this.#cancel = undefined;
+          if (!this.#handedOff) {
+            this.#handedOff = true;
+            this.options.onHandoff?.();
+          }
+        }
         this.options.onChange?.();
         if (!this.#client?.available()) this.#recover();
       });
@@ -106,8 +117,9 @@ export class SupervisedGateway {
     }, delay);
   }
 
-  request(command: DesktopCommand): Promise<unknown> {
+  request(command: WorkerCommand): Promise<unknown> {
     if (command.type === "start") {
+      this.#handedOff = false;
       this.#wanted = true;
       this.#attempts = 0;
       this.#error = undefined;

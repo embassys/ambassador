@@ -19,6 +19,8 @@ function workflowCue(type: unknown): string {
       return "Use message_box submit_action_result for actual results; ask_owner for input or confirmation. Do not guess. Background transcript text does not reach the owner.";
     case "permission_outcome":
       return "Status only; no new action. Ambassador dispatches saved intent. Do not reconstruct a payload.";
+    case "permission_revoked":
+      return "This grant was withdrawn. Do not request it again automatically or cancel completed work. Inspect saved status through message_box.";
     case "owner_input":
       return "Use message_box inbox to resume only this call. Approval permits execution, not a result.";
     case "action_response":

@@ -117,3 +117,23 @@ capabilities, steps and outcomes. Native bridge and desktop claims remain
 unqualified until their exact user-facing path passes. Central failure modes
 that cannot safely be induced live remain deterministic regression cases plus
 explicit API limitations. Do not publish while release blockers remain.
+
+## Shared CLI and desktop installation (ADR 0069)
+
+The same-build handoff regressions cover fixed-path attachment without copying
+credentials, preserved isolated instances, linked-directory rejection, saved
+canonical executor directories, pending registration in either direction,
+unchanged encrypted identity, durable pending actions, stale process identifiers
+and authenticated stop. Supervisor tests prove handoff disables crash recovery.
+A packaged process test runs the public CLI, starts the fresh app against its
+installation, hands back to the CLI, and reopens the app without interrupting it.
+This test runs on all three desktop CI platforms with isolated user data.
+
+Revocation tests cover pending and ready actions, submitted and uncertain calls,
+wrong permission/action/grantor metadata, a stale later grant, restart and an
+explicit new user request. A waiting observer must wake without an automatic
+permission request. Permission-list tests accept all five reviewed statuses,
+including revoked and expired, and still reject unknown values. The exact
+revocation rejection is classified as a confirmed refusal, not uncertain delivery.
+Live qualification must also read the resulting permission list: successfully
+receiving a notification alone does not prove the app can display its status.

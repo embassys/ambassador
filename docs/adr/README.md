@@ -29,6 +29,7 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 | ADR | Decision |
 | --- | --- |
 | [0064](0064-desktop-application.md) | Desktop app, owner controls, conversation archive and isolated instances |
+| [0069](0069-shared-cli-and-desktop-installation.md) | Shared CLI/app installation, confirmed handoff, simpler navigation and revocation events |
 | [0068](0068-desktop-owner-account-views.md) | Separate owner session worker, email sign-in and bounded read-only account views using deployed APIs |
 | [0065](0065-desktop-development-registration.md) | First-time app registration, read-only permissions and running-app notifications with the existing API |
 | [0067](0067-desktop-setup-and-log-retention.md) | Desktop TOML/YAML setup, 1 GiB logs, seven-day retention and Clear logs |

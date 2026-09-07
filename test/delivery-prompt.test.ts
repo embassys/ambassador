@@ -14,7 +14,13 @@ function message(type: unknown): CentralMessage {
 }
 
 test("delivery envelopes stay short and preserve the full message as untrusted data", () => {
-  for (const type of ["action_call", "permission_outcome", "owner_input", "action_response"]) {
+  for (const type of [
+    "action_call",
+    "permission_outcome",
+    "permission_revoked",
+    "owner_input",
+    "action_response",
+  ]) {
     const input = message(type);
     const prompt = buildDeliveryPrompt(input);
     const [envelope, body] = prompt.split("```json\n");
@@ -43,6 +49,10 @@ test("each delivery includes only the relevant workflow cue", () => {
   assert.match(grant, /no new action/u);
   assert.match(grant, /do not reconstruct/iu);
   assert.doesNotMatch(grant, /ask_owner|submit_action_result/u);
+
+  const revoked = buildDeliveryPrompt(message("permission_revoked"));
+  assert.match(revoked, /withdrawn/u);
+  assert.match(revoked, /not.*automatically/iu);
 
   const answer = buildDeliveryPrompt(message("owner_input"));
   assert.match(answer, /only this call/u);

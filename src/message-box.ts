@@ -250,7 +250,8 @@ export class MessageBox {
           call_id: outbound.call_id,
           status: ["awaiting_permission", "submitted"].includes(outbound.status)
             ? "pending"
-            : outbound.status.includes("rejected") || outbound.status === "denied"
+            : outbound.status.includes("rejected") ||
+                ["denied", "revoked"].includes(outbound.status)
               ? "rejected"
               : "uncertain",
         };
@@ -506,7 +507,8 @@ export class MessageBox {
           call_id: outbound.call_id,
           status: outbound.status.includes("uncertain")
             ? "uncertain"
-            : outbound.status.includes("rejected") || outbound.status === "denied"
+            : outbound.status.includes("rejected") ||
+                ["denied", "revoked"].includes(outbound.status)
               ? "rejected"
               : "pending",
         };
@@ -668,6 +670,13 @@ export class MessageBox {
       if (message.payload.type === "human_input_response")
         return this.options.owners?.capture(message) ?? false;
       const saved = this.options.outbound.forMessage(message);
+      const tracked = saved === undefined ? undefined : this.#store.get(saved.operation_id);
+      if (
+        tracked &&
+        message.action_type_id != null &&
+        tracked.action_type_id !== message.action_type_id
+      )
+        return false;
       if (saved !== undefined && this.#store.get(saved.operation_id) !== undefined)
         this.#get(saved.operation_id);
       if (
@@ -686,7 +695,8 @@ export class MessageBox {
       await this.options.outbound.capture(message, this.#lifetime.signal);
       const payload = message.payload;
       const correlation =
-        payload.type === "permission_outcome" && typeof payload.permission_id === "string"
+        ["permission_outcome", "permission_revoked"].includes(String(payload.type)) &&
+        typeof payload.permission_id === "string"
           ? `permission:${payload.permission_id}`
           : payload.type === "action_response" && typeof payload.call_id === "string"
             ? `call:${payload.call_id}`
@@ -699,7 +709,7 @@ export class MessageBox {
         (message.action_type_id != null && operation.action_type_id !== message.action_type_id)
       )
         return false;
-      if (payload.type === "permission_outcome") {
+      if (payload.type === "permission_outcome" || payload.type === "permission_revoked") {
         if (
           operation.target_email !== undefined &&
           (typeof payload.grantor_email !== "string" ||
@@ -707,7 +717,9 @@ export class MessageBox {
         )
           return false;
         if (
-          !["granted", "denied"].includes(String(payload.status)) ||
+          !(payload.type === "permission_revoked" ? ["revoked"] : ["granted", "denied"]).includes(
+            String(payload.status),
+          ) ||
           payload.granted !== (payload.status === "granted")
         )
           return false;
@@ -731,7 +743,8 @@ export class MessageBox {
             call_id: outbound.call_id,
             status: outbound.status.includes("uncertain")
               ? "uncertain"
-              : outbound.status.includes("rejected") || outbound.status === "denied"
+              : outbound.status.includes("rejected") ||
+                  ["denied", "revoked"].includes(outbound.status)
                 ? "rejected"
                 : "pending",
           };

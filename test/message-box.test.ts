@@ -14,6 +14,49 @@ import { OutboundActions } from "../src/outbound-actions.js";
 import { PendingActionInbox } from "../src/pending-action-inbox.js";
 import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 
+test("revoked permission wakes a pending action without dispatch or automatic re-request", async (t) => {
+  const f = await fixture(t, false, 2000);
+  const request_id = randomUUID();
+  await f.box.call(
+    {
+      type: "request_action",
+      request_id,
+      action_type: "lookup",
+      target_email: "peer@example.test",
+      payload: { query: "saved private intent" },
+      wait_seconds: 0,
+    },
+    new AbortController().signal,
+  );
+  const waiting = f.box.call(
+    { type: "check", request_id, wait_seconds: 1 },
+    new AbortController().signal,
+  );
+  const revoked = {
+    ...f.outcome,
+    payload: {
+      ...f.outcome.payload,
+      type: "permission_revoked",
+      granted: false,
+      status: "revoked",
+    },
+  };
+  assert.equal(await f.box.capture({ ...revoked, action_type_id: "wrong-action" }), false);
+  assert.equal(
+    (await f.box.call({ type: "check", request_id, wait_seconds: 0 }, new AbortController().signal))
+      .status,
+    "pending",
+  );
+  await f.box.capture(revoked);
+  const reply = await waiting;
+  assert.equal(reply.status, "rejected");
+  assert.match(JSON.stringify(reply), /revoked/u);
+  await f.restart();
+  await f.box.capture(f.outcome);
+  assert.equal(f.calls, 0);
+  assert.equal(f.requests, 1);
+});
+
 async function fixture(t: TestContext, granted = false, waitMs = 35) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-message-box-"));
   const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);

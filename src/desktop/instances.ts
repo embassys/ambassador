@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
+import { defaultGatewayPaths } from "../gateway-paths.js";
 import { secureWindowsArtifact } from "../windows-access-control.js";
 import { type DesktopInstance, desktopInstanceSchema } from "./protocol.js";
 
@@ -31,17 +33,41 @@ async function secureDirectory(path: string): Promise<string> {
   return await realpath(path);
 }
 
+async function canonicalPlannedPath(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(path) === path) throw error;
+    return join(await canonicalPlannedPath(dirname(path)), basename(path));
+  }
+}
+
 export class DesktopInstances {
   #instances: DesktopInstance[];
   #tail: Promise<unknown> = Promise.resolve();
   private constructor(
     readonly directory: string,
     records: DesktopInstance[],
+    readonly cliDirectory: string,
   ) {
     this.#instances = records;
   }
 
-  static async open(directory: string): Promise<DesktopInstances> {
+  static async open(
+    directory: string,
+    options: { cliDirectory?: string } = {},
+  ): Promise<DesktopInstances> {
+    const requestedCliDirectory = resolve(
+      options.cliDirectory ??
+        defaultGatewayPaths(process.platform, process.env, homedir()).stateDirectory,
+    );
+    try {
+      if ((await lstat(requestedCliDirectory)).isSymbolicLink())
+        throw new Error("The CLI location cannot be an alias.");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const cliDirectory = await canonicalPlannedPath(requestedCliDirectory);
     const canonical = await secureDirectory(resolve(directory));
     const path = join(canonical, "instances.json");
     let records: DesktopInstance[] = [];
@@ -64,18 +90,28 @@ export class DesktopInstances {
         await file.close();
       }
       const ids = new Set<string>();
-      const ports = new Set<number>();
+      const ports = new Map<number, DesktopInstance>();
+      let shared = false;
       const roots: string[] = [];
       for (const record of records) {
         if (!isAbsolute(record.stateDirectory) || !isAbsolute(record.workingDirectory))
           throw new Error("Invalid instance path.");
         const root = await realpath(record.stateDirectory);
         const stat = await lstat(record.stateDirectory);
-        if (!stat.isDirectory() || basename(root) !== record.id || root !== record.stateDirectory)
+        if (
+          !stat.isDirectory() ||
+          (process.getuid && stat.uid !== process.getuid()) ||
+          root !== record.stateDirectory ||
+          (record.source === "cli"
+            ? root !== cliDirectory || record.port !== 8787 || shared
+            : basename(root) !== record.id)
+        )
           throw new Error("Invalid instance storage binding.");
         if (
           ids.has(record.id) ||
-          ports.has(record.port) ||
+          (ports.has(record.port) &&
+            record.source !== "cli" &&
+            ports.get(record.port)?.source !== "cli") ||
           roots.some((other) => overlaps(other, root))
         )
           throw new Error("Instance registry contains conflicting instances.");
@@ -85,7 +121,8 @@ export class DesktopInstances {
         )
           throw new Error("Invalid instance workspace.");
         ids.add(record.id);
-        ports.add(record.port);
+        if (record.source !== "cli" || !ports.has(record.port)) ports.set(record.port, record);
+        shared ||= record.source === "cli";
         roots.push(root);
       }
     } catch (error) {
@@ -95,11 +132,37 @@ export class DesktopInstances {
       if (records.length > 0)
         throw new Error("An instance directory is missing. Restore it before continuing.");
     }
-    return new DesktopInstances(canonical, records);
+    return new DesktopInstances(canonical, records, cliDirectory);
   }
 
   list(): DesktopInstance[] {
     return this.#instances.map((instance) => ({ ...instance }));
+  }
+
+  attachCli(enabled = false): Promise<DesktopInstance> {
+    return this.#serial(async () => {
+      const existing = this.#instances.find((record) => record.source === "cli");
+      if (existing) return { ...existing };
+      if (this.#instances.length >= 8)
+        throw new Error("This build supports up to eight instances.");
+      if (this.#instances.some((record) => overlaps(record.stateDirectory, this.cliDirectory)))
+        throw new Error("The CLI installation overlaps another instance.");
+      const stateDirectory = await secureDirectory(this.cliDirectory);
+      if (stateDirectory !== this.cliDirectory)
+        throw new Error("The CLI location cannot be an alias.");
+      const instance = desktopInstanceSchema.parse({
+        id: randomUUID(),
+        name: "Shared with CLI",
+        source: "cli",
+        port: 8787,
+        stateDirectory,
+        workingDirectory: join(stateDirectory, "workspace"),
+        enabled,
+        createdAt: new Date().toISOString(),
+      });
+      await this.#save([...this.#instances, instance]);
+      return { ...instance };
+    });
   }
 
   #serial<T>(operation: () => Promise<T>): Promise<T> {

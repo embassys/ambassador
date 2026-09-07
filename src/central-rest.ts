@@ -40,6 +40,7 @@ export type CentralRestErrorCode =
   | "permission_missing"
   | "permission_pending"
   | "permission_denied"
+  | "permission_revoked"
   | "permission_expired"
   | "permission_spent"
   | "invalid_arguments";
@@ -78,7 +79,7 @@ export interface CentralPermission {
   readonly grantor_email: string;
   readonly grantee_email: string;
   readonly action_type: string;
-  readonly status: "pending" | "granted" | "denied";
+  readonly status: "pending" | "granted" | "denied" | "revoked" | "expired";
   readonly scope?: Record<string, unknown> | null;
   readonly created_at?: string | null;
   readonly decided_at?: string | null;
@@ -364,7 +365,7 @@ function permission(value: unknown): CentralPermission {
     !EMAIL.test(value.grantee_email) ||
     typeof value.action_type !== "string" ||
     !NAME.test(value.action_type) ||
-    !["pending", "granted", "denied"].includes(value.status as string) ||
+    !["pending", "granted", "denied", "revoked", "expired"].includes(value.status as string) ||
     (value.scope !== undefined && value.scope !== null && !isCentralRecord(value.scope)) ||
     !["created_at", "decided_at", "expires_at"].every(
       (name) =>
@@ -687,6 +688,7 @@ export class CentralRestClient {
                 "No permission exists for this action": "permission_missing",
                 "Permission is pending, not granted": "permission_pending",
                 "Permission is denied, not granted": "permission_denied",
+                "Permission is revoked, not granted": "permission_revoked",
                 "Permission has expired": "permission_expired",
                 "This permission was granted for a single use, which has already been spent. Request permission again.":
                   "permission_spent",

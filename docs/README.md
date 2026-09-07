@@ -19,6 +19,7 @@ plan contains only work that is not complete.
 | Review the new web app and owner API availability | [Web app and server review](desktop-web-app-review-2026-09-07.md) |
 | Review the approved desktop product and central API requirements | [Desktop app design](desktop-app-design.md) |
 | Plan desktop implementation and platform acceptance testing | [Desktop app plan](desktop-app-plan.md) |
+| Switch between CLI and app using the same installation | [Shared installation](adr/0069-shared-cli-and-desktop-installation.md) |
 | Build and verify desktop distribution files | [Desktop development packages](desktop-distribution.md) |
 | Understand the supplied examples of users getting stuck | [Stalled-session review](stalled-session-review.md) |
 | Configure foreground waits and optional native return | [Client delivery](client-delivery.md) |

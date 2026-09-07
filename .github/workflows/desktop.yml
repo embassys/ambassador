@@ -50,12 +50,19 @@ jobs:
           sudo chown root:root "$sandbox_helper"
           sudo chmod 4755 "$sandbox_helper"
           xvfb-run -a pnpm --filter @embassys/desktop run verify:package
+      - name: Verify CLI and app handoffs
+        if: runner.os != 'Linux'
+        run: pnpm --filter @embassys/desktop run verify:shared
+      - name: Verify CLI and app handoffs under a Linux test display
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @embassys/desktop run verify:shared
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: desktop-evidence-${{ matrix.os }}
           path: |
             .build/desktop/app/build-manifest.json
             .build/desktop/host-resource-qualification.json
+            .build/desktop/shared-host-qualification.json
             .build/desktop/distribution/*.manifest.json
             .build/desktop/distribution/*.cdx.json
             .build/desktop/distribution/*.sha256

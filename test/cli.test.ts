@@ -453,7 +453,6 @@ for (const verbose of [false, true])
     assert.ok(endpoint !== undefined);
     const client = new TestMcpClient(endpoint);
     await client.initialize({ name: "codex-mcp-client", version: "qualification" });
-    await client.callTool("register_agent", { email: "verbose@fixture.test" });
     await assert.rejects(
       client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
       (error: unknown) =>
@@ -464,6 +463,7 @@ for (const verbose of [false, true])
         (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
           "central_enrollment",
     );
+    await client.callTool("register_agent", { email: "verbose@fixture.test" });
     if (verbose) {
       assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
       assert.match(output.stderr(), /mcp\.tool\.request/u);

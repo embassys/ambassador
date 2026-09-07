@@ -48,7 +48,8 @@ issue-only. These items do not authorize another release.
   provider configuration isolation. Qualify MCP setup and native return against
   the selected instance, including concurrent providers and independent stop/clean.
   The published CLI remains fixed to its original port and state location; no
-  new CLI selectors or migration are planned.
+  new CLI selectors or migration are planned. ADR 0069 adds a shared installation
+  and confirmed CLI/app handoffs using matching builds, not multiple engine versions.
   ADR 0066 adds locked portable packages, source/host compatibility checks and
   runtime-version validation. A signed engine catalog, compatible state bounds
   and separately qualified artifacts are still required before enabling version
@@ -115,8 +116,17 @@ issue-only. These items do not authorize another release.
   form and view checks. Owner runtime code `f3b5cfd` passes all three desktop CI
   jobs in [run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469).
   In-app decisions, full owner history, identity recovery,
-  explicit revocation-event handling and native remote push remain open. See the
+  and native remote push remain open. Explicit revocation-event handling is
+  implemented in the current ADR 0069 candidate. See the
   desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.
+
+The current candidate also implements ADR 0069: the web app's four-section
+navigation and teal/ink visual language, a shared CLI installation, saved
+registration across hosts, confirmed authenticated process handoff and stopped
+state after handoff. Existing isolated instances remain separate. Current local
+checks pass 465 tests with seven expected skips, plus 14 desktop rendering,
+parser and artifact tests. Final native and live evidence belongs in the desktop
+plan; these counts alone do not qualify a user-visible result.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

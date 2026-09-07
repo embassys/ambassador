@@ -171,6 +171,10 @@ async function snapshot() {
   return {
     appVersion: app.getVersion(),
     build: "Development preview",
+    cliCommand:
+      process.platform === "win32"
+        ? `& '${nodePath.replaceAll("'", "''")}' '${join(runtimeRoot, "dist", "cli.js").replaceAll("'", "''")}' start`
+        : `'${nodePath.replaceAll("'", "'\\''")}' '${join(runtimeRoot, "dist", "cli.js").replaceAll("'", "'\\''")}' start`,
     diagnosticsMode,
     platform: process.platform,
     appearance: appearance.value,
@@ -232,6 +236,9 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
           },
         }),
       onChange: changed,
+      onHandoff: () => {
+        void instances.updateEnabled(instance.id, false).then(changed).catch(showError);
+      },
     });
     workers.set(instance.id, worker);
   }
@@ -248,10 +255,35 @@ async function stop(instance: DesktopInstance): Promise<void> {
   changed();
 }
 
+async function confirmHandoff(instance: DesktopInstance): Promise<boolean> {
+  const worker = getWorker(instance);
+  const running = (await worker.request({ type: "external_process", instanceId: instance.id })) as {
+    processInstanceId?: string;
+  };
+  if (!running.processInstanceId) return true;
+  const answer = await dialog.showMessageBox({
+    type: "question",
+    message: "Another Ambassador is using this installation.",
+    detail: "Stop that server and continue here? Its identity and saved work will stay in place.",
+    buttons: ["Cancel", "Stop and continue"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (answer.response !== 1) return false;
+  await worker.request({
+    type: "external_stop",
+    instanceId: instance.id,
+    processInstanceId: running.processInstanceId,
+  });
+  return true;
+}
+
 async function execute(input: unknown): Promise<unknown> {
   const command = parseDesktopCommand(input);
   const mutation = [
     "start",
+    "attach_cli",
     "stop",
     "clean",
     "create",
@@ -278,6 +310,10 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  if (command.type === "attach_cli") {
+    const attached = await instances.attachCli();
+    return { ...(await snapshot()), createdInstanceId: attached.id };
+  }
   const accountCommand = ownerCommandSchema.safeParse(command);
   if (accountCommand.success) {
     if (accountCommand.data.type === "owner_open_web") {
@@ -502,6 +538,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     return { saved: true };
   }
   if (command.type === "stop") {
+    if (!(await confirmHandoff(instance))) return snapshot();
     await stop(instance);
     return snapshot();
   }
@@ -518,6 +555,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
       noLink: true,
     });
     if (first.response !== 1) return snapshot();
+    if (!(await confirmHandoff(instance))) return snapshot();
     await stop(instance);
     const worker = getWorker(instance);
     const preview = (await worker.request({
@@ -558,6 +596,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     return snapshot();
   }
   if (command.type === "start") {
+    if (!(await confirmHandoff(instance))) return snapshot();
     await instances.updateEnabled(instance.id, true);
     await getWorker(instance).request(command);
     changed();
@@ -796,7 +835,7 @@ else {
         }
         changed();
       });
-      if (instances.list().length === 0) await instances.create({ name: "Personal", port: 8787 });
+      if (instances.list().length === 0) await instances.attachCli(true);
       session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
         callback(false),
       );
@@ -874,13 +913,26 @@ else {
       updateMenu();
       const openedAtLogin =
         process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin;
-      windowLifecycle.ready(process.argv.includes("--background") || openedAtLogin);
+      const backgroundLaunch = process.argv.includes("--background") || openedAtLogin;
+      windowLifecycle.ready(backgroundLaunch);
       for (const instance of instances.list()) {
         if (quitLifecycle.stopping) break;
-        if (instance.enabled)
-          await getWorker(instance)
-            .request({ type: "start", instanceId: instance.id })
-            .catch(changed);
+        if (!instance.enabled) continue;
+        try {
+          if (!backgroundLaunch && !(await confirmHandoff(instance))) {
+            await instances.updateEnabled(instance.id, false);
+            changed();
+            continue;
+          }
+          await getWorker(instance).request({ type: "start", instanceId: instance.id });
+        } catch {
+          if (!backgroundLaunch)
+            dialog.showErrorBox(
+              "The server could not start",
+              "Check Device settings and Logs before trying again. Any other running server was left alone.",
+            );
+          changed();
+        }
       }
       initialLaunch = false;
     } catch {

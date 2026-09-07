@@ -21,6 +21,7 @@ test("recognizes exact central permission errors without returning arbitrary det
     ["No permission exists for this action", "permission_missing"],
     ["Permission is pending, not granted", "permission_pending"],
     ["Permission is denied, not granted", "permission_denied"],
+    ["Permission is revoked, not granted", "permission_revoked"],
     ["Permission has expired", "permission_expired"],
     [
       "This permission was granted for a single use, which has already been spent. Request permission again.",
@@ -55,6 +56,35 @@ test("recognizes exact central permission errors without returning arbitrary det
       },
     );
   }
+});
+
+test("permission lists retain revoked and expired grants without accepting unknown statuses", async () => {
+  const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
+  const rows = ["pending", "granted", "denied", "revoked", "expired"].map((status, index) => ({
+    id: `permission.${index}`,
+    grantor_email: "owner@fixture.test",
+    grantee_email: "peer@fixture.test",
+    action_type: "get_phone_number",
+    status,
+  }));
+  const client = new CentralRestClient({
+    centralOrigin: "https://central.fixture.test",
+    transport: new CentralProtectedTransport({
+      credential: () => credential,
+      now: () => FIXTURE_NOW_SECONDS,
+      fetch: async () =>
+        new Response(JSON.stringify(rows), { headers: { "content-type": "application/json" } }),
+    }),
+  });
+  assert.deepEqual(await client.getMyPermissions(), rows);
+  const first = rows[0];
+  assert.ok(first);
+  rows.push({ ...first, status: "unknown" });
+  await assert.rejects(
+    client.getMyPermissions(),
+    (error: unknown) =>
+      error instanceof CentralRestError && error.code === "central_response_invalid",
+  );
 });
 
 test("classifies reviewed pre-acceptance errors without trusting the response body", async () => {

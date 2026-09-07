@@ -4,6 +4,46 @@ import { test } from "node:test";
 import type { DesktopCommand, GatewaySnapshot } from "../src/desktop/protocol.js";
 import { SupervisedGateway } from "../src/desktop/supervisor.js";
 
+test("an authenticated handoff clears restart intent before the old worker exits", async () => {
+  const id = randomUUID();
+  let changed = () => {};
+  let alive = true;
+  let state: GatewaySnapshot = { id, state: "running" };
+  let handedOff = 0;
+  let restarts = 0;
+  const supervisor = new SupervisedGateway({
+    id,
+    onHandoff: () => {
+      handedOff++;
+    },
+    create: (notify) => {
+      changed = notify;
+      return {
+        available: () => alive,
+        snapshot: () => state,
+        request: async () => state,
+        close: async () => {
+          alive = false;
+        },
+      };
+    },
+    schedule: () => {
+      restarts++;
+      return () => {};
+    },
+  });
+  await supervisor.request({ type: "start", instanceId: id });
+  state = { id, state: "stopping", stopReason: "handoff" };
+  changed();
+  state = { id, state: "stopped", stopReason: "handoff" };
+  changed();
+  alive = false;
+  changed();
+  assert.equal(handedOff, 1);
+  assert.equal(restarts, 0);
+  await supervisor.close();
+});
+
 test("worker recovery is bounded and never replays a mutation", async () => {
   const id = randomUUID();
   const created: Fake[] = [];

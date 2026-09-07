@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { capabilityForKind } from "../agent-capabilities.js";
 import { type CentralEnrollmentClient, CentralEnrollmentError } from "../central-enrollment.js";
-import { createDeliveryProfile, type DeliveryProfileStore } from "../delivery-profile.js";
+import {
+  createDeliveryProfile,
+  type DeliveryProfile,
+  type DeliveryProfileStore,
+  validateStoredDeliveryProfile,
+} from "../delivery-profile.js";
 import type { GatewayIdentity } from "../identity.js";
 import { readLocalSettings, writeLocalSettings } from "./local-settings.js";
 
@@ -24,6 +29,7 @@ const recordSchema = registrationInput.extend({
     "conflict",
   ]),
   agentId: z.string().max(256).optional(),
+  displayName: z.string().min(1).max(128).optional(),
   message: z.string().max(512).optional(),
   resendAfter: z.number().int().nonnegative(),
 });
@@ -50,6 +56,9 @@ interface Options {
 export class DesktopRegistration {
   #record: RegistrationRecord | undefined;
   #busy = false;
+  #verifiedResult: Record<string, unknown> | undefined;
+  #resendResult: Record<string, string> | undefined;
+  #lastError: CentralEnrollmentError | undefined;
   private constructor(
     readonly options: Options,
     record?: RegistrationRecord,
@@ -77,6 +86,7 @@ export class DesktopRegistration {
     if (this.options.identity.enrolled) return this.snapshot();
     if (this.#busy) throw new Error("Registration is already in progress.");
     this.#busy = true;
+    this.#lastError = undefined;
     try {
       await operation();
       return this.snapshot();
@@ -84,22 +94,46 @@ export class DesktopRegistration {
       this.#busy = false;
     }
   }
-  register(raw: unknown): Promise<RegistrationSnapshot> {
+  register(
+    raw: unknown,
+    prepared?: DeliveryProfile,
+    displayName?: string,
+  ): Promise<RegistrationSnapshot> {
     return this.#exclusive(async () => {
       const input = registrationInput.parse(raw);
       const previous = this.#record;
       if (previous && previous.phase !== "rejected") {
-        if (previous.email !== input.email || previous.executor !== input.executor)
+        if (
+          previous.email !== input.email ||
+          previous.executor !== input.executor ||
+          previous.displayName !== displayName
+        )
           throw new Error("Finish the saved registration first.");
+        if (
+          prepared &&
+          JSON.stringify(await this.options.profileStore.load()) !== JSON.stringify(prepared)
+        )
+          throw new Error("Finish registration with the saved delivery profile.");
         return;
       }
       const capability = capabilityForKind(input.executor);
       if (!capability?.direct) throw new Error("This executor is unavailable.");
+      if (prepared) {
+        await validateStoredDeliveryProfile(prepared, this.options.workingDirectory);
+        if (prepared.agent_kind !== input.executor)
+          throw new Error("The selected executor changed.");
+      }
       await this.options.profileStore.save(
-        await createDeliveryProfile(capability, { mode: "direct" }, this.options.workingDirectory),
+        prepared ??
+          (await createDeliveryProfile(
+            capability,
+            { mode: "direct" },
+            this.options.workingDirectory,
+          )),
       );
       const record: RegistrationRecord = {
         ...input,
+        ...(displayName ? { displayName } : {}),
         phase: "registration_uncertain",
         resendAfter: (this.options.now?.() ?? Date.now()) + 60_000,
         message:
@@ -108,7 +142,7 @@ export class DesktopRegistration {
       await this.#save(record);
       try {
         const result = await this.options.client.register(
-          { email: input.email },
+          { email: input.email, ...(displayName ? { display_name: displayName } : {}) },
           this.options.signal,
         );
         await this.#save({
@@ -118,6 +152,7 @@ export class DesktopRegistration {
           message: "Enter the six-digit code sent to your email.",
         });
       } catch (error) {
+        if (error instanceof CentralEnrollmentError) this.#lastError = error;
         if (
           error instanceof CentralEnrollmentError &&
           ["registration_conflict", "unsupported_email_format", "central_rate_limited"].includes(
@@ -129,7 +164,7 @@ export class DesktopRegistration {
             phase: error.code === "registration_conflict" ? "conflict" : "rejected",
             message:
               error.code === "registration_conflict"
-                ? "This email is already registered. Use the existing installation. Returning-user sign-in and recovery are not available yet; Clean will not fix this."
+                ? "This email is already registered. Open its shared CLI installation, or use Account to sign in. Account sign-in cannot restore a lost local agent; Clean will not fix that."
                 : error.code === "central_rate_limited"
                   ? "Too many requests. Wait before trying again."
                   : "The server rejected this email format. It does not support +tag addresses yet.",
@@ -137,6 +172,44 @@ export class DesktopRegistration {
         }
       }
     });
+  }
+  async registerFromTools(
+    arguments_: { email: string; display_name?: string },
+    profile: DeliveryProfile,
+  ): Promise<Record<string, unknown>> {
+    const state = await this.register(
+      { email: arguments_.email, executor: profile.agent_kind },
+      profile,
+      arguments_.display_name,
+    );
+    if (this.#lastError) throw this.#lastError;
+    if (state.phase === "conflict") throw new CentralEnrollmentError("registration_conflict");
+    if (state.phase !== "awaiting_code" || !this.#record?.agentId)
+      throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+    return { agent_id: this.#record.agentId, email: state.email, message: state.message };
+  }
+  async verifyFromTools(raw: unknown): Promise<Record<string, unknown>> {
+    const input = z
+      .strictObject({ email: registrationInput.shape.email, code: z.string().regex(/^\d{6}$/u) })
+      .parse(raw);
+    if (!this.#record || input.email !== this.#record.email)
+      throw new Error("Use the email from the saved registration.");
+    const result = await this.verify(input.code);
+    if (this.#lastError) throw this.#lastError;
+    if (result.phase === "awaiting_code") throw new CentralEnrollmentError("verification_failed");
+    if (result.phase !== "registered" || !this.#verifiedResult)
+      throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+    return this.#verifiedResult;
+  }
+  async resendFromTools(raw: unknown): Promise<Record<string, unknown>> {
+    const input = z.strictObject({ email: registrationInput.shape.email }).parse(raw);
+    if (!this.#record || input.email !== this.#record.email)
+      throw new Error("Use the email from the saved registration.");
+    await this.resend();
+    if (this.#lastError) throw this.#lastError;
+    if (!this.#resendResult)
+      throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+    return this.#resendResult;
   }
   verify(code: string): Promise<RegistrationSnapshot> {
     return this.#exclusive(async () => {
@@ -154,7 +227,7 @@ export class DesktopRegistration {
           "Verification may have completed centrally, but no local credential was confirmed. Do not register again or use Clean. Central identity recovery is required.",
       });
       try {
-        await this.options.identity.enroll(async () => {
+        this.#verifiedResult = await this.options.identity.enroll(async () => {
           const result = await this.options.client.verify(
             { email: record.email, code },
             this.options.signal,
@@ -164,6 +237,7 @@ export class DesktopRegistration {
           return result;
         });
       } catch (error) {
+        if (error instanceof CentralEnrollmentError) this.#lastError = error;
         if (
           error instanceof CentralEnrollmentError &&
           ["verification_failed", "central_rate_limited"].includes(error.code)
@@ -184,6 +258,7 @@ export class DesktopRegistration {
   }
   resend(): Promise<RegistrationSnapshot> {
     return this.#exclusive(async () => {
+      this.#resendResult = undefined;
       const record = this.#record;
       if (!record || !["awaiting_code", "registration_uncertain"].includes(record.phase))
         throw new Error("No resend is available for this registration.");
@@ -196,14 +271,18 @@ export class DesktopRegistration {
         message: "Another code was requested. Check your email; delivery is not yet confirmed.",
       });
       try {
-        await this.options.client.resend({ email: record.email }, this.options.signal);
+        this.#resendResult = await this.options.client.resend(
+          { email: record.email },
+          this.options.signal,
+        );
         await this.#save({
           ...record,
           phase: "awaiting_code",
           resendAfter: now + 60_000,
           message: "Enter the latest code sent to your email.",
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof CentralEnrollmentError) this.#lastError = error;
         /* Preserve the request time so repeated clicks cannot send more mail. */
       }
     });

@@ -14,6 +14,7 @@ import type { GatewayOverview } from "../../src/gateway-application.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
 import { Account } from "./account.js";
 import { Activity, Permissions } from "./agent-status.js";
+import { Navigation } from "./navigation.js";
 import { Registration } from "./registration.js";
 
 interface AppSnapshot {
@@ -31,6 +32,7 @@ interface AppSnapshot {
   palette: ReturnType<typeof controlPalette>;
   appVersion: string;
   build: string;
+  cliCommand: string;
   loginItem: LoginItemState;
   owner: OwnerSnapshot;
   instances: (DesktopInstance & { runtime: GatewaySnapshot })[];
@@ -105,15 +107,15 @@ const pages: { id: Page; label: string; description: string }[] = [
     label: "Account",
     description: "Your requests, permissions and central message history.",
   },
-  { id: "attention", label: "Attention", description: "Requests and questions that need you." },
+  { id: "attention", label: "Requests", description: "Requests and questions that need you." },
   {
     id: "registration",
-    label: "Registration",
+    label: "Set up this device",
     description: "Register this instance with your email and choose its agent.",
   },
   {
     id: "conversations",
-    label: "Conversations",
+    label: "Messages",
     description: "Follow the work your agents do with other people.",
   },
   {
@@ -124,12 +126,12 @@ const pages: { id: Page; label: string; description: string }[] = [
   { id: "agents", label: "Agents", description: "Connect the tools you already use." },
   {
     id: "diagnostics",
-    label: "Diagnostics",
+    label: "Logs",
     description: "Understand what happened, without the guesswork.",
   },
   {
     id: "settings",
-    label: "Settings",
+    label: "Device settings",
     description: "Your account, local servers and preferences.",
   },
 ];
@@ -137,6 +139,7 @@ const pages: { id: Page; label: string; description: string }[] = [
 function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>();
   const [overview, setOverview] = useState<GatewayOverview>();
+  const [overviewUnavailable, setOverviewUnavailable] = useState(false);
   const [page, setPage] = useState<Page>(() => {
     const saved = localStorage.getItem("ambassador.page");
     return pages.find((item) => item.id === saved)?.id ?? "attention";
@@ -144,6 +147,11 @@ function App() {
   const [selectedId, setSelectedId] = useState(
     () => localStorage.getItem("ambassador.instance") ?? "",
   );
+  const [dataSource, setDataSource] = useState<"account" | "local">("account");
+  const navigate = (destination: Page) => {
+    setPage(destination);
+    setDataSource(destination === "conversations" ? "local" : "account");
+  };
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [appearanceChoice, setAppearanceChoice] = useState<AppSnapshot["appearance"]>();
@@ -214,12 +222,14 @@ function App() {
     localStorage.setItem("ambassador.navigation", snapshot.navigation.id);
     setSelectedId(snapshot.navigation.instanceId);
     setPage(snapshot.navigation.page);
+    setDataSource("local");
   }, [snapshot?.navigation]);
   useEffect(() => {
-    if (!id || (page !== "attention" && page !== "settings")) return;
+    if (!id || (page !== "account" && !(page === "attention" && dataSource === "local"))) return;
     let current = true;
     let reading = false;
     setOverview(undefined);
+    setOverviewUnavailable(false);
     const update = async () => {
       if (reading || document.hidden) return;
       reading = true;
@@ -227,7 +237,9 @@ function App() {
         const result = await call({ type: "overview", instanceId: id });
         if (current) setOverview(result as GatewayOverview);
       } catch {
-        if (current) setError("Agent activity is unavailable. Check this instance in Diagnostics.");
+        if (current) setOverviewUnavailable(true);
+        if (current && runtimeState === "running")
+          setError("Agent activity is unavailable. Check Logs.");
       } finally {
         reading = false;
       }
@@ -238,17 +250,11 @@ function App() {
       current = false;
       clearInterval(timer);
     };
-  }, [id, runtimeState, page, call]);
+  }, [id, runtimeState, page, dataSource, call]);
   useEffect(() => {
     if (!snapshot) return;
     document.documentElement.dataset.platform = snapshot.platform;
     document.documentElement.dataset.theme = snapshot.dark ? "dark" : "light";
-    document.documentElement.style.setProperty("--control-accent", snapshot.palette.accent);
-    document.documentElement.style.setProperty(
-      "--control-accent-text",
-      snapshot.palette.accentText,
-    );
-    document.documentElement.style.setProperty("--accent", snapshot.palette.link);
   }, [snapshot]);
   useEffect(() => {
     localStorage.setItem("ambassador.page", page);
@@ -326,7 +332,7 @@ function App() {
     try {
       const result = await call(command);
       if (
-        command.type === "create" &&
+        ["create", "attach_cli"].includes(command.type) &&
         result &&
         typeof result === "object" &&
         "createdInstanceId" in result &&
@@ -495,24 +501,9 @@ function App() {
           <img className="brand-mark" src="/brand.svg" alt="" />
           <span>Embassys</span>
         </div>
-        <div className="workspace-label">Workspace</div>
-        <nav aria-label="Main navigation">
-          {pages.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className={`nav-item ${page === item.id ? "active" : ""}`}
-              onClick={() => setPage(item.id)}
-              aria-current={page === item.id ? "page" : undefined}
-            >
-              <Icon name={item.id} />
-              <span>{item.label}</span>
-              {page === item.id && <span className="nav-dot" />}
-            </button>
-          ))}
-        </nav>
+        <Navigation page={page} select={navigate} />
         <div className="sidebar-bottom">
-          <div className="instance-label">Local instance</div>
+          <div className="instance-label">This device</div>
           <label className="sr-only" htmlFor="instance-select">
             Selected instance
           </label>
@@ -533,21 +524,32 @@ function App() {
               ? "Local server running"
               : selected?.runtime.state === "error"
                 ? "Server needs attention"
-                : "Server stopped"}
+                : "Not running here"}
           </div>
-          <div className="version">Development preview · {snapshot?.appVersion ?? "…"}</div>
+          <button
+            type="button"
+            className="text-button server-link"
+            onClick={() => navigate("settings")}
+          >
+            Manage server
+          </button>
+          <div className="version">Development · {snapshot?.appVersion ?? "…"}</div>
         </div>
       </aside>
       <main>
         <header className="page-header">
           <div>
             <h1>{currentPage.label}</h1>
-            <p>{currentPage.description}</p>
+            {!["attention", "permissions", "conversations", "account"].includes(page) && (
+              <button
+                type="button"
+                className="text-button back-link"
+                onClick={() => navigate("account")}
+              >
+                ‹ Account
+              </button>
+            )}
           </div>
-          <span className={`toolbar-status ${page !== "account" && running ? "is-running" : ""}`}>
-            {page !== "account" && <span className={`status-dot ${running ? "green" : "amber"}`} />}
-            {page === "account" ? "Owner account" : (selected?.name ?? "Workspace")}
-          </span>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -562,69 +564,71 @@ function App() {
           <div className="empty-state">Opening your workspace…</div>
         ) : (
           <>
+            {["attention", "permissions", "conversations"].includes(page) && (
+              <fieldset className="source-tabs appearance-control">
+                <legend className="sr-only">Message source</legend>
+                {(["account", "local"] as const).map((source) => (
+                  <label key={source}>
+                    <input
+                      className="visually-hidden"
+                      type="radio"
+                      name="data-source"
+                      checked={dataSource === source}
+                      onChange={() => setDataSource(source)}
+                    />
+                    <span>
+                      {source === "account"
+                        ? page === "conversations"
+                          ? "Network messages"
+                          : "Your account"
+                        : page === "conversations"
+                          ? "Conversations"
+                          : "This agent"}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {dataSource === "account" &&
+              ["attention", "permissions", "conversations"].includes(page) && (
+                <Account
+                  key={page}
+                  section={
+                    page === "attention"
+                      ? "requests"
+                      : page === "permissions"
+                        ? "permissions"
+                        : "communications"
+                  }
+                  snapshot={snapshot.owner}
+                  call={call}
+                  changed={refresh}
+                  signIn={() => navigate("account")}
+                />
+              )}
             {page === "attention" &&
+              dataSource === "local" &&
               (overview === undefined ? (
-                <p role="status">Loading agent activity…</p>
+                overviewUnavailable ? (
+                  <section className="simple-empty">
+                    <h2>Local activity is unavailable</h2>
+                    <p>Open server settings to start it here or check its status.</p>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => navigate("settings")}
+                    >
+                      Manage server
+                    </button>
+                  </section>
+                ) : (
+                  <p role="status">Loading this agent…</p>
+                )
               ) : overview.enrollment.verified === true ? (
                 <>
-                  <section className="settings-section identity-card">
-                    <img className="brand-mark" src="/brand.svg" alt="" />
-                    <div>
-                      <h3>Agent registered</h3>
-                      <p className="body-note break">{overview.enrollment.email}</p>
-                    </div>
-                    <span className="subtle-tag">
-                      {overview.enrollment.credential_status === "active"
-                        ? "Verified"
-                        : "Credentials need attention"}
-                    </span>
-                  </section>
-                  <div className="section-title">
-                    <h3>Agent activity</h3>
-                  </div>
-                  <div className="steps">
-                    <div className="step">
-                      <Icon name="attention" />
-                      <div>
-                        <h4>
-                          {overview.pendingCalls} incoming{" "}
-                          {overview.pendingCalls === 1 ? "request" : "requests"} pending
-                        </h4>
-                        <p>
-                          {overview.pendingCalls
-                            ? "Open the conversation to see the agent's progress. Approval and question emails go to the owner."
-                            : "Your agent has no pending incoming actions saved on this device."}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="step">
-                      <Icon name="conversations" />
-                      <div>
-                        <h4>
-                          {overview.sessionCount} saved{" "}
-                          {overview.sessionCount === 1 ? "conversation" : "conversations"}
-                        </h4>
-                        <p>Available conversation history stays here when the app restarts.</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setPage("conversations")}
-                      >
-                        View
-                      </button>
-                    </div>
-                    <div className="step">
-                      <Icon name="check" />
-                      <div>
-                        <h4>
-                          {overview.receivedResults} saved{" "}
-                          {overview.receivedResults === 1 ? "result" : "results"}
-                        </h4>
-                        <p>Results stay available until your requesting agent confirms receipt.</p>
-                      </div>
-                    </div>
-                  </div>
+                  <p className="context-line">
+                    {overview.enrollment.email} · {selected?.name}
+                  </p>
                   {selected && (
                     <Activity
                       key={`${id}-${runtimeState}-${snapshot.navigation?.id ?? ""}`}
@@ -637,90 +641,54 @@ function App() {
                       }
                     />
                   )}
-                  <p className="quiet-note">
-                    Human decisions use their email links. Desktop notifications cover locally
-                    observed work while Embassys runs; remote push is not connected.
-                  </p>
                 </>
               ) : (
-                <>
-                  <section className="welcome-card">
-                    <img className="welcome-logo" src="/brand.svg" alt="" />
-                    <h2>Welcome to Embassys</h2>
-                    <p>Connect your agent to exchange requests with other people's agents.</p>
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={() => setPage("registration")}
-                    >
-                      Register with Embassys <Icon name="arrow" size={16} />
-                    </button>
-                  </section>
-                  <div className="section-title">
-                    <h3>Getting connected</h3>
-                    <span>Your first steps</span>
-                  </div>
-                  <div className="steps">
-                    <div className="step">
-                      <div className={`step-number ${running ? "complete" : ""}`}>
-                        {running ? <Icon name="check" size={18} /> : "1"}
-                      </div>
-                      <div>
-                        <h4>Start your local server</h4>
-                        <p>
-                          {running
-                            ? "Running quietly in the background."
-                            : "Start it from Settings when you're ready."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setPage("settings")}
-                      >
-                        Manage
-                      </button>
-                    </div>
-                    <div className="step">
-                      <div className="step-number">2</div>
-                      <div>
-                        <h4>Connect an agent</h4>
-                        <p>Add Embassys to the agent you already use.</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setPage("agents")}
-                      >
-                        Set up
-                      </button>
-                    </div>
-                    <div className="step">
-                      <div className="step-number muted">3</div>
-                      <div>
-                        <h4>Register your email</h4>
-                        <p>Enter your email and verification code in this app.</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setPage("registration")}
-                      >
-                        Register
-                      </button>
-                    </div>
-                  </div>
-                  <div className="quiet-note">
-                    <Icon name="attention" size={18} />
-                    <span>
-                      Use Account to sign in to an existing account. Restoring a reset local agent
-                      is not supported yet.
-                    </span>
-                  </div>
-                </>
+                <section className="simple-empty">
+                  <h2>Connect this device</h2>
+                  <p>Choose your agent and verify your email to get started.</p>
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => navigate("registration")}
+                  >
+                    Set up this device
+                  </button>
+                </section>
               ))}
             {page === "account" && snapshot && (
-              <Account snapshot={snapshot.owner} call={call} changed={refresh} />
+              <>
+                <Account snapshot={snapshot.owner} call={call} changed={refresh} />
+                <section className="device-links">
+                  <h3>This device</h3>
+                  <p className="context-line">
+                    {selected?.name}
+                    {overview?.enrollment.email ? ` · ${overview.enrollment.email}` : ""}
+                  </p>
+                  {(
+                    [
+                      [
+                        "registration",
+                        overview === undefined || overview.enrollment.verified
+                          ? "Agent registration"
+                          : "Set up this device",
+                      ],
+                      ["agents", "Connect your agents"],
+                      ["settings", "Server and preferences"],
+                      ["diagnostics", "Logs"],
+                    ] as const
+                  ).map(([destination, label]) => (
+                    <button
+                      type="button"
+                      className="device-link"
+                      key={destination}
+                      onClick={() => navigate(destination)}
+                    >
+                      <span>{label}</span>
+                      <Icon name="arrow" size={16} />
+                    </button>
+                  ))}
+                </section>
+              </>
             )}
             {page === "registration" && selected && (
               <Registration
@@ -729,7 +697,7 @@ function App() {
                 running={running}
                 command={call}
                 start={() => void mutate({ type: "start", instanceId: selected.id })}
-                connected={() => setPage("agents")}
+                connected={() => navigate("agents")}
               />
             )}
             {page === "agents" && (
@@ -845,7 +813,7 @@ function App() {
                 )}
               </>
             )}
-            {page === "conversations" && (
+            {page === "conversations" && dataSource === "local" && (
               <>
                 <div className="quiet-note">
                   <Icon name="conversations" size={18} />
@@ -956,7 +924,7 @@ function App() {
                 )}
               </>
             )}
-            {page === "permissions" && selected && (
+            {page === "permissions" && dataSource === "local" && selected && (
               <Permissions
                 key={`${selected.id}-${runtimeState}-${snapshot.navigation?.id ?? ""}`}
                 instanceId={selected.id}
@@ -1172,19 +1140,94 @@ function App() {
             )}
             {page === "settings" && (
               <>
+                {selected && (
+                  <section className="settings-section">
+                    <h3>{selected.name}</h3>
+                    <div className="settings-row">
+                      <div>
+                        <strong>Local server</strong>
+                        <p>
+                          {running
+                            ? "Keeps running when you close this window."
+                            : "Your saved state stays here while the server is stopped."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={running ? "secondary" : "primary"}
+                        disabled={busy || ["starting", "stopping"].includes(selected.runtime.state)}
+                        onClick={() =>
+                          void mutate({
+                            type: running ? "stop" : "start",
+                            instanceId: selected.id,
+                          })
+                        }
+                      >
+                        {running
+                          ? "Stop server"
+                          : selected.runtime.state === "error"
+                            ? "Retry start"
+                            : "Start server"}
+                      </button>
+                    </div>
+                    <details className="server-details">
+                      <summary>Connection and storage</summary>
+                      <div className="settings-row">
+                        <div>
+                          <strong>MCP address</strong>
+                          <p className="mono">{endpoint}</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => void copy(endpoint, "settings-endpoint")}
+                        >
+                          {copied === "settings-endpoint" ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                      <div className="settings-row">
+                        <div>
+                          <strong>Data location</strong>
+                          <p className="mono break">{selected.stateDirectory}</p>
+                        </div>
+                      </div>
+                      <div className="settings-row">
+                        <div>
+                          <strong>Clean local instance</strong>
+                          <p>
+                            Clear local registration and work. Keep logs and provider configuration.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="danger"
+                          disabled={
+                            busy || ["starting", "stopping"].includes(selected.runtime.state)
+                          }
+                          onClick={() =>
+                            void mutate({
+                              type: "clean",
+                              instanceId: selected.id,
+                              confirmation: "clear-local-instance",
+                            })
+                          }
+                        >
+                          Clean…
+                        </button>
+                      </div>
+                    </details>
+                  </section>
+                )}
                 <section className="settings-section">
                   <h3>Notifications</h3>
                   <div className="settings-row">
                     <div>
                       <strong>Agent updates</strong>
-                      <p>
-                        Show a desktop notification when this running app receives work, a result or
-                        a recorded question. Notifications contain no personal details.
-                      </p>
+                      <p>Notify me about requests and results while Embassys is running.</p>
                       <p>
                         {snapshot.notifications.supported
-                          ? "Delivery also depends on your system notification settings and Do Not Disturb. Remote push is not available yet."
-                          : "System notifications are unavailable on this desktop. Saved work remains visible in Attention."}
+                          ? "System settings and Do Not Disturb may silence alerts."
+                          : "Notifications are unavailable here. View updates in Requests."}
                       </p>
                     </div>
                     <button
@@ -1254,7 +1297,11 @@ function App() {
                   <div className="settings-row">
                     <div>
                       <strong>Launch at login</strong>
-                      <p>{snapshot.loginItem.message}</p>
+                      <p>
+                        {!snapshot.loginItem.canChange && snapshot.platform === "darwin"
+                          ? "Available in signed release builds."
+                          : snapshot.loginItem.message}
+                      </p>
                       <p>Stopping an individual server keeps it stopped on the next app launch.</p>
                     </div>
                     <button
@@ -1285,123 +1332,49 @@ function App() {
                   </button>
                 </section>
                 <section className="settings-section">
-                  <h3>Account</h3>
-                  {overview?.enrollment.verified === true && (
-                    <div className="settings-row">
-                      <div>
-                        <strong>Registered agent</strong>
-                        <p className="break">{overview.enrollment.email}</p>
-                        <p>
-                          This is the agent's saved identity. Owner account sign-in is separate.
-                        </p>
-                      </div>
-                      <span className="subtle-tag">Verified</span>
-                    </div>
-                  )}
-                  <div className="settings-row">
-                    <div>
-                      <strong>Register this instance</strong>
-                      <p>
-                        Register a new agent for this local server. Account sign-in is separate from
-                        local agent registration and recovery.
-                      </p>
-                    </div>
+                  <h3>Use the CLI</h3>
+                  <p className="body-note">
+                    The shared installation uses the same identity and work in the app and terminal.
+                    Stop one server before starting the other.
+                  </p>
+                  {snapshot.instances.some((item) => item.source === "cli") ? (
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => setPage("registration")}
+                      onClick={() =>
+                        setSelectedId(
+                          snapshot.instances.find((item) => item.source === "cli")?.id ?? "",
+                        )
+                      }
                     >
-                      Open registration
+                      Select shared installation
                     </button>
-                  </div>
-                  <div className="settings-row">
-                    <div>
-                      <strong>Owner account</strong>
-                      <p>
-                        {snapshot?.owner.email ??
-                          "Sign in to see account requests and permissions."}
-                      </p>
-                    </div>
-                    <button type="button" className="secondary" onClick={() => setPage("account")}>
-                      Open account
+                  ) : (
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => void mutate({ type: "attach_cli" })}
+                    >
+                      Open CLI installation
                     </button>
-                  </div>
+                  )}
+                  <p className="body-note">
+                    Use the CLI included with this build. Older installed versions may not
+                    understand newer saved work.
+                  </p>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => void copy(snapshot.cliCommand, "bundled-cli")}
+                  >
+                    {copied === "bundled-cli"
+                      ? "Copied"
+                      : `Copy ${snapshot.platform === "win32" ? "PowerShell" : "terminal"} start command`}
+                  </button>
                 </section>
-                {selected && (
-                  <section className="settings-section">
-                    <h3>{selected.name}</h3>
-                    <div className="settings-row">
-                      <div>
-                        <strong>Local server</strong>
-                        <p>
-                          {running
-                            ? "Keeps running when you close this window."
-                            : "Your saved state stays here while the server is stopped."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className={running ? "secondary" : "primary"}
-                        disabled={busy}
-                        onClick={() =>
-                          void mutate({
-                            type: running ? "stop" : "start",
-                            instanceId: selected.id,
-                          })
-                        }
-                      >
-                        {running
-                          ? "Stop server"
-                          : selected.runtime.state === "error"
-                            ? "Retry start"
-                            : "Start server"}
-                      </button>
-                    </div>
-                    <div className="settings-row">
-                      <div>
-                        <strong>MCP address</strong>
-                        <p className="mono">{endpoint}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => void copy(endpoint, "settings-endpoint")}
-                      >
-                        {copied === "settings-endpoint" ? "Copied" : "Copy"}
-                      </button>
-                    </div>
-                    <div className="settings-row">
-                      <div>
-                        <strong>Data location</strong>
-                        <p className="mono break">{selected.stateDirectory}</p>
-                      </div>
-                    </div>
-                    <div className="settings-row">
-                      <div>
-                        <strong>Clean local instance</strong>
-                        <p>
-                          Clear local registration and work. Keep logs and provider configuration.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        className="danger"
-                        disabled={busy}
-                        onClick={() =>
-                          void mutate({
-                            type: "clean",
-                            instanceId: selected.id,
-                            confirmation: "clear-local-instance",
-                          })
-                        }
-                      >
-                        Clean…
-                      </button>
-                    </div>
-                  </section>
-                )}
-                <section className="settings-section">
-                  <h3>Another local instance</h3>
+                <details className="settings-section">
+                  <summary>Additional instances</summary>
                   <p className="body-note">
                     Create an isolated server with its own port and storage. This build uses the
                     bundled engine version for each instance.
@@ -1465,7 +1438,7 @@ function App() {
                     />{" "}
                     Choose where to store this instance
                   </label>
-                </section>
+                </details>
                 <p className="body-note">
                   Closing the window keeps Embassys in the menu bar. Quit Embassys stops its
                   servers. Updates and account recovery will follow in later development stages.

@@ -13,6 +13,7 @@
     "verify": "node scripts/verify.mjs",
     "verify:host": "node scripts/verify-host.mjs",
     "verify:package": "node scripts/verify-host.mjs --packaged",
+    "verify:shared": "node scripts/verify-shared.mjs",
     "verify:portable": "node scripts/verify-portable.mjs",
     "verify:distribution": "node scripts/verify-distribution.mjs"
   },
