@@ -40,6 +40,7 @@ export class DesktopGatewayClient {
     readonly options: {
       readonly nodePath: string;
       readonly workerPath: string;
+      readonly expectedRuntime?: string;
       readonly instance: DesktopInstance;
       readonly onChange?: (snapshot: GatewaySnapshot) => void;
       readonly onNotification?: (event: LocalNotification) => void;
@@ -80,6 +81,22 @@ export class DesktopGatewayClient {
           );
           if (parsed.success) options.onNotification?.(parsed.data);
         } else if (message.type === "ready" || message.type === "state") {
+          if (
+            message.type === "ready" &&
+            options.expectedRuntime &&
+            (!("runtime" in message) || message.runtime !== options.expectedRuntime)
+          ) {
+            clearTimeout(timer);
+            this.#state = {
+              id: options.instance.id,
+              state: "error",
+              error: "The bundled server runtime is incompatible. Reinstall a complete app build.",
+            };
+            options.onChange?.(this.snapshot());
+            reject(new Error("The bundled server runtime is incompatible."));
+            void this.close();
+            return;
+          }
           const parsed = snapshotSchema.safeParse(
             "snapshot" in message ? message.snapshot : undefined,
           );

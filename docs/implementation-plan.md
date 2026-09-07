@@ -52,6 +52,10 @@ issue-only. These items do not authorize another release.
   the selected instance, including concurrent providers and independent stop/clean.
   The published CLI remains fixed to its original port and state location; no
   new CLI selectors or migration are planned.
+  ADR 0066 adds locked portable packages, source/host compatibility checks and
+  runtime-version validation. A signed engine catalog, compatible state bounds
+  and separately qualified artifacts are still required before enabling version
+  installation or selection.
 
 - [ ] Implement the approved Embassys desktop app under ADR 0064. The
   [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,

@@ -18,6 +18,7 @@ plan contains only work that is not complete.
 | Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
 | Review the approved desktop product and central API requirements | [Desktop app design](desktop-app-design.md) |
 | Plan desktop implementation and platform acceptance testing | [Desktop app plan](desktop-app-plan.md) |
+| Build and verify desktop distribution files | [Desktop development packages](desktop-distribution.md) |
 | Understand the supplied examples of users getting stuck | [Stalled-session review](stalled-session-review.md) |
 | Configure foreground waits and optional native return | [Client delivery](client-delivery.md) |
 | Implement the approved durable workflow and client matrix | [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) |

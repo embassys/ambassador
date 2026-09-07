@@ -77,7 +77,7 @@ export class DesktopLoginItem {
       return this.#unavailable("Launch at login requires the installed app.");
     if (this.options.platform === "darwin" && !this.options.macDistributionVerified)
       return this.#unavailable(
-        "Launch at login will be available in the signed Mac build. This preview is unsigned.",
+        "Launch at login requires a verified signed and notarized Mac build. This app has not passed that check.",
       );
     if (!["darwin", "win32", "linux"].includes(this.options.platform))
       return this.#unavailable("Launch at login is unavailable on this system.");

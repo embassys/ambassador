@@ -34,6 +34,8 @@ import {
   type SupportExport,
   saveSupportExport,
 } from "../../src/desktop/diagnostics.js";
+import { verifyMacDistribution } from "../../src/desktop/distribution.js";
+import { BUNDLED_NODE_VERSION, verifyBundledEngine } from "../../src/desktop/engine.js";
 import { DesktopInstances } from "../../src/desktop/instances.js";
 import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
@@ -174,6 +176,7 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
         new DesktopGatewayClient({
           nodePath,
           workerPath,
+          expectedRuntime: `v${BUNDLED_NODE_VERSION}`,
           instance,
           onChange,
           onNotification: (event) => {
@@ -610,12 +613,24 @@ else {
   });
   void app.whenReady().then(async () => {
     try {
+      await verifyBundledEngine({
+        manifestPath: join(ownDirectory, "build-manifest.json"),
+        gateway: runtimeRoot,
+        app: app.getVersion(),
+        electron: process.versions.electron,
+        platform: process.platform,
+        arch: process.arch,
+      });
       const configurationRoot = process.env.XDG_CONFIG_HOME;
       loginItem = new DesktopLoginItem({
         platform: process.platform,
         packaged: app.isPackaged,
         executable: process.execPath,
-        macDistributionVerified: false,
+        macDistributionVerified: await verifyMacDistribution({
+          platform: process.platform,
+          packaged: app.isPackaged,
+          bundle: join(dirname(process.execPath), "../.."),
+        }),
         configurationDirectory:
           configurationRoot && isAbsolute(configurationRoot)
             ? configurationRoot

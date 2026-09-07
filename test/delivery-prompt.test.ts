@@ -33,6 +33,7 @@ test("each delivery includes only the relevant workflow cue", () => {
   const action = buildDeliveryPrompt(message("action_call"));
   assert.match(action, /submit_action_result/u);
   assert.match(action, /ask_owner/u);
+  assert.match(action, /input or confirmation/u);
   assert.match(action, /transcript.*does not reach the owner/iu);
   assert.match(action, /Do not guess/u);
   assert.match(action, /actual results/u);
