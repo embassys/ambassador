@@ -19,6 +19,7 @@ export interface EncryptedFileWebhookSecretStoreOptions {
   readonly platform?: NodeJS.Platform;
   readonly windowsAccessControl?: EncryptedFileCredentialStoreOptions["windowsAccessControl"];
   readonly scope?: string;
+  readonly deriveKey?: EncryptedFileCredentialStoreOptions["deriveKey"];
 }
 
 function validateWebhookSecret(value: string): void {
@@ -32,6 +33,7 @@ export class EncryptedFileWebhookSecretStore implements WebhookSecretStore {
   constructor(path: string, keyPath: string, options: EncryptedFileWebhookSecretStoreOptions = {}) {
     this.#path = resolve(path);
     this.#store = new EncryptedFileCredentialStore(path, keyPath, options.scope ?? DEFAULT_SCOPE, {
+      ...(options.deriveKey ? { deriveKey: options.deriveKey } : {}),
       ...(options.platform === undefined ? {} : { platform: options.platform }),
       ...(options.windowsAccessControl === undefined
         ? {}

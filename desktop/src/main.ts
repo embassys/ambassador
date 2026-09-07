@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -21,6 +21,7 @@ import {
   saveSupportExport,
 } from "../../src/desktop/diagnostics.js";
 import { DesktopInstances } from "../../src/desktop/instances.js";
+import { DesktopLoginItem } from "../../src/desktop/login-item.js";
 import {
   type DesktopCommand,
   type DesktopInstance,
@@ -39,10 +40,12 @@ const ownDirectory = dirname(fileURLToPath(import.meta.url));
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let instances: DesktopInstances;
+let loginItem: DesktopLoginItem;
 const workers = new Map<string, SupervisedGateway>();
 let quitting = false;
 let pendingChanges = false;
 let busy = false;
+let initialLaunch = true;
 let exportPreview:
   | { id: string; instanceId: string; expires: number; data: SupportExport }
   | undefined;
@@ -53,10 +56,11 @@ const runtimeRoot = app.isPackaged
 const nodePath = join(runtimeRoot, "runtime", process.platform === "win32" ? "node.exe" : "node");
 const workerPath = join(runtimeRoot, "dist", "desktop", "worker.js");
 
-function snapshot() {
+async function snapshot() {
   return {
     appVersion: app.getVersion(),
     build: "Development preview",
+    loginItem: await loginItem.read(),
     owner: {
       status: "unavailable",
       message: "Account sign-in is coming in the next development stage.",
@@ -113,6 +117,7 @@ async function execute(input: unknown): Promise<unknown> {
     "export_prepare",
     "export_save",
     "history_delete",
+    "set_launch_at_login",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
@@ -125,6 +130,11 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  if (command.type === "set_launch_at_login") {
+    await loginItem.set(command.enabled);
+    changed();
+    return snapshot();
+  }
   if (command.type === "create") {
     let parentDirectory: string | undefined;
     if (command.chooseLocation) {
@@ -143,7 +153,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     });
     changed();
     await getWorker(created).request({ type: "start", instanceId: created.id });
-    return { ...snapshot(), createdInstanceId: created.id };
+    return { ...(await snapshot()), createdInstanceId: created.id };
   }
   const instance = instances.list().find((item) => item.id === command.instanceId);
   if (!instance) throw new Error("This instance is no longer available.");
@@ -386,7 +396,9 @@ else {
   process.once("SIGTERM", () => app.quit());
   process.once("SIGINT", () => app.quit());
   app.on("second-instance", showWindow);
-  app.on("activate", showWindow);
+  app.on("activate", () => {
+    if (!initialLaunch) showWindow();
+  });
   app.on("window-all-closed", () => {
     /* Background workers remain owned by the tray host. */
   });
@@ -406,6 +418,21 @@ else {
   });
   void app.whenReady().then(async () => {
     try {
+      const configurationRoot = process.env.XDG_CONFIG_HOME;
+      loginItem = new DesktopLoginItem({
+        platform: process.platform,
+        packaged: app.isPackaged,
+        executable: process.execPath,
+        macDistributionVerified: false,
+        configurationDirectory:
+          configurationRoot && isAbsolute(configurationRoot)
+            ? configurationRoot
+            : join(app.getPath("home"), ".config"),
+        native: {
+          read: (options) => app.getLoginItemSettings(options),
+          write: (options) => app.setLoginItemSettings(options),
+        },
+      });
       instances = await DesktopInstances.open(join(app.getPath("userData"), "desktop"));
       if (instances.list().length === 0) await instances.create({ name: "Personal", port: 8787 });
       session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
@@ -464,13 +491,17 @@ else {
       tray.setToolTip("Ambassador");
       tray.on("click", showWindow);
       updateMenu();
-      showWindow();
+      const openedAtLogin =
+        process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin;
+      if (!process.argv.includes("--background") && !openedAtLogin) showWindow();
       for (const instance of instances.list()) {
+        if (quitting) break;
         if (instance.enabled)
-          void getWorker(instance)
+          await getWorker(instance)
             .request({ type: "start", instanceId: instance.id })
             .catch(changed);
       }
+      initialLaunch = false;
     } catch {
       dialog.showErrorBox(
         "Ambassador could not open",

@@ -2,20 +2,16 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { AcpSessionStore } from "../acp-session-store.js";
-import { EncryptedFileCredentialStore } from "../credential-store.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { GatewayError } from "../errors.js";
-import {
-  CENTRAL_ORIGIN,
-  openGatewayApplication,
-  type RunningGatewayApplication,
-} from "../gateway-application.js";
+import { openGatewayApplication, type RunningGatewayApplication } from "../gateway-application.js";
 import { pathsForStateDirectory } from "../gateway-paths.js";
 import { GatewayIdentity } from "../identity.js";
-import { EncryptedFileLocalControlSecretStore, LocalControlClient } from "../local-control.js";
+import { LocalControlClient } from "../local-control.js";
 import { clearLocalGatewayState } from "../local-state-cleaner.js";
 import { ProcessLock } from "../process-lock.js";
 import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.js";
+import { desktopCredentialStores } from "./credential-stores.js";
 import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
 import { readLocalSummary } from "./local-summary.js";
 import type { GatewaySnapshot } from "./protocol.js";
@@ -76,6 +72,7 @@ export class DesktopGateway {
         });
         const application = await openGatewayApplication({
           ...this.#paths,
+          ...desktopCredentialStores(this.#paths),
           workingDirectory: await realpath(this.options.workingDirectory),
           environment: this.options.environment,
           localMcpPort: this.options.port,
@@ -221,10 +218,7 @@ export class DesktopGateway {
     const endpoint = this.#state.endpoint;
     if (this.#state.state !== "running" || endpoint === undefined)
       throw new Error("Start this server to load provider history.");
-    const secret = await new EncryptedFileLocalControlSecretStore(
-      this.#paths.localControlSecretPath,
-      this.#paths.localControlSecretKeyPath,
-    ).load();
+    const secret = await desktopCredentialStores(this.#paths).localControlSecretStore.load();
     if (secret === undefined) throw new Error("Local control is unavailable.");
     return new LocalControlClient(endpoint, secret);
   }
@@ -252,11 +246,7 @@ export class DesktopGateway {
     let archive: VisibleTranscripts | undefined;
     try {
       const identity = await GatewayIdentity.open(
-        new EncryptedFileCredentialStore(
-          this.#paths.credentialPath,
-          this.#paths.credentialKeyPath,
-          JSON.stringify({ centralOrigin: CENTRAL_ORIGIN }),
-        ),
+        desktopCredentialStores(this.#paths).credentialStore,
       );
       if (identity.enrolled)
         archive = new VisibleTranscripts(
