@@ -1,19 +1,23 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
+import { link, lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { secureWindowsArtifact } from "../windows-access-control.js";
 
-export const connectionProvider = z.enum(["claude_code", "openclaw"]);
+export const connectionProvider = z.enum(["claude_code", "openclaw", "codex", "hermes"]);
 export const connectionOperation = z.enum(["connect", "repair", "disconnect"]);
 export type ConnectionProvider = z.infer<typeof connectionProvider>;
 export type ConnectionOperation = z.infer<typeof connectionOperation>;
 /** Manual setup remains available while the installed-provider matrix is qualified. */
 export function connectionAvailable(platform: string, arch: string): boolean {
   return platform === "darwin" && arch === "arm64";
+}
+export interface ConnectionDocument {
+  read(text: string): unknown;
+  edit(text: string, entry: Record<string, unknown> | undefined): string;
 }
 export interface ConnectionState {
   state: "missing" | "configured" | "conflict" | "unavailable";
@@ -50,6 +54,8 @@ export function connectionEntry(
 ): Record<string, unknown> {
   if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) throw new Error("Invalid port.");
   const url = `http://127.0.0.1:${port}/mcp`;
+  if (provider === "codex") return { url, tool_timeout_sec: 660 };
+  if (provider === "hermes") return { url, timeout: 660 };
   return provider === "claude_code"
     ? { type: "http", url, timeout: 660000 }
     : { url, transport: "streamable-http", requestTimeoutMs: 660000 };
@@ -113,6 +119,7 @@ export class AgentConnection {
       ownershipPath: string;
       run: (command: "claude" | "openclaw", args: string[]) => Promise<void>;
       now?: () => number;
+      document?: ConnectionDocument | undefined;
     },
   ) {
     if (!isAbsolute(options.configurationPath) || !isAbsolute(options.ownershipPath))
@@ -120,6 +127,11 @@ export class AgentConnection {
   }
   async #read() {
     const current = await readBounded(this.options.configurationPath);
+    const text = current.fingerprint === "absent" ? "" : current.bytes.toString("utf8");
+    if (this.options.document)
+      return { fingerprint: current.fingerprint, text, entry: this.options.document.read(text) };
+    if (["codex", "hermes"].includes(this.options.provider))
+      throw new Error("Desktop parser is unavailable.");
     const parsed: unknown = JSON.parse(current.bytes.toString("utf8"));
     if (!record(parsed)) throw new Error("Invalid configuration.");
     const group =
@@ -133,6 +145,7 @@ export class AgentConnection {
       throw new Error("Invalid MCP settings.");
     return {
       fingerprint: current.fingerprint,
+      text,
       entry: record(group) ? group.ambassador : undefined,
     };
   }
@@ -221,6 +234,16 @@ export class AgentConnection {
       return { ...result, owned: false };
     }
     const before = await this.#read();
+    if (this.options.document) {
+      try {
+        this.options.document.edit(
+          before.text,
+          operation === "disconnect" ? undefined : connectionEntry(this.options.provider, port),
+        );
+      } catch {
+        return unavailable;
+      }
+    }
     const ownership = await this.#ownership();
     const id = randomUUID();
     this.#preview = {
@@ -233,6 +256,29 @@ export class AgentConnection {
     };
     return { ...result, previewId: id };
   }
+  async #replaceConfiguration(fingerprint: string, contents: string) {
+    if (Buffer.byteLength(contents) > 4 * 1024 * 1024) throw new Error("Configuration too large.");
+    const path = this.options.configurationPath;
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    try {
+      const file = await open(temporary, "wx", 0o600);
+      try {
+        if (process.platform === "win32") await secureWindowsArtifact(temporary, "file");
+        await file.writeFile(contents);
+        await file.sync();
+      } finally {
+        await file.close();
+      }
+      if ((await readBounded(path)).fingerprint !== fingerprint)
+        throw new Error("Settings changed during setup.");
+      if (fingerprint === "absent") await link(temporary, path);
+      else await rename(temporary, path);
+    } finally {
+      await rm(temporary, { force: true });
+    }
+  }
+
   async apply(id: string): Promise<ConnectionState> {
     const preview = this.#preview;
     if (!preview || preview.id !== id || preview.expires <= (this.options.now ?? Date.now)())
@@ -269,7 +315,10 @@ export class AgentConnection {
             ];
     await this.#save(preview.port, "prepared");
     try {
-      await this.options.run(provider === "claude_code" ? "claude" : "openclaw", args);
+      if (this.options.document) {
+        const updated = this.options.document.edit(before.text, remove ? undefined : expected);
+        await this.#replaceConfiguration(before.fingerprint, updated);
+      } else await this.options.run(provider === "claude_code" ? "claude" : "openclaw", args);
     } catch {
       /* Reconcile saved state; never replay an uncertain command. */
     }

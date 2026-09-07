@@ -161,6 +161,12 @@ restore local data that the owner deleted.
 
 ## Desktop owner account and notifications
 
+The later [web app and server review](desktop-web-app-review-2026-09-07.md)
+finds deployed owner session, request, permission/revocation and browser-push
+endpoints. Issues 7–10 now concern qualification and remaining contract gaps,
+not the complete absence of an owner API. Device/executor recovery, complete
+pages, mutation recovery and native push remain open.
+
 The [2026-09-07 source and deployed-schema review](desktop-api-review-2026-09-07.md)
 distinguishes existing first-time agent enrollment and permission reads from the
 missing owner contracts. Legacy approval and OAuth endpoints are not suitable

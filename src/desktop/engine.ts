@@ -45,6 +45,7 @@ const buildManifest = z.strictObject({
   protocol: z.literal(1),
   source: digest,
   qualification: z.string().max(256),
+  diagnostics: z.enum(["development", "production"]),
 });
 
 async function readMetadata(path: string): Promise<unknown> {

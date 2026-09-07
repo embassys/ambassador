@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -50,7 +50,10 @@ import { SupervisedGateway } from "../../src/desktop/supervisor.js";
 import { DesktopWindowLifecycle } from "../../src/desktop/window-lifecycle.js";
 import { DesktopGatewayClient } from "../../src/desktop/worker-client.js";
 
+import { providerDocument } from "./provider-config.js";
+
 app.setName("Embassys");
+let diagnosticsMode: "development" | "production" = "production";
 protocol.registerSchemesAsPrivileged([
   { scheme: "ambassador", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
@@ -105,10 +108,37 @@ const runtimeRoot = app.isPackaged
 const nodePath = join(runtimeRoot, "runtime", process.platform === "win32" ? "node.exe" : "node");
 const workerPath = join(runtimeRoot, "dist", "desktop", "worker.js");
 
-function providerConfiguration(
+async function providerConfiguration(
   provider: ConnectionProvider,
   environment: NodeJS.ProcessEnv,
-): string {
+): Promise<string> {
+  if (provider === "codex" || provider === "hermes") {
+    const root =
+      provider === "codex"
+        ? environment.CODEX_HOME || join(app.getPath("home"), ".codex")
+        : environment.HERMES_HOME || join(app.getPath("home"), ".hermes");
+    if (!isAbsolute(root)) throw new Error("Use an absolute provider configuration location.");
+    if (provider === "hermes") {
+      if (environment.HERMES_PROFILE || environment.HERMES_CONFIG || environment.HERMES_ENV)
+        throw new Error("Use manual setup for this Hermes profile.");
+      if (!environment.HERMES_HOME) {
+        try {
+          const path = join(root, "active_profile");
+          const stat = await lstat(path);
+          if (
+            !stat.isFile() ||
+            stat.size > 512 ||
+            (await readFile(path, "utf8")).trim() !== "default"
+          )
+            throw new Error("Use manual setup for the active Hermes profile.");
+        } catch (error) {
+          if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT"))
+            throw error;
+        }
+      }
+    }
+    return join(root, provider === "codex" ? "config.toml" : "config.yaml");
+  }
   if (provider === "claude_code") {
     const root = environment.CLAUDE_CONFIG_DIR || app.getPath("home");
     if (!isAbsolute(root)) throw new Error("Use an absolute provider configuration location.");
@@ -137,6 +167,7 @@ async function snapshot() {
   return {
     appVersion: app.getVersion(),
     build: "Development preview",
+    diagnosticsMode,
     platform: process.platform,
     appearance: appearance.value,
     dark: nativeTheme.shouldUseDarkColors,
@@ -177,6 +208,7 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
           nodePath,
           workerPath,
           expectedRuntime: `v${BUNDLED_NODE_VERSION}`,
+          diagnostics: diagnosticsMode,
           instance,
           onChange,
           onNotification: (event) => {
@@ -208,6 +240,7 @@ async function execute(input: unknown): Promise<unknown> {
     "stop",
     "clean",
     "create",
+    "clear_logs",
     "export_prepare",
     "export_save",
     "history_delete",
@@ -276,15 +309,21 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         message:
           "Use the setup instructions on this platform. Automatic setup is awaiting native qualification.",
       };
-    const name = command.provider === "claude_code" ? "Claude Code" : "OpenClaw";
+    const name = {
+      claude_code: "Claude Code",
+      openclaw: "OpenClaw",
+      codex: "Codex",
+      hermes: "Hermes",
+    }[command.provider];
     const environment = desktopLaunchEnvironment(
       process.env,
       dirname(nodePath),
       app.getPath("home"),
     );
-    const configurationPath = providerConfiguration(command.provider, environment);
+    const configurationPath = await providerConfiguration(command.provider, environment);
     const setup = new AgentConnection({
       provider: command.provider,
+      document: providerDocument(command.provider),
       configurationPath,
       ownershipPath: join(
         instances.directory,
@@ -362,6 +401,20 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     if (choice.response !== 1) return { deleted: false };
     return await getWorker(instance).request(command);
   }
+  if (command.type === "clear_logs") {
+    const choice = await dialog.showMessageBox({
+      type: "warning",
+      message: `Clear diagnostic logs for ${instance.name}?`,
+      detail: `Remove the retained diagnostic files in ${join(instance.stateDirectory, "diagnostics")}. Up to 1 GiB may be removed. Conversations and pending work are kept. New events will still be recorded.`,
+      buttons: ["Cancel", "Clear logs"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice.response !== 1) return { cleared: false };
+    exportPreview = undefined;
+    return getWorker(instance).request(command);
+  }
   if (command.type === "reveal_logs") {
     const directory = join(instance.stateDirectory, "diagnostics");
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -370,6 +423,11 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
   }
   if (command.type === "export_prepare") {
     exportPreview = undefined;
+    await getWorker(instance).request({
+      type: "logs",
+      instanceId: instance.id,
+      query: { limit: 1 },
+    });
     const data = await prepareSupportExport(join(instance.stateDirectory, "diagnostics"), {
       includeBodies: command.includeBodies,
       ...(command.query ? { query: command.query } : {}),
@@ -476,8 +534,9 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
       guides: [
         {
           name: "Codex",
+          ...(connectionAvailable(process.platform, process.arch) ? { connect: "codex" } : {}),
           instruction: `codex mcp add ambassador --url http://127.0.0.1:${instance.port}/mcp`,
-          note: "Set tool_timeout_sec = 660 in the selected MCP entry, then reload Codex. Use a separate provider profile for a development instance.",
+          note: "Guided setup saves the address and allows a ten-minute wait. Reload Codex afterward. Project-specific settings can override this connection.",
         },
         {
           name: "Claude Code",
@@ -495,8 +554,9 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         },
         {
           name: "Hermes",
+          ...(connectionAvailable(process.platform, process.arch) ? { connect: "hermes" } : {}),
           instruction: `hermes mcp add ambassador --url http://127.0.0.1:${instance.port}/mcp\nhermes mcp test ambassador`,
-          note: "Run in the intended Hermes profile. Set its tool timeout to at least 660 seconds, then start a fresh session or run /reload-mcp.",
+          note: "Guided setup saves the address and allows a ten-minute wait in this Hermes profile. Start a fresh session or run /reload-mcp afterward.",
         },
       ],
     };
@@ -613,7 +673,7 @@ else {
   });
   void app.whenReady().then(async () => {
     try {
-      await verifyBundledEngine({
+      const manifest = await verifyBundledEngine({
         manifestPath: join(ownDirectory, "build-manifest.json"),
         gateway: runtimeRoot,
         app: app.getVersion(),
@@ -621,6 +681,7 @@ else {
         platform: process.platform,
         arch: process.arch,
       });
+      diagnosticsMode = manifest.diagnostics;
       const configurationRoot = process.env.XDG_CONFIG_HOME;
       loginItem = new DesktopLoginItem({
         platform: process.platform,

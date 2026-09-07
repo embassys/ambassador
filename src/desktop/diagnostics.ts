@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { type FileHandle, lstat, open } from "node:fs/promises";
 import { join } from "node:path";
+import { z } from "zod";
+import { diagnosticMetadata } from "../diagnostic-log.js";
+import { redactVerboseValue } from "../verbose-log.js";
+import { secureWindowsArtifact } from "../windows-access-control.js";
+import { DESKTOP_LOG_FILE_BYTES, DESKTOP_LOG_FILES } from "./diagnostic-policy.js";
 import {
   type DiagnosticPage,
   type DiagnosticQuery,
@@ -11,62 +16,209 @@ import {
 
 export type { DiagnosticPage, DiagnosticQuery, DiagnosticRecord } from "./diagnostic-query.js";
 
-import { redactVerboseValue } from "../verbose-log.js";
-import { secureWindowsArtifact } from "../windows-access-control.js";
-
-const FILE_LIMIT = 8 * 1024 * 1024;
 const RECORD_LIMIT = 64 * 1024;
-const RECORD_COUNT_LIMIT = 100_000;
+const SCAN_LIMIT = 2 * 1024 * 1024;
+const EXPORT_LIMIT = 32 * 1024 * 1024;
+const identity = z.strictObject({
+  index: z
+    .number()
+    .int()
+    .min(0)
+    .max(DESKTOP_LOG_FILES - 1),
+  ino: z.number().nonnegative(),
+  dev: z.number().nonnegative(),
+  size: z.number().int().min(0).max(DESKTOP_LOG_FILE_BYTES),
+  born: z.number().nonnegative(),
+});
+const cursorSchema = z.strictObject({
+  version: z.literal(1),
+  filter: z.string().length(64),
+  files: z.array(identity).max(DESKTOP_LOG_FILES),
+  file: z.number().int().min(0).max(DESKTOP_LOG_FILES),
+  position: z.number().int().min(0).max(DESKTOP_LOG_FILE_BYTES),
+  skip: z.boolean(),
+});
+type Cursor = z.infer<typeof cursorSchema>;
+const pathFor = (directory: string, index: number) =>
+  join(directory, index ? `events.${index}.jsonl` : "events.jsonl");
+const missing = (error: unknown) =>
+  error && typeof error === "object" && "code" in error && error.code === "ENOENT";
+async function openLog(directory: string, index: number) {
+  const path = pathFor(directory, index);
+  const parent = await lstat(directory);
+  if (
+    !parent.isDirectory() ||
+    parent.isSymbolicLink() ||
+    (process.getuid && parent.uid !== process.getuid())
+  )
+    throw new Error("Invalid diagnostic directory.");
+  const before = await lstat(path);
+  if (!before.isFile() || before.nlink !== 1 || (process.getuid && before.uid !== process.getuid()))
+    throw new Error("Invalid diagnostic file.");
+  const file = await open(
+    path,
+    constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW),
+  );
+  try {
+    const stat = await file.stat();
+    if (stat.ino !== before.ino || stat.dev !== before.dev || stat.size > DESKTOP_LOG_FILE_BYTES)
+      throw new Error("Diagnostic file changed or exceeds its size limit.");
+    return { file, stat };
+  } catch (error) {
+    await file.close();
+    throw error;
+  }
+}
+async function initialCursor(directory: string, filter: string): Promise<Cursor> {
+  const files: Cursor["files"] = [];
+  for (let index = 0; index < DESKTOP_LOG_FILES; index++) {
+    try {
+      const { file, stat } = await openLog(directory, index);
+      await file.close();
+      files.push({ index, ino: stat.ino, dev: stat.dev, size: stat.size, born: stat.birthtimeMs });
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+  }
+  return { version: 1, filter, files, file: 0, position: files[0]?.size ?? 0, skip: false };
+}
 
-async function collect(directory: string, rawQuery: DiagnosticQuery) {
+/** Read backwards using a reusable block, retaining at most one bounded record. */
+class ReverseReader {
+  #block = Buffer.alloc(0);
+  #start = 0;
+  #end = 0;
+  bytesRead = 0;
+  constructor(readonly file: FileHandle) {}
+  async byteRange(end: number): Promise<Buffer> {
+    if (end <= this.#start || end > this.#end) {
+      this.#start = Math.max(0, end - RECORD_LIMIT);
+      this.#block = Buffer.alloc(end - this.#start);
+      this.#end = end;
+      let offset = 0;
+      while (offset < this.#block.length) {
+        const { bytesRead } = await this.file.read(
+          this.#block,
+          offset,
+          this.#block.length - offset,
+          this.#start + offset,
+        );
+        if (!bytesRead) throw new Error("Logs changed while reading. Load newest events again.");
+        offset += bytesRead;
+      }
+      this.bytesRead += this.#block.length;
+    }
+    return this.#block.subarray(0, end - this.#start);
+  }
+  async previous(position: number, skipping: boolean) {
+    let end = position;
+    let parts: Buffer[] = [];
+    let length = 0;
+    let skip = skipping;
+    // A complete JSONL record ends in LF. Partial writes are never displayed.
+    const last = await this.byteRange(end);
+    if (last[last.length - 1] === 10) {
+      end--;
+      // A skipped oversized record may end exactly at a block boundary.
+      // This LF belongs to the preceding complete record, which is readable.
+      skip = false;
+    } else skip = true;
+    while (end > 0) {
+      const block = await this.byteRange(end);
+      const boundary = block.lastIndexOf(10);
+      const part = block.subarray(boundary + 1);
+      length += part.length;
+      if (length > RECORD_LIMIT) {
+        skip = true;
+        parts = [];
+      }
+      if (!skip) parts.unshift(part);
+      end -= part.length;
+      if (boundary >= 0 || end === 0)
+        return {
+          line: skip ? undefined : Buffer.concat(parts).toString("utf8"),
+          position: end,
+          skip: false,
+        };
+      if (this.bytesRead >= SCAN_LIMIT) return { line: undefined, position: end, skip: true };
+    }
+    return {
+      line: skip ? undefined : Buffer.concat(parts).toString("utf8"),
+      position: 0,
+      skip: false,
+    };
+  }
+}
+
+export async function readDiagnostics(
+  directory: string,
+  rawQuery: DiagnosticQuery = {},
+): Promise<DiagnosticPage> {
   const query = diagnosticQuerySchema.parse(rawQuery);
   if (query.from && query.to && Date.parse(query.from) > Date.parse(query.to))
     throw new Error("Choose an end time after the start time.");
+  const filter = createHash("sha256")
+    .update(JSON.stringify([query.search ?? "", query.from ?? "", query.to ?? ""]))
+    .digest("hex");
+  let cursor: Cursor;
+  try {
+    cursor = query.cursor
+      ? cursorSchema.parse(JSON.parse(Buffer.from(query.cursor, "base64url").toString("utf8")))
+      : await initialCursor(directory, filter);
+  } catch (error) {
+    if (!query.cursor) throw error;
+    throw new Error("Log cursor expired. Load newest events again.");
+  }
+  if (
+    cursor.filter !== filter ||
+    cursor.file > cursor.files.length ||
+    cursor.position > (cursor.files[cursor.file]?.size ?? 0) ||
+    new Set(cursor.files.map((file) => file.index)).size !== cursor.files.length
+  )
+    throw new Error("Log filters or files changed. Load newest events again.");
   const records: DiagnosticRecord[] = [];
   const warnings = new Set<string>();
-  let readCount = 0;
-  for (let index = 0; index < 4; index++) {
-    const path = join(directory, index === 0 ? "events.jsonl" : `events.${index}.jsonl`);
-    let file: FileHandle | undefined;
+  let bytes = 0;
+  let scanned = 0;
+  while (
+    cursor.file < cursor.files.length &&
+    records.length < (query.limit ?? 100) &&
+    scanned < SCAN_LIMIT
+  ) {
+    const saved = cursor.files[cursor.file];
+    if (!saved) break;
+    let opened: Awaited<ReturnType<typeof openLog>>;
     try {
-      const before = await lstat(path);
+      opened = await openLog(directory, saved.index);
+    } catch (error) {
+      if (missing(error)) throw new Error("Logs changed. Load newest events again.");
+      throw error;
+    }
+    const { file, stat } = opened;
+    try {
       if (
-        !before.isFile() ||
-        before.nlink !== 1 ||
-        (process.getuid && before.uid !== process.getuid())
+        stat.ino !== saved.ino ||
+        stat.dev !== saved.dev ||
+        stat.birthtimeMs !== saved.born ||
+        stat.size < saved.size
       )
-        throw new Error("Invalid diagnostic file.");
-      file = await open(
-        path,
-        constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW),
-      );
-      const stat = await file.stat();
-      if (stat.ino !== before.ino || stat.dev !== before.dev || stat.size > FILE_LIMIT)
-        throw new Error("Diagnostic file changed or exceeds its size limit.");
-      const bytes = Buffer.alloc(stat.size);
-      let read = 0;
-      while (read < bytes.length) {
-        const result = await file.read(bytes, read, bytes.length - read, read);
-        if (result.bytesRead === 0) break;
-        read += result.bytesRead;
-      }
-      let start = 0;
-      while (start < read) {
-        const end = bytes.indexOf(10, start);
-        if (end < 0 || end >= read) {
-          warnings.add("An incomplete final record was omitted.");
-          break;
+        throw new Error("Logs changed. Load newest events again.");
+      const reader = new ReverseReader(file);
+      while (
+        cursor.position > 0 &&
+        records.length < (query.limit ?? 100) &&
+        scanned + reader.bytesRead < SCAN_LIMIT
+      ) {
+        const before = cursor.position;
+        const previous = await reader.previous(cursor.position, cursor.skip);
+        cursor.position = previous.position;
+        cursor.skip = previous.skip;
+        if (!previous.line) {
+          warnings.add("Incomplete, malformed or oversized records were omitted.");
+          continue;
         }
-        if (++readCount > RECORD_COUNT_LIMIT) {
-          warnings.add("The record limit was reached. Narrow the time range.");
-          break;
-        }
-        const length = end - start;
-        const line = length <= RECORD_LIMIT ? bytes.subarray(start, end).toString("utf8") : "";
-        start = end + 1;
         try {
-          if (length > RECORD_LIMIT) throw new Error("Oversized record");
-          const parsed: unknown = JSON.parse(line);
+          const parsed: unknown = JSON.parse(previous.line);
           if (
             !parsed ||
             typeof parsed !== "object" ||
@@ -86,52 +238,48 @@ async function collect(directory: string, rawQuery: DiagnosticQuery) {
           )
             continue;
           const safe = redactVerboseValue(parsed) as Record<string, unknown>;
-          const text = JSON.stringify(safe);
-          if (query.search && !text.toLowerCase().includes(query.search.toLowerCase())) continue;
-          records.push({
-            id: createHash("sha256").update(`${index}:${end}:${line}`).digest("hex"),
+          if (
+            query.search &&
+            !JSON.stringify(safe).toLowerCase().includes(query.search.toLowerCase())
+          )
+            continue;
+          const record: DiagnosticRecord = {
+            id: createHash("sha256")
+              .update(`${saved.index}:${saved.ino}:${before}:${previous.line}`)
+              .digest("hex"),
             timestamp: parsed.timestamp,
             event: String(redactVerboseValue(parsed.event)),
             ...(typeof safe.run_id === "string" ? { run_id: safe.run_id } : {}),
             ...(safe.data === undefined ? {} : { data: safe.data }),
-          });
+          };
+          const length = Buffer.byteLength(JSON.stringify(record));
+          if (records.length && bytes + length > 512 * 1024) {
+            cursor.position = before;
+            cursor.skip = false;
+            break;
+          }
+          records.push(record);
+          bytes += length;
         } catch {
           warnings.add("Malformed or oversized records were omitted.");
         }
       }
-    } catch (error) {
-      if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT"))
-        throw error;
+      scanned += reader.bytesRead;
     } finally {
-      await file?.close();
+      await file.close();
     }
-    if (readCount > RECORD_COUNT_LIMIT) break;
+    if (cursor.position === 0) {
+      cursor.file++;
+      cursor.position = cursor.files[cursor.file]?.size ?? 0;
+      cursor.skip = false;
+    } else break;
   }
-  records.sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
-  return { records, warnings: [...warnings] };
-}
-
-export async function readDiagnostics(
-  directory: string,
-  rawQuery: DiagnosticQuery = {},
-): Promise<DiagnosticPage> {
-  const query = diagnosticQuerySchema.parse(rawQuery);
-  const all = await collect(directory, query);
-  const offset = query.offset ?? 0;
-  const records: DiagnosticRecord[] = [];
-  let bytes = 0;
-  for (const record of all.records.slice(offset, offset + (query.limit ?? 100))) {
-    const length = Buffer.byteLength(JSON.stringify(record));
-    if (records.length && bytes + length > 512 * 1024) break;
-    records.push(record);
-    bytes += length;
-  }
+  const hasMore = cursor.file < cursor.files.length;
   return {
     records,
-    total: all.records.length,
-    hasMore: offset + records.length < all.records.length,
-    nextOffset: offset + records.length,
-    warnings: all.warnings,
+    hasMore,
+    ...(hasMore ? { nextCursor: Buffer.from(JSON.stringify(cursor)).toString("base64url") } : {}),
+    warnings: [...warnings],
   };
 }
 
@@ -146,34 +294,42 @@ export async function prepareSupportExport(
   directory: string,
   input: { includeBodies?: boolean; query?: DiagnosticQuery },
 ): Promise<SupportExport> {
-  const { records, warnings } = await collect(directory, input.query ?? {});
   const includeBodies = input.includeBodies === true;
-  const lines = records.reverse().map((record) => {
-    const { id: _id, data, ...metadata } = record;
-    return JSON.stringify({
-      ...metadata,
-      ...(includeBodies && data !== undefined ? { data } : {}),
-    });
+  const query = diagnosticQuerySchema.parse(input.query ?? {});
+  const lines: string[] = [];
+  const warnings = new Set<string>();
+  let bytes = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await readDiagnostics(directory, { ...query, cursor, limit: 100 });
+    for (const warning of page.warnings) warnings.add(warning);
+    for (const { id: _id, data, ...metadata } of page.records) {
+      const retained = includeBodies ? data : diagnosticMetadata(data);
+      const line = JSON.stringify({
+        ...metadata,
+        ...(retained === undefined ? {} : { data: retained }),
+      });
+      bytes += Buffer.byteLength(line) + 1;
+      if (bytes > EXPORT_LIMIT)
+        throw new Error("Export exceeds 32 MiB. Choose a narrower time range.");
+      lines.push(line);
+    }
+    cursor = page.nextCursor;
+  } while (cursor);
+  const header = JSON.stringify({
+    event: "ambassador.support_export",
+    created_at: new Date().toISOString(),
+    include_bodies: includeBodies,
+    record_count: lines.length,
+    warnings: [...warnings],
   });
-  const contents =
-    [
-      JSON.stringify({
-        event: "ambassador.support_export",
-        created_at: new Date().toISOString(),
-        include_bodies: includeBodies,
-        record_count: records.length,
-        warnings,
-      }),
-      ...lines,
-    ].join("\n") + "\n";
-  if (Buffer.byteLength(contents) > 4 * FILE_LIMIT + RECORD_LIMIT)
-    throw new Error("Export exceeds its limit. Choose a narrower time range.");
+  const contents = `${header}\n${lines.reverse().join("\n")}\n`;
   return {
     contents,
-    recordCount: records.length,
+    recordCount: lines.length,
     bytes: Buffer.byteLength(contents),
     includeBodies,
-    warnings,
+    warnings: [...warnings],
   };
 }
 export async function saveSupportExport(path: string, preview: SupportExport): Promise<void> {

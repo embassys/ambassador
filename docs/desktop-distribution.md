@@ -70,3 +70,16 @@ it does not prove native desktop interactions, notifications or provider behavio
 
 See [ADR 0066](adr/0066-desktop-completion.md) and the
 [desktop implementation plan](desktop-app-plan.md) for the remaining inputs.
+
+
+## Diagnostic policy in a build
+
+The default development build records bounded request and response bodies after
+credential redaction. Set `EMBASSYS_DESKTOP_DIAGNOSTICS=production` for metadata-only
+logging. Any other value fails the build. The verified manifest records this
+choice; it is not a runtime agent option or a CLI flag. Both policies use at most
+1 GiB per app instance and expire log segments after seven days while the instance
+runs or when its diagnostics are next opened. The app can clear these logs without
+stopping its server. Export previews are limited to 32 MiB per selection.
+
+This setting does not make an unsigned development package a production release.

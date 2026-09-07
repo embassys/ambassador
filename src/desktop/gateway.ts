@@ -16,6 +16,7 @@ import { clearLocalGatewayState } from "../local-state-cleaner.js";
 import { ProcessLock } from "../process-lock.js";
 import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.js";
 import { desktopCredentialStores } from "./credential-stores.js";
+import { type DiagnosticMode, desktopDiagnosticOptions } from "./diagnostic-policy.js";
 import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
 import { readLocalSummary } from "./local-summary.js";
 import type { LocalNotification } from "./notifications.js";
@@ -28,6 +29,7 @@ export interface DesktopGatewayOptions {
   readonly port: number;
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
+  readonly diagnostics?: DiagnosticMode;
   readonly onChange?: (snapshot: GatewaySnapshot) => void;
   readonly onNotification?: (event: LocalNotification) => void;
 }
@@ -71,7 +73,10 @@ export class DesktopGateway {
         this.#lock = await ProcessLock.acquire(this.#paths.lockPath);
         await mkdir(this.options.workingDirectory, { recursive: true, mode: 0o700 });
         this.#abort = new AbortController();
-        this.#diagnostics = new DiagnosticLog(join(this.options.stateDirectory, "diagnostics"));
+        this.#diagnostics = new DiagnosticLog(
+          join(this.options.stateDirectory, "diagnostics"),
+          desktopDiagnosticOptions(this.options.diagnostics ?? "production"),
+        );
         this.#diagnostics.log("desktop.gateway.starting", {
           instance_id: this.options.id,
           name: this.options.name,
@@ -380,7 +385,39 @@ export class DesktopGateway {
     });
   }
 
-  async logs(query?: DiagnosticQuery) {
-    return await readDiagnostics(join(this.options.stateDirectory, "diagnostics"), query);
+  async #withDiagnostics<T>(operation: (log: DiagnosticLog) => Promise<T>): Promise<T> {
+    if (this.#diagnostics) return operation(this.#diagnostics);
+    if (this.#cleanPreview)
+      throw new Error("Finish the Clean preview before changing diagnostics.");
+    const lock = await ProcessLock.acquire(this.#paths.lockPath);
+    let log: DiagnosticLog | undefined;
+    try {
+      log = new DiagnosticLog(
+        join(this.options.stateDirectory, "diagnostics"),
+        desktopDiagnosticOptions(this.options.diagnostics ?? "production"),
+      );
+      return await operation(log);
+    } finally {
+      await log?.close();
+      await lock.release();
+    }
+  }
+
+  logs(query?: DiagnosticQuery) {
+    return this.#serial(() =>
+      this.#withDiagnostics(async (log) => {
+        await log.maintain();
+        return readDiagnostics(log.directory, query);
+      }),
+    );
+  }
+
+  clearLogs() {
+    return this.#serial(() =>
+      this.#withDiagnostics(async (log) => {
+        await log.clear();
+        return { cleared: true };
+      }),
+    );
   }
 }

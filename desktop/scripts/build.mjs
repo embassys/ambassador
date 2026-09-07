@@ -108,6 +108,9 @@ await run(runtime, [packageManager, "--dir", gateway, "rebuild", "better-sqlite3
 await build({
   entryPoints: [join(repository, "desktop/src/main.ts")],
   outfile: join(destination, "main.js"),
+  banner: {
+    js: 'import { createRequire as embassysCreateRequire } from "node:module"; const require = embassysCreateRequire(import.meta.url);',
+  },
   bundle: true,
   platform: "node",
   format: "esm",
@@ -156,6 +159,9 @@ await writeFile(
     2,
   ),
 );
+const diagnostics = process.env.EMBASSYS_DESKTOP_DIAGNOSTICS ?? "development";
+if (!["development", "production"].includes(diagnostics))
+  throw new Error("Unknown desktop diagnostic policy.");
 await writeFile(
   join(destination, "build-manifest.json"),
   JSON.stringify(
@@ -168,6 +174,7 @@ await writeFile(
       platform,
       arch,
       protocol: 1,
+      diagnostics,
       source: await engineSourceDigest(join(gateway, "dist")),
       qualification: "Unsigned development build; native qualification pending.",
     },

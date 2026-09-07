@@ -16,6 +16,7 @@ import { Registration } from "./registration.js";
 
 interface AppSnapshot {
   platform: string;
+  diagnosticsMode: "development" | "production";
   appearance: "system" | "light" | "dark";
   dark: boolean;
   notifications: { enabled: boolean; supported: boolean };
@@ -44,7 +45,7 @@ interface Setup {
     name: string;
     instruction: string;
     note: string;
-    connect?: "claude_code" | "openclaw";
+    connect?: "claude_code" | "openclaw" | "codex" | "hermes";
   }[];
 }
 declare global {
@@ -335,7 +336,7 @@ function App() {
     }
   }
   async function connectAgent(
-    provider: "claude_code" | "openclaw",
+    provider: "claude_code" | "openclaw" | "codex" | "hermes",
     operation: "connect" | "check" | "repair" | "disconnect" = "connect",
   ) {
     if (!id) return;
@@ -405,21 +406,21 @@ function App() {
       if (generation === viewGeneration.current) setBusy(false);
     }
   }
-  function logQuery(offset = 0): DiagnosticQuery {
+  function logQuery(cursor?: string): DiagnosticQuery {
     return {
       search: logSearch,
-      offset,
+      ...(cursor ? { cursor } : {}),
       limit: 100,
       ...(logFrom ? { from: new Date(logFrom).toISOString() } : {}),
       ...(logTo ? { to: new Date(logTo).toISOString() } : {}),
     };
   }
-  async function loadLogs(offset = 0) {
+  async function loadLogs(cursor?: string) {
     if (!id) return;
     const generation = viewGeneration.current;
     setLoading(true);
     try {
-      const result = await call({ type: "logs", instanceId: id, query: logQuery(offset) });
+      const result = await call({ type: "logs", instanceId: id, query: logQuery(cursor) });
       if (generation === viewGeneration.current) setLogs(result as DiagnosticPage);
     } catch {
       if (generation === viewGeneration.current)
@@ -963,21 +964,49 @@ function App() {
                   </div>
                   <div className="health-card">
                     <span>Log retention</span>
-                    <strong>4 × 8 MiB</strong>
+                    <strong>1 GiB · 7 days</strong>
                   </div>
                 </div>
                 <div className="section-title">
                   <h3>Events</h3>
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={busy}
-                    onClick={() => {
-                      if (id) void mutate({ type: "reveal_logs", instanceId: id });
-                    }}
-                  >
-                    Open log folder
-                  </button>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!id) return;
+                        const generation = viewGeneration.current;
+                        setBusy(true);
+                        void call({ type: "clear_logs", instanceId: id })
+                          .then(async (result) => {
+                            if (
+                              generation === viewGeneration.current &&
+                              (result as { cleared: boolean }).cleared
+                            ) {
+                              setExportPreview(undefined);
+                              await loadLogs();
+                            }
+                          })
+                          .catch(() =>
+                            setError("Logs could not be cleared. Check the server and try again."),
+                          )
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      Clear logs…
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (id) void mutate({ type: "reveal_logs", instanceId: id });
+                      }}
+                    >
+                      Open log folder
+                    </button>
+                  </div>
                 </div>
                 <form
                   className="log-filters"
@@ -1016,7 +1045,9 @@ function App() {
                   </button>
                 </form>
                 <div className="quiet-note">
-                  Development logs retain request and response bodies with credentials removed.
+                  {snapshot?.diagnosticsMode === "development"
+                    ? "Development logs include request and response bodies with credentials removed."
+                    : "Production logs contain event metadata only."}
                   Times use your local timezone.
                 </div>
                 {logs?.warnings.map((warning) => (
@@ -1049,7 +1080,7 @@ function App() {
                 )}
                 <div className="section-title">
                   <p className="body-note">
-                    {logs?.total ?? 0} matching events. Showing up to 100 per page.
+                    {logs?.records.length ?? 0} events on this page. Newest first.
                   </p>
                   <div className="button-row">
                     <button
@@ -1064,7 +1095,7 @@ function App() {
                       type="button"
                       className="secondary"
                       disabled={loading || !logs?.hasMore}
-                      onClick={() => void loadLogs(logs?.nextOffset)}
+                      onClick={() => void loadLogs(logs?.nextCursor)}
                     >
                       Older events
                     </button>
@@ -1073,7 +1104,8 @@ function App() {
                 <section className="settings-section">
                   <h3>Export diagnostics</h3>
                   <p className="body-note">
-                    Exports use your current search and time range. Nothing is uploaded.
+                    Exports use your current search and time range, up to 32 MiB per export. Narrow
+                    the dates for larger selections. Nothing is uploaded.
                   </p>
                   <label className="check-label">
                     <input

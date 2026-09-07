@@ -50,6 +50,7 @@ process.on("message", (raw: unknown) => {
     process.title = `Embassys: ${instance.name}`;
     gateway = new DesktopGateway({
       ...instance,
+      diagnostics: initial.data.diagnostics,
       environment: process.env,
       onChange: (snapshot) => send({ protocol: DESKTOP_PROTOCOL, type: "state", snapshot }),
       onNotification: (event) => send({ protocol: DESKTOP_PROTOCOL, type: "notification", event }),
@@ -124,6 +125,9 @@ process.on("message", (raw: unknown) => {
       case "history_delete":
         await current.deleteHistory(command.sessionId);
         result = { deleted: true };
+        break;
+      case "clear_logs":
+        result = await current.clearLogs();
         break;
       case "logs":
         result = await current.logs(command.query);

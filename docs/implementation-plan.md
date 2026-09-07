@@ -42,9 +42,6 @@ issue-only. These items do not authorize another release.
   native return first needs trusted origin routing and busy-session semantics.
   Windows CI passing does not qualify every provider; Claude Code desktop and
   Remote Control evidence does not qualify standalone Claude Chat or Cowork.
-- [ ] Production logging policy. Decide retention before a production rollout.
-  Detailed request/response body logs with credential redaction are approved for
-  development; that approval does not settle the production policy.
 - [ ] Multiple engine versions and provider isolation. Embassys now supports
   named instances with separate ports, locations, credentials, locks, workflow
   state and logs under ADR 0064. Finish trusted engine-version selection and
@@ -103,9 +100,12 @@ issue-only. These items do not authorize another release.
   Code `e800b84` also passes desktop tests, package builds and actual host probes
   on macOS, Windows and Linux in
   [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
-  Codex/Hermes helpers, native
+  Codex/Hermes helpers passed isolated native Mac setup and installed-provider checks under ADR 0067. Native
   Windows/Linux qualification, signed distribution, trusted engine selection and
-  API-dependent owner screens remain open. See the desktop plan for evidence
+  API-dependent owner screens remain open. The later
+  [web app review](desktop-web-app-review-2026-09-07.md) identifies deployed owner
+  APIs and the remaining contract gaps; integrate and qualify those without
+  duplicating the owner realm or changing central code. See the desktop plan for evidence
   and the remaining matrix. Owner API features depend on server issues 7–10.
 
 See [central follow-ups](central-follow-ups.md) for server details and
