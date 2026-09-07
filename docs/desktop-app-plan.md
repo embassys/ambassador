@@ -414,8 +414,8 @@ and central connection state without a log dump on the home screen.
 
 Implement log filters, reveal folder, support export preview, transcript deletion,
 retention controls and Clean with unresolved-work disclosure. Test these against
-large histories and exhausted quotas. Decide production log retention before
-enabling production distribution.
+large histories and exhausted quotas. ADR 0067 records the approved production
+log policy; signed distribution still requires separate release authorization.
 
 Exit: a user can trace an incoming request from permission to execution to exact
 result, read the available conversation after restart, see what they approved,
@@ -577,17 +577,11 @@ artifact under `.build/desktop/distribution/`; nothing was released.
 
 Remaining work that needs no central change but does need external input:
 
-- Codex/Hermes automatic setup needs the pending explicit approval for
-  smol-toml 1.8.0 and yaml 2.9.0. No parser was installed. Existing manual setup
-  and guarded Claude/OpenClaw helpers remain available.
-- Production log retention awaits the owner's policy decision; development
-  body retention is unchanged. The pending proposal is metadata-only production
-  logs retained for at most seven days and 32 MiB.
 - Signed installers, automatic updates and engine-version installation need
   release certificates, a distribution channel and compatible signed artifacts.
   Runtime checks alone do not qualify opening newer state with an older engine.
-- Native Mac interaction needs an unlocked desktop; real Windows/Linux and
-  broader provider qualification need those environments. Calendar invitation
+- Real Windows/Linux desktop and broader provider qualification need those
+  environments. The Mac is available and the latest checks are recorded below. Calendar invitation
   delivery needs a configured calendar account and consenting test recipient.
 - Hermes native return still lacks a qualified atomic idle-only injection and
   trusted-origin path. OpenClaw display and Codex first-chat discovery need the
@@ -599,7 +593,6 @@ Remaining work that needs no central change but does need external input:
 The shell, architecture, development diagnostics and proposed visible-history
 retention were approved on 2026-09-07. Remaining inputs are:
 
-- A production diagnostic retention policy.
 - Access through normal release infrastructure to Apple signing/APNs and Windows
   signing/push registration, plus a decision on distribution channels.
 - A confirmed first-release OS/architecture matrix and real devices/providers
@@ -608,3 +601,47 @@ retention were approved on 2026-09-07. Remaining inputs are:
 
 API changes remain issue-only here. The app plan does not authorize central code
 changes, provider credential collection, app-store submissions or publication.
+
+
+## Approved setup and retention completion
+
+ADR 0067 records the owner's approval for the exact desktop-only parsers,
+metadata-only production logs, seven-day retention and a 1 GiB cap per instance.
+Development builds continue to retain credential-redacted bodies. The app has a
+confirmed Clear logs control that preserves conversations and pending work.
+The viewer reads backwards in bounded blocks and pages; export previews have a
+separate, visible 32 MiB limit. Rotation, expiry, stale cursors, oversized records,
+queued clears, stopped-instance locking and instance isolation have regression
+coverage. Published CLI defaults remain unchanged.
+
+Codex and Hermes setup now preserves unrelated settings and comments through
+validated TOML/YAML edits. Existing ownership, review expiry, conflict detection,
+repair and disconnect apply to both. Parser code is bundled only into the desktop
+host. Tests cover missing/matching/conflicting entries, comments, edits during
+review, invalid/duplicate data, unsupported inline TOML and YAML aliases/merges.
+
+The native Mac test used two fresh app instances and disposable provider profiles.
+Clear cancellation preserved records; confirmation removed only the selected
+instance's logs while its server remained running. The second instance retained
+132 records, displayed as 100 and 32 across two pages. Its pending-work marker
+was unchanged. Codex and Hermes connection dialogs saved their entries, and
+another instance could not overwrite the Codex profile. The installed Codex
+reported the expected URL and a 660-second timeout; installed Hermes listed the
+entry and connected to the packaged app, discovering all six MCP tools. No
+personal provider profile or central identity was changed.
+
+Evidence is in `.build/desktop-design/installed-setup-results.json` and the native
+app observations in this task. These tests qualify the setup helpers, not another
+live central action exchange. The earlier central polling failure remains open.
+The [new web app review](desktop-web-app-review-2026-09-07.md) records owner APIs
+that are now deployed and the remaining recovery, pagination and decision gaps.
+
+
+Local regression evidence for this pass: the full suite passed 433 tests with
+seven expected platform/qualification skips before the two additional sparse
+quota and exact-boundary paging regressions. The final focused log suite passes
+17 tests, including both additions. All nine desktop parser/artifact tests pass,
+and root/desktop type checks pass. Lint reports only the two pre-existing
+optional-chain suggestions in visible-transcripts.ts. The actual app and both
+isolated servers exited after keyboard Quit. Packaging and CI results for the
+final commit are recorded below when available.

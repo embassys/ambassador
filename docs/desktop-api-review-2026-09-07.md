@@ -1,5 +1,7 @@
 # Desktop API capability review
 
+The later [web app review](desktop-web-app-review-2026-09-07.md) updates owner API availability after new commits and deployment. The observations below describe the earlier server revision.
+
 Reviewed on 2026-09-07 against server `main` at
 [`708f205b`](https://github.com/embassys/agent2agent/tree/708f205bfaee5010eb86fcfae55967fb5d02071c)
 and the deployed [OpenAPI document](https://mcp.embassys.ai/openapi.json).

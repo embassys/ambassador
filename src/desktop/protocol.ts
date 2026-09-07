@@ -85,6 +85,7 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("logs"), ...selected, query: diagnosticQuerySchema.optional() }),
   z.strictObject({ type: z.literal("reveal_logs"), ...selected }),
+  z.strictObject({ type: z.literal("clear_logs"), ...selected }),
   z.strictObject({
     type: z.literal("export_prepare"),
     ...selected,
@@ -122,5 +123,6 @@ export const workerRequestSchema = z.strictObject({
 export const workerInitSchema = z.strictObject({
   protocol: z.literal(DESKTOP_PROTOCOL),
   type: z.literal("initialize"),
+  diagnostics: z.enum(["development", "production"]).default("production"),
   instance: desktopInstanceSchema,
 });

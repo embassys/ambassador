@@ -1,6 +1,6 @@
 # 0066 Desktop work independent of central API changes
 
-Status: accepted scope; dependency and production-retention decisions pending
+Status: accepted; setup dependencies and retention approved in ADR 0067
 
 Date: 2026-09-07
 
@@ -40,10 +40,10 @@ unconfigured update channels explicit; never execute an arbitrary downloaded
 program or treat an npm CLI release as a desktop update.
 
 Codex and Hermes setup must preserve unrelated configuration, comments and user
-edits. Parser approval is pending for smol-toml 1.8.0 and yaml 2.9.0; do not
-install them before the owner's answer. Keep parser code in the desktop host,
-outside the CLI production dependency graph. Production diagnostic retention is
-also pending. Development body logging remains as approved.
+edits. ADR 0067 records approval for smol-toml 1.8.0 and yaml 2.9.0 in the
+desktop host, outside the CLI production dependency graph. It also records
+production metadata-only logging, seven-day retention, a 1 GiB app log cap and
+a separate Clear logs control. Development body logging remains as approved.
 
 Native registration/notification and agent-conversation tests require an unlocked
 Mac. Use isolated app instances and disposable test identities. A result in a

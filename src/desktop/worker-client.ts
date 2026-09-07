@@ -41,6 +41,7 @@ export class DesktopGatewayClient {
       readonly nodePath: string;
       readonly workerPath: string;
       readonly expectedRuntime?: string;
+      readonly diagnostics?: "development" | "production";
       readonly instance: DesktopInstance;
       readonly onChange?: (snapshot: GatewaySnapshot) => void;
       readonly onNotification?: (event: LocalNotification) => void;
@@ -147,7 +148,12 @@ export class DesktopGatewayClient {
       this.#child.once("error", ended);
       this.#child.once("exit", ended);
       this.#child.send(
-        { protocol: DESKTOP_PROTOCOL, type: "initialize", instance: options.instance },
+        {
+          protocol: DESKTOP_PROTOCOL,
+          type: "initialize",
+          diagnostics: options.diagnostics ?? "production",
+          instance: options.instance,
+        },
         (error) => {
           if (error) ended();
         },

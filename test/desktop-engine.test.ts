@@ -24,6 +24,7 @@ test("bundled engine checks all source files and its exact host contract", async
     protocol: 1,
     source: await engineSourceDigest(source),
     qualification: "development",
+    diagnostics: "development",
   };
   const manifestPath = join(root, "build-manifest.json");
   const verify = () =>
@@ -47,6 +48,7 @@ test("bundled engine checks all source files and its exact host contract", async
     { electron: "44.1.0" },
     { app: "0.2.0" },
     { source: "b".repeat(64) },
+    { diagnostics: "unknown" },
   ]) {
     await writeFile(manifestPath, JSON.stringify({ ...manifest, ...changed }));
     await assert.rejects(verify());

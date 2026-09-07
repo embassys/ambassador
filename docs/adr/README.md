@@ -30,6 +30,7 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 | --- | --- |
 | [0064](0064-desktop-application.md) | Desktop app, owner controls, conversation archive and isolated instances |
 | [0065](0065-desktop-development-registration.md) | First-time app registration, read-only permissions and running-app notifications with the existing API |
+| [0067](0067-desktop-setup-and-log-retention.md) | Desktop TOML/YAML setup, 1 GiB logs, seven-day retention and Clear logs |
 | [0066](0066-desktop-completion.md) | Portable locked desktop builds, integrity checks, distribution verification and remaining external inputs |
 | [0062](0062-explicit-local-enrollment-context.md) | Explicit local enrollment context independent of permission count |
 | [0063](0063-persistent-openclaw-webhook-peers.md) | Persistent OpenClaw webhook conversations per enrolled requester |

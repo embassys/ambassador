@@ -16,6 +16,7 @@ plan contains only work that is not complete.
 | --- | --- |
 | Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
 | Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
+| Review the new web app and owner API availability | [Web app and server review](desktop-web-app-review-2026-09-07.md) |
 | Review the approved desktop product and central API requirements | [Desktop app design](desktop-app-design.md) |
 | Plan desktop implementation and platform acceptance testing | [Desktop app plan](desktop-app-plan.md) |
 | Build and verify desktop distribution files | [Desktop development packages](desktop-distribution.md) |
