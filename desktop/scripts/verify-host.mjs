@@ -186,5 +186,7 @@ try {
     }
   }
   if (started) await assert.rejects(initialize());
-  await rm(root, { recursive: true, force: true });
+  // Windows can release Chromium cache handles shortly after the host exits.
+  // The server has already been proven stopped; retry only this test's files.
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

@@ -554,6 +554,20 @@ five-minute test deadline then stopped the app before a result, so that run is
 not end-to-end success. Prompt guidance is not a guarantee that every model will
 use the tool; preserve this case in subsequent provider qualification.
 
+A fresh-identity rerun then reached a central delivery limit. Central accepted
+the synthetic action, but repeated polls on the new recipient exceeded the
+40-second client deadline before any local action capture. The
+[central follow-up record](central-follow-ups.md) keeps this observation with
+issues 1 and 3. No speculative poll fallback or action replay was added. This
+run is not live end-to-end qualification of the new package.
+
+CI for code `f5b9be6` passed macOS and Linux. Windows passed archive extraction,
+packaged Node/SQLite/MCP and actual host startup before its test cleanup hit a
+transient lock on Chromium's Trust Tokens cache. Cleanup now retries only the
+test's own directory for a bounded period after the server is confirmed stopped;
+a persistent lock still fails. Native Windows Quit and notification behavior
+remain outside this CI evidence.
+
 Remaining work that needs no central change but does need external input:
 
 - Codex/Hermes automatic setup needs the pending explicit approval for
