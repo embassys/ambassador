@@ -84,6 +84,16 @@ worker's listen pool. Bound listener setup, release listeners that are no
 longer active, and cover listen-pool exhaustion in the server tests. The HTTP
 request must return within the requested hold plus a small response margin.
 
+The 2026-09-07 desktop portability qualification saw this again. Central returned
+`200` and `status: delivered` for a synthetic `get_phone_number` call at
+18:54:20 UTC. The new recipient's packaged app was running, but its repeated
+30-second polls exceeded the client's 40-second budget and the app did not
+capture the action during the test. The requester also saw timed-out polls.
+This is consistent with issue 3's listener acquisition problem and issue 1's
+consuming-read risk; it does not identify which server worker or response lost
+progress. Do not call this a successful live exchange or resubmit the action to
+work around it. Registration and permission reads passed separately.
+
 Fix this in central with a database-backed delivery lease, stable message IDs,
 lease expiry, and idempotent acknowledgement. Add server tests for a client
 disconnect after claim, concurrent polls for one identity, worker handoff, and
