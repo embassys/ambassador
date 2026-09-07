@@ -195,8 +195,19 @@ This does not settle active-provider or other-platform resource budgets.
 The latest complete repository check passes 402 tests with seven expected skips.
 The lower total than the intermediate 405-test run reflects consolidation of the
 old Claude-only tests, with additional shared-helper edge cases. Desktop
-compilation and the bundled runtime/SQLite/MCP probe pass. New branch CI results
-will be recorded after this candidate is pushed.
+compilation and the bundled runtime/SQLite/MCP probe pass. Code commit `8a6c105`
+passed the expanded desktop suite, package builds and actual host probes on
+macOS, Windows and Linux in
+[run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
+including the new macOS background resource gate. This does not qualify native
+Windows/Linux controls or installed providers.
+
+A development export of the live target's 283 diagnostic records retained request
+and response bodies when selected. The metadata-only export omitted them. All
+100 protected header occurrences were redacted, no compact token was present,
+and the saved export was owner-only. This check used the same export service as
+the native dialog; the dialog itself passed the earlier Mac check. Evidence is
+`live-export-result.json` and the local `live-diagnostics-export.jsonl`.
 
 Remaining desktop work:
 

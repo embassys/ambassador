@@ -78,7 +78,10 @@ issue-only. These items do not authorize another release.
   identity still showing onboarding. Final native inspection of the second turn
   awaits an unlocked Mac. A redundant Dock-icon allocation was fixed; the
   verified background instance now measures 167.5 MiB and 0.10% of one core.
-  The macOS CI lane includes the existing background resource gate.
+  Code `8a6c105` passed package builds and actual host probes on macOS, Windows
+  and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
+  including the macOS background resource gate. A live diagnostic export also
+  passed body-inclusion and credential-redaction checks.
   Codex/Hermes helpers, native
   Windows/Linux qualification, signed distribution, trusted engine selection and
   API-dependent owner screens remain open. See the desktop plan for evidence
