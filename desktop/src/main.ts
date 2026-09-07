@@ -28,6 +28,7 @@ import {
   parseDesktopCommand,
 } from "../../src/desktop/protocol.js";
 import { SupervisedGateway } from "../../src/desktop/supervisor.js";
+import { DesktopWindowLifecycle } from "../../src/desktop/window-lifecycle.js";
 import { DesktopGatewayClient } from "../../src/desktop/worker-client.js";
 
 app.setName("Ambassador Development");
@@ -42,6 +43,7 @@ let tray: Tray | undefined;
 let instances: DesktopInstances;
 let loginItem: DesktopLoginItem;
 const workers = new Map<string, SupervisedGateway>();
+const windowLifecycle = new DesktopWindowLifecycle(openWindow);
 let quitting = false;
 let pendingChanges = false;
 let busy = false;
@@ -321,6 +323,11 @@ function trusted(event: Electron.IpcMainInvokeEvent): boolean {
 }
 
 function showWindow(): void {
+  if (!quitting) windowLifecycle.requestOpen();
+}
+
+function openWindow(): void {
+  if (quitting) return;
   if (window && !window.isDestroyed()) {
     window.show();
     window.focus();
@@ -493,7 +500,7 @@ else {
       updateMenu();
       const openedAtLogin =
         process.platform === "darwin" && app.getLoginItemSettings().wasOpenedAtLogin;
-      if (!process.argv.includes("--background") && !openedAtLogin) showWindow();
+      windowLifecycle.ready(process.argv.includes("--background") || openedAtLogin);
       for (const instance of instances.list()) {
         if (quitting) break;
         if (instance.enabled)
