@@ -54,7 +54,7 @@ issue-only. These items do not authorize another release.
   and separately qualified artifacts are still required before enabling version
   installation or selection.
 
-- [ ] Implement the approved Embassys desktop app under ADR 0064. The
+- [ ] Finish the approved Embassys desktop app under ADR 0064. The
   [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
   agent setup, conversations, approvals, notifications, isolated instances and
   central API requirements. The [plan](desktop-app-plan.md) defines delivery
@@ -105,12 +105,16 @@ issue-only. These items do not authorize another release.
   implemented. Code `31531b2` passes 435 regression tests, nine parser/artifact
   tests and all three desktop CI jobs in
   [run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381). Native
-  Windows/Linux qualification, signed distribution, trusted engine selection and
-  API-dependent owner screens remain open. The later
-  [web app review](desktop-web-app-review-2026-09-07.md) identifies deployed owner
-  APIs and the remaining contract gaps; integrate and qualify those without
-  duplicating the owner realm or changing central code. See the desktop plan for evidence
-  and the remaining matrix. Owner API features depend on server issues 7–10.
+  Windows/Linux qualification, signed distribution and trusted engine selection
+  remain open. ADR 0068 now implements owner email sign-in, session renewal and
+  sign-out, plus bounded read-only account requests, permissions and central
+  messages through the APIs identified in the
+  [web app review](desktop-web-app-review-2026-09-07.md). The separate owner worker
+  keeps tokens in encrypted custody outside gateway instances. Controlled live
+  login, reads, restart, refresh and sign-out passed, as did native Mac account
+  form and view checks. In-app decisions, full owner history, identity recovery,
+  explicit revocation-event handling and native remote push remain open. See the
+  desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

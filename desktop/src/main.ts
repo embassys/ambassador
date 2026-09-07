@@ -40,6 +40,8 @@ import { DesktopInstances } from "../../src/desktop/instances.js";
 import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
 import { DesktopNotifications } from "../../src/desktop/notifications.js";
+import { ownerCommandSchema } from "../../src/desktop/owner-protocol.js";
+import { OwnerWorkerClient } from "../../src/desktop/owner-worker-client.js";
 import {
   type DesktopCommand,
   type DesktopInstance,
@@ -66,6 +68,7 @@ let instances: DesktopInstances;
 let loginItem: DesktopLoginItem;
 let appearance: DesktopAppearance;
 let notifications: DesktopNotifications;
+let owner: OwnerWorkerClient | undefined;
 let notificationTimer: NodeJS.Timeout | undefined;
 let navigation:
   | {
@@ -88,6 +91,7 @@ const quitLifecycle = new DesktopQuitLifecycle({
     for (const [, abort] of activeSetup) abort.abort();
     await Promise.all([
       ...[...workers.values()].map((worker) => worker.close()),
+      owner?.close(),
       Promise.allSettled(activeSetup.map(([task]) => task)),
     ]);
     workers.clear();
@@ -175,15 +179,26 @@ async function snapshot() {
     notifications: { enabled: notifications.enabled, supported: Notification.isSupported() },
     navigation,
     loginItem: await loginItem.read(),
-    owner: {
-      status: "unavailable",
-      message: "Account sign-in is coming in the next development stage.",
-    },
+    owner: getOwner().snapshot(),
     instances: instances.list().map((instance) => ({
       ...instance,
       runtime: workers.get(instance.id)?.snapshot() ?? { id: instance.id, state: "stopped" },
     })),
   };
+}
+
+function getOwner(): OwnerWorkerClient {
+  if (!owner) {
+    owner = new OwnerWorkerClient({
+      directory: join(instances.directory, "account"),
+      nodePath,
+      workerPath: join(runtimeRoot, "dist", "desktop", "owner-worker.js"),
+      expectedRuntime: `v${BUNDLED_NODE_VERSION}`,
+      diagnostics: diagnosticsMode,
+      onChange: changed,
+    });
+  }
+  return owner;
 }
 
 function changed(): void {
@@ -263,6 +278,25 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  const accountCommand = ownerCommandSchema.safeParse(command);
+  if (accountCommand.success) {
+    if (accountCommand.data.type === "owner_open_web") {
+      await shell.openExternal("https://mcp.embassys.ai/app/");
+      return { opened: true };
+    }
+    if (accountCommand.data.type === "owner_reveal_logs") {
+      const directory = join(instances.directory, "account", "diagnostics");
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      if (await shell.openPath(directory))
+        throw new Error("The account log folder could not open.");
+      return { opened: true };
+    }
+    if (accountCommand.data.type === "owner_status" && owner && !owner.available()) {
+      await owner.close();
+      owner = undefined;
+    }
+    return getOwner().request(accountCommand.data);
+  }
   if (command.type === "set_notifications") {
     await notifications.setEnabled(command.enabled);
     changed();
@@ -299,6 +333,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     await getWorker(created).request({ type: "start", instanceId: created.id });
     return { ...(await snapshot()), createdInstanceId: created.id };
   }
+  if (!("instanceId" in command)) throw new Error("Select an instance for this operation.");
   const instance = instances.list().find((item) => item.id === command.instanceId);
   if (!instance) throw new Error("This instance is no longer available.");
   if (command.type === "agent_connection") {

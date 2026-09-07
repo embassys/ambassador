@@ -2,6 +2,7 @@ import { z } from "zod";
 import { connectionOperation, connectionProvider } from "./agent-connections.js";
 import { appearanceSchema } from "./appearance.js";
 import { diagnosticQuerySchema } from "./diagnostic-query.js";
+import { ownerCommands } from "./owner-protocol.js";
 import { registrationInput } from "./registration.js";
 
 export const DESKTOP_PROTOCOL = 1;
@@ -30,6 +31,7 @@ export type DesktopInstance = z.infer<typeof desktopInstanceSchema>;
 
 const selected = { instanceId };
 const commandSchema = z.discriminatedUnion("type", [
+  ...ownerCommands,
   z.strictObject({ type: z.literal("snapshot") }),
   z.strictObject({ type: z.literal("set_appearance"), appearance: appearanceSchema }),
   z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),

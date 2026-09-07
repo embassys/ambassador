@@ -94,6 +94,11 @@ while the desktop owner flow is qualified.
 
 ## Next integration order
 
+Update: ADR 0068 implements steps 1–2. Controlled live owner login, all read-only
+views, session rotation, restart and sign-out passed through the packaged worker.
+Native Mac account entry and view checks also passed. See the final evidence in
+[the desktop plan](desktop-app-plan.md). The contract findings above still apply.
+
 1. Finish and qualify the approved desktop setup helpers and log policy.
 2. Qualify owner login, refresh, sign-out and bounded read-only snapshots against
    the existing app endpoints with disposable identities. Keep owner state

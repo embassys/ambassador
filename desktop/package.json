@@ -8,7 +8,7 @@
     "start": "node scripts/launch.mjs",
     "package": "node scripts/package.mjs",
     "distribute": "node scripts/distribute.mjs",
-    "test:artifacts": "node --test scripts/artifact-tools.test.mjs scripts/provider-config.test.mjs",
+    "test:artifacts": "node --test scripts/artifact-tools.test.mjs scripts/provider-config.test.mjs scripts/account.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "verify": "node scripts/verify.mjs",
     "verify:host": "node scripts/verify-host.mjs",

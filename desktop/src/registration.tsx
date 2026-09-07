@@ -92,7 +92,7 @@ export function Registration({
       <h3>{entry ? "Register with Embassys" : "Verify your email"}</h3>
       <p className="body-note">
         {entry
-          ? "Create a new agent identity for this instance. Already registered elsewhere? Returning-user sign-in and identity recovery are not available in this development build."
+          ? "Create a new agent identity for this instance. Already registered? Use Account to sign in. Restoring a reset local agent is not supported yet."
           : state.email}
       </p>
       {state.message && (

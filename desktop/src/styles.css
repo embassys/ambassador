@@ -1124,3 +1124,102 @@ input:not([type="checkbox"]):not([type="radio"]) {
   overflow-wrap: anywhere;
   font-size: 12px;
 }
+
+.account-page {
+  max-width: 920px;
+}
+.account-page .registration-form {
+  display: grid;
+  gap: 14px;
+  max-width: 490px;
+  margin-top: 22px;
+}
+.account-page .registration-form > button {
+  justify-self: start;
+}
+.account-actions,
+.account-toolbar,
+.account-row-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.account-toolbar,
+.account-row-heading {
+  justify-content: space-between;
+}
+.account-toolbar {
+  margin: 18px 0;
+}
+.account-tabs {
+  width: fit-content;
+  max-width: 100%;
+  margin: 12px 0 20px;
+}
+.account-row {
+  padding: 18px 0;
+}
+.account-row + .account-row {
+  border-top: 1px solid var(--line);
+}
+.account-row:first-of-type {
+  padding-top: 2px;
+}
+.account-row:last-child {
+  padding-bottom: 2px;
+}
+.account-row p {
+  margin: 8px 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.account-row time,
+.account-limit {
+  font-size: 12px;
+  color: var(--muted);
+}
+.account-limit {
+  line-height: 1.6;
+  margin: 16px 0;
+}
+.account-notice {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.account-question {
+  white-space: pre-wrap;
+}
+.account-details {
+  margin-top: 12px;
+}
+.account-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--accent);
+}
+.account-details pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+  user-select: text;
+}
+.account-facts {
+  display: flex;
+  gap: 16px 32px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+.account-facts dt {
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.account-facts dd {
+  margin: 0;
+}
