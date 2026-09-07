@@ -135,6 +135,9 @@ test("reports verified enrollment independently of an empty permission list and 
     credential_status: "active",
   };
   assert.deepEqual(result.enrollment, expected);
+  assert.deepEqual(gateway.localOverview().enrollment, expected);
+  assert.equal(gateway.localOverview().pendingCalls, 0);
+  assert.equal(gateway.localOverview().receivedResults, 0);
   assert.deepEqual(result.permissions, []);
   assert.match(String(result.message), /empty.*permission.*registered/iu);
   const catalog = await client.callTool("list_action_types", {});
@@ -153,6 +156,7 @@ test("reports verified enrollment independently of an empty permission list and 
   const restored = new TestMcpClient(reopened.endpoint);
   await restored.initialize(OPENCLAW);
   assert.ok(restored.serverInstructions?.includes(email));
+  assert.deepEqual(reopened.localOverview().enrollment, expected);
   assert.deepEqual(await restored.callTool("get_my_permissions", {}), result);
   assert.equal(
     value.central.requests().filter((request) => request.path === "/api/register_agent").length,

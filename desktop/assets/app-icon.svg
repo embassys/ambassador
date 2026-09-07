@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>Embassys app icon</title><rect x="24" y="24" width="976" height="976" rx="216" fill="#f7f7fc"/><g transform="translate(130 207) scale(1.91)">
+  <defs>
+    <linearGradient id="blue" x1="40" y1="30" x2="255" y2="290" gradientUnits="userSpaceOnUse"><stop stop-color="#078bff"/><stop offset="1" stop-color="#0641ee"/></linearGradient>
+    <linearGradient id="purple" x1="360" y1="30" x2="190" y2="310" gradientUnits="userSpaceOnUse"><stop stop-color="#ac20f7"/><stop offset="1" stop-color="#5300ef"/></linearGradient>
+  </defs>
+  <path d="M200 50C127-2 55 18 16 69C-22 121-20 210 27 259C75 309 144 308 206 269L297 184C323 154 288 102 250 81Z" fill="url(#blue)"/>
+  <path d="M200 50C273-2 345 18 384 69C422 121 420 210 373 259C325 309 256 308 194 269L103 184C77 154 112 102 150 81Z" fill="url(#purple)"/>
+  <path d="M202 59C181 67 126 109 100 141C66 184 94 226 128 246C150 260 177 274 196 278C213 278 261 247 282 223C304 196 275 185 251 188L221 192C208 193 185 184 170 175C163 169 165 163 171 155C185 138 213 121 246 111C273 103 249 76 223 64C215 60 207 58 202 59Z" fill="white"/>
+</g></svg>

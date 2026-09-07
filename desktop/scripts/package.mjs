@@ -12,6 +12,7 @@ const paths = await packager({
   executableName: "Embassys",
   appBundleId: "com.embassys.desktop.development",
   appCategoryType: "public.app-category.productivity",
+  icon: `${application}/assets/app-icon.${process.platform === "darwin" ? "icns" : process.platform === "win32" ? "ico" : "png"}`,
   appVersion: manifest.app,
   electronVersion: manifest.electron,
   platform: process.platform,

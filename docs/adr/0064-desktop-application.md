@@ -165,8 +165,9 @@ linked, oversized or conflicting configuration and never replace an existing
 entry. A matching entry needs no write. Recheck the reviewed file before invoking
 Claude and inspect the saved entry after the command, including a lost response.
 Discard command output. Configuration success is separate from a connected
-client or tested executor. Other provider helpers and configure/repair/disconnect
-ownership remain tracked work; unsupported setup stays manual.
+client or tested executor. The connection ownership extension below now covers
+Claude Code and OpenClaw; Codex and Hermes remain manual until their safe
+configuration helpers and installed-client tests are complete.
 
 This follows the [Claude Code MCP setup and timeout contract](https://code.claude.com/docs/en/mcp).
 The installed CLI preserved the timeout and refused a duplicate entry in an
@@ -177,3 +178,36 @@ Native Quit uses a separate cleanup state. Further quit requests remain prevente
 until workers and setup commands settle. Final termination runs on the next event
 loop turn so an already-resolved cleanup cannot re-enter the same Cocoa terminate
 callback. Failed cleanup restores the controls and reports an error.
+
+## Platform appearance and connection ownership
+
+On 2026-09-07 the user requested further implementation, a more polished native
+appearance and app-driven end-to-end qualification, and supplied a blue/purple
+logo reference. Use a repository-owned vector interpretation and packaged Mac,
+Windows and Linux icons. No additional UI framework is needed: the approved
+Electron shell provides native window controls, Mac sidebar vibrancy and Windows
+Mica, with ordinary Linux window decorations. System fonts, platform spacing,
+keyboard conventions, high contrast and reduced transparency remain explicit.
+Light, dark and system appearance are local app preferences.
+
+Connection changes use a five-minute review tied to the selected instance,
+provider configuration and its fingerprint. Keep a separate public-data-only
+ownership journal before invoking the provider's fixed setup command. Check
+the saved entry after success or a lost response; never automatically repeat
+the command. Repair restores a missing app-owned entry. Disconnect removes only
+the unchanged entry the app created. A matching pre-existing entry remains
+unowned; a changed entry or another instance's binding gets manual guidance.
+App Clean preserves connection ownership and provider settings.
+
+Claude Code uses its user-scope add/remove commands. OpenClaw uses create-only
+`mcp add` with a 660-second timeout and its `unset` command. An explicit absolute
+OpenClaw configuration path binds setup to that exact profile. Unsupported
+profile resolution or JSON5 settings remain manual until validated parsing is
+available. Checking settings does not prove a model connection or conversation
+return. The app never restarts a provider as a side effect of configuration.
+
+Automatic connection commands are enabled only for a natively qualified platform.
+The initial qualification is macOS arm64 with installed Claude Code and OpenClaw.
+Other systems retain manual instructions until their installed-client tests pass;
+compiling the app on CI does not enable a configuration adapter. In particular,
+Windows npm command shims need a reviewed native launch path before qualification.

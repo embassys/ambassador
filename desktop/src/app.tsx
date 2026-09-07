@@ -8,9 +8,13 @@ import type {
   DesktopInstance,
   GatewaySnapshot,
 } from "../../src/desktop/protocol.js";
+import type { GatewayOverview } from "../../src/gateway-application.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
 
 interface AppSnapshot {
+  platform: string;
+  appearance: "system" | "light" | "dark";
+  dark: boolean;
   appVersion: string;
   build: string;
   loginItem: LoginItemState;
@@ -25,7 +29,12 @@ interface Session {
 }
 interface Setup {
   endpoint: string;
-  guides: { name: string; instruction: string; note: string; connect?: "claude_code" }[];
+  guides: {
+    name: string;
+    instruction: string;
+    note: string;
+    connect?: "claude_code" | "openclaw";
+  }[];
 }
 declare global {
   interface Window {
@@ -93,6 +102,7 @@ const pages: { id: Page; label: string; description: string }[] = [
 
 function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>();
+  const [overview, setOverview] = useState<GatewayOverview>();
   const [page, setPage] = useState<Page>(() => {
     const saved = localStorage.getItem("ambassador.page");
     return pages.find((item) => item.id === saved)?.id ?? "attention";
@@ -131,7 +141,7 @@ function App() {
   const [chooseLocation, setChooseLocation] = useState(false);
   const createRequest = useRef(crypto.randomUUID());
   const [setup, setSetup] = useState<Setup>();
-  const [connectionMessage, setConnectionMessage] = useState("");
+  const [connectionMessages, setConnectionMessages] = useState<Record<string, string>>({});
   const [newName, setNewName] = useState("");
   const [newPort, setNewPort] = useState("");
   const proposedPort = newPort || String(suggestedInstancePort(snapshot?.instances ?? []));
@@ -159,6 +169,36 @@ function App() {
   const selected =
     snapshot?.instances.find((instance) => instance.id === selectedId) ?? snapshot?.instances[0];
   const id = selected?.id;
+  const runtimeState = selected?.runtime.state;
+  useEffect(() => {
+    if (!id || (page !== "attention" && page !== "settings")) return;
+    let current = true;
+    let reading = false;
+    setOverview(undefined);
+    const update = async () => {
+      if (reading || document.hidden) return;
+      reading = true;
+      try {
+        const result = await call({ type: "overview", instanceId: id });
+        if (current) setOverview(result as GatewayOverview);
+      } catch {
+        if (current) setError("Agent activity is unavailable. Check this instance in Diagnostics.");
+      } finally {
+        reading = false;
+      }
+    };
+    void update();
+    const timer = runtimeState === "running" ? setInterval(() => void update(), 5000) : undefined;
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [id, runtimeState, page, call]);
+  useEffect(() => {
+    if (!snapshot) return;
+    document.documentElement.dataset.platform = snapshot.platform;
+    document.documentElement.dataset.theme = snapshot.dark ? "dark" : "light";
+  }, [snapshot]);
   useEffect(() => {
     localStorage.setItem("ambassador.page", page);
     if (id) localStorage.setItem("ambassador.instance", id);
@@ -168,7 +208,10 @@ function App() {
     let current = true;
     viewGeneration.current++;
     setHistory(undefined);
-    setConnectionMessage("");
+    setHistorySession("");
+    setSessions([]);
+    setSetup(undefined);
+    setConnectionMessages({});
     setExportPreview(undefined);
     setExportSaved(false);
     setLogs(undefined);
@@ -227,23 +270,29 @@ function App() {
       setBusy(false);
     }
   }
-  async function connectClaude() {
+  async function connectAgent(
+    provider: "claude_code" | "openclaw",
+    operation: "connect" | "check" | "repair" | "disconnect" = "connect",
+  ) {
     if (!id) return;
     const generation = ++viewGeneration.current;
     setBusy(true);
-    setConnectionMessage("");
+    setConnectionMessages((previous) => ({ ...previous, [provider]: "Checking settings…" }));
     try {
       const result = (await call({
-        type: "connect_agent",
+        type: "agent_connection",
         instanceId: id,
-        provider: "claude_code",
+        provider,
+        operation,
       })) as { message: string };
-      if (generation === viewGeneration.current) setConnectionMessage(result.message);
+      if (generation === viewGeneration.current)
+        setConnectionMessages((previous) => ({ ...previous, [provider]: result.message }));
     } catch {
       if (generation === viewGeneration.current)
-        setConnectionMessage(
-          "Setup could not finish. Review Claude Code's settings before trying again.",
-        );
+        setConnectionMessages((previous) => ({
+          ...previous,
+          [provider]: "Setup could not finish. Review the provider's settings before trying again.",
+        }));
     } finally {
       if (generation === viewGeneration.current) setBusy(false);
     }
@@ -369,10 +418,10 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">E</div>
+          <img className="brand-mark" src="/brand.svg" alt="" />
           <span>Embassys</span>
         </div>
-        <div className="workspace-label">YOUR WORKSPACE</div>
+        <div className="workspace-label">Workspace</div>
         <nav aria-label="Main navigation">
           {pages.map((item) => (
             <button
@@ -389,7 +438,7 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="instance-label">LOCAL INSTANCE</div>
+          <div className="instance-label">Local instance</div>
           <label className="sr-only" htmlFor="instance-select">
             Selected instance
           </label>
@@ -421,7 +470,10 @@ function App() {
             <h1>{currentPage.label}</h1>
             <p>{currentPage.description}</p>
           </div>
-          <span className="preview-tag">DEVELOPMENT</span>
+          <span className={`toolbar-status ${running ? "is-running" : ""}`}>
+            <span className={`status-dot ${running ? "green" : "amber"}`} />
+            {selected?.name ?? "Workspace"}
+          </span>
         </header>
         {error && (
           <div className="error-banner" role="alert">
@@ -436,88 +488,140 @@ function App() {
           <div className="empty-state">Opening your workspace…</div>
         ) : (
           <>
-            {page === "attention" && (
-              <>
-                <section className="welcome-card">
-                  <div className="eyebrow">WELCOME TO EMBASSYS</div>
-                  <h2>
-                    Your agents.
-                    <br />
-                    Working together.
-                  </h2>
-                  <p>
-                    A home for the requests, conversations and decisions
-                    <br className="wide-only" /> that move between you and other people's agents.
+            {page === "attention" &&
+              (overview === undefined ? (
+                <p role="status">Loading agent activity…</p>
+              ) : overview.enrollment.verified === true ? (
+                <>
+                  <section className="settings-section identity-card">
+                    <img className="brand-mark" src="/brand.svg" alt="" />
+                    <div>
+                      <h3>Agent registered</h3>
+                      <p className="body-note break">{overview.enrollment.email}</p>
+                    </div>
+                    <span className="subtle-tag">
+                      {overview.enrollment.credential_status === "active"
+                        ? "Verified"
+                        : "Credentials need attention"}
+                    </span>
+                  </section>
+                  <div className="section-title">
+                    <h3>Agent activity</h3>
+                  </div>
+                  <div className="steps">
+                    <div className="step">
+                      <Icon name="attention" />
+                      <div>
+                        <h4>
+                          {overview.pendingCalls} incoming{" "}
+                          {overview.pendingCalls === 1 ? "request" : "requests"} pending
+                        </h4>
+                        <p>
+                          {overview.pendingCalls
+                            ? "Open the conversation to see the agent's progress. Approval and question emails go to the owner."
+                            : "Your agent has no pending incoming actions saved on this device."}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="step">
+                      <Icon name="conversations" />
+                      <div>
+                        <h4>
+                          {overview.sessionCount} saved{" "}
+                          {overview.sessionCount === 1 ? "conversation" : "conversations"}
+                        </h4>
+                        <p>Available conversation history stays here when the app restarts.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setPage("conversations")}
+                      >
+                        View
+                      </button>
+                    </div>
+                    <div className="step">
+                      <Icon name="check" />
+                      <div>
+                        <h4>
+                          {overview.receivedResults} saved{" "}
+                          {overview.receivedResults === 1 ? "result" : "results"}
+                        </h4>
+                        <p>Results stay available until your requesting agent confirms receipt.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="quiet-note">
+                    App sign-in, approval controls and push notifications are not available in this
+                    preview. Use the email sent for each owner decision.
                   </p>
-                  <button type="button" className="primary" onClick={() => setPage("agents")}>
-                    Set up an agent <Icon name="arrow" size={16} />
-                  </button>
-                  <div className="welcome-art" aria-hidden="true">
-                    <div className="orbit orbit-one" />
-                    <div className="orbit orbit-two" />
-                    <div className="art-core">
-                      <Icon name="agents" size={44} />
-                    </div>
-                    <span className="satellite satellite-one">
-                      <Icon name="conversations" size={24} />
-                    </span>
-                    <span className="satellite satellite-two">
-                      <Icon name="check" size={22} />
-                    </span>
-                  </div>
-                </section>
-                <div className="section-title">
-                  <h3>Getting connected</h3>
-                  <span>Your first steps</span>
-                </div>
-                <div className="steps">
-                  <div className="step">
-                    <div className={`step-number ${running ? "complete" : ""}`}>
-                      {running ? <Icon name="check" size={18} /> : "1"}
-                    </div>
-                    <div>
-                      <h4>Start your local server</h4>
-                      <p>
-                        {running
-                          ? "Running quietly in the background."
-                          : "Start it from Settings when you're ready."}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => setPage("settings")}
-                    >
-                      Manage
+                </>
+              ) : (
+                <>
+                  <section className="welcome-card">
+                    <img className="welcome-logo" src="/brand.svg" alt="" />
+                    <h2>Welcome to Embassys</h2>
+                    <p>Connect your agent to exchange requests with other people's agents.</p>
+                    <button type="button" className="primary" onClick={() => setPage("agents")}>
+                      Set up an agent <Icon name="arrow" size={16} />
                     </button>
+                  </section>
+                  <div className="section-title">
+                    <h3>Getting connected</h3>
+                    <span>Your first steps</span>
                   </div>
-                  <div className="step">
-                    <div className="step-number">2</div>
-                    <div>
-                      <h4>Connect an agent</h4>
-                      <p>Add Embassys to the agent you already use.</p>
+                  <div className="steps">
+                    <div className="step">
+                      <div className={`step-number ${running ? "complete" : ""}`}>
+                        {running ? <Icon name="check" size={18} /> : "1"}
+                      </div>
+                      <div>
+                        <h4>Start your local server</h4>
+                        <p>
+                          {running
+                            ? "Running quietly in the background."
+                            : "Start it from Settings when you're ready."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setPage("settings")}
+                      >
+                        Manage
+                      </button>
                     </div>
-                    <button type="button" className="text-button" onClick={() => setPage("agents")}>
-                      Set up
-                    </button>
-                  </div>
-                  <div className="step">
-                    <div className="step-number muted">3</div>
-                    <div>
-                      <h4>Sign in to your account</h4>
-                      <p>App sign-in and approval notifications are being built next.</p>
+                    <div className="step">
+                      <div className="step-number">2</div>
+                      <div>
+                        <h4>Connect an agent</h4>
+                        <p>Add Embassys to the agent you already use.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setPage("agents")}
+                      >
+                        Set up
+                      </button>
                     </div>
-                    <span className="subtle-tag">Coming next</span>
+                    <div className="step">
+                      <div className="step-number muted">3</div>
+                      <div>
+                        <h4>Sign in to your account</h4>
+                        <p>App sign-in and approval notifications are being built next.</p>
+                      </div>
+                      <span className="subtle-tag">Coming next</span>
+                    </div>
                   </div>
-                </div>
-                <div className="quiet-note">
-                  <Icon name="attention" size={18} />
-                  <span>
-                    This preview runs the real local server. The owner inbox is not connected yet.
-                  </span>
-                </div>
-              </>
-            )}
+                  <div className="quiet-note">
+                    <Icon name="attention" size={18} />
+                    <span>
+                      This preview runs the real local server. The owner inbox is not connected yet.
+                    </span>
+                  </div>
+                </>
+              ))}
             {page === "agents" && (
               <>
                 <div className="endpoint-card">
@@ -534,15 +638,10 @@ function App() {
                   </button>
                 </div>
                 <p className="body-note">
-                  Connect Claude Code here, or follow the instructions for another agent. For
-                  multiple instances, use separate provider profiles so requests reach the intended
-                  identity. Saving a connection does not verify a conversation.
+                  Add Embassys to your agent using the instructions below. Guided setup is available
+                  for tested clients on this platform. Use separate provider profiles for different
+                  instances.
                 </p>
-                {connectionMessage && (
-                  <p className="quiet-note" role="status">
-                    {connectionMessage}
-                  </p>
-                )}
                 {loading ? (
                   <p>Loading setup instructions…</p>
                 ) : (
@@ -559,15 +658,62 @@ function App() {
                           </div>
                         </div>
                         <p>{guide.note}</p>
+                        {guide.connect && connectionMessages[guide.connect] && (
+                          <p className="quiet-note" role="status">
+                            {connectionMessages[guide.connect]}
+                          </p>
+                        )}
                         {guide.connect && (
                           <button
                             type="button"
                             className="primary"
                             disabled={busy || !running}
-                            onClick={() => void connectClaude()}
+                            onClick={() => {
+                              if (guide.connect) void connectAgent(guide.connect);
+                            }}
                           >
-                            Connect Claude Code
+                            Connect {guide.name}
                           </button>
+                        )}
+                        {guide.connect && (
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="text-button"
+                              disabled={busy}
+                              onClick={() => {
+                                if (guide.connect) void connectAgent(guide.connect, "check");
+                              }}
+                            >
+                              Check settings
+                            </button>
+                            <details>
+                              <summary>Manage connection</summary>
+                              <div className="button-row">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={busy || !running}
+                                  onClick={() => {
+                                    if (guide.connect) void connectAgent(guide.connect, "repair");
+                                  }}
+                                >
+                                  Repair
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    if (guide.connect)
+                                      void connectAgent(guide.connect, "disconnect");
+                                  }}
+                                >
+                                  Disconnect…
+                                </button>
+                              </div>
+                            </details>
+                          </div>
                         )}
                         {guide.connect && !running && (
                           <p className="body-note">Start this instance from Settings to connect.</p>
@@ -892,6 +1038,30 @@ function App() {
             {page === "settings" && (
               <>
                 <section className="settings-section">
+                  <h3>Appearance</h3>
+                  <div className="settings-row">
+                    <div>
+                      <strong>Theme</strong>
+                      <p>Follow your system, or choose a light or dark appearance.</p>
+                    </div>
+                    <select
+                      aria-label="Appearance"
+                      value={snapshot.appearance}
+                      disabled={busy}
+                      onChange={(event) =>
+                        void mutate({
+                          type: "set_appearance",
+                          appearance: event.target.value as AppSnapshot["appearance"],
+                        })
+                      }
+                    >
+                      <option value="system">System</option>
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </div>
+                </section>
+                <section className="settings-section">
                   <h3>Startup</h3>
                   <div className="settings-row">
                     <div>
@@ -928,6 +1098,18 @@ function App() {
                 </section>
                 <section className="settings-section">
                   <h3>Account</h3>
+                  {overview?.enrollment.verified === true && (
+                    <div className="settings-row">
+                      <div>
+                        <strong>Registered agent</strong>
+                        <p className="break">{overview.enrollment.email}</p>
+                        <p>
+                          This is the agent's saved identity. Owner account sign-in is separate.
+                        </p>
+                      </div>
+                      <span className="subtle-tag">Verified</span>
+                    </div>
+                  )}
                   <div className="settings-row">
                     <div>
                       <strong>Sign in with your email</strong>

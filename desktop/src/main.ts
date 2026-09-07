@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,12 +10,19 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  nativeTheme,
   protocol,
   session,
   shell,
   Tray,
 } from "electron";
-import { ClaudeSetup, runClaudeSetup } from "../../src/desktop/claude-setup.js";
+import {
+  AgentConnection,
+  type ConnectionProvider,
+  connectionAvailable,
+  runConnectionCommand,
+} from "../../src/desktop/agent-connections.js";
+import { DesktopAppearance, windowAppearance } from "../../src/desktop/appearance.js";
 import {
   prepareSupportExport,
   type SupportExport,
@@ -45,6 +52,7 @@ let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let instances: DesktopInstances;
 let loginItem: DesktopLoginItem;
+let appearance: DesktopAppearance;
 const workers = new Map<string, SupervisedGateway>();
 const setupTasks = new Map<Promise<void>, AbortController>();
 const windowLifecycle = new DesktopWindowLifecycle(openWindow);
@@ -74,10 +82,35 @@ const runtimeRoot = app.isPackaged
 const nodePath = join(runtimeRoot, "runtime", process.platform === "win32" ? "node.exe" : "node");
 const workerPath = join(runtimeRoot, "dist", "desktop", "worker.js");
 
+function providerConfiguration(
+  provider: ConnectionProvider,
+  environment: NodeJS.ProcessEnv,
+): string {
+  if (provider === "claude_code") {
+    const root = environment.CLAUDE_CONFIG_DIR || app.getPath("home");
+    if (!isAbsolute(root)) throw new Error("Use an absolute provider configuration location.");
+    return join(root, ".claude.json");
+  }
+  if (
+    (environment.OPENCLAW_HOME || environment.OPENCLAW_PROFILE) &&
+    !environment.OPENCLAW_CONFIG_PATH
+  )
+    throw new Error("Use manual setup for this OpenClaw profile.");
+  const path =
+    environment.OPENCLAW_CONFIG_PATH ||
+    join(environment.OPENCLAW_STATE_DIR || join(app.getPath("home"), ".openclaw"), "openclaw.json");
+  if (!isAbsolute(path)) throw new Error("Use an absolute provider configuration location.");
+  environment.OPENCLAW_CONFIG_PATH = path;
+  return path;
+}
+
 async function snapshot() {
   return {
     appVersion: app.getVersion(),
     build: "Development preview",
+    platform: process.platform,
+    appearance: appearance.value,
+    dark: nativeTheme.shouldUseDarkColors,
     loginItem: await loginItem.read(),
     owner: {
       status: "unavailable",
@@ -136,7 +169,8 @@ async function execute(input: unknown): Promise<unknown> {
     "export_save",
     "history_delete",
     "set_launch_at_login",
-    "connect_agent",
+    "agent_connection",
+    "set_appearance",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
@@ -149,6 +183,12 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  if (command.type === "set_appearance") {
+    await appearance.set(command.appearance);
+    nativeTheme.themeSource = appearance.value;
+    changed();
+    return snapshot();
+  }
   if (command.type === "set_launch_at_login") {
     await loginItem.set(command.enabled);
     changed();
@@ -176,43 +216,65 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
   }
   const instance = instances.list().find((item) => item.id === command.instanceId);
   if (!instance) throw new Error("This instance is no longer available.");
-  if (command.type === "connect_agent") {
-    if (workers.get(instance.id)?.snapshot().state !== "running")
+  if (command.type === "agent_connection") {
+    if (!connectionAvailable(process.platform, process.arch))
       return {
         state: "unavailable",
-        message: "Start this instance's server before connecting Claude Code.",
+        owned: false,
+        message:
+          "Use the setup instructions on this platform. Automatic setup is awaiting native qualification.",
       };
+    const name = command.provider === "claude_code" ? "Claude Code" : "OpenClaw";
     const environment = desktopLaunchEnvironment(
       process.env,
       dirname(nodePath),
       app.getPath("home"),
     );
-    const configurationDirectory = environment.CLAUDE_CONFIG_DIR;
-    if (configurationDirectory && !isAbsolute(configurationDirectory))
-      return {
-        state: "unavailable",
-        message:
-          "Claude Code's configuration location is relative. Use its manual setup instructions.",
-      };
-    const configurationPath = join(configurationDirectory || app.getPath("home"), ".claude.json");
-    const setup = new ClaudeSetup({
+    const configurationPath = providerConfiguration(command.provider, environment);
+    const setup = new AgentConnection({
+      provider: command.provider,
       configurationPath,
-      workingDirectory: instance.workingDirectory,
-      run: (args) => {
+      ownershipPath: join(
+        instances.directory,
+        "connections",
+        `${command.provider}-${createHash("sha256").update(configurationPath).digest("hex")}.json`,
+      ),
+      run: (executable, args) => {
         const abort = new AbortController();
-        const task = runClaudeSetup(args, instance.workingDirectory, environment, abort.signal);
+        const task = runConnectionCommand(
+          executable,
+          args,
+          instance.workingDirectory,
+          environment,
+          abort.signal,
+        );
         setupTasks.set(task, abort);
         void task.finally(() => setupTasks.delete(task)).catch(() => undefined);
         return task;
       },
     });
-    const preview = await setup.prepare(instance.port);
+    if (command.operation === "check") return setup.inspect(instance.port);
+    if (
+      command.operation !== "disconnect" &&
+      workers.get(instance.id)?.snapshot().state !== "running"
+    )
+      return {
+        state: "unavailable",
+        owned: false,
+        message: "Start this instance's server before connecting an agent.",
+      };
+    const preview = await setup.prepare(command.operation, instance.port);
     if (!preview.previewId) return preview;
+    const remove = command.operation === "disconnect";
+    const action = remove ? "Disconnect" : command.operation === "repair" ? "Repair" : "Connect";
     const choice = await dialog.showMessageBox({
       type: "question",
-      message: `Connect Claude Code to ${instance.name}?`,
-      detail: `Add the ambassador MCP entry for http://127.0.0.1:${instance.port}/mcp to ${configurationPath}. This applies across your Claude Code projects. Tool calls may wait up to eleven minutes. Existing entries are preserved. Reload Claude Code afterward.`,
-      buttons: ["Cancel", "Connect Claude Code"],
+      message:
+        command.operation === "repair"
+          ? `Repair the ${name} connection for ${instance.name}?`
+          : `${action} ${name}${remove ? " from " : " to "}${instance.name}?`,
+      detail: `${remove ? "Remove this app's unchanged" : "Add the"} ambassador MCP entry ${remove ? "from" : "to"} ${configurationPath}. ${remove ? "Saved conversations and other settings remain." : `Address: http://127.0.0.1:${instance.port}/mcp. Tool calls may wait up to eleven minutes.`} Reload ${name} afterward.`,
+      buttons: ["Cancel", `${action} ${name}`],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
@@ -220,22 +282,19 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
     if (choice.response !== 1)
       return {
         state: "cancelled",
-        message: "Setup cancelled. Claude Code's settings were left untouched.",
+        owned: false,
+        message: "Setup cancelled. The provider's settings were left untouched.",
       };
-    if (quitLifecycle.stopping || workers.get(instance.id)?.snapshot().state !== "running")
+    if (
+      quitLifecycle.stopping ||
+      (!remove && workers.get(instance.id)?.snapshot().state !== "running")
+    )
       return {
         state: "unavailable",
-        message: "The server stopped during setup. Start it and review the connection again.",
+        owned: false,
+        message: "The server stopped during setup. Review the connection again.",
       };
-    try {
-      return await setup.apply(preview.previewId);
-    } catch {
-      return {
-        state: "unavailable",
-        message:
-          "The reviewed settings changed or expired. Review the connection again before applying it.",
-      };
-    }
+    return setup.apply(preview.previewId);
   }
   if (command.type === "history_delete") {
     const choice = await dialog.showMessageBox({
@@ -370,14 +429,17 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         },
         {
           name: "Claude Code",
-          connect: "claude_code",
+          ...(connectionAvailable(process.platform, process.arch)
+            ? { connect: "claude_code" }
+            : {}),
           instruction: `claude mcp add-json --scope user ambassador '{"type":"http","url":"http://127.0.0.1:${instance.port}/mcp","timeout":660000}'`,
-          note: "Connect adds this instance to your Claude Code user configuration after review. An existing connection is never replaced. Reload Claude Code afterward. Standalone Chat and Cowork need separate qualification.",
+          note: "These settings let Claude Code wait for a reply for up to ten minutes. Reload Claude Code afterward. Standalone Chat and Cowork are not yet qualified.",
         },
         {
           name: "OpenClaw",
-          instruction: `openclaw mcp set ambassador '{"url":"http://127.0.0.1:${instance.port}/mcp","transport":"streamable-http","enabled":true}'\nopenclaw mcp doctor ambassador --probe`,
-          note: "Run in the intended OpenClaw profile. Set its tool timeout to at least 660 seconds, then reload when it is safe to interrupt chats.",
+          ...(connectionAvailable(process.platform, process.arch) ? { connect: "openclaw" } : {}),
+          instruction: `openclaw mcp set ambassador '{"url":"http://127.0.0.1:${instance.port}/mcp","transport":"streamable-http","requestTimeoutMs":660000}'\nopenclaw mcp doctor ambassador --probe`,
+          note: "Use the intended OpenClaw profile. These settings allow a ten-minute wait. Reload OpenClaw when it is safe to interrupt chats.",
         },
         {
           name: "Hermes",
@@ -418,7 +480,12 @@ function openWindow(): void {
     minWidth: 800,
     minHeight: 570,
     title: "Embassys",
-    backgroundColor: "#f7f8fa",
+    icon: join(ownDirectory, "assets", "app-icon.png"),
+    ...windowAppearance(
+      process.platform,
+      nativeTheme.shouldUseDarkColors,
+      nativeTheme.prefersReducedTransparency,
+    ),
     show: false,
     webPreferences: {
       preload: join(ownDirectory, "preload.cjs"),
@@ -509,6 +576,16 @@ else {
         },
       });
       instances = await DesktopInstances.open(join(app.getPath("userData"), "desktop"));
+      appearance = await DesktopAppearance.open(instances.directory);
+      nativeTheme.themeSource = appearance.value;
+      nativeTheme.on("updated", () => {
+        if (window) {
+          window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#1e1e20" : "#f5f5f7");
+          if (process.platform === "darwin")
+            window.setVibrancy(nativeTheme.prefersReducedTransparency ? null : "sidebar");
+        }
+        changed();
+      });
       if (instances.list().length === 0) await instances.create({ name: "Personal", port: 8787 });
       session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) =>
         callback(false),
@@ -518,6 +595,7 @@ else {
         "/index.html": { file: "index.html", type: "text/html; charset=utf-8" },
         "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
         "/styles.css": { file: "styles.css", type: "text/css; charset=utf-8" },
+        "/brand.svg": { file: "brand.svg", type: "image/svg+xml" },
       };
       protocol.handle("ambassador", async (request) => {
         const url = new URL(request.url);
@@ -553,16 +631,34 @@ else {
       const pixels = Buffer.alloc(22 * 22 * 4);
       for (let y = 2; y < 20; y++) {
         for (let x = 1; x < 21; x++) {
-          const stem = x >= 4 && x <= 7;
-          const bar = x >= 4 && x <= 17 && (y <= 4 || y >= 17 || (y >= 9 && y <= 12));
-          if (stem || bar) {
+          const lobes =
+            ((x - 7) / 6) ** 2 + ((y - 11) / 8) ** 2 < 1 ||
+            ((x - 15) / 6) ** 2 + ((y - 11) / 8) ** 2 < 1;
+          const notch = x >= 7 && x <= 14 && Math.abs(y - 11) < 1.8 + (x - 7) * 0.55;
+          if (lobes && !notch) {
             pixels[(y * 22 + x) * 4 + 3] = 255;
           }
         }
       }
       const icon = nativeImage.createFromBitmap(pixels, { width: 22, height: 22 });
-      icon.setTemplateImage(true);
-      tray = new Tray(icon);
+      icon.setTemplateImage(process.platform === "darwin");
+      // A packaged Mac app already uses its bundle icon. Replacing it retains
+      // another decoded Dock bitmap throughout the background host's lifetime.
+      if (process.platform === "darwin") {
+        if (!app.isPackaged)
+          app.dock?.setIcon(
+            nativeImage
+              .createFromPath(join(ownDirectory, "assets", "app-icon.png"))
+              .resize({ width: 256, height: 256 }),
+          );
+        tray = new Tray(icon);
+      } else {
+        tray = new Tray(
+          nativeImage
+            .createFromPath(join(ownDirectory, "assets", "app-icon.png"))
+            .resize({ width: 22, height: 22 }),
+        );
+      }
       tray.setToolTip("Embassys");
       tray.on("click", showWindow);
       updateMenu();

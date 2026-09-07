@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { connectionOperation, connectionProvider } from "./agent-connections.js";
+import { appearanceSchema } from "./appearance.js";
 import { diagnosticQuerySchema } from "./diagnostic-query.js";
 
 export const DESKTOP_PROTOCOL = 1;
@@ -28,6 +30,7 @@ export type DesktopInstance = z.infer<typeof desktopInstanceSchema>;
 const selected = { instanceId };
 const commandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("snapshot") }),
+  z.strictObject({ type: z.literal("set_appearance"), appearance: appearanceSchema }),
   z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),
   z.strictObject({ type: z.literal("start"), ...selected }),
   z.strictObject({ type: z.literal("stop"), ...selected }),
@@ -47,6 +50,7 @@ const commandSchema = z.discriminatedUnion("type", [
     chooseLocation: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal("sessions"), ...selected }),
+  z.strictObject({ type: z.literal("overview"), ...selected }),
   z.strictObject({
     type: z.literal("history"),
     ...selected,
@@ -69,9 +73,10 @@ const commandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("export_save"), ...selected, previewId: instanceId }),
   z.strictObject({ type: z.literal("setup"), ...selected }),
   z.strictObject({
-    type: z.literal("connect_agent"),
+    type: z.literal("agent_connection"),
     ...selected,
-    provider: z.literal("claude_code"),
+    provider: connectionProvider,
+    operation: z.union([connectionOperation, z.literal("check")]),
   }),
 ]);
 export type DesktopCommand = z.infer<typeof commandSchema>;

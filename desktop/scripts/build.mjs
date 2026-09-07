@@ -144,6 +144,8 @@ await build({
 });
 await cp(join(repository, "desktop/src/index.html"), join(destination, "index.html"));
 await cp(join(repository, "desktop/src/styles.css"), join(destination, "styles.css"));
+await cp(join(repository, "desktop/src/brand.svg"), join(destination, "brand.svg"));
+await cp(join(repository, "desktop/assets"), join(destination, "assets"), { recursive: true });
 const desktop = JSON.parse(await readFile(join(repository, "desktop/package.json"), "utf8"));
 const core = JSON.parse(await readFile(join(repository, "package.json"), "utf8"));
 await writeFile(
