@@ -568,13 +568,21 @@ test's own directory for a bounded period after the server is confirmed stopped;
 a persistent lock still fails. Native Windows Quit and notification behavior
 remain outside this CI evidence.
 
+Code `02e6aa8` then passed all three platform jobs in
+[run 34154117576](https://github.com/embassys/ambassador/actions/runs/34154117576),
+including the Windows cleanup retry, extracted archives, actual packaged host
+startup/shutdown and the Mac background resource gate. All live test servers
+were stopped afterward. The unsigned Mac DMG remains a local development
+artifact under `.build/desktop/distribution/`; nothing was released.
+
 Remaining work that needs no central change but does need external input:
 
 - Codex/Hermes automatic setup needs the pending explicit approval for
   smol-toml 1.8.0 and yaml 2.9.0. No parser was installed. Existing manual setup
   and guarded Claude/OpenClaw helpers remain available.
 - Production log retention awaits the owner's policy decision; development
-  body retention is unchanged.
+  body retention is unchanged. The pending proposal is metadata-only production
+  logs retained for at most seven days and 32 MiB.
 - Signed installers, automatic updates and engine-version installation need
   release certificates, a distribution channel and compatible signed artifacts.
   Runtime checks alone do not qualify opening newer state with an older engine.
