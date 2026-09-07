@@ -101,6 +101,20 @@ high contrast, and avoid raw protocol banners in conversations. Requests need
 text labels as well as color. Preserve scroll position while new events arrive;
 offer a New messages control instead of moving the reader unexpectedly.
 
+The Electron content area uses web components; it is not an AppKit or WinUI
+widget tree. The current implementation gives macOS compact push buttons and a
+keyboard-operated segmented appearance selector, Windows larger controls with
+its field treatment, and Linux neutral desktop controls. Native window chrome,
+file dialogs and macOS menus remain OS-provided. Read the system accent through
+Electron's [system preferences API](https://www.electronjs.org/docs/latest/api/system-preferences),
+with an opaque fallback where unavailable. Keep button labels and accent links
+at least 4.5:1 against their normal backgrounds. Refresh on appearance changes
+and window focus. This does not promise to copy every Linux desktop theme.
+
+A UI drawn through platform widget frameworks would require a separate toolkit
+prototype and explicit dependency approval. No new toolkit is selected for this
+refinement; the approved Electron host and bundled server remain in place.
+
 Support keyboard-only operation, screen readers, text zoom, reduced motion,
 local date/time formatting and explicit timezones for calendar requests. Test
 small windows, long email addresses, right-to-left text and high-density displays.

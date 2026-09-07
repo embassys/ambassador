@@ -212,15 +212,29 @@ and the saved export was owner-only. This check used the same export service as
 the native dialog; the dialog itself passed the earlier Mac check. Evidence is
 `live-export-result.json` and the local `live-diagnostics-export.jsonl`.
 
+The next component pass uses the OS accent, with tested text contrast in light
+and dark themes and a fallback for missing or invalid accent values. macOS has
+compact push buttons and a segmented theme selector; Windows and Linux have
+their own control sizing. This refines the approved web UI, without adding a
+toolkit. Rapid theme changes are serialized and retain the latest choice. The
+complete repository check passes 403 tests with seven expected skips. The
+bundled worker and packaged host probes pass; the background sample measured
+165.8 MiB and 0.10% of one core with one unenrolled instance and no provider.
+The packaged Mac check caught and fixed a lost theme choice during a fast
+arrow-key change. Repeating Light → System → Light → Dark retained Dark and
+keyboard focus; Tab moved to the next enabled control. Light/dark rendering,
+enlarged text, and Start/Stop of the isolated enrolled server passed. Screenshots
+are `native-controls-light.png`, `native-controls-dark.png` and
+`native-controls-zoom.png` under `.build/desktop-design/`. These are actual Mac
+window captures, not renderings of Windows/Linux controls.
+
 Remaining desktop work:
 
 - Complete Codex and Hermes configuration helpers after the requested parser
   dependency decision; qualify each helper on its supported native systems.
-- Review the owner's request for controls that follow each host platform more
-  closely. Electron provides a web component UI plus native OS integration; a
-  system-widget UI would need a separately approved toolkit prototype. No new
-  toolkit has been selected or installed. Qualify native Windows/Linux appearance,
-  tray behavior and provider setup.
+- Qualify the platform control refinements on native Windows/Linux desktops,
+  including tray behavior and provider setup. A system-widget UI would need a
+  separately approved toolkit prototype; none has been selected or installed.
 - Qualify active-provider resource use and native Windows/Linux resource budgets.
 - Integrate owner sign-in, decisions, permissions and push when API issues 7–10
   provide the accepted contracts. Recovery issues 1–6 remain release risks.

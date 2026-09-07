@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { controlPalette } from "../../src/desktop/appearance.js";
 import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
 import { suggestedInstancePort } from "../../src/desktop/instance-defaults.js";
 import type { LoginItemState } from "../../src/desktop/login-item.js";
@@ -15,6 +16,7 @@ interface AppSnapshot {
   platform: string;
   appearance: "system" | "light" | "dark";
   dark: boolean;
+  palette: ReturnType<typeof controlPalette>;
   appVersion: string;
   build: string;
   loginItem: LoginItemState;
@@ -112,6 +114,9 @@ function App() {
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [appearanceChoice, setAppearanceChoice] = useState<AppSnapshot["appearance"]>();
+  const pendingAppearance = useRef<AppSnapshot["appearance"]>(undefined);
+  const savingAppearance = useRef(false);
   const [copied, setCopied] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [history, setHistory] = useState<
@@ -198,6 +203,12 @@ function App() {
     if (!snapshot) return;
     document.documentElement.dataset.platform = snapshot.platform;
     document.documentElement.dataset.theme = snapshot.dark ? "dark" : "light";
+    document.documentElement.style.setProperty("--control-accent", snapshot.palette.accent);
+    document.documentElement.style.setProperty(
+      "--control-accent-text",
+      snapshot.palette.accentText,
+    );
+    document.documentElement.style.setProperty("--accent", snapshot.palette.link);
   }, [snapshot]);
   useEffect(() => {
     localStorage.setItem("ambassador.page", page);
@@ -218,7 +229,7 @@ function App() {
     setLogSearch("");
     setLogFrom("");
     setLogTo("");
-    setBusy(false);
+    setBusy(savingAppearance.current);
     setError("");
     if (!id || !["conversations", "diagnostics", "agents"].includes(page)) return;
     setLoading(true);
@@ -245,6 +256,29 @@ function App() {
       current = false;
     };
   }, [id, page, call]);
+
+  async function chooseAppearance(value: AppSnapshot["appearance"]) {
+    pendingAppearance.current = value;
+    setAppearanceChoice(value);
+    if (savingAppearance.current) return;
+    savingAppearance.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      while (pendingAppearance.current !== undefined) {
+        const next = pendingAppearance.current;
+        pendingAppearance.current = undefined;
+        setSnapshot((await call({ type: "set_appearance", appearance: next })) as AppSnapshot);
+      }
+    } catch {
+      pendingAppearance.current = undefined;
+      setError("Your appearance preference could not be saved. Try again.");
+    } finally {
+      savingAppearance.current = false;
+      setAppearanceChoice(undefined);
+      setBusy(false);
+    }
+  }
 
   async function mutate(command: DesktopCommand) {
     setBusy(true);
@@ -1044,21 +1078,42 @@ function App() {
                       <strong>Theme</strong>
                       <p>Follow your system, or choose a light or dark appearance.</p>
                     </div>
-                    <select
-                      aria-label="Appearance"
-                      value={snapshot.appearance}
-                      disabled={busy}
-                      onChange={(event) =>
-                        void mutate({
-                          type: "set_appearance",
-                          appearance: event.target.value as AppSnapshot["appearance"],
-                        })
-                      }
-                    >
-                      <option value="system">System</option>
-                      <option value="light">Light</option>
-                      <option value="dark">Dark</option>
-                    </select>
+                    {snapshot.platform === "darwin" ? (
+                      <fieldset
+                        className="appearance-control"
+                        disabled={busy && !savingAppearance.current}
+                      >
+                        <legend className="visually-hidden">Appearance</legend>
+                        {(["system", "light", "dark"] as const).map((value) => (
+                          <label key={value}>
+                            <input
+                              className="visually-hidden"
+                              type="radio"
+                              name="appearance"
+                              value={value}
+                              checked={(appearanceChoice ?? snapshot.appearance) === value}
+                              onChange={() => void chooseAppearance(value)}
+                            />
+                            <span>
+                              {value === "system" ? "System" : value === "light" ? "Light" : "Dark"}
+                            </span>
+                          </label>
+                        ))}
+                      </fieldset>
+                    ) : (
+                      <select
+                        aria-label="Appearance"
+                        value={appearanceChoice ?? snapshot.appearance}
+                        disabled={busy && !savingAppearance.current}
+                        onChange={(event) =>
+                          void chooseAppearance(event.target.value as AppSnapshot["appearance"])
+                        }
+                      >
+                        <option value="system">System</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                      </select>
+                    )}
                   </div>
                 </section>
                 <section className="settings-section">

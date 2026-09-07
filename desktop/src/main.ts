@@ -14,6 +14,7 @@ import {
   protocol,
   session,
   shell,
+  systemPreferences,
   Tray,
 } from "electron";
 import {
@@ -22,7 +23,11 @@ import {
   connectionAvailable,
   runConnectionCommand,
 } from "../../src/desktop/agent-connections.js";
-import { DesktopAppearance, windowAppearance } from "../../src/desktop/appearance.js";
+import {
+  controlPalette,
+  DesktopAppearance,
+  windowAppearance,
+} from "../../src/desktop/appearance.js";
 import {
   prepareSupportExport,
   type SupportExport,
@@ -105,12 +110,19 @@ function providerConfiguration(
 }
 
 async function snapshot() {
+  let accent: string | undefined;
+  try {
+    accent = systemPreferences.getAccentColor();
+  } catch {
+    // Some Linux desktops do not expose an accent to Electron.
+  }
   return {
     appVersion: app.getVersion(),
     build: "Development preview",
     platform: process.platform,
     appearance: appearance.value,
     dark: nativeTheme.shouldUseDarkColors,
+    palette: controlPalette(accent, nativeTheme.shouldUseDarkColors),
     loginItem: await loginItem.read(),
     owner: {
       status: "unavailable",
@@ -503,6 +515,7 @@ function openWindow(): void {
     window = undefined;
   });
   window.once("ready-to-show", () => window?.show());
+  window.on("focus", changed);
   void window.loadURL(`${uiOrigin}/index.html`);
 }
 
@@ -578,6 +591,8 @@ else {
       instances = await DesktopInstances.open(join(app.getPath("userData"), "desktop"));
       appearance = await DesktopAppearance.open(instances.directory);
       nativeTheme.themeSource = appearance.value;
+      if (process.platform !== "darwin") systemPreferences.on("accent-color-changed", changed);
+      if (process.platform === "win32") systemPreferences.on("color-changed", changed);
       nativeTheme.on("updated", () => {
         if (window) {
           window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#1e1e20" : "#f5f5f7");
