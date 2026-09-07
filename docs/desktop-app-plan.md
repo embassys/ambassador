@@ -637,11 +637,23 @@ The [new web app review](desktop-web-app-review-2026-09-07.md) records owner API
 that are now deployed and the remaining recovery, pagination and decision gaps.
 
 
-Local regression evidence for this pass: the full suite passed 433 tests with
-seven expected platform/qualification skips before the two additional sparse
-quota and exact-boundary paging regressions. The final focused log suite passes
-17 tests, including both additions. All nine desktop parser/artifact tests pass,
-and root/desktop type checks pass. Lint reports only the two pre-existing
-optional-chain suggestions in visible-transcripts.ts. The actual app and both
-isolated servers exited after keyboard Quit. Packaging and CI results for the
-final commit are recorded below when available.
+Final code `31531b2` passes 435 regression tests with seven expected
+platform/qualification skips, plus all nine desktop parser/artifact tests.
+Root and desktop type checks pass. Lint reports only the two pre-existing
+optional-chain suggestions in visible-transcripts.ts. One parallel verification
+process was terminated with signal 9; the sequential full rerun passed.
+
+All three desktop CI jobs passed on macOS, Windows and Linux in
+[run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381).
+This includes the parser tests, packaged worker, portable copy, extracted
+archive and actual host lifecycle. It does not qualify real Windows/Linux
+provider interactions or user-visible notifications.
+
+The final local Mac background host measured 171.0 MiB across five processes and
+0.10% of one core while idle. Its extracted DMG passed checksum, inventory and
+real MCP worker verification. Local artifact:
+`.build/desktop/distribution/Embassys-0.1.0-darwin-arm64-development.dmg`.
+SHA-256: `41801f9ec5f56b1bf2c0179406aa7c8a51cb8d75113cf3cf913b72799e7a53f7`.
+Nothing was published. Both disposable test instances and their provider profiles
+were removed after confirming they were stopped. The usual Personal app profile
+was reopened with its server still stopped and its existing logs preserved.

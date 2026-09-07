@@ -100,7 +100,11 @@ issue-only. These items do not authorize another release.
   Code `e800b84` also passes desktop tests, package builds and actual host probes
   on macOS, Windows and Linux in
   [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
-  Codex/Hermes helpers passed isolated native Mac setup and installed-provider checks under ADR 0067. Native
+  Codex/Hermes helpers passed isolated native Mac setup and installed-provider
+  checks under ADR 0067. Its 1 GiB/seven-day logs and Clear logs control are
+  implemented. Code `31531b2` passes 435 regression tests, nine parser/artifact
+  tests and all three desktop CI jobs in
+  [run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381). Native
   Windows/Linux qualification, signed distribution, trusted engine selection and
   API-dependent owner screens remain open. The later
   [web app review](desktop-web-app-review-2026-09-07.md) identifies deployed owner

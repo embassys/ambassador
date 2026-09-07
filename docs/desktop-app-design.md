@@ -606,8 +606,9 @@ multi-instance controls. Keep the CLI available for developers without making it
 part of normal setup.
 
 The user approved the owner API boundary, visible-conversation archive and the
-30-day conversation and 90-day local audit cache defaults. Production diagnostic
-retention still needs a separate release decision. Real macOS/Windows remote push needs
+30-day conversation and 90-day local audit cache defaults. ADR 0067 records
+metadata-only production diagnostics with seven-day retention and a 1 GiB cap
+per app instance. Real macOS/Windows remote push needs
 developer accounts, signing identities and the selected Windows packaging route.
 These credentials belong in release infrastructure, never in this document.
 
