@@ -68,8 +68,8 @@ issue-only. These items do not authorize another release.
   are outside scope. Native archive display, custom storage selection and guarded
   Claude Code setup passed with isolated test data. Native testing also caught
   and fixed a hidden process after keyboard Quit and a reused port suggestion.
-  The current local check passes 395 tests with seven expected skips. Remaining
-  work includes the other provider helpers, repair/disconnect, enrolled resource
+  The current local check passes 395 tests with seven expected skips. Code commit
+  `dfbb8ec` also passed desktop CI on all three platforms. Remaining work includes the other provider helpers, repair/disconnect, enrolled resource
   and native-provider qualification, signed distribution and API-dependent screens.
   See the desktop plan for measured progress. Owner API features depend on server issues 7–10.
 
