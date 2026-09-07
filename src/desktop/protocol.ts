@@ -26,6 +26,7 @@ export const desktopInstanceSchema = z.strictObject({
   workingDirectory: z.string().min(1).max(4096),
   enabled: z.boolean(),
   createdAt: z.iso.datetime(),
+  source: z.literal("cli").optional(),
 });
 export type DesktopInstance = z.infer<typeof desktopInstanceSchema>;
 
@@ -33,6 +34,7 @@ const selected = { instanceId };
 const commandSchema = z.discriminatedUnion("type", [
   ...ownerCommands,
   z.strictObject({ type: z.literal("snapshot") }),
+  z.strictObject({ type: z.literal("attach_cli") }),
   z.strictObject({ type: z.literal("set_appearance"), appearance: appearanceSchema }),
   z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),
   z.strictObject({ type: z.literal("set_notifications"), enabled: z.boolean() }),
@@ -104,6 +106,12 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type DesktopCommand = z.infer<typeof commandSchema>;
+export const workerCommandSchema = z.discriminatedUnion("type", [
+  ...commandSchema.options,
+  z.strictObject({ type: z.literal("external_process"), ...selected }),
+  z.strictObject({ type: z.literal("external_stop"), ...selected, processInstanceId: instanceId }),
+]);
+export type WorkerCommand = z.infer<typeof workerCommandSchema>;
 export function parseDesktopCommand(value: unknown): DesktopCommand {
   return commandSchema.parse(value);
 }
@@ -114,12 +122,13 @@ export interface GatewaySnapshot {
   readonly endpoint?: string;
   readonly error?: string;
   readonly startedAt?: string;
+  readonly stopReason?: "handoff";
 }
 
 export const workerRequestSchema = z.strictObject({
   protocol: z.literal(DESKTOP_PROTOCOL),
   requestId: instanceId,
-  command: commandSchema,
+  command: workerCommandSchema,
 });
 
 export const workerInitSchema = z.strictObject({

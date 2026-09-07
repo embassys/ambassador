@@ -100,6 +100,13 @@ process.on("message", (raw: unknown) => {
         await current.start();
         result = current.snapshot();
         break;
+      case "external_process":
+        result = await current.externalProcess();
+        break;
+      case "external_stop":
+        await current.stopExternal(command.processInstanceId);
+        result = current.snapshot();
+        break;
       case "stop":
         await current.stop();
         result = current.snapshot();

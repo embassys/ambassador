@@ -3,12 +3,41 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { capabilityForKind } from "../src/agent-capabilities.js";
 import { CentralEnrollmentClient, CentralEnrollmentError } from "../src/central-enrollment.js";
-import { DeliveryProfileStore } from "../src/delivery-profile.js";
+import { createDeliveryProfile, DeliveryProfileStore } from "../src/delivery-profile.js";
 import { parseDesktopCommand } from "../src/desktop/protocol.js";
 import { DesktopRegistration } from "../src/desktop/registration.js";
 import { GatewayIdentity } from "../src/identity.js";
 import { startFakeCentral } from "./support/fake-central.js";
+
+test("CLI registration can finish in the app and app registration can finish in CLI", async (t) => {
+  for (const cliFirst of [true, false]) {
+    const f = await setup(t);
+    const email = `${cliFirst ? "cli" : "app"}-handoff@fixture.test`;
+    const capability = capabilityForKind("claude");
+    assert.ok(capability);
+    const profile = await createDeliveryProfile(
+      capability,
+      { mode: "direct" },
+      f.options.workingDirectory,
+    );
+    let registration = await DesktopRegistration.open(f.options);
+    if (cliFirst) await registration.registerFromTools({ email }, profile);
+    else await registration.register({ email, executor: "claude" });
+    registration = await DesktopRegistration.open(f.options);
+    const count = f.central.requests().length;
+    await registration.registerFromTools({ email }, profile);
+    assert.equal(f.central.requests().length, count);
+    await assert.rejects(
+      registration.verifyFromTools({ email: "wrong@fixture.test", code: "123456" }),
+    );
+    if (cliFirst) await registration.verify(f.central.verificationCode(email));
+    else await registration.verifyFromTools({ email, code: f.central.verificationCode(email) });
+    assert.equal(registration.snapshot().phase, "registered");
+    assert.equal(f.options.identity.enrollment.email, email);
+  }
+});
 
 async function setup(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "embassys-registration-"));

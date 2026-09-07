@@ -115,6 +115,7 @@ export interface GatewayApplicationOptions {
   readonly log?: VerboseLogger;
   readonly visibleTranscriptPath?: string;
   readonly desktopRegistrationPath?: string;
+  readonly toolRegistrationPath?: string;
   readonly onDesktopNotification?: (event: LocalNotification) => void;
 }
 
@@ -412,6 +413,17 @@ export async function openGatewayApplication(
     nowSeconds,
   });
   const guidedRegistration = new GuidedRegistration({
+    ...(options.desktopRegistrationPath || options.toolRegistrationPath
+      ? {
+          registerPrepared: (
+            profile: DeliveryProfile,
+            arguments_: { email: string; display_name?: string },
+          ) => {
+            if (!desktopRegistration) throw new Error("Registration state is unavailable.");
+            return desktopRegistration.registerFromTools(arguments_, profile);
+          },
+        }
+      : {}),
     profileStore,
     webhookSecretStore,
     workingDirectory: options.workingDirectory,
@@ -606,7 +618,8 @@ export async function openGatewayApplication(
             ? "incoming"
             : message.payload.type === "action_response"
               ? "result"
-              : message.payload.type === "permission_outcome"
+              : message.payload.type === "permission_outcome" ||
+                  message.payload.type === "permission_revoked"
                 ? "permission"
                 : undefined;
         if (kind && message.id) {
@@ -774,19 +787,28 @@ export async function openGatewayApplication(
         });
         let result: Record<string, unknown>;
         if (!identity.enrolled) {
-          if (desktopRegistration && REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name))
+          if (
+            options.desktopRegistrationPath &&
+            REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name)
+          )
             throw new LocalMcpToolError("registration_in_app");
           switch (name) {
             case "register_agent":
               result = await guidedRegistration.register(arguments_, clientInfo, signal);
               break;
             case "resend_verification":
-              result = await enrollment.resend(arguments_, signal);
+              result = desktopRegistration
+                ? await desktopRegistration.resendFromTools(arguments_)
+                : await enrollment.resend(arguments_, signal);
               break;
             case "verify_email":
               await loadProfile();
-              result = await identity.enroll(() => enrollment.verify(arguments_, signal));
-              await enableEnrolledIdentity();
+              if (desktopRegistration)
+                result = await desktopRegistration.verifyFromTools(arguments_);
+              else {
+                result = await identity.enroll(() => enrollment.verify(arguments_, signal));
+                await enableEnrolledIdentity();
+              }
               break;
             default:
               if (
@@ -881,9 +903,10 @@ export async function openGatewayApplication(
   try {
     const localControlSecret = await localControlSecretStore.createOrLoad();
     identity = await GatewayIdentity.open(store, nowSeconds);
-    if (options.desktopRegistrationPath)
+    const registrationPath = options.desktopRegistrationPath ?? options.toolRegistrationPath;
+    if (registrationPath)
       desktopRegistration = await DesktopRegistration.open({
-        path: options.desktopRegistrationPath,
+        path: registrationPath,
         profileStore,
         workingDirectory: options.workingDirectory,
         identity,

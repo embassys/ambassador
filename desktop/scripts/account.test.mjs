@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData} from './src/account.tsx'; export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = snapshot => renderToStaticMarkup(createElement(Account, {snapshot,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData} from './src/account.tsx'; import {Navigation} from './src/navigation.tsx'; export const nav = page => renderToStaticMarkup(createElement(Navigation,{page,select:()=>{}})); export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -22,8 +22,18 @@ await build({
   },
   jsx: "automatic",
 });
-const { view, account } = await import(pathToFileURL(join(root, "account.mjs")).href);
+const { view, account, nav } = await import(pathToFileURL(join(root, "account.mjs")).href);
 test.after(() => rm(root, { recursive: true, force: true }));
+
+test("navigation has four sections and keeps device settings under Account", () => {
+  const html = nav("diagnostics");
+  assert.equal((html.match(/<button/gu) || []).length, 4);
+  assert.match(html, /Requests/);
+  assert.match(html, /Permissions/);
+  assert.match(html, /Messages/);
+  assert.match(html, /aria-current="page"[^>]*>.*Account/);
+  assert.doesNotMatch(html, /Registration|Diagnostics|Workspace/);
+});
 
 test("account requests escape agent text, preserve choice labels and offer no decision buttons", () => {
   const html = view({
@@ -78,7 +88,10 @@ test("owner sign-in form is separate from local agent registration and sign-out"
   assert.doesNotMatch(opening, /<form|service is unavailable/);
   const initial = account({ context: "context", status: "signed_out" });
   assert.match(initial, /Send sign-in code/);
-  assert.match(initial, /Signing out keeps local servers running/);
+  assert.match(
+    account({ context: "context", status: "signed_in" }),
+    /Signing out keeps local servers running/,
+  );
   assert.doesNotMatch(initial, /type="password"|access_token|refresh_token/);
   const waiting = account({
     context: "context",
@@ -89,4 +102,16 @@ test("owner sign-in form is separate from local agent registration and sign-out"
   assert.match(waiting, /autocomplete="one-time-code"/iu);
   assert.match(waiting, /Resend in 60s/);
   assert.match(waiting, /If .*owner@fixture.test.* has an Embassys agent/);
+});
+
+test("primary account views have one purpose and redirect sign-in to Account", () => {
+  const signedOut = account({ context: "context", status: "signed_out" }, "requests");
+  assert.match(signedOut, /Sign in/);
+  assert.doesNotMatch(signedOut, /<form|Account view|name="account-tab"/);
+  const signedIn = account(
+    { context: "context", status: "signed_in", email: "owner@fixture.test" },
+    "permissions",
+  );
+  assert.match(signedIn, /Shared by you|Shared with you/);
+  assert.doesNotMatch(signedIn, /Sign out|name="account-tab"/);
 });

@@ -10,6 +10,10 @@ const additional = new Set([
   "visible-transcripts.test.js",
   "direct-delivery.test.js",
   "central-agent-permission.test.js",
+  "central-rest.test.js",
+  "outbound-actions.test.js",
+  "message-box.test.js",
+  "delivery-prompt.test.js",
 ]);
 const files = (await readdir(directory))
   .filter(

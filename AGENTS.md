@@ -37,6 +37,13 @@ scope on your own.
   releases require approval. Existing CLI flags remain unchanged. Keep desktop
   build dependencies outside the CLI production graph and record exact choices.
 
+- ADR 0069 supersedes the CLI-interoperability exclusion above. The user later
+  requested CLI and app handoffs and the web app's simpler visual language.
+  Open the CLI's fixed installation directly, preserve existing isolated app
+  instances, and share registration progress and visible history. Confirm the
+  exact authenticated process before a handoff, and prevent desktop restart
+  after handing control to the CLI. Keep public CLI arguments unchanged.
+
 - ADR 0065 approves first-time desktop registration through the existing API,
   read-only agent permission/status views and running-app notifications.
   Use private app IPC with an explicitly chosen fixed direct executor; do not

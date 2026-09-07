@@ -727,3 +727,56 @@ SHA-256: `41801f9ec5f56b1bf2c0179406aa7c8a51cb8d75113cf3cf913b72799e7a53f7`.
 Nothing was published. Both disposable test instances and their provider profiles
 were removed after confirming they were stopped. The usual Personal app profile
 was reopened with its server still stopped and its existing logs preserved.
+
+## Shared installation and simpler navigation, 2026-09-07
+
+ADR 0069 implements the owner's later request for CLI/app handoffs. Fresh desktop
+setup uses the default CLI installation. Existing isolated instances stay in place;
+Device settings can add the shared installation. The app and matching CLI build
+share registration progress, identity, pending work, visible history and the
+saved executor directory. Switching hosts does not register again or copy credentials.
+The app includes a copyable start command for its bundled CLI; older installed
+versions are not qualified to read newer development state.
+
+Start, Stop and Clean authenticate any running owner before asking to stop it.
+Cancellation preserves that process. The private stop command cannot be sent by
+the renderer. A stale process ID cannot stop a replacement. When the app hands
+off, it saves the stopped preference and stops its recovery loop, so reopening
+it does not interrupt a running CLI. The existing exclusive Clean review still
+protects identity and unfinished work.
+
+The UI now follows the web app's Requests, Permissions, Messages and Account
+navigation, ink/teal palette and simpler layout. Account snapshots and local agent
+activity have separate labelled views. Device setup, server preferences and logs
+sit under Account. Native window controls, system fonts, appearance preferences,
+keyboard access and high-contrast styling remain. No toolkit or dependency was added.
+
+Current local checks pass 465 tests with seven expected skips, plus 14 desktop
+rendering/parser/artifact tests. The encrypted fixture test verifies registration
+and pending work across CLI → app → CLI, with one registration and one verification.
+The actual packaged process test also passes on this Mac: public CLI startup,
+fresh app attachment, authenticated handoff, persisted stopped preference and
+app restart while the CLI continues running. The packaged runtime and extracted
+DMG checks passed before the final revocation-reader correction; the final
+package and shared-host probe have been rebuilt and repeated afterward.
+
+The live revocation test exposed a permission-list parser that rejected revoked
+records. It now accepts the five statuses in the reviewed server contract and
+classifies the exact revoked-action refusal. Local tests cover stale grants,
+revocation before dispatch, uncertain submissions and explicit new requests.
+The live repeat passed after one delayed email required the supported resend
+flow. Central's actual revocation message reached the gateway, triggered a
+permission notification and appeared as revoked in the permission list. No
+action or automatic permission request was created. The temporary owner session
+was signed out and local test state removed. Evidence is in
+`.build/desktop-design/revocation-live-qualification.json` and the packaged
+handoff checks in `.build/desktop/shared-host-qualification.json`.
+Native Mac checks now pass for the four-section layout, labelled account/local
+views, light/dark appearance, foreground handoff cancellation and confirmation,
+server controls and Clean. Cancel left the CLI running; confirmation shut it
+down cleanly and started the app. Clean removed only a disposable local marker,
+preserved logs, and allowed the matching public CLI to start afterward. Native
+inspection moved Start/Stop above the other preferences and collapsed connection
+and storage details. Both temporary processes stopped before their test profile
+was removed. Evidence is in `.build/desktop-design/native-shared-qualification.json`.
+No server code changed or release was published.

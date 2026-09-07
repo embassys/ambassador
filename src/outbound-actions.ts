@@ -23,6 +23,7 @@ const STATUSES = [
   "dispatch_uncertain",
   "submitted",
   "denied",
+  "revoked",
 ] as const;
 type Status = (typeof STATUSES)[number];
 
@@ -46,6 +47,7 @@ const REJECTION_REASONS = [
   "permission_missing",
   "permission_pending",
   "permission_denied",
+  "permission_revoked",
   "permission_expired",
   "permission_spent",
   "invalid_request",
@@ -253,7 +255,7 @@ export class OutboundActions {
       const previous = this.#store.get(identifier(key));
       if (
         previous !== undefined &&
-        !["denied", "request_rejected", "dispatch_rejected"].includes(previous.status)
+        !["denied", "revoked", "request_rejected", "dispatch_rejected"].includes(previous.status)
       ) {
         if (canonical(previous.payload) !== canonical(payload)) throw new McpContractError();
         return this.#result(
@@ -343,18 +345,30 @@ export class OutboundActions {
           this.#store.remove([identifier(value)]);
         return;
       }
-      if (payload.type !== "permission_outcome" || typeof payload.permission_id !== "string")
+      if (
+        !["permission_outcome", "permission_revoked"].includes(String(payload.type)) ||
+        typeof payload.permission_id !== "string"
+      )
         return;
       const value = this.#store.find(`permission:${payload.permission_id}`);
       if (
         value === undefined ||
         value.permission_id !== payload.permission_id ||
-        value.status !== "awaiting_permission" ||
         typeof payload.grantor_email !== "string" ||
         payload.grantor_email.toLowerCase() !== value.target_email.toLowerCase() ||
         payload.action_type !== value.action_type
       )
         return;
+      if (payload.type === "permission_revoked") {
+        if (
+          payload.status === "revoked" &&
+          payload.granted === false &&
+          ["awaiting_permission", "ready"].includes(value.status)
+        )
+          this.#save({ ...value, status: "revoked" });
+        return;
+      }
+      if (value.status !== "awaiting_permission") return;
       if (payload.granted === false && payload.status === "denied") {
         this.#save({ ...value, status: "denied" });
       } else if (payload.granted === true && payload.status === "granted") {
@@ -385,7 +399,8 @@ export class OutboundActions {
   forMessage(message: CentralMessage): OutboundAction | undefined {
     const payload = message.payload;
     const correlation =
-      payload.type === "permission_outcome" && typeof payload.permission_id === "string"
+      ["permission_outcome", "permission_revoked"].includes(String(payload.type)) &&
+      typeof payload.permission_id === "string"
         ? `permission:${payload.permission_id}`
         : payload.type === "action_response" && typeof payload.call_id === "string"
           ? `call:${payload.call_id}`

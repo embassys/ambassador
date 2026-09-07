@@ -26,6 +26,59 @@ const outcome: CentralMessage = {
     status: "granted",
   },
 };
+const revoked: CentralMessage = {
+  ...outcome,
+  id: "revocation",
+  payload: { ...outcome.payload, type: "permission_revoked", status: "revoked", granted: false },
+};
+
+test("revocation stops undispatched work across restart and ignores stale grants", async (t) => {
+  for (const ready of [false, true]) {
+    const value = await fixture(t);
+    await value.store.request(arguments_);
+    if (ready) {
+      const abort = new AbortController();
+      abort.abort();
+      await assert.rejects(value.store.capture(outcome, abort.signal));
+      assert.equal(value.store.page().items[0]?.value.status, "ready");
+    }
+    await value.store.capture(revoked);
+    value.reopen();
+    await value.store.capture(outcome);
+    assert.equal(value.store.page().items[0]?.value.status, "revoked");
+    assert.equal(value.calls.length, 0);
+    assert.equal(value.requests.length, 1);
+    await value.store.request(arguments_);
+    assert.equal(value.requests.length, 2);
+  }
+});
+
+test("revocation validates its full correlation and never cancels submitted or uncertain work", async (t) => {
+  const value = await fixture(t);
+  await value.store.request(arguments_);
+  for (const mismatch of [
+    { grantor_email: "other@fixture.test" },
+    { permission_id: "other-permission" },
+    { action_type: "other_action" },
+    { granted: true },
+    { status: "granted" },
+  ]) {
+    await value.store.capture({ ...revoked, payload: { ...revoked.payload, ...mismatch } });
+    assert.equal(value.store.page().items[0]?.value.status, "awaiting_permission");
+  }
+  for (const fail of [false, true]) {
+    const submitted = await fixture(t, fail, true);
+    await submitted.store.request(arguments_);
+    await submitted.store.capture(revoked);
+    submitted.reopen();
+    await submitted.store.capture(outcome);
+    assert.equal(submitted.calls.length, 1);
+    assert.equal(
+      submitted.store.page().items[0]?.value.status,
+      fail ? "dispatch_uncertain" : "submitted",
+    );
+  }
+});
 
 async function fixture(t: TestContext, fail = false, granted = false) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-outbound-"));

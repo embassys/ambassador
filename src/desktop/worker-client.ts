@@ -7,10 +7,10 @@ import { desktopLaunchEnvironment } from "./launch-environment.js";
 import { type LocalNotification, localNotificationSchema } from "./notifications.js";
 import {
   DESKTOP_PROTOCOL,
-  type DesktopCommand,
   type DesktopInstance,
   type GatewaySnapshot,
-  parseDesktopCommand,
+  type WorkerCommand,
+  workerCommandSchema,
 } from "./protocol.js";
 
 const snapshotSchema = z.strictObject({
@@ -19,6 +19,7 @@ const snapshotSchema = z.strictObject({
   endpoint: z.string().max(512).optional(),
   error: z.string().max(1000).optional(),
   startedAt: z.iso.datetime().optional(),
+  stopReason: z.literal("handoff").optional(),
 });
 
 interface Pending {
@@ -108,6 +109,7 @@ export class DesktopGatewayClient {
             ...(parsed.data.endpoint === undefined ? {} : { endpoint: parsed.data.endpoint }),
             ...(parsed.data.error === undefined ? {} : { error: parsed.data.error }),
             ...(parsed.data.startedAt === undefined ? {} : { startedAt: parsed.data.startedAt }),
+            ...(parsed.data.stopReason ? { stopReason: parsed.data.stopReason } : {}),
           };
           options.onChange?.(this.snapshot());
           if (message.type === "ready") {
@@ -178,9 +180,9 @@ export class DesktopGatewayClient {
     return this.#ready;
   }
 
-  async request(input: DesktopCommand): Promise<unknown> {
+  async request(input: WorkerCommand): Promise<unknown> {
     if (this.#closed) throw new Error("This server process is closed.");
-    const command = parseDesktopCommand(input);
+    const command = workerCommandSchema.parse(input);
     if (!("instanceId" in command) || command.instanceId !== this.options.instance.id)
       throw new Error("Wrong instance.");
     await this.#ready;

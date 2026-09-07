@@ -5,38 +5,40 @@
   color: var(--text);
   font-size: 13px;
   font-synthesis: none;
-  --text: #242426;
-  --subtle: #68686e;
-  --muted: #737379;
-  --accent: #006be6;
-  --control-accent: #007aff;
-  --control-accent-text: #000;
+  --text: #172423;
+  --subtle: #536763;
+  --muted: #657771;
+  --accent: #087f76;
+  --control-accent: #087f76;
+  --control-accent-text: #fff;
   --panel: #fff;
-  --canvas: #f5f5f7;
-  --sidebar: #ececeeeb;
-  --line: #dedee3;
-  --soft-line: #ededf0;
+  --canvas: #fafcfb;
+  --sidebar: #f2f6f5ee;
+  --line: #dce6e2;
+  --soft-line: #e8efec;
   --field: #fff;
-  --hover: #e2e2e7;
-  --selection: #d7e5f9;
-  --selection-text: #14579e;
-  --shadow: 0 1px 2px #00000009;
+  --hover: #eaf1ee;
+  --selection: #dcefe9;
+  --selection-text: #075f56;
+  --shadow: none;
 }
 :root[data-theme="dark"] {
-  --text: #eeeef0;
-  --subtle: #b0b0b7;
-  --muted: #a0a0a8;
-  --accent: #64abff;
-  --panel: #29292c;
-  --canvas: #1e1e20;
-  --sidebar: #252527ed;
-  --line: #414145;
-  --soft-line: #39393d;
-  --field: #36363a;
-  --hover: #39393f;
-  --selection: #364962;
-  --selection-text: #c0dcff;
-  --shadow: 0 1px 2px #00000024;
+  --text: oklch(0.93 0.004 264);
+  --subtle: oklch(0.78 0.008 264);
+  --muted: oklch(0.67 0.012 264);
+  --accent: oklch(0.79 0.13 195);
+  --control-accent: oklch(0.79 0.13 195);
+  --control-accent-text: oklch(0.16 0.012 264);
+  --panel: oklch(0.21 0.013 264);
+  --canvas: oklch(0.16 0.012 264);
+  --sidebar: oklch(0.18 0.012 264 / 0.95);
+  --line: oklch(0.27 0.014 264);
+  --soft-line: oklch(0.25 0.014 264);
+  --field: oklch(0.24 0.013 264);
+  --hover: oklch(0.27 0.014 264);
+  --selection: oklch(0.27 0.04 195);
+  --selection-text: oklch(0.79 0.13 195);
+  --shadow: none;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
@@ -1222,4 +1224,139 @@ input:not([type="checkbox"]):not([type="radio"]) {
 }
 .account-facts dd {
   margin: 0;
+}
+
+/* Match the web app's restrained layout without changing native window controls. */
+.sidebar {
+  width: 194px;
+  padding-inline: 12px;
+}
+.brand {
+  font-size: 17px;
+  margin-bottom: 32px;
+}
+.brand-mark {
+  width: 27px;
+  height: 25px;
+}
+.nav-item {
+  padding-block: 11px;
+  margin-bottom: 3px;
+}
+.sidebar-bottom {
+  padding-top: 18px;
+}
+.server-link {
+  margin: 0 8px 12px;
+}
+.page-header {
+  border-bottom: 0;
+  padding-top: 24px;
+  margin-bottom: 16px;
+}
+.page-header h1 {
+  font-size: 21px;
+  font-weight: 600;
+}
+.back-link {
+  margin-top: 9px;
+}
+.app-shell > main > :not(.page-header) {
+  max-width: 800px;
+  margin-inline: auto;
+}
+.settings-section {
+  padding: 18px 20px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.settings-section > h3,
+.device-links > h3 {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-row p {
+  max-width: 480px;
+}
+.source-tabs {
+  width: fit-content;
+  margin-bottom: 26px;
+}
+.appearance-control input:checked + span {
+  box-shadow: none;
+  color: var(--selection-text);
+  background: var(--selection);
+}
+.source-tabs span {
+  padding: 6px 13px;
+}
+.simple-empty {
+  padding: 58px 22px;
+  text-align: center;
+}
+.simple-empty h2 {
+  font-size: 19px;
+  font-weight: 550;
+  margin: 0 0 10px;
+}
+.simple-empty p {
+  color: var(--subtle);
+  margin: 0 auto 22px;
+  max-width: 370px;
+  line-height: 1.7;
+}
+.context-line {
+  color: var(--subtle);
+  font-size: 12px;
+  margin: 0 0 20px;
+  overflow-wrap: anywhere;
+}
+.device-links {
+  margin-top: 36px;
+}
+.device-link {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  padding: 16px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.device-link:hover {
+  color: var(--accent);
+}
+.device-link svg {
+  color: var(--muted);
+}
+.account-toolbar {
+  margin: 0 0 20px;
+}
+.account-page .settings-row {
+  padding-top: 0;
+}
+.account-limit {
+  font-size: 11px;
+  line-height: 1.6;
+}
+.account-row {
+  padding-block: 18px;
+}
+.account-row strong {
+  font-weight: 550;
+}
+@media (max-width: 760px) {
+  .sidebar {
+    width: 155px;
+  }
+  .simple-empty {
+    padding-inline: 0;
+  }
+}
+@media (forced-colors: active) {
+  .device-link {
+    border-color: ButtonText;
+  }
 }

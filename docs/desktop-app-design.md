@@ -50,12 +50,12 @@ the public CLI and release authorization remain separate.
 
 | Existing boundary | Proposed desktop boundary |
 | --- | --- |
-| GUI work is outside scope | Embassys replaces the CLI experience and reuses its gateway core |
+| GUI work is outside scope | Embassys provides the desktop experience and shares its gateway core with the CLI |
 | Registration chooses delivery from MCP client identity | App sign-in and explicit owner selection choose a reviewed executor; agent tool calls cannot change it |
 | One default state directory and port | Isolated named instances, each with its own port, data, identity binding and engine version |
 | Human decisions happen through email | Owner-authenticated app decisions and email use one central decision transaction |
 | Provider history stays with the provider | Retain an encrypted archive of visible Ambassador-managed conversation content from the desktop cutover onward |
-| No state migration | Fresh app-owned instances; no CLI import or migration; incompatible state versions are refused |
+| No state migration | ADR 0069 opens the fixed CLI installation directly; additional instances remain isolated; incompatible state versions are refused |
 | No installation/publication tooling changes | Signed desktop installers, bounded agent setup helpers and an update workflow |
 
 Keep exact action schemas, explicit outbound intent, no replay of uncertain
@@ -180,9 +180,15 @@ Expired code, resend cooldown, wrong code, email delivery failure, offline
 verification, lost verification response, expired session and revoked device
 are separate states. Never suggest Clean as the routine recovery for sign-in.
 
-Embassys creates fresh app-owned state. There is no CLI import, credential
-transfer or migration flow. Leave existing CLI and older development-app files
-untouched. Recovering an already registered email without local credentials
+[ADR 0069](adr/0069-shared-cli-and-desktop-installation.md) supersedes the earlier
+exclusion of CLI interoperability. Fresh setup opens the CLI's default installation
+directly. Existing isolated desktop instances remain available; Account → Device
+settings → Use the CLI adds the shared installation without moving their data.
+Only one host runs an installation at a time, with confirmation before stopping
+its authenticated current process. Registration progress, identity, pending work,
+results and the saved executor directory remain in the same files. Use matching
+development builds; the app can copy a command for its bundled CLI. No credential
+transfer or schema migration is involved. Recovering an already registered email without local credentials
 requires central's owner recovery contract; never use Clean to create a replacement
 identity or copy a live database.
 

@@ -1,15 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { AcpSessionStore } from "../acp-session-store.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { GatewayError } from "../errors.js";
 import {
+  type GatewayApplicationOptions,
   type GatewayOverview,
   openGatewayApplication,
   type RunningGatewayApplication,
 } from "../gateway-application.js";
 import { pathsForStateDirectory } from "../gateway-paths.js";
+import { gatewayWorkingDirectory } from "../gateway-working-directory.js";
 import { GatewayIdentity } from "../identity.js";
 import { LocalControlClient } from "../local-control.js";
 import { clearLocalGatewayState } from "../local-state-cleaner.js";
@@ -32,6 +35,10 @@ export interface DesktopGatewayOptions {
   readonly diagnostics?: DiagnosticMode;
   readonly onChange?: (snapshot: GatewaySnapshot) => void;
   readonly onNotification?: (event: LocalNotification) => void;
+  readonly testOverrides?: Pick<
+    GatewayApplicationOptions,
+    "centralOrigin" | "nowSeconds" | "deliveryTargetFactory"
+  >;
 }
 
 export class DesktopGateway {
@@ -42,6 +49,7 @@ export class DesktopGateway {
   #diagnostics: DiagnosticLog | undefined;
   #abort: AbortController | undefined;
   #tail: Promise<unknown> = Promise.resolve();
+  #handedOff = false;
   #cleanPreview: { id: string; lock: ProcessLock; timer: NodeJS.Timeout } | undefined;
 
   constructor(readonly options: DesktopGatewayOptions) {
@@ -69,6 +77,7 @@ export class DesktopGateway {
       if (this.#state.state === "running") return;
       if (this.#cleanPreview) throw new Error("Finish the Clean preview before starting.");
       this.#changed({ id: this.options.id, state: "starting" });
+      this.#handedOff = false;
       try {
         this.#lock = await ProcessLock.acquire(this.#paths.lockPath);
         await mkdir(this.options.workingDirectory, { recursive: true, mode: 0o700 });
@@ -84,7 +93,11 @@ export class DesktopGateway {
         const application = await openGatewayApplication({
           ...this.#paths,
           ...desktopCredentialStores(this.#paths),
-          workingDirectory: await realpath(this.options.workingDirectory),
+          ...this.options.testOverrides,
+          workingDirectory: await gatewayWorkingDirectory(
+            this.#paths.profilePath,
+            await realpath(this.options.workingDirectory),
+          ),
           environment: this.options.environment,
           localMcpPort: this.options.port,
           signal: this.#abort.signal,
@@ -95,6 +108,7 @@ export class DesktopGateway {
             ? { onDesktopNotification: this.options.onNotification }
             : {}),
           onStopRequested: () => {
+            this.#handedOff = true;
             void this.stop();
           },
           onRuntimeNotice: (notice) =>
@@ -169,9 +183,55 @@ export class DesktopGateway {
   stop(): Promise<void> {
     this.#abort?.abort();
     return this.#serial(async () => {
-      this.#changed({ id: this.options.id, state: "stopping" });
+      this.#changed({
+        id: this.options.id,
+        state: "stopping",
+        ...(this.#handedOff ? { stopReason: "handoff" as const } : {}),
+      });
       await this.#close();
-      this.#changed({ id: this.options.id, state: "stopped" });
+      this.#changed({
+        id: this.options.id,
+        state: "stopped",
+        ...(this.#handedOff ? { stopReason: "handoff" as const } : {}),
+      });
+    });
+  }
+
+  externalProcess(): Promise<{ processInstanceId?: string }> {
+    return this.#serial(async () => {
+      if (this.#application || this.#cleanPreview) return {};
+      try {
+        const lock = await ProcessLock.acquire(this.#paths.lockPath);
+        await lock.release();
+        return {};
+      } catch (error) {
+        if (!(error instanceof GatewayError) || error.code !== "daemon_running") throw error;
+      }
+      return {
+        processInstanceId: await (await this.#externalControl()).getProcessInstance(
+          AbortSignal.timeout(15000),
+        ),
+      };
+    });
+  }
+
+  stopExternal(processInstanceId: string): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#application || this.#cleanPreview)
+        throw new Error("This app already owns the installation.");
+      const signal = AbortSignal.timeout(30000);
+      await (await this.#externalControl()).stopProcess(processInstanceId, signal);
+      for (;;) {
+        signal.throwIfAborted();
+        try {
+          const lock = await ProcessLock.acquire(this.#paths.lockPath);
+          await lock.release();
+          return;
+        } catch (error) {
+          if (!(error instanceof GatewayError) || error.code !== "daemon_running") throw error;
+        }
+        await delay(100, undefined, { signal });
+      }
     });
   }
 
@@ -236,6 +296,15 @@ export class DesktopGateway {
     const secret = await desktopCredentialStores(this.#paths).localControlSecretStore.load();
     if (secret === undefined) throw new Error("Local control is unavailable.");
     return new LocalControlClient(endpoint, secret);
+  }
+
+  async #externalControl(): Promise<LocalControlClient> {
+    const secret = await desktopCredentialStores(this.#paths).localControlSecretStore.load();
+    if (secret === undefined)
+      throw new Error(
+        "The running server cannot be identified. Stop it from its terminal before continuing.",
+      );
+    return new LocalControlClient(`http://127.0.0.1:${this.options.port}/mcp`, secret);
   }
 
   sessions(): Promise<unknown> {
