@@ -129,12 +129,15 @@ on `codex/desktop-app`; this is not a release candidate.
   and `embassys-native-history.png`. Configuration success is not a live agent
   conversation or original-chat delivery test.
 - The current full local check passes 395 tests with seven expected skips.
-  Desktop typechecking, packaged build and actual host probe also pass. The new
-  code still needs its branch CI run on all three platforms.
+  Desktop typechecking, packaged build and actual host probe also pass. Code
+  commit `dfbb8ec` passed the desktop tests, package builds and actual host probes
+  on macOS, Windows and Linux in
+  [run 34123765678](https://github.com/embassys/ambassador/actions/runs/34123765678).
+  This does not qualify a native Windows/Linux desktop or provider session.
 
 Next: qualify enrolled resource use and real-provider archive capture, then finish
-connection helpers and their repair/disconnect flows. Owner login/decisions/push still need
-the central contracts. Engine-version selection requires published trusted builds;
+connection helpers and their repair/disconnect flows. Owner login/decisions/push
+still need the central contracts. Engine-version selection requires published trusted builds;
 launch-at-login still needs installed OS-session qualification. Signed installers
 and updates remain to be completed and qualified.
 The current checks are not completion of the full matrix below.
