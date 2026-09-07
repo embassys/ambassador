@@ -75,8 +75,9 @@ issue-only. These items do not authorize another release.
   app, deployed central API and real Claude executor passed exact synthetic result
   and receipt; the first completed turn was seen in the native app and survived
   restart. Live tests found and fixed repeated tool-summary rows and an enrolled
-  identity still showing onboarding. Final native inspection of the second turn
-  awaits an unlocked Mac. A redundant Dock-icon allocation was fixed; the
+  identity still showing onboarding. Native inspection of the second turn passed after unlock,
+  including stopped-server history, light/dark appearance, enlarged layout and
+  keyboard Quit. A redundant Dock-icon allocation was fixed; the
   verified background instance now measures 167.5 MiB and 0.10% of one core.
   Code `8a6c105` passed package builds and actual host probes on macOS, Windows
   and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
