@@ -28,6 +28,7 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 
 | ADR | Decision |
 | --- | --- |
+| [0064](0064-desktop-application.md) | Desktop app, owner controls, conversation archive and isolated instances |
 | [0062](0062-explicit-local-enrollment-context.md) | Explicit local enrollment context independent of permission count |
 | [0063](0063-persistent-openclaw-webhook-peers.md) | Persistent OpenClaw webhook conversations per enrolled requester |
 | [0006](0006-toolchain.md) | Repository toolchain |

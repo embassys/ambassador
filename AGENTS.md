@@ -25,6 +25,15 @@ scope on your own.
 
 ## Project rules
 
+- ADR 0064 is the approved desktop implementation. On 2026-09-07 the user
+  approved the desktop design and plan, Electron with bundled Node, isolated
+  instances, owner controls, visible conversation retention and packaging, and
+  requested implementation. Read docs/desktop-app-design.md and
+  docs/desktop-app-plan.md for the amendments to the older GUI prohibition,
+  history retention and migration rules. API code remains issue-only and new
+  releases require approval. Existing CLI flags remain unchanged. Keep desktop
+  build dependencies outside the CLI production graph and record exact choices.
+
 - ADR 0061 is the user's approved delivery cutover. It supersedes the older
   serial polling, ephemeral control-message custody, separate business tools,
   console-only diagnostics and prohibition on native origin bridges below.

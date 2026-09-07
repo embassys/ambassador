@@ -3,6 +3,11 @@
 Status: accepted target. [Implementation progress](implementation-plan.md) and
 [qualification](qualification.md) identify what has been tested.
 
+[ADR 0064](adr/0064-desktop-application.md) adds the approved desktop target in
+[Desktop app design](desktop-app-design.md). It amends the CLI-only product,
+owner setup, instance isolation and content persistence boundaries below for the
+desktop implementation. The remainder describes the published gateway baseline.
+
 Embassys Ambassador connects a local agent to the Embassys REST service.
 One foreground process owns one enrolled identity and one incoming delivery
 profile. Agents use a local MCP tool to request work, check it, supply missing
@@ -178,7 +183,7 @@ Remote waiting-for-owner progress is not currently published to callers.
 [API follow-ups](central-follow-ups.md) track these issues. No API code change
 is part of this implementation.
 
-GUI development, arbitrary agent commands, general conversations, provider
+Arbitrary agent commands, general conversations, provider
 credential management, central MCP discovery and automatic installation remain
 outside scope. The user authorized the 0.2.19 development release through the
 existing publication workflow, with the limits recorded in ADR 0015.

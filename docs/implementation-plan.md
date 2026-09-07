@@ -56,6 +56,15 @@ issue-only. These items do not authorize another release.
   continues. The current public CLI remains fixed to port 8787 and its default
   state directory; internal test overrides are not a supported user option.
 
+- [ ] Implement the approved desktop app under ADR 0064. The
+  [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
+  agent setup, conversations, approvals, notifications, isolated instances and
+  central API requirements. The [plan](desktop-app-plan.md) defines delivery
+  phases, dependencies and regression/live release gates. The user approved
+  the recommendations and implementation on 2026-09-07. Start with the packaged
+  shell, background lifecycle and isolated instances; owner API features depend
+  on central changes tracked as issues.
+
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.
 
