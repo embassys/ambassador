@@ -1,9 +1,11 @@
-# Desktop app implementation and test plan
+# Embassys app implementation and test plan
 
 Status: approved implementation sequence under [ADR 0064](adr/0064-desktop-application.md).
 
 Date: 2026-09-07. The user authorized implementation and the recommended desktop
-stack. Central implementation, new public CLI flags and release remain separate.
+stack. The user subsequently named the app Embassys and removed CLI import
+and migration from scope. Central implementation, new public CLI flags and
+release remain separate.
 
 ## Progress on 2026-09-07
 
@@ -99,8 +101,39 @@ on `codex/desktop-app`; this is not a release candidate.
   [10](https://github.com/embassys/agent2agent/issues/10). Existing recovery issues
   1–6 remain in scope. No API code changed.
 
-Next: finish native archive and enrolled resource checks, then complete
-connection helpers and deliberate CLI import. Owner login/decisions/push still need
+- Named the app Embassys across native menus, window, tray, package/executable,
+  process labels and startup identity. It creates its own app data. The user
+  removed CLI import and migration from scope; old installations are untouched.
+- Native Mac checks passed for custom storage selection, independent port 8788,
+  saved instance selection and stopped-state persistence. The new-instance form
+  now skips occupied saved ports after a restart. The first suggested port was
+  previously reset to 8788 even when another instance already used it.
+- Opened and captured encrypted archive content in the actual Mac window after
+  restart, using labelled synthetic complete/partial turns. This qualifies the
+  display and offline read path, not a real provider conversation. Test identity
+  and history were removed afterward; no synthetic identity remains enrolled.
+- Fixed native keyboard Quit leaving a hidden host after its window closed.
+  Final termination now waits for a later event-loop turn. Repeated Quit cannot
+  bypass server cleanup. Native Stop followed immediately by keyboard Quit and
+  idle keyboard Quit both exited with no remaining host; regression tests cover
+  deferred exit, repeated requests and failed cleanup.
+- Added guarded Claude Code Connect. The installed CLI writes only a new fixed
+  MCP entry after native review, with a 660000 ms timeout. Conflicting existing
+  entries are refused. Tests cover malformed/oversized/linked configuration,
+  changes during review, expired previews, cancellation, lost command response,
+  false success and preserving unrelated settings. Quit terminates setup work.
+- Native Mac setup in an isolated Claude profile passed Cancel, Connect and a
+  repeat check. The actual saved endpoint/timeout and unrelated settings were
+  verified. Normal provider configuration was untouched. Evidence includes
+  `.build/desktop-design/native-setup-result.json`, `embassys-native-setup.png`
+  and `embassys-native-history.png`. Configuration success is not a live agent
+  conversation or original-chat delivery test.
+- The current full local check passes 395 tests with seven expected skips.
+  Desktop typechecking, packaged build and actual host probe also pass. The new
+  code still needs its branch CI run on all three platforms.
+
+Next: qualify enrolled resource use and real-provider archive capture, then finish
+connection helpers and their repair/disconnect flows. Owner login/decisions/push still need
 the central contracts. Engine-version selection requires published trusted builds;
 launch-at-login still needs installed OS-session qualification. Signed installers
 and updates remain to be completed and qualified.
@@ -122,7 +155,7 @@ server's recovery and owner authorization work as well as the desktop client.
 Deliverables:
 
 - ADRs for the desktop shell/dependencies, owner identity and trust, instance
-  isolation, visible transcript retention, CLI import and desktop distribution.
+  isolation, visible transcript retention and desktop distribution.
 - Clickable screen prototype for onboarding, Attention, request detail,
   Conversations, Permissions, Agents and Diagnostics, including failure states.
 - API issue updates for D1–D8 from the design. Extend issues 1–6 where appropriate;
@@ -205,9 +238,9 @@ scope plus a native installed-client check. Preserve existing tools and settings
 Ask before a provider restart that interrupts active conversations. Show manual
 guidance for missing providers and unsupported clients.
 
-Build CLI import as a distinct operation: exact-instance stop, exclusive lock,
-format/key checks, atomic transfer, identity verification and recovery from an
-interrupted import. Never use Clean to manufacture a new central identity.
+Create fresh Embassys instances. CLI import and migration were removed from
+scope by the user on 2026-09-07. Never use Clean to manufacture a new central
+identity; existing-account recovery still requires the owner API.
 
 Exit: a new and a returning user can reach a working connected agent entirely
 through the app; old grants survive supported recovery; ordinary prompts require
@@ -306,9 +339,9 @@ behavior. No finite suite guarantees every possible edge case.
 | Custody/events | Crash before/after local commit, lost ack, duplicate/out-of-order event, reconnect cursor gap, concurrent devices, owner feed cannot consume execution message, executor transfer fences old receiver |
 | Decisions | App and email race, two windows/devices, exact provider options, expired/revoked/used grant, stale revision, lost response recovered by mutation ID, pending call changed, dead ACP invocation, offline draft never auto-approved |
 | History/results | Replayed stream, partial turn, provider compaction/deletion, unavailable old history, webhook history absent, duplicate badges, one peer across restarts, two peers never merged, viewing does not consume agent result |
-| Storage/clean | Quota full, disk full, malformed ciphertext, missing/locked secret store, import interrupted, unresolved work at Clean, logs preserved, local history delete versus provider delete, schema downgrade refused |
+| Storage/clean | Quota full, disk full, malformed ciphertext, missing/locked secret store, unresolved work at Clean, logs preserved, local history delete versus provider delete, schema downgrade refused |
 | Notifications | Feed/push duplicate, device token rotation, invalid token, DND, denial, no tray, click after sign-out/account switch, expired item, restart on click without automatic execution, no sensitive preview |
-| Updates/export | Invalid update signature, mismatched engine/UI protocol, interrupted migration, shutdown with active work, secret scan of installed artifacts and bundles, partial export, no automatic upload |
+| Updates/export | Invalid update signature, mismatched engine/UI protocol, shutdown with active work, secret scan of installed artifacts and bundles, partial export, no automatic upload |
 | UX/accessibility | Keyboard navigation, focus after update/dialog, screen reader, zoom/high contrast, dark mode, high DPI, long/unicode text, timezone/DST, unambiguous empty/offline/error states |
 
 ## Live acceptance scenarios

@@ -150,8 +150,8 @@ await writeFile(
   join(destination, "package.json"),
   JSON.stringify(
     {
-      name: "ambassador-development",
-      productName: "Ambassador Development",
+      name: "embassys-development",
+      productName: "Embassys",
       author: "Embassys",
       description: "Manage your Embassys agents, requests and local server.",
       version: desktop.version,

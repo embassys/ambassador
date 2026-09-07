@@ -30,7 +30,10 @@ scope on your own.
   instances, owner controls, visible conversation retention and packaging, and
   requested implementation. Read docs/desktop-app-design.md and
   docs/desktop-app-plan.md for the amendments to the older GUI prohibition,
-  history retention and migration rules. API code remains issue-only and new
+  history retention rules. The desktop app is Embassys and replaces the CLI
+  experience. The user removed CLI import and migration from scope on
+  2026-09-07; create fresh app instances and leave old installations untouched.
+  API code remains issue-only and new
   releases require approval. Existing CLI flags remain unchanged. Keep desktop
   build dependencies outside the CLI production graph and record exact choices.
 

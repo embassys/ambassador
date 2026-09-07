@@ -1,4 +1,4 @@
-# Ambassador desktop app
+# Embassys desktop app
 
 Status: accepted for implementation under [ADR 0064](adr/0064-desktop-application.md).
 
@@ -8,8 +8,8 @@ Date: 2026-09-07. Companion: [implementation and test plan](desktop-app-plan.md)
 
 Build a desktop app that lives in the macOS menu bar or Windows/Linux tray,
 with a proper window for requests, conversations, permissions and settings.
-Launching the app starts Ambassador in the background. Closing its window keeps
-it running; **Quit Ambassador** stops it. Users sign in, connect their agents,
+Launching Embassys starts its server in the background. Closing its window keeps
+it running; **Quit Embassys** stops it. Users sign in, connect their agents,
 answer questions and manage the server without opening a terminal.
 
 Reuse the existing TypeScript gateway and its durable workflow engine. Put the
@@ -38,12 +38,12 @@ the public CLI and release authorization remain separate.
 
 | Existing boundary | Proposed desktop boundary |
 | --- | --- |
-| GUI work is outside scope | Desktop is the primary experience; CLI remains an optional developer interface to the same core |
+| GUI work is outside scope | Embassys replaces the CLI experience and reuses its gateway core |
 | Registration chooses delivery from MCP client identity | App sign-in and explicit owner selection choose a reviewed executor; agent tool calls cannot change it |
 | One default state directory and port | Isolated named instances, each with its own port, data, identity binding and engine version |
 | Human decisions happen through email | Owner-authenticated app decisions and email use one central decision transaction |
 | Provider history stays with the provider | Retain an encrypted archive of visible Ambassador-managed conversation content from the desktop cutover onward |
-| No state migration | A deliberate, tested CLI-to-app import and forward-only app schema upgrades |
+| No state migration | Fresh app-owned instances; no CLI import or migration; incompatible state versions are refused |
 | No installation/publication tooling changes | Signed desktop installers, bounded agent setup helpers and an update workflow |
 
 Keep exact action schemas, explicit outbound intent, no replay of uncertain
@@ -56,7 +56,7 @@ pending operation only. It never becomes an instruction to invent another action
 ### Menu and main window
 
 The tray menu contains the active instance name, connection state, number of
-items needing attention, **Open Ambassador**, **Start/Stop server**, and **Quit**.
+items needing attention, **Open Embassys**, **Start/Stop server**, and **Quit**.
 Put Clean in Settings, away from everyday controls. With several instances,
 show each one's state in the menu and make the selected instance explicit.
 
@@ -154,13 +154,11 @@ Expired code, resend cooldown, wrong code, email delivery failure, offline
 verification, lost verification response, expired session and revoked device
 are separate states. Never suggest Clean as the routine recovery for sign-in.
 
-For existing CLI users, offer an explicit **Use this local Ambassador identity**
-flow after stopping the existing instance. Validate identity and keys, transfer
-custody atomically, and retain a rollback record until validation succeeds.
-Never copy a live database or let CLI and app poll under the same credentials.
-Historical provider sessions remain provider-owned; import only verified local
-bindings and supported history. Recovering an already registered email without
-local credentials requires central's recovery contract.
+Embassys creates fresh app-owned state. There is no CLI import, credential
+transfer or migration flow. Leave existing CLI and older development-app files
+untouched. Recovering an already registered email without local credentials
+requires central's owner recovery contract; never use Clean to create a replacement
+identity or copy a live database.
 
 ### Connection buttons
 
@@ -475,7 +473,7 @@ manifest and an owner-initiated installation flow.
 Version 0.2.19 has no desktop IPC protocol or supported instance selectors.
 Do not advertise it as app-managed merely because internal tests can override
 its port. Qualify management from the first compatible engine release onward;
-older binaries require an explicitly reviewed adapter or remain manual installs.
+older binaries are outside the app-managed version set.
 
 Provider configuration is part of isolation. A background executor for Test
 must not load the Production Ambassador endpoint from a global provider config.
@@ -524,8 +522,9 @@ silently change provider settings or install a new executor.
 Download updates in the background, but install after work drains or the owner
 accepts a clearly described interruption. Persist current custody before stopping.
 Keep the previous application artifact for rollback; do not run it against a newer
-database schema unless that combination is explicitly supported. Test migrations
-and restore procedures before enabling automatic updates. No unconditional
+database schema unless that combination is explicitly supported. Refuse
+incompatible state versions. Schema migration is outside this scope; qualify
+interruption and artifact rollback before enabling automatic updates. No unconditional
 application/schema downgrade button.
 
 ## Central API requirements

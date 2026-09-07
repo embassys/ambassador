@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DesktopGateway } from "../src/desktop/gateway.js";
+import { suggestedInstancePort } from "../src/desktop/instance-defaults.js";
 import { DesktopInstances } from "../src/desktop/instances.js";
 import { parseDesktopCommand } from "../src/desktop/protocol.js";
 import { ProcessLock } from "../src/process-lock.js";
@@ -17,6 +18,21 @@ test("desktop IPC rejects unknown commands, paths and unconfirmed destructive in
   assert.throws(() => parseDesktopCommand({ type: "snapshot", token: "secret" }));
   assert.deepEqual(parseDesktopCommand({ type: "snapshot" }), { type: "snapshot" });
   const instanceId = crypto.randomUUID();
+  assert.equal(
+    parseDesktopCommand({ type: "connect_agent", instanceId, provider: "claude_code" }).type,
+    "connect_agent",
+  );
+  assert.throws(() =>
+    parseDesktopCommand({ type: "connect_agent", instanceId, provider: "arbitrary" }),
+  );
+  assert.throws(() =>
+    parseDesktopCommand({
+      type: "connect_agent",
+      instanceId,
+      provider: "claude_code",
+      configurationPath: "/arbitrary",
+    }),
+  );
   assert.throws(() =>
     parseDesktopCommand({
       type: "export_save",
@@ -199,4 +215,16 @@ test("the registry cannot redirect Clean to an unrelated directory", async (t) =
     }),
   );
   await assert.rejects(DesktopInstances.open(directory));
+});
+
+test("new-instance form skips ports used by saved instances after restart", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-port-suggestion-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const registry = await DesktopInstances.open(root);
+  await registry.create({ name: "Personal", port: 8787 });
+  await registry.create({ name: "Test", port: 8788 });
+  await registry.create({ name: "Alternate", port: 8790 });
+  const restored = await DesktopInstances.open(root);
+  assert.equal(suggestedInstancePort(restored.list()), 8789);
+  assert.equal(suggestedInstancePort([]), 8788);
 });

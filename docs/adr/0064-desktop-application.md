@@ -10,12 +10,27 @@ The user approved all recommendations in the desktop design and implementation
 plan, asked to push the documents to main, and authorized implementation. This
 approves the Electron shell with a bundled Node gateway, desktop setup helpers,
 isolated instances, owner sign-in and decisions through new central contracts,
-visible conversation archiving, deliberate CLI import, and desktop packaging.
+visible conversation archiving and desktop packaging. The later scope amendment
+below removes the initially proposed CLI import.
 It does not authorize central code changes or a release.
 
 The accepted detail is in [Desktop app design](../desktop-app-design.md) and
 [Desktop app plan](../desktop-app-plan.md). Implementation status stays in the
 [work plan](../implementation-plan.md); API changes remain issue-only.
+
+## Product name and fresh app state
+
+On 2026-09-07 the user named the desktop app **Embassys** and confirmed that it
+replaces the CLI experience. CLI import, credential transfer and state migration
+are out of scope. Create fresh app-owned instances and leave existing CLI and
+older development-app data untouched. Do not implement a compatibility reader
+or an import screen. Unsupported state versions fail closed.
+
+The private workspace is `@embassys/desktop`. Development packages use the
+Embassys app and executable name, with `com.embassys.desktop.development` as the
+OS identity. The existing gateway package and fixed `ambassador` MCP entry remain
+internal integration names; this does not rename a published release or grant
+permission to publish one.
 
 ## Decision
 
@@ -51,8 +66,8 @@ the agent's unread result. Linux retains running-app delivery and email fallback
 
 ## Implementation boundaries
 
-This amends the previous GUI prohibition, provider-history persistence rule and
-no-migration rule only as specified by the accepted desktop plan. The public CLI
+This amends the previous GUI prohibition and provider-history persistence rule
+only as specified by the accepted desktop plan. Migration remains out of scope. The public CLI
 retains its existing commands and flags until an exact CLI change is approved.
 All current credential, fixed-provider, exact-action, uncertainty and independent
 receiver protections remain in force.
@@ -136,3 +151,29 @@ preview leaves the control unavailable. A login launch opens the background host
 normal launch or a later activation opens the window. No public CLI flag changed.
 See the [Electron login-item contract](https://www.electronjs.org/docs/latest/api/app#appsetloginitemsettingssettings-macos-windows)
 and [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html).
+
+## Guarded Claude Code setup
+
+The first automatic connection helper uses Claude Code's supported
+`mcp add-json --scope user` command with the fixed `ambassador` entry and a
+660000 ms per-server timeout. A native review names the selected instance,
+loopback address and user-wide scope. It does not select the incoming executor,
+register an identity, restart Claude or approve provider tools.
+
+Validate the existing configuration before offering a change. Refuse malformed,
+linked, oversized or conflicting configuration and never replace an existing
+entry. A matching entry needs no write. Recheck the reviewed file before invoking
+Claude and inspect the saved entry after the command, including a lost response.
+Discard command output. Configuration success is separate from a connected
+client or tested executor. Other provider helpers and configure/repair/disconnect
+ownership remain tracked work; unsupported setup stays manual.
+
+This follows the [Claude Code MCP setup and timeout contract](https://code.claude.com/docs/en/mcp).
+The installed CLI preserved the timeout and refused a duplicate entry in an
+isolated temporary profile on 2026-09-07. No dependency was added.
+
+
+Native Quit uses a separate cleanup state. Further quit requests remain prevented
+until workers and setup commands settle. Final termination runs on the next event
+loop turn so an already-resolved cleanup cannot re-enter the same Cocoa terminate
+callback. Failed cleanup restores the controls and reports an error.

@@ -13,7 +13,8 @@ This document defines the current target without a compatibility or migration
 promise.
 
 The approved desktop work in [ADR 0064](adr/0064-desktop-application.md) adds
-private owner controls, isolated instances and deliberate import/migration. Its
+private owner controls and isolated fresh instances in the Embassys app. CLI
+import and migration are outside scope. Its
 [design](desktop-app-design.md) records the new boundaries and required central
 contracts. Those contracts are not deployed API routes; the CLI protocol below
 remains the published baseline until the corresponding implementation is qualified.

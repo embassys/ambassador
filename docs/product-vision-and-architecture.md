@@ -6,7 +6,7 @@ Status: accepted target. [Implementation progress](implementation-plan.md) and
 [ADR 0064](adr/0064-desktop-application.md) adds the approved desktop target in
 [Desktop app design](desktop-app-design.md). It amends the CLI-only product,
 owner setup, instance isolation and content persistence boundaries below for the
-desktop implementation. The remainder describes the published gateway baseline.
+Embassys app. CLI import and migration are outside scope. The remainder describes the published gateway baseline.
 
 Embassys Ambassador connects a local agent to the Embassys REST service.
 One foreground process owns one enrolled identity and one incoming delivery
