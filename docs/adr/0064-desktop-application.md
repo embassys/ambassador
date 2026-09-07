@@ -78,3 +78,31 @@ SHA-256 against Node's published manifest. It rebuilds SQLite under that runtime
 and tests the worker with an isolated executable path. The deployment workspace
 is separate from the source checkout. Production distribution still needs
 signed components and native qualification of the complete runtime matrix.
+
+## Desktop service implementation
+
+The renderer submits only typed instance IDs and bounded query fields. Native
+file dialogs select export and storage paths in the host. Exports prepare a
+five-minute immutable preview, omit bodies by default, redact credentials again,
+and create a new owner-only file. They never upload. Clean acquires the stopped
+instance's lock for the entire identity/count review and confirmation, with a
+five-minute cancellation deadline. Cancel leaves the instance stopped.
+
+Visible transcripts use the existing authenticated encrypted record format in a
+separate `ambassador-visible-transcripts` scope. New stores can opt into HMAC
+session/turn group indexes for bounded pages and retention work. Existing custody
+schemas stay unchanged. Active and settled turn indexes separate recovery and
+retention from body reads. The archive has its own 1 GiB quota and fixed-size gap
+notice; archive failure does not block the receiver or consume workflow results.
+Only live visible text and tool titles/statuses enter capture. Provider replay is
+excluded, and private thought events are excluded from both capture and direct
+update diagnostics. Bodies expire after 30 days; gap metadata expires after 90.
+Reads and local-history deletion never submit an agent receipt or delete provider
+history. Old history is a labelled provider preview when available.
+
+The host retries an unexpectedly exited gateway at 2, 8 and 30 seconds, then
+requires a manual restart. It starts the gateway using saved state; it never
+replays the IPC command that lost its response. Intentional stop cancels recovery.
+Linux package directories omit spaces because the tested Ubuntu sandbox launcher
+split the executable path. The development CI provisions only its bundled
+`chrome-sandbox` helper with the required ownership/mode and keeps sandboxing on.

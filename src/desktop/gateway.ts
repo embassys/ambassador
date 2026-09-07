@@ -1,15 +1,23 @@
-import { constants } from "node:fs";
-import { type FileHandle, lstat, mkdir, open, realpath } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { AcpSessionStore } from "../acp-session-store.js";
+import { EncryptedFileCredentialStore } from "../credential-store.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { GatewayError } from "../errors.js";
-import { openGatewayApplication, type RunningGatewayApplication } from "../gateway-application.js";
+import {
+  CENTRAL_ORIGIN,
+  openGatewayApplication,
+  type RunningGatewayApplication,
+} from "../gateway-application.js";
 import { pathsForStateDirectory } from "../gateway-paths.js";
+import { GatewayIdentity } from "../identity.js";
 import { EncryptedFileLocalControlSecretStore, LocalControlClient } from "../local-control.js";
 import { clearLocalGatewayState } from "../local-state-cleaner.js";
 import { ProcessLock } from "../process-lock.js";
-import { redactVerboseValue } from "../verbose-log.js";
+import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.js";
+import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
+import { readLocalSummary } from "./local-summary.js";
 import type { GatewaySnapshot } from "./protocol.js";
 
 export interface DesktopGatewayOptions {
@@ -30,6 +38,7 @@ export class DesktopGateway {
   #diagnostics: DiagnosticLog | undefined;
   #abort: AbortController | undefined;
   #tail: Promise<unknown> = Promise.resolve();
+  #cleanPreview: { id: string; lock: ProcessLock; timer: NodeJS.Timeout } | undefined;
 
   constructor(readonly options: DesktopGatewayOptions) {
     this.#paths = pathsForStateDirectory(options.stateDirectory);
@@ -54,6 +63,7 @@ export class DesktopGateway {
   start(): Promise<void> {
     return this.#serial(async () => {
       if (this.#state.state === "running") return;
+      if (this.#cleanPreview) throw new Error("Finish the Clean preview before starting.");
       this.#changed({ id: this.options.id, state: "starting" });
       try {
         this.#lock = await ProcessLock.acquire(this.#paths.lockPath);
@@ -71,6 +81,7 @@ export class DesktopGateway {
           localMcpPort: this.options.port,
           signal: this.#abort.signal,
           log: this.#diagnostics.log,
+          visibleTranscriptPath: join(this.options.stateDirectory, "visible-transcripts.sqlite"),
           onStopRequested: () => {
             void this.stop();
           },
@@ -124,6 +135,7 @@ export class DesktopGateway {
   }
 
   async #close(): Promise<void> {
+    await this.#releaseClean();
     this.#abort?.abort();
     const application = this.#application;
     this.#application = undefined;
@@ -151,15 +163,55 @@ export class DesktopGateway {
     });
   }
 
-  clean(): Promise<void> {
+  async #releaseClean(): Promise<void> {
+    const preview = this.#cleanPreview;
+    this.#cleanPreview = undefined;
+    if (preview) {
+      clearTimeout(preview.timer);
+      await preview.lock.release();
+    }
+  }
+
+  prepareClean() {
+    return this.#serial(async () => {
+      if (!["stopped", "error"].includes(this.#state.state))
+        throw new Error("Stop this server before reviewing Clean.");
+      await this.#releaseClean();
+      const lock = await ProcessLock.acquire(this.#paths.lockPath);
+      try {
+        const summary = await readLocalSummary(this.#paths);
+        const id = randomUUID();
+        const timer = setTimeout(() => {
+          void this.#serial(() => this.#releaseClean());
+        }, 300_000);
+        timer.unref();
+        this.#cleanPreview = { id, lock, timer };
+        return { previewId: id, ...summary };
+      } catch (error) {
+        await lock.release();
+        throw error;
+      }
+    });
+  }
+
+  cancelClean(previewId: string): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#cleanPreview?.id === previewId) await this.#releaseClean();
+    });
+  }
+
+  clean(previewId?: string): Promise<void> {
     return this.#serial(async () => {
       if (this.#state.state !== "stopped" && this.#state.state !== "error")
         throw new Error("The server must be stopped before cleaning this instance.");
-      const lock = await ProcessLock.acquire(this.#paths.lockPath);
+      if ((previewId !== undefined || this.#cleanPreview) && previewId !== this.#cleanPreview?.id)
+        throw new Error("The Clean preview expired or does not match.");
+      const lock = this.#cleanPreview?.lock ?? (await ProcessLock.acquire(this.#paths.lockPath));
       try {
         await clearLocalGatewayState(this.options.stateDirectory, this.#paths.lockPath);
       } finally {
-        await lock.release();
+        if (this.#cleanPreview) await this.#releaseClean();
+        else await lock.release();
       }
       this.#changed({ id: this.options.id, state: "stopped" });
     });
@@ -194,42 +246,99 @@ export class DesktopGateway {
     });
   }
 
-  history(sessionId: string): Promise<readonly string[]> {
-    return this.#serial(async () => await (await this.#control()).showSession(sessionId, false));
+  async #offlineArchive<T>(operation: (archive: VisibleTranscripts | undefined) => T): Promise<T> {
+    if (this.#cleanPreview) throw new Error("Finish the Clean review first.");
+    const lock = await ProcessLock.acquire(this.#paths.lockPath);
+    let archive: VisibleTranscripts | undefined;
+    try {
+      const identity = await GatewayIdentity.open(
+        new EncryptedFileCredentialStore(
+          this.#paths.credentialPath,
+          this.#paths.credentialKeyPath,
+          JSON.stringify({ centralOrigin: CENTRAL_ORIGIN }),
+        ),
+      );
+      if (identity.enrolled)
+        archive = new VisibleTranscripts(
+          join(this.options.stateDirectory, "visible-transcripts.sqlite"),
+          identity.localCredential(),
+        );
+      return await operation(archive);
+    } finally {
+      archive?.close();
+      await lock.release();
+    }
   }
 
-  async logs(): Promise<unknown[]> {
-    const path = join(this.options.stateDirectory, "diagnostics", "events.jsonl");
-    let file: FileHandle | undefined;
-    try {
-      const stat = await lstat(path);
-      if (!stat.isFile() || stat.nlink !== 1) throw new Error("Invalid diagnostic file.");
-      file = await open(
-        path,
-        constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW),
-      );
-      const size = (await file.stat()).size;
-      const length = Math.min(size, 256 * 1024);
-      const buffer = Buffer.alloc(length);
-      await file.read(buffer, 0, length, size - length);
-      const lines = buffer.toString("utf8").split("\n");
-      if (size > length) lines.shift();
-      return lines
-        .filter(Boolean)
-        .slice(-100)
-        .flatMap((line) => {
-          try {
-            return [redactVerboseValue(JSON.parse(line))];
-          } catch {
-            return [];
+  history(
+    sessionId: string,
+    after = 0,
+  ): Promise<
+    | TranscriptPage
+    | {
+        source: "provider";
+        lines: readonly string[];
+        warnings: string[];
+        hasMore: false;
+        nextCursor: number;
+      }
+  > {
+    return this.#serial(async () => {
+      const archived = this.#application
+        ? this.#application.visibleHistory(sessionId, after)
+        : await this.#offlineArchive((archive) => archive?.page(sessionId, after));
+      if (archived?.items.length || archived?.hasMore || after > 0)
+        return (
+          archived ?? {
+            source: "archive",
+            items: [],
+            hasMore: false,
+            nextCursor: after,
+            warnings: [],
           }
+        );
+      if (this.#application) {
+        try {
+          return {
+            source: "provider",
+            lines: await (await this.#control()).showSession(sessionId, false),
+            warnings: [
+              ...(archived?.warnings ?? []),
+              "Provider history is a partial preview. It is not saved in the local archive.",
+            ],
+            hasMore: false,
+            nextCursor: 0,
+          };
+        } catch {
+          /* An unavailable provider does not hide the archive notice. */
+        }
+      }
+      return {
+        source: "archive",
+        items: [],
+        hasMore: false,
+        nextCursor: after,
+        warnings: [
+          ...(archived?.warnings ?? []),
+          "No archived content is available for this session. Older history requires the running server and its provider.",
+        ],
+      };
+    });
+  }
+
+  deleteHistory(sessionId: string): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#application) await this.#application.deleteVisibleHistory(sessionId);
+      else {
+        await this.#offlineArchive(async (archive) => {
+          while (archive?.deleteSession(sessionId))
+            await new Promise<void>((resolve) => setImmediate(resolve));
         });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT")
-        return [];
-      throw new Error("Recent diagnostics could not be read.");
-    } finally {
-      await file?.close();
-    }
+      }
+    });
+  }
+
+  async logs(query?: DiagnosticQuery) {
+    return await readDiagnostics(join(this.options.stateDirectory, "diagnostics"), query);
   }
 }

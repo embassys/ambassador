@@ -190,6 +190,22 @@ const app = acp
         },
       });
     }
+    if (scenario === "visible-transcript") {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "private-reasoning-marker" },
+        },
+      });
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "visible-answer-marker" },
+        },
+      });
+    }
     return { stopReason: "end_turn" };
   })
   .onNotification(acp.methods.agent.session.cancel, (context) => {

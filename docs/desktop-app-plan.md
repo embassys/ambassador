@@ -28,22 +28,51 @@ on `codex/desktop-app`; this is not a release candidate.
   bounds, isolated real MCP servers, stop/clean, port and lock conflicts, registry
   races/corruption, storage binding and parent-disconnect shutdown. Desktop
   typechecking also passed.
-- Added a macOS/Windows/Linux CI build and host-probe workflow. These remote jobs
-  and native UI/provider qualification have not yet been observed. The local Mac
-  was locked when computer control attempted to inspect the window. No screenshot,
-  menu-bar display, accessibility or hidden-window performance pass is claimed.
+- The packaged build and real host probe passed on macOS, Windows and Linux in
+  [run 34102535495](https://github.com/embassys/ambassador/actions/runs/34102535495).
+  Earlier failures caught missing Windows author metadata, Ubuntu sandbox-helper
+  permissions and an executable path containing spaces. Linux packages now use
+  a space-free directory; sandboxing remains enabled. This does not qualify a
+  native Windows or Linux user desktop.
+- Native macOS checks observed the window, accessible controls and real server
+  state. Created an isolated instance on port 8788 without stopping the existing
+  service on 8787. Filtered its real events, previewed two records and saved a
+  metadata-only export with the native save dialog. Reviewed Clean's identity
+  and work counts, then cancelled; the instance remained stopped and intact.
+  Closing the window disposed the renderer. Tray interactions, a screen-reader
+  session and resource-budget qualification remain open.
+- Added bounded log filters and pagination across all rotated files, explicit
+  body inclusion, export preview/save and reveal-folder controls. Custom storage
+  uses the native directory picker. Instance creation has a stable request ID;
+  reopening the window retains the selected view and instance.
+- Clean now stops the selected instance before reviewing its identity and stored
+  work. A five-minute exclusive-lock preview prevents changes before confirmation.
+  Cancel releases custody and leaves the server stopped. The dialog distinguishes
+  saved records from unfinished actions and explains the central re-registration
+  limitation. Gateway crash recovery is capped at three attempts, with 2, 8 and
+  30 second delays; it does not resubmit the interrupted command.
+- Added the encrypted visible transcript archive and bounded session pages.
+  Streaming text is normalized, provider replay and private reasoning are excluded,
+  interrupted turns and storage gaps are labelled, and settled bodies expire after
+  30 days. Local history deletion leaves workflow custody and provider history
+  untouched. Provider previews are labelled separately from saved content.
+  Archive capture is now covered with the mock ACP provider; native archive and
+  real-provider qualification still need the updated package.
+- The latest full local check passed 369 tests with seven expected skips, including
+  encrypted group indexes, transcript normalization/Unicode/pagination/retention,
+  quota gaps, stopped-instance history, Clean custody and bounded worker recovery.
+  This check predates the remaining connection and performance work.
 - Opened API issues [7](https://github.com/embassys/agent2agent/issues/7),
   [8](https://github.com/embassys/agent2agent/issues/8),
   [9](https://github.com/embassys/agent2agent/issues/9) and
   [10](https://github.com/embassys/agent2agent/issues/10). Existing recovery issues
   1–6 remain in scope. No API code changed.
 
-Next: inspect and qualify the native window/tray, complete provider crash cleanup
-and shutdown races, then add connection helpers and history/diagnostic services.
-Custom storage selection, engine-version selection, CLI import, automatic agent
-configuration and detailed unresolved-work counts in Clean remain outstanding.
-The initial Clean dialog warns about local work loss but does not count it yet.
-The nine tests are a foundation, not completion of the full matrix below.
+Next: finish native archive and resource checks, close idle workers, then complete
+connection helpers and deliberate CLI import. Owner login/decisions/push still need
+the central contracts. Engine-version selection requires published trusted builds;
+launch-at-login, signed installers and updates remain to be completed and qualified.
+The current checks are not completion of the full matrix below.
 
 ## Delivery sequence
 

@@ -377,6 +377,10 @@ export class OwnerQuestions {
       payload: this.#answerPayload(record),
     };
   }
+  count(): number {
+    return this.#store.count();
+  }
+
   close(): void {
     this.#store.close();
   }

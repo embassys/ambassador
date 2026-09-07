@@ -60,6 +60,7 @@ import { OwnerQuestionError, OwnerQuestions } from "./owner-questions.js";
 import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
 import { SessionMaintenance } from "./session-maintenance.js";
 import { describeVerboseError, traceFetch, type VerboseLogger } from "./verbose-log.js";
+import { type TranscriptPage, VisibleTranscripts } from "./visible-transcripts.js";
 import { WebhookDeliveryError, WebhookDeliveryTarget } from "./webhook-delivery.js";
 import {
   EncryptedFileWebhookSecretStore,
@@ -109,11 +110,14 @@ export interface GatewayApplicationOptions {
   readonly onRuntimeNotice?: (notice: GatewayError) => void;
   readonly onStopRequested?: () => void;
   readonly log?: VerboseLogger;
+  readonly visibleTranscriptPath?: string;
 }
 
 export interface RunningGatewayApplication {
   readonly endpoint: string;
   readonly failure: Promise<Error>;
+  visibleHistory(sessionId: string, after?: number): TranscriptPage | undefined;
+  deleteVisibleHistory(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -351,6 +355,9 @@ export async function openGatewayApplication(
   let humanInputMailbox: HumanInputMailbox | undefined;
   let messageBox: MessageBox | undefined;
   let ownerQuestions: OwnerQuestions | undefined;
+  let transcripts: VisibleTranscripts | undefined;
+  let transcriptMaintenance: NodeJS.Timeout | undefined;
+  let transcriptWarning: string | undefined;
   let relayRun: Promise<void> | undefined;
   let pendingActionInbox: PendingActionInbox | undefined;
   let outboundActions: OutboundActions | undefined;
@@ -443,6 +450,7 @@ export async function openGatewayApplication(
       approvePermission: context.approvePermission,
       nowMs: () => Math.floor(nowSeconds() * 1_000),
       log,
+      ...(transcripts ? { transcript: transcripts } : {}),
     });
     return serializeDirectTarget(direct);
   };
@@ -452,6 +460,32 @@ export async function openGatewayApplication(
     if (activation !== undefined) return activation;
     activation = (async () => {
       const profile = await loadProfile();
+      if (options.visibleTranscriptPath && !transcripts) {
+        try {
+          transcripts = new VisibleTranscripts(
+            options.visibleTranscriptPath,
+            identity.localCredential(),
+            { now: () => nowSeconds() * 1000 },
+          );
+          while (transcripts.recoverInterrupted())
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          transcripts.maintain();
+          transcriptMaintenance = setInterval(() => {
+            try {
+              transcripts?.maintain();
+            } catch {
+              log("transcript.maintenance.failed", {});
+            }
+          }, 60_000);
+          transcriptMaintenance.unref();
+        } catch {
+          transcripts?.close();
+          transcripts = undefined;
+          transcriptWarning =
+            "The local conversation archive is unavailable. Workflow processing continues; check Diagnostics and storage.";
+          log("transcript.open.failed", {});
+        }
+      }
       if (profile.profile.mode === "direct" && acpSessionStore === undefined) {
         acpSessionStore = new AcpSessionStore(options.acpSessionPath);
         sessionMaintenance = new SessionMaintenance({
@@ -798,6 +832,8 @@ export async function openGatewayApplication(
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
     await messageBox?.close();
+    if (transcriptMaintenance) clearInterval(transcriptMaintenance);
+    transcripts?.close();
     ownerQuestions?.close();
     pendingActionInbox?.close();
     actionResultInbox?.close();
@@ -813,6 +849,21 @@ export async function openGatewayApplication(
   return {
     endpoint: local.endpoint,
     failure,
+    visibleHistory: (sessionId, after) =>
+      transcripts?.page(sessionId, after) ??
+      (transcriptWarning
+        ? {
+            source: "archive",
+            items: [],
+            nextCursor: after ?? 0,
+            hasMore: false,
+            warnings: [transcriptWarning],
+          }
+        : undefined),
+    deleteVisibleHistory: async (sessionId) => {
+      while (transcripts?.deleteSession(sessionId))
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    },
     async close() {
       if (closed) return;
       closed = true;
@@ -822,6 +873,8 @@ export async function openGatewayApplication(
       await relayRun?.catch(() => undefined);
       await local.close();
       await messageBox?.close();
+      if (transcriptMaintenance) clearInterval(transcriptMaintenance);
+      transcripts?.close();
       ownerQuestions?.close();
       pendingActionInbox?.close();
       actionResultInbox?.close();

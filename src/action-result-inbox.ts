@@ -148,6 +148,10 @@ export class ActionResultInbox {
     return this.#store.remove(callIds);
   }
 
+  count(): number {
+    return this.#store.count();
+  }
+
   close(): void {
     this.#store.close();
   }

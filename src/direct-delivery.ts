@@ -201,6 +201,10 @@ export interface DirectDeliveryTargetOptions {
   readonly environment: NodeJS.ProcessEnv;
   readonly sessionStore: AcpSessionStore;
   readonly approvePermission: AcpPermissionApproval;
+  readonly transcript?: Pick<
+    import("./visible-transcripts.js").VisibleTranscripts,
+    "begin" | "update" | "finish"
+  >;
   readonly nowMs?: () => number;
   readonly log?: VerboseLogger;
   readonly initializationDeadlineMs?: number;
@@ -436,6 +440,7 @@ export class DirectDeliveryTarget {
   readonly #environment: Record<string, string>;
   readonly #sessionStore: AcpSessionStore;
   readonly #approvePermission: AcpPermissionApproval;
+  readonly #transcript: DirectDeliveryTargetOptions["transcript"];
   readonly #nowMs: () => number;
   readonly #log: VerboseLogger;
   readonly #initializationDeadlineMs: number;
@@ -461,6 +466,7 @@ export class DirectDeliveryTarget {
     this.#workingDirectory = options.workingDirectory;
     this.#sessionStore = options.sessionStore;
     this.#approvePermission = options.approvePermission;
+    this.#transcript = options.transcript;
     this.#nowMs = options.nowMs ?? Date.now;
     this.#log = options.log ?? (() => undefined);
     this.#initializationDeadlineMs =
@@ -604,6 +610,8 @@ export class DirectDeliveryTarget {
     let promptDeadline: PausableDeadline | undefined;
     let observedBytes = 0;
     let replayingHistory = false;
+    let transcriptSequence = 0;
+    let transcriptActive = false;
     let attemptFailure: unknown;
     let cleanupSucceeded = false;
     try {
@@ -661,6 +669,17 @@ export class DirectDeliveryTarget {
           if (replayingHistory) return;
           observedBytes += Buffer.byteLength(JSON.stringify(context.params), "utf8");
           if (observedBytes > this.#maximumOutputBytes) throw new OutputLimitExceeded();
+          if (context.params.update.sessionUpdate === "agent_thought_chunk") return;
+          if (
+            promptDispatched &&
+            transcriptActive &&
+            context.params.sessionId === currentSessionId
+          ) {
+            if (!this.#transcript?.update(messageId, ++transcriptSequence, context.params.update)) {
+              transcriptActive = false;
+              this.#log("transcript.capture.paused", { message_id: messageId });
+            }
+          }
           const commandCount = availableCommandCount(context.params.update);
           if (commandCount !== undefined) {
             this.#log("acp.commands.available", {
@@ -795,6 +814,8 @@ export class DirectDeliveryTarget {
         this.#sessionStore.markMessage(messageId, "dispatched", this.#nowMs());
         const promptSignal = promptDeadline.signal;
         promptDispatched = true;
+        transcriptActive =
+          this.#transcript?.begin(currentSessionId, { ...message, id: messageId }) ?? false;
         this.#log("acp.prompt", { session_id: currentSessionId, message });
         result = await raceSignal(
           withChildFailure(
@@ -821,6 +842,11 @@ export class DirectDeliveryTarget {
       const completedAt = this.#nowMs();
       this.#sessionStore.touch(currentSessionId, completedAt);
       this.#sessionStore.markMessage(messageId, "completed", completedAt);
+      if (promptDispatched)
+        this.#transcript?.finish(
+          messageId,
+          result.stopReason === "end_turn" ? "complete" : "partial",
+        );
       this.#log("acp.prompt.completed", {
         session_id: currentSessionId,
         stop_reason: result.stopReason,
@@ -842,6 +868,7 @@ export class DirectDeliveryTarget {
       }
       currentSessionId = undefined;
     } catch (error) {
+      if (promptDispatched) this.#transcript?.finish(messageId, "partial");
       if (promptDispatched && this.#sessionStore.messageState(messageId) === "dispatched") {
         this.#sessionStore.markMessage(messageId, "uncertain", this.#nowMs());
       }

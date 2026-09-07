@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
 import type {
   DesktopCommand,
   DesktopInstance,
   GatewaySnapshot,
 } from "../../src/desktop/protocol.js";
+import type { TranscriptPage } from "../../src/visible-transcripts.js";
 
 interface AppSnapshot {
   appVersion: string;
@@ -88,14 +90,43 @@ const pages: { id: Page; label: string; description: string }[] = [
 
 function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>();
-  const [page, setPage] = useState<Page>("attention");
-  const [selectedId, setSelectedId] = useState("");
+  const [page, setPage] = useState<Page>(() => {
+    const saved = localStorage.getItem("ambassador.page");
+    return pages.find((item) => item.id === saved)?.id ?? "attention";
+  });
+  const [selectedId, setSelectedId] = useState(
+    () => localStorage.getItem("ambassador.instance") ?? "",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState("");
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [history, setHistory] = useState<string[]>();
-  const [logs, setLogs] = useState<{ id: string; entry: unknown }[]>([]);
+  const [history, setHistory] = useState<
+    | TranscriptPage
+    | {
+        source: "provider";
+        lines: readonly string[];
+        warnings: string[];
+        hasMore: false;
+        nextCursor: number;
+      }
+  >();
+  const [historySession, setHistorySession] = useState("");
+  const [logs, setLogs] = useState<DiagnosticPage>();
+  const [logSearch, setLogSearch] = useState("");
+  const [logFrom, setLogFrom] = useState("");
+  const [logTo, setLogTo] = useState("");
+  const [includeBodies, setIncludeBodies] = useState(false);
+  const [exportPreview, setExportPreview] = useState<{
+    previewId: string;
+    recordCount: number;
+    bytes: number;
+    includeBodies: boolean;
+    warnings: string[];
+  }>();
+  const [exportSaved, setExportSaved] = useState(false);
+  const [chooseLocation, setChooseLocation] = useState(false);
+  const createRequest = useRef(crypto.randomUUID());
   const [setup, setSetup] = useState<Setup>();
   const [newName, setNewName] = useState("");
   const [newPort, setNewPort] = useState("8788");
@@ -123,11 +154,21 @@ function App() {
   const selected =
     snapshot?.instances.find((instance) => instance.id === selectedId) ?? snapshot?.instances[0];
   const id = selected?.id;
+  useEffect(() => {
+    localStorage.setItem("ambassador.page", page);
+    if (id) localStorage.setItem("ambassador.instance", id);
+  }, [page, id]);
 
   useEffect(() => {
     let current = true;
     viewGeneration.current++;
     setHistory(undefined);
+    setExportPreview(undefined);
+    setExportSaved(false);
+    setLogs(undefined);
+    setLogSearch("");
+    setLogFrom("");
+    setLogTo("");
     setBusy(false);
     setError("");
     if (!id || !["conversations", "diagnostics", "agents"].includes(page)) return;
@@ -142,8 +183,7 @@ function App() {
       .then((result) => {
         if (!current) return;
         if (page === "conversations") setSessions(result as Session[]);
-        else if (page === "diagnostics")
-          setLogs((result as unknown[]).map((entry) => ({ id: crypto.randomUUID(), entry })));
+        else if (page === "diagnostics") setLogs(result as DiagnosticPage);
         else setSetup(result as Setup);
       })
       .catch((cause: unknown) => {
@@ -161,7 +201,19 @@ function App() {
     setBusy(true);
     setError("");
     try {
-      await call(command);
+      const result = await call(command);
+      if (
+        command.type === "create" &&
+        result &&
+        typeof result === "object" &&
+        "createdInstanceId" in result &&
+        typeof result.createdInstanceId === "string"
+      ) {
+        setSelectedId(result.createdInstanceId);
+        setNewName("");
+        setNewPort(String(Math.min(command.port + 1, 65535)));
+        createRequest.current = crypto.randomUUID();
+      }
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The operation could not finish.");
@@ -173,6 +225,111 @@ function App() {
     await window.ambassador.copy(text);
     setCopied(key);
     setTimeout(() => setCopied(""), 1800);
+  }
+  async function loadHistory(sessionId: string, after = 0) {
+    if (!id) return;
+    const generation = ++viewGeneration.current;
+    setHistorySession(sessionId);
+    setBusy(true);
+    try {
+      const result = await call({ type: "history", instanceId: id, sessionId, after });
+      if (viewGeneration.current === generation) setHistory(result as NonNullable<typeof history>);
+    } catch {
+      if (viewGeneration.current === generation)
+        setError("This conversation could not be loaded. Check Diagnostics for this instance.");
+    } finally {
+      if (viewGeneration.current === generation) setBusy(false);
+    }
+  }
+  async function deleteHistory() {
+    if (!id || !historySession) return;
+    const generation = viewGeneration.current;
+    setBusy(true);
+    try {
+      const result = (await call({
+        type: "history_delete",
+        instanceId: id,
+        sessionId: historySession,
+      })) as { deleted: boolean };
+      if (generation === viewGeneration.current && result.deleted)
+        setHistory({
+          source: "archive",
+          items: [],
+          warnings: ["Local history deleted. Provider history and pending work remain."],
+          nextCursor: 0,
+          hasMore: false,
+        });
+    } catch {
+      if (generation === viewGeneration.current) setError("Local history could not be deleted.");
+    } finally {
+      if (generation === viewGeneration.current) setBusy(false);
+    }
+  }
+  function logQuery(offset = 0): DiagnosticQuery {
+    return {
+      search: logSearch,
+      offset,
+      limit: 100,
+      ...(logFrom ? { from: new Date(logFrom).toISOString() } : {}),
+      ...(logTo ? { to: new Date(logTo).toISOString() } : {}),
+    };
+  }
+  async function loadLogs(offset = 0) {
+    if (!id) return;
+    const generation = viewGeneration.current;
+    setLoading(true);
+    try {
+      const result = await call({ type: "logs", instanceId: id, query: logQuery(offset) });
+      if (generation === viewGeneration.current) setLogs(result as DiagnosticPage);
+    } catch {
+      if (generation === viewGeneration.current)
+        setError("Could not load logs. Check the selected dates and server.");
+    } finally {
+      if (generation === viewGeneration.current) setLoading(false);
+    }
+  }
+  async function prepareExport() {
+    if (!id) return;
+    const generation = viewGeneration.current;
+    setBusy(true);
+    setExportSaved(false);
+    setExportPreview(undefined);
+    try {
+      const result = await call({
+        type: "export_prepare",
+        instanceId: id,
+        includeBodies,
+        query: logQuery(),
+      });
+      if (generation === viewGeneration.current)
+        setExportPreview(result as NonNullable<typeof exportPreview>);
+    } catch {
+      if (generation === viewGeneration.current)
+        setError("Could not prepare the export. Try a shorter time range.");
+    } finally {
+      if (generation === viewGeneration.current) setBusy(false);
+    }
+  }
+  async function saveExport() {
+    if (!id || !exportPreview) return;
+    const generation = viewGeneration.current;
+    setBusy(true);
+    try {
+      const result = (await call({
+        type: "export_save",
+        instanceId: id,
+        previewId: exportPreview.previewId,
+      })) as { saved: boolean };
+      if (generation === viewGeneration.current && result.saved) {
+        setExportSaved(true);
+        setExportPreview(undefined);
+      }
+    } catch {
+      if (generation === viewGeneration.current)
+        setError("Could not save. Prepare a fresh export and choose a new filename.");
+    } finally {
+      if (generation === viewGeneration.current) setBusy(false);
+    }
   }
   const running = selected?.runtime.state === "running";
   const endpoint = selected ? `http://127.0.0.1:${selected.port}/mcp` : "";
@@ -390,8 +547,8 @@ function App() {
                 <div className="quiet-note">
                   <Icon name="conversations" size={18} />
                   <span>
-                    These are Ambassador-managed sessions. Provider history may be a partial
-                    preview.
+                    Visible text is saved for 30 days. Tool summaries are included; private
+                    reasoning is excluded. Older provider history may be a partial preview.
                   </span>
                 </div>
                 {loading ? (
@@ -410,30 +567,8 @@ function App() {
                           type="button"
                           className="session-row"
                           key={item.session_id}
-                          onClick={() => {
-                            if (id) {
-                              const generation = ++viewGeneration.current;
-                              setBusy(true);
-                              void call({
-                                type: "history",
-                                instanceId: id,
-                                sessionId: item.session_id,
-                              })
-                                .then((result) => {
-                                  if (viewGeneration.current === generation)
-                                    setHistory(result as string[]);
-                                })
-                                .catch(() => {
-                                  if (viewGeneration.current === generation)
-                                    setError(
-                                      "Start the server and check the provider to load this history.",
-                                    );
-                                })
-                                .finally(() => {
-                                  if (viewGeneration.current === generation) setBusy(false);
-                                });
-                            }
-                          }}
+                          onClick={() => void loadHistory(item.session_id)}
+                          aria-pressed={historySession === item.session_id}
                         >
                           <strong>{item.agent_kind}</strong>
                           <small>{item.session_id.slice(0, 16)}…</small>
@@ -445,7 +580,71 @@ function App() {
                       {busy ? (
                         "Loading conversation…"
                       ) : history ? (
-                        <pre>{history.join("\n")}</pre>
+                        <>
+                          <p className="body-note">
+                            {history.source === "archive"
+                              ? "Saved by Ambassador"
+                              : "Provider preview"}
+                          </p>
+                          {history.warnings.map((warning) => (
+                            <p className="quiet-note" key={warning}>
+                              {warning}
+                            </p>
+                          ))}
+                          {history.source === "provider" ? (
+                            <pre>{history.lines.join("\n")}</pre>
+                          ) : (
+                            history.items.map((item) =>
+                              item.kind === "turn" ? (
+                                <div className="turn-marker" key={item.id}>
+                                  <strong>{item.actionType}</strong>
+                                  <span>
+                                    {item.status === "recording"
+                                      ? "In progress or interrupted"
+                                      : item.status}
+                                  </span>
+                                  <time>{new Date(item.createdAt).toLocaleString()}</time>
+                                  {item.reason && <p>{item.reason}</p>}
+                                </div>
+                              ) : item.role === "user" || item.role === "tool" ? (
+                                <details className="transcript-detail" key={item.id}>
+                                  <summary>
+                                    {item.role === "user" ? "Incoming request" : "Tool activity"}
+                                  </summary>
+                                  <pre>{item.text}</pre>
+                                </details>
+                              ) : (
+                                <div className="transcript-message" key={item.id}>
+                                  {item.text}
+                                </div>
+                              ),
+                            )
+                          )}
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => void loadHistory(historySession)}
+                            >
+                              First page
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={!history.hasMore}
+                              onClick={() => void loadHistory(historySession, history.nextCursor)}
+                            >
+                              Next page
+                            </button>
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => void deleteHistory()}
+                            >
+                              Delete local history…
+                            </button>
+                          </div>
+                        </>
                       ) : (
                         <p>Select a session to read the available history.</p>
                       )}
@@ -484,65 +683,163 @@ function App() {
                   </div>
                 </div>
                 <div className="section-title">
-                  <h3>Recent events</h3>
+                  <h3>Events</h3>
                   <button
                     type="button"
                     className="text-button"
+                    disabled={busy}
                     onClick={() => {
-                      if (id)
-                        void call({ type: "logs", instanceId: id })
-                          .then((result) =>
-                            setLogs(
-                              (result as unknown[]).map((entry) => ({
-                                id: crypto.randomUUID(),
-                                entry,
-                              })),
-                            ),
-                          )
-                          .catch(() => setError("Could not refresh logs."));
+                      if (id) void mutate({ type: "reveal_logs", instanceId: id });
                     }}
                   >
-                    Refresh
+                    Open log folder
                   </button>
                 </div>
+                <form
+                  className="log-filters"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void loadLogs();
+                  }}
+                >
+                  <label>
+                    Search events or request IDs
+                    <input
+                      value={logSearch}
+                      maxLength={128}
+                      onChange={(event) => setLogSearch(event.target.value)}
+                      placeholder="Request ID, action or error"
+                    />
+                  </label>
+                  <label>
+                    From
+                    <input
+                      type="datetime-local"
+                      value={logFrom}
+                      onChange={(event) => setLogFrom(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Until
+                    <input
+                      type="datetime-local"
+                      value={logTo}
+                      onChange={(event) => setLogTo(event.target.value)}
+                    />
+                  </label>
+                  <button type="submit" className="secondary" disabled={loading}>
+                    Apply
+                  </button>
+                </form>
                 <div className="quiet-note">
-                  Development logs contain request and response bodies with credentials removed.
-                  Showing the latest 100 records.
+                  Development logs retain request and response bodies with credentials removed.
+                  Times use your local timezone.
                 </div>
+                {logs?.warnings.map((warning) => (
+                  <p className="quiet-note" key={warning}>
+                    {warning}
+                  </p>
+                ))}
                 {loading ? (
-                  <p>Loading diagnostics…</p>
+                  <p role="status">Loading diagnostics…</p>
                 ) : (
                   <div className="log-list">
-                    {logs.length ? (
-                      logs.map(({ entry, id: recordId }) => {
-                        const record = entry as {
-                          timestamp?: string;
-                          event?: string;
-                          data?: unknown;
-                        };
-                        return (
-                          <details key={recordId}>
-                            <summary>
-                              <time>
-                                {record.timestamp
-                                  ? new Date(record.timestamp).toLocaleTimeString()
-                                  : ""}
-                              </time>
-                              <span>{record.event ?? "Event"}</span>
-                            </summary>
-                            <pre>{JSON.stringify(record.data ?? {}, null, 2)}</pre>
-                          </details>
-                        );
-                      })
+                    {logs?.records.length ? (
+                      logs.records.map((record) => (
+                        <details key={record.id}>
+                          <summary>
+                            <time>{new Date(record.timestamp).toLocaleString()}</time>
+                            <span>{record.event}</span>
+                          </summary>
+                          <pre>{JSON.stringify(record.data ?? {}, null, 2)}</pre>
+                        </details>
+                      ))
                     ) : (
                       <Empty
                         icon="diagnostics"
-                        title="No recent events"
-                        text="Start the server to record local activity."
+                        title="No matching events"
+                        text="Try another filter, or start the server to record activity."
                       />
                     )}
                   </div>
                 )}
+                <div className="section-title">
+                  <p className="body-note">
+                    {logs?.total ?? 0} matching events. Showing up to 100 per page.
+                  </p>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={loading}
+                      onClick={() => void loadLogs()}
+                    >
+                      Newest
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={loading || !logs?.hasMore}
+                      onClick={() => void loadLogs(logs?.nextOffset)}
+                    >
+                      Older events
+                    </button>
+                  </div>
+                </div>
+                <section className="settings-section">
+                  <h3>Export diagnostics</h3>
+                  <p className="body-note">
+                    Exports use your current search and time range. Nothing is uploaded.
+                  </p>
+                  <label className="check-label">
+                    <input
+                      type="checkbox"
+                      checked={includeBodies}
+                      onChange={(event) => {
+                        setIncludeBodies(event.target.checked);
+                        setExportPreview(undefined);
+                      }}
+                    />{" "}
+                    Include request and response bodies
+                  </label>
+                  <p className="body-note">
+                    Credentials are always removed. Bodies can contain personal messages and action
+                    results.
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void prepareExport()}
+                  >
+                    Preview export
+                  </button>
+                  {exportPreview && (
+                    <div className="export-preview" role="status">
+                      <strong>
+                        {exportPreview.recordCount} events · {Math.ceil(exportPreview.bytes / 1024)}{" "}
+                        KiB
+                      </strong>
+                      <p>
+                        {exportPreview.includeBodies
+                          ? "Includes redacted request and response bodies."
+                          : "Event metadata only. Request and response bodies are omitted."}
+                      </p>
+                      {exportPreview.warnings.map((warning) => (
+                        <p key={warning}>{warning}</p>
+                      ))}
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => void saveExport()}
+                      >
+                        Save export…
+                      </button>
+                    </div>
+                  )}
+                  {exportSaved && <p role="status">Export saved.</p>}
+                </section>
               </>
             )}
             {page === "settings" && (
@@ -578,14 +875,16 @@ function App() {
                         disabled={busy}
                         onClick={() =>
                           void mutate({
-                            type: running || selected.runtime.state === "error" ? "stop" : "start",
+                            type: running ? "stop" : "start",
                             instanceId: selected.id,
                           })
                         }
                       >
-                        {running || selected.runtime.state === "error"
+                        {running
                           ? "Stop server"
-                          : "Start server"}
+                          : selected.runtime.state === "error"
+                            ? "Retry start"
+                            : "Start server"}
                       </button>
                     </div>
                     <div className="settings-row">
@@ -641,14 +940,23 @@ function App() {
                     className="create-form"
                     onSubmit={(event) => {
                       event.preventDefault();
-                      void mutate({ type: "create", name: newName, port: Number(newPort) });
+                      void mutate({
+                        type: "create",
+                        requestId: createRequest.current,
+                        name: newName,
+                        port: Number(newPort),
+                        chooseLocation,
+                      });
                     }}
                   >
                     <label>
                       Name
                       <input
                         value={newName}
-                        onChange={(event) => setNewName(event.target.value)}
+                        onChange={(event) => {
+                          setNewName(event.target.value);
+                          createRequest.current = crypto.randomUUID();
+                        }}
                         required
                         maxLength={80}
                         placeholder="Development"
@@ -661,7 +969,10 @@ function App() {
                         min={1024}
                         max={65535}
                         value={newPort}
-                        onChange={(event) => setNewPort(event.target.value)}
+                        onChange={(event) => {
+                          setNewPort(event.target.value);
+                          createRequest.current = crypto.randomUUID();
+                        }}
                         required
                       />
                     </label>
@@ -673,6 +984,17 @@ function App() {
                       Create instance
                     </button>
                   </form>
+                  <label className="check-label">
+                    <input
+                      type="checkbox"
+                      checked={chooseLocation}
+                      onChange={(event) => {
+                        setChooseLocation(event.target.checked);
+                        createRequest.current = crypto.randomUUID();
+                      }}
+                    />{" "}
+                    Choose where to store this instance
+                  </label>
                 </section>
                 <p className="body-note">
                   Closing the window keeps Ambassador in the menu bar. Quit Ambassador stops its

@@ -17,6 +17,7 @@ import {
   DirectDeliveryTarget,
 } from "../src/direct-delivery.js";
 import type { VerboseLogger } from "../src/verbose-log.js";
+import type { VisibleTranscripts } from "../src/visible-transcripts.js";
 
 const MESSAGE: CentralMessage = {
   id: "message-1",
@@ -53,6 +54,7 @@ async function target(
     sourceEnvironment?: NodeJS.ProcessEnv;
     log?: VerboseLogger;
     permissionApproval?: AcpPermissionApproval;
+    transcript?: Pick<VisibleTranscripts, "begin" | "update" | "finish">;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
@@ -88,6 +90,7 @@ async function target(
     workingDirectory: root,
     environment: options.sourceEnvironment ?? process.env,
     sessionStore,
+    ...(options.transcript ? { transcript: options.transcript } : {}),
     approvePermission: async (request) => {
       permissionRequests.push(request);
       return await (options.permissionApproval?.(request, new AbortController().signal) ??
@@ -135,6 +138,50 @@ test("builds a guarded prompt containing the complete canonical message", () => 
   assert.doesNotMatch(prompt, /submit_action_result/u);
   assert.equal(prompt.endsWith(`${JSON.stringify(MESSAGE, null, 2)}\n\`\`\``), true);
   assert.equal(prompt.match(/complete body marker/gu)?.length, 1);
+});
+
+test("direct delivery archives only the dispatched turn, excluding provider history replay", async (t) => {
+  const events: { type: string; value: unknown }[] = [];
+  const logs: unknown[] = [];
+  const value = await target(t, "visible-transcript", {
+    log: (_event, data) => {
+      logs.push(data);
+    },
+    transcript: {
+      begin: (sessionId, message) => {
+        events.push({ type: "begin", value: { sessionId, message } });
+        return true;
+      },
+      update: (_messageId, _sequence, update) => {
+        events.push({ type: "update", value: update });
+        return true;
+      },
+      finish: (_messageId, status) => {
+        events.push({ type: "finish", value: status });
+        return true;
+      },
+    },
+  });
+  value.sessionStore.create({
+    session_id: "mock-session",
+    agent_kind: "mock",
+    working_directory: value.root,
+    ...(MESSAGE.id ? { central_message_id: MESSAGE.id } : {}),
+    status: "active",
+    created_at_ms: 1,
+    last_used_at_ms: 1,
+  });
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  assert.equal(events[0]?.type, "begin");
+  assert.equal(events.at(-1)?.type, "finish");
+  assert.equal(events.at(-1)?.value, "complete");
+  assert.equal(events.filter((event) => event.type === "begin").length, 1);
+  assert.match(JSON.stringify(events), /visible-answer-marker/u);
+  assert.doesNotMatch(
+    JSON.stringify(events.filter((event) => event.type === "update")),
+    /stored request|stored answer|private-reasoning-marker/u,
+  );
+  assert.doesNotMatch(JSON.stringify(logs), /private-reasoning-marker/u);
 });
 
 test("resumes an active retry and exposes provider history through session commands", async (t) => {

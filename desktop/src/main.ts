@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,14 +12,21 @@ import {
   nativeImage,
   protocol,
   session,
+  shell,
   Tray,
 } from "electron";
+import {
+  prepareSupportExport,
+  type SupportExport,
+  saveSupportExport,
+} from "../../src/desktop/diagnostics.js";
 import { DesktopInstances } from "../../src/desktop/instances.js";
 import {
   type DesktopCommand,
   type DesktopInstance,
   parseDesktopCommand,
 } from "../../src/desktop/protocol.js";
+import { SupervisedGateway } from "../../src/desktop/supervisor.js";
 import { DesktopGatewayClient } from "../../src/desktop/worker-client.js";
 
 app.setName("Ambassador Development");
@@ -31,10 +39,13 @@ const ownDirectory = dirname(fileURLToPath(import.meta.url));
 let window: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let instances: DesktopInstances;
-const workers = new Map<string, DesktopGatewayClient>();
+const workers = new Map<string, SupervisedGateway>();
 let quitting = false;
 let pendingChanges = false;
 let busy = false;
+let exportPreview:
+  | { id: string; instanceId: string; expires: number; data: SupportExport }
+  | undefined;
 
 const runtimeRoot = app.isPackaged
   ? join(process.resourcesPath, "gateway")
@@ -69,10 +80,14 @@ function changed(): void {
   }, 50);
 }
 
-function getWorker(instance: DesktopInstance): DesktopGatewayClient {
+function getWorker(instance: DesktopInstance): SupervisedGateway {
   let worker = workers.get(instance.id);
   if (worker === undefined) {
-    worker = new DesktopGatewayClient({ nodePath, workerPath, instance, onChange: changed });
+    worker = new SupervisedGateway({
+      id: instance.id,
+      create: (onChange) => new DesktopGatewayClient({ nodePath, workerPath, instance, onChange }),
+      onChange: changed,
+    });
     workers.set(instance.id, worker);
   }
   return worker;
@@ -90,7 +105,15 @@ async function stop(instance: DesktopInstance): Promise<void> {
 
 async function execute(input: unknown): Promise<unknown> {
   const command = parseDesktopCommand(input);
-  const mutation = ["start", "stop", "clean", "create"].includes(command.type);
+  const mutation = [
+    "start",
+    "stop",
+    "clean",
+    "create",
+    "export_prepare",
+    "export_save",
+    "history_delete",
+  ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
   try {
@@ -103,33 +126,141 @@ async function execute(input: unknown): Promise<unknown> {
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
   if (command.type === "create") {
-    const created = await instances.create({ name: command.name, port: command.port });
+    let parentDirectory: string | undefined;
+    if (command.chooseLocation) {
+      const selection = await dialog.showOpenDialog({
+        title: "Choose a location for this instance",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (selection.canceled || !selection.filePaths[0]) return snapshot();
+      parentDirectory = selection.filePaths[0];
+    }
+    const created = await instances.create({
+      name: command.name,
+      port: command.port,
+      requestId: command.requestId,
+      ...(parentDirectory ? { parentDirectory } : {}),
+    });
     changed();
     await getWorker(created).request({ type: "start", instanceId: created.id });
-    return snapshot();
+    return { ...snapshot(), createdInstanceId: created.id };
   }
   const instance = instances.list().find((item) => item.id === command.instanceId);
   if (!instance) throw new Error("This instance is no longer available.");
+  if (command.type === "history_delete") {
+    const choice = await dialog.showMessageBox({
+      type: "warning",
+      message: "Delete this local conversation archive?",
+      detail:
+        "Only visible content saved by this app is deleted. Provider history, permissions, pending requests and unread agent results remain. A currently running turn may have a gap until the next request.",
+      buttons: ["Cancel", "Delete local history"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (choice.response !== 1) return { deleted: false };
+    return await getWorker(instance).request(command);
+  }
+  if (command.type === "reveal_logs") {
+    const directory = join(instance.stateDirectory, "diagnostics");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (await shell.openPath(directory)) throw new Error("The log folder could not open.");
+    return { opened: true };
+  }
+  if (command.type === "export_prepare") {
+    exportPreview = undefined;
+    const data = await prepareSupportExport(join(instance.stateDirectory, "diagnostics"), {
+      includeBodies: command.includeBodies,
+      ...(command.query ? { query: command.query } : {}),
+    });
+    const preview = {
+      id: randomUUID(),
+      instanceId: instance.id,
+      expires: Date.now() + 300_000,
+      data,
+    };
+    exportPreview = preview;
+    setTimeout(() => {
+      if (exportPreview === preview) exportPreview = undefined;
+    }, 300_000).unref();
+    const { contents: _contents, ...details } = data;
+    return { previewId: preview.id, ...details };
+  }
+  if (command.type === "export_save") {
+    const preview = exportPreview;
+    if (
+      !preview ||
+      preview.id !== command.previewId ||
+      preview.instanceId !== instance.id ||
+      preview.expires < Date.now()
+    ) {
+      exportPreview = undefined;
+      throw new Error("This preview expired. Prepare a new export.");
+    }
+    const selection = await dialog.showSaveDialog({
+      title: "Save diagnostic export",
+      defaultPath: `ambassador-diagnostics-${new Date().toISOString().replace(/[:.]/gu, "-")}.jsonl`,
+      filters: [{ name: "Diagnostic log", extensions: ["jsonl"] }],
+    });
+    if (selection.canceled || !selection.filePath) return { saved: false };
+    await saveSupportExport(selection.filePath, preview.data);
+    exportPreview = undefined;
+    return { saved: true };
+  }
   if (command.type === "stop") {
     await stop(instance);
     return snapshot();
   }
   if (command.type === "clean") {
-    const choice = await dialog.showMessageBox({
+    const first = await dialog.showMessageBox({
       type: "warning",
-      title: `Clean ${instance.name}?`,
-      message: `Clear local data for ${instance.name}?`,
+      title: `Review ${instance.name} before cleaning`,
+      message: `Stop ${instance.name} to review its local data?`,
       detail:
-        "This stops this instance and removes its local registration, pending work and session records. Logs remain. Central registration and your agent's configuration and history are unchanged. Unsubmitted work may be lost.",
-      buttons: ["Cancel", "Stop and clean"],
+        "The next screen shows its identity and saved work before anything is erased. Cancelling the review leaves this server stopped.",
+      buttons: ["Cancel", "Stop and review"],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
     });
-    if (choice.response !== 1) return snapshot();
+    if (first.response !== 1) return snapshot();
     await stop(instance);
-    await getWorker(instance).request(command);
-    changed();
+    const worker = getWorker(instance);
+    const preview = (await worker.request({
+      type: "clean_preview",
+      instanceId: instance.id,
+    })) as import("../../src/desktop/local-summary.js").LocalSummary & { previewId: string };
+    try {
+      const choice = await dialog.showMessageBox({
+        type: "warning",
+        title: `Clean ${instance.name}?`,
+        message: `Erase local data for ${instance.name}?`,
+        detail: [
+          `Identity: ${preview.enrollment.email ?? "Not registered"}${preview.enrollment.agent_id ? ` · ${preview.enrollment.agent_id}` : ""}`,
+          `Pending incoming actions: ${preview.pendingCalls}`,
+          `Received results still saved: ${preview.receivedResults}`,
+          `Unresolved message deliveries or receipts: ${preview.unresolvedNotifications}`,
+          `Saved outbound requests: ${preview.savedOutboundRequests}`,
+          `Saved owner questions: ${preview.savedOwnerQuestions}`,
+          `Local session records: ${preview.sessionCount}`,
+          "",
+          "Counts can refer to the same request. Saved requests and questions include completed work.",
+          "Local enrollment and work will be removed. Logs, provider configuration and provider history remain. Central registration remains, so Clean may leave you unable to register again until central identity recovery is available.",
+        ].join("\n"),
+        buttons: ["Cancel", "Erase local data"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (choice.response === 1) await worker.request({ ...command, previewId: preview.previewId });
+    } finally {
+      await worker.request({
+        type: "clean_cancel",
+        instanceId: instance.id,
+        previewId: preview.previewId,
+      });
+      changed();
+    }
     return snapshot();
   }
   if (command.type === "start") {
@@ -165,6 +296,8 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
       ],
     };
   }
+  if (["clean_preview", "clean_cancel"].includes(command.type))
+    throw new Error("Clean review is managed by the app.");
   return await getWorker(instance).request(command);
 }
 

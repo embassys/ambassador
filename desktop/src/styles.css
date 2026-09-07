@@ -569,7 +569,8 @@ pre {
   color: #8792a0;
   flex: 1;
 }
-.create-form input {
+.create-form input,
+.log-filters input {
   border: 1px solid #dce3ed;
   border-radius: 6px;
   padding: 8px 10px;
@@ -748,7 +749,8 @@ pre {
   .sidebar select,
   .secondary,
   .danger,
-  .create-form input {
+  .create-form input,
+  .log-filters input {
     background: #262e3b;
     border-color: #394557;
     color: #a8b8d0;
@@ -801,4 +803,76 @@ pre {
   .nav-item.active {
     outline: 2px solid Highlight;
   }
+}
+
+.log-filters {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0;
+}
+.log-filters label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--subtle);
+}
+.log-filters input {
+  min-width: 140px;
+}
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0;
+  font-size: 13px;
+}
+.check-label input {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  accent-color: var(--accent);
+}
+.export-preview {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.turn-marker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 18px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.turn-marker time,
+.turn-marker span {
+  color: var(--subtle);
+}
+.turn-marker p {
+  width: 100%;
+  margin: 0;
+}
+.transcript-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 16px 0;
+}
+.transcript-detail {
+  margin: 12px 0;
+  font-size: 12px;
+}
+.transcript-detail summary {
+  cursor: pointer;
+  color: var(--subtle);
 }

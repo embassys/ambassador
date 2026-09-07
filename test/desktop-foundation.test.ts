@@ -16,6 +16,41 @@ test("desktop IPC rejects unknown commands, paths and unconfirmed destructive in
   assert.throws(() => parseDesktopCommand({ type: "clean", instanceId: crypto.randomUUID() }));
   assert.throws(() => parseDesktopCommand({ type: "snapshot", token: "secret" }));
   assert.deepEqual(parseDesktopCommand({ type: "snapshot" }), { type: "snapshot" });
+  const instanceId = crypto.randomUUID();
+  assert.throws(() =>
+    parseDesktopCommand({
+      type: "export_save",
+      instanceId,
+      previewId: crypto.randomUUID(),
+      path: "/arbitrary",
+    }),
+  );
+  assert.throws(() => parseDesktopCommand({ type: "logs", instanceId, query: { limit: 101 } }));
+  assert.throws(() =>
+    parseDesktopCommand({
+      type: "create",
+      name: "Test",
+      port: 8788,
+      requestId: crypto.randomUUID(),
+      parentDirectory: "/arbitrary",
+    }),
+  );
+  assert.equal(
+    parseDesktopCommand({ type: "logs", instanceId, query: { search: "request", limit: 25 } }).type,
+    "logs",
+  );
+});
+
+test("instance creation retries return the saved instance and reject changed intent", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-desktop-create-retry-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const records = await DesktopInstances.open(root);
+  const input = { requestId: crypto.randomUUID(), name: "Development", port: 18987 };
+  const first = await records.create(input);
+  const restored = await DesktopInstances.open(root);
+  assert.deepEqual(await restored.create(input), first);
+  assert.equal(restored.list().length, 1);
+  await assert.rejects(restored.create({ ...input, port: 18988 }), /different/u);
 });
 
 test("instance records survive restart and reject colliding ports and aliased roots", async (t) => {
