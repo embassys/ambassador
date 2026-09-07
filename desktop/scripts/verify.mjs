@@ -6,13 +6,32 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
-const gateway = join(repository, ".build/desktop/app/gateway");
+const resourceArgument = process.argv.indexOf("--resources");
+const suppliedResources = resourceArgument < 0 ? undefined : process.argv[resourceArgument + 1];
+if (resourceArgument >= 0 && (!suppliedResources || !isAbsolute(suppliedResources)))
+  throw new Error("The package test needs an absolute Resources directory.");
+const packaged = process.argv.includes("--packaged") || !!suppliedResources;
+const resources =
+  suppliedResources ??
+  (packaged
+    ? join(
+        repository,
+        `.build/desktop/packages/Embassys-${process.platform}-${process.arch}`,
+        process.platform === "darwin" ? "Embassys.app/Contents/Resources" : "resources",
+      )
+    : join(repository, ".build/desktop/app"));
+const gateway = join(resources, "gateway");
 const node = join(gateway, "runtime", process.platform === "win32" ? "node.exe" : "node");
-const manifest = JSON.parse(await readFile(join(dirname(gateway), "build-manifest.json"), "utf8"));
+const manifest = JSON.parse(
+  await readFile(
+    join(resources, packaged ? "app/build-manifest.json" : "build-manifest.json"),
+    "utf8",
+  ),
+);
 assert.equal(manifest.node, "24.19.0");
 const probe = spawnSync(
   node,
@@ -37,6 +56,7 @@ assert.equal(probe.status, 0, probe.stderr);
 const resolve = createRequire(join(gateway, "package.json"));
 assert.ok(resolve.resolve("@agentclientprotocol/sdk"));
 assert.ok(resolve.resolve("@agentclientprotocol/claude-agent-acp/dist/index.js"));
+assert.ok(resolve.resolve("@agentclientprotocol/codex-acp/dist/index.js"));
 
 const portProbe = createServer();
 await new Promise((resolve) => portProbe.listen(0, "127.0.0.1", resolve));

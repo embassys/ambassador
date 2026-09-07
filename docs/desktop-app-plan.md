@@ -520,6 +520,58 @@ resource decisions. D4/D5 block a reliable production workflow. D6 blocks comple
 permission history/revocation. D7 blocks native remote push. D8 blocks full result
 validation and remote progress. Preserve these gates even if the UI is finished.
 
+## Local completion pass, 2026-09-07
+
+[ADR 0066](adr/0066-desktop-completion.md) and the
+[distribution guide](desktop-distribution.md) cover the work authorized without
+server changes. Packaging now uses the frozen production lockfile and a hoisted
+dependency tree. Qualification found and fixed absolute links back to the build
+directory and adapter versions resolved outside the lockfile. The extracted Mac
+DMG passes exact inventory, SQLite, adapter-resolution and real MCP worker tests.
+The same archive/portability checks run in all three desktop CI jobs.
+
+The app checks all bundled gateway source files and its app/core/Electron,
+platform, architecture and private protocol before starting. Worker startup also
+checks Node's version. Signing is explicit and fails on missing inputs or failed
+verification. Mac login startup now uses actual signature, Gatekeeper and stapled
+ticket verification; it stays unavailable on this unsigned build. No signing
+identity or update channel is configured, and no artifacts were published.
+
+The full local check passes 425 tests with seven platform skips, plus three
+artifact-tool tests. The packaged Mac host starts and stops its server, preserves
+it through a duplicate launch, and measures 167.6 MiB with 0.20% of one core while
+idle. Live registration through the packaged worker again passes invalid/valid
+code handling, restart, pending/granted permission reads, correlated notification
+IPC and credential redaction. Native form/banner inspection remains unqualified
+while computer control reports the Mac locked.
+
+A repeated live Claude request exposed a model behavior gap: Claude asked for
+confirmation only in its background transcript. The request remained pending.
+The delivery cue now explicitly includes confirmation in `ask_owner`, and the
+initial instructions distinguish a new call ID from a replay. The test driver
+recorded that observed question and an answer for the same call; the original
+five-minute test deadline then stopped the app before a result, so that run is
+not end-to-end success. Prompt guidance is not a guarantee that every model will
+use the tool; preserve this case in subsequent provider qualification.
+
+Remaining work that needs no central change but does need external input:
+
+- Codex/Hermes automatic setup needs the pending explicit approval for
+  smol-toml 1.8.0 and yaml 2.9.0. No parser was installed. Existing manual setup
+  and guarded Claude/OpenClaw helpers remain available.
+- Production log retention awaits the owner's policy decision; development
+  body retention is unchanged.
+- Signed installers, automatic updates and engine-version installation need
+  release certificates, a distribution channel and compatible signed artifacts.
+  Runtime checks alone do not qualify opening newer state with an older engine.
+- Native Mac interaction needs an unlocked desktop; real Windows/Linux and
+  broader provider qualification need those environments. Calendar invitation
+  delivery needs a configured calendar account and consenting test recipient.
+- Hermes native return still lacks a qualified atomic idle-only injection and
+  trusted-origin path. OpenClaw display and Codex first-chat discovery need the
+  remaining native tests. Provider behavior is not central API behavior, but it
+  cannot be marked qualified from a fixture or background log.
+
 ## Remaining owner and release inputs
 
 The shell, architecture, development diagnostics and proposed visible-history

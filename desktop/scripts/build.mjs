@@ -69,6 +69,7 @@ else {
   runtimeSource = join(unpacked, "bin/node");
 }
 await run(process.execPath, [packageManager, "run", "build"]);
+const { engineSourceDigest } = await import("../../dist/desktop/engine.js");
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
 // Keep pnpm's deploy/rebuild state outside the working checkout.
@@ -86,26 +87,16 @@ for (const file of [
   await cp(join(repository, file), join(source, file), { recursive: true });
 }
 const workspace =
-  "packages:\n  - .\nminimumReleaseAge: 1440\nminimumReleaseAgeStrict: true\nblockExoticSubdeps: true\nallowBuilds:\n  better-sqlite3: true\n";
+  "packages:\n  - .\nnodeLinker: hoisted\nminimumReleaseAge: 1440\nminimumReleaseAgeStrict: true\nblockExoticSubdeps: true\nallowBuilds:\n  better-sqlite3: true\n";
 await writeFile(join(source, "pnpm-workspace.yaml"), workspace);
+await cp(source, gateway, { recursive: true, verbatimSymlinks: true });
 await run(
   runtimeSource,
-  [
-    packageManager,
-    "--dir",
-    source,
-    "--filter",
-    "@embassys/ambassador",
-    "deploy",
-    "--legacy",
-    "--prod",
-    gateway,
-  ],
+  [packageManager, "--dir", gateway, "install", "--frozen-lockfile", "--prod", "--ignore-scripts"],
   {
     env: { ...process.env, PATH: `${dirname(runtimeSource)}${delimiter}${process.env.PATH ?? ""}` },
   },
 );
-await writeFile(join(gateway, "pnpm-workspace.yaml"), workspace);
 await mkdir(join(gateway, "runtime"), { recursive: true });
 const runtime = join(gateway, "runtime", platform === "win32" ? "node.exe" : "node");
 await copyFile(runtimeSource, runtime);
@@ -177,9 +168,7 @@ await writeFile(
       platform,
       arch,
       protocol: 1,
-      source: createHash("sha256")
-        .update(await readFile(join(gateway, "dist/desktop/worker.js")))
-        .digest("hex"),
+      source: await engineSourceDigest(join(gateway, "dist")),
       qualification: "Unsigned development build; native qualification pending.",
     },
     null,

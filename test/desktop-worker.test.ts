@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,35 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { DesktopGatewayClient } from "../src/desktop/worker-client.js";
 import { ProcessLock } from "../src/process-lock.js";
+
+test("worker startup rejects an incompatible runtime before accepting commands", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-worker-version-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workerPath = join(root, "fixture.cjs");
+  await writeFile(
+    workerPath,
+    `process.on('message', (message) => {
+    process.send({protocol: 1, type: 'ready', runtime: 'v0.0.0', snapshot: {id: message.instance.id, state: 'stopped'}});
+  }); process.on('disconnect', () => process.exit(0));`,
+  );
+  const client = new DesktopGatewayClient({
+    nodePath: process.execPath,
+    workerPath,
+    expectedRuntime: process.version,
+    instance: {
+      id: randomUUID(),
+      name: "Version probe",
+      port: 19872,
+      stateDirectory: root,
+      workingDirectory: join(root, "workspace"),
+      enabled: false,
+      createdAt: new Date().toISOString(),
+    },
+  });
+  t.after(() => client.close());
+  await assert.rejects(client.ready(), /runtime/);
+  assert.equal(client.snapshot().state, "error");
+});
 
 test("gateway worker completes a private handshake and exits when its parent IPC closes", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-worker-"));
