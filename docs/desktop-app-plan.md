@@ -169,15 +169,18 @@ regression now keeps one evolving summary per tool call, including status-only
 updates and interleaved calls across archive reopening. The second live request
 completed with this change; reopening its encrypted archive confirmed two
 completed tool summaries and the complete final response. Its final native
-visual check is pending because the
-Mac locked. The app also now reads existing enrollment through private local IPC:
+visual check passed after the Mac was unlocked. The actual window displayed
+the second completed turn with two tool summaries. The same response remained
+readable after Stop server. Light/dark switching, enlarged settings layout and
+keyboard Quit also passed. The app also now reads existing enrollment through private local IPC:
 the native Attention view shows the verified agent after restart instead of
 onboarding. Reads never submit a receipt or add another central poller.
 
 Local evidence is under `.build/desktop-design/`: `connections-ui-result.json`,
 `live-app-result.json`, `live-app-repeat-result.json`, `live-app-archive-result.json`,
 `live-app-registered.png`
-and `live-app-first-conversation.png`. These are qualification artifacts, not
+and `live-app-first-conversation.png`, `live-app-final-conversation.png`,
+`live-app-final-offline.png` and `embassys-zoom-settings.png`. These are qualification artifacts, not
 application fixtures. Disposable test addresses and the synthetic phone number
 were used; credentials and email decision tokens are excluded from evidence.
 
@@ -213,8 +216,11 @@ Remaining desktop work:
 
 - Complete Codex and Hermes configuration helpers after the requested parser
   dependency decision; qualify each helper on its supported native systems.
-- Finish the unlocked Mac visual pass, keyboard/zoom checks and final screenshots.
-  Qualify native Windows/Linux appearance, tray behavior and provider setup.
+- Review the owner's request for controls that follow each host platform more
+  closely. Electron provides a web component UI plus native OS integration; a
+  system-widget UI would need a separately approved toolkit prototype. No new
+  toolkit has been selected or installed. Qualify native Windows/Linux appearance,
+  tray behavior and provider setup.
 - Qualify active-provider resource use and native Windows/Linux resource budgets.
 - Integrate owner sign-in, decisions, permissions and push when API issues 7–10
   provide the accepted contracts. Recovery issues 1–6 remain release risks.
