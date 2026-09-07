@@ -151,6 +151,11 @@ restore local data that the owner deleted.
 
 ## Desktop owner account and notifications
 
+The [2026-09-07 source and deployed-schema review](desktop-api-review-2026-09-07.md)
+distinguishes existing first-time agent enrollment and permission reads from the
+missing owner contracts. Legacy approval and OAuth endpoints are not suitable
+substitutes for the owner flow.
+
 The user approved ADR 0064 on 2026-09-07. The desktop engine and shell can be
 built locally; agent enrollment tokens do not authorize the new owner UI.
 The following issues define server work without changing the API here:

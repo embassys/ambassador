@@ -230,6 +230,11 @@ window captures, not renderings of Windows/Linux controls.
 
 Remaining desktop work:
 
+The [2026-09-07 API review](desktop-api-review-2026-09-07.md) confirms existing
+first-time agent registration and agent-scoped permission/status reads. A smaller
+development app flow could use these before owner APIs are ready; this is a
+proposed amendment to owner onboarding, not a completed or approved change.
+
 - Complete Codex and Hermes configuration helpers after the requested parser
   dependency decision; qualify each helper on its supported native systems.
 - Qualify the platform control refinements on native Windows/Linux desktops,
