@@ -1,10 +1,65 @@
 # Current work
 
-The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md)
-and requested implementation, regression coverage and live end-to-end testing.
-The user authorized PR creation, merge and the 0.2.19 development release on
-2026-09-05 after reviewing the remaining limitations. The release retains the
-final artifact and CI gates. API work remains issue-only.
+The 0.2.19 development release is complete. [PR 39](https://github.com/embassys/ambassador/pull/39)
+is merged; publication and artifact verification are recorded in the
+[release notes](https://github.com/embassys/ambassador/releases/tag/v0.2.19).
+The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md),
+implementation, regression coverage and live end-to-end testing, then authorized
+the release on 2026-09-05 with the remaining limitations below.
+
+## Open follow-ups
+
+Captured together at the user's request on 2026-09-07. API work remains
+issue-only. These items do not authorize another release.
+
+- [ ] Central API recovery. Prevent message loss on disconnect, recover accepted
+  submissions whose responses were lost, fix stuck polling, and support
+  credential and identity recovery after expiry or `clean`. This is the biggest
+  remaining reliability risk. Track server work in issues
+  [1](https://github.com/embassys/agent2agent/issues/1),
+  [2](https://github.com/embassys/agent2agent/issues/2),
+  [3](https://github.com/embassys/agent2agent/issues/3) and
+  [4](https://github.com/embassys/agent2agent/issues/4). Local durability cannot
+  recover a message that central consumed before a lost HTTP response.
+- [ ] Codex discovery. Confirm a fresh desktop chat recognizes Embassys without
+  asking for its website or needing a tool hint. Registration, the phone-number
+  exchange and explicit receipt passed; the opening UI still needs observation.
+- [ ] OpenClaw native display. Resolve the duplicate badge and hidden waiting
+  reply seen on idle return. Saved history contains one native answer, and the
+  result remains unread and recoverable. Keep native return experimental and
+  foreground waits the default until the desktop behavior passes a retest.
+- [ ] Calendar invitations. Verify an invitation actually reaches another
+  person using a configured calendar account and consenting test recipient.
+  Availability, local event creation and denial handling passed. Local event
+  creation alone does not prove invitation delivery.
+- [ ] API result contracts and progress. Define and validate action-specific
+  results, and tell callers when the other agent needs owner input. Track remote
+  progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result
+  schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6). Update
+  Ambassador's validation, fixtures and qualification when those contracts exist.
+- [ ] Broader client qualification. Qualify Hermes native return, standalone
+  Claude Chat/Cowork, and each supported real-agent mode on Windows. Hermes
+  native return first needs trusted origin routing and busy-session semantics.
+  Windows CI passing does not qualify every provider; Claude Code desktop and
+  Remote Control evidence does not qualify standalone Claude Chat or Cowork.
+- [ ] Production logging policy. Decide retention before a production rollout.
+  Detailed request/response body logs with credential redaction are approved for
+  development; that approval does not settle the production policy.
+- [ ] Multiple local instances and versions. Add a way to choose a local port,
+  state location and process name so different Ambassador versions can run at
+  the same time. Record the CLI and isolation design in an ADR before writing
+  tests and implementation. Each instance needs separate enrollment,
+  credentials, locks, workflow state, sessions and logs. Route MCP setup,
+  native bridges, session commands and confirmed stop/clean to the selected
+  instance, with Host/Origin checks matching its loopback port. Cover port and
+  state collisions, restart, and stopping or cleaning one instance while another
+  continues. The current public CLI remains fixed to port 8787 and its default
+  state directory; internal test overrides are not a supported user option.
+
+See [central follow-ups](central-follow-ups.md) for server details and
+[client delivery](client-delivery.md) for the current support matrix.
+
+## Implementation and qualification evidence
 
 Implemented:
 
@@ -93,20 +148,6 @@ Current real webhook qualification passes for both OpenClaw and Hermes.
 OpenClaw reuses a requester history across target recreation; Hermes completes
 the owner-question/result flow but its receiver creates a new session for each
 webhook delivery. Hermes direct mode provides Ambassador-managed peer sessions.
-
-Follow-up qualification retained for this development release:
-
-- Confirm the user-operated Codex desktop no longer needs a website/tool hint
-  and displays the returned number. The completed MCP exchange is recorded in
-  [qualification](qualification.md); it does not alone prove the opening UI.
-- Resolve the remaining OpenClaw native-display limitation. The
-  corrected foreground deferral passed a fresh desktop-only test with one
-  visible answer. Idle return also appeared automatically, but the app showed
-  a duplicate badge and obscured the waiting reply despite one saved native
-  answer. The result remained unread and recoverable. Preserve the experimental
-  label and foreground default; do not claim exactly-once desktop presentation.
-- Retest delivered calendar invitations after the owner supplies a configured
-  test calendar and consenting recipient. The local event is already verified.
 
 The approved release procedure requires the versioned artifact, PR and
 main-branch CI to pass before OIDC publication, followed by independent registry
