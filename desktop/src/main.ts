@@ -9,6 +9,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  Notification,
   nativeImage,
   nativeTheme,
   protocol,
@@ -36,6 +37,7 @@ import {
 import { DesktopInstances } from "../../src/desktop/instances.js";
 import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
+import { DesktopNotifications } from "../../src/desktop/notifications.js";
 import {
   type DesktopCommand,
   type DesktopInstance,
@@ -58,11 +60,25 @@ let tray: Tray | undefined;
 let instances: DesktopInstances;
 let loginItem: DesktopLoginItem;
 let appearance: DesktopAppearance;
+let notifications: DesktopNotifications;
+let notificationTimer: NodeJS.Timeout | undefined;
+let navigation:
+  | {
+      id: string;
+      instanceId: string;
+      page: "attention" | "permissions";
+      activity: "incoming" | "results";
+    }
+  | undefined;
+const activeNotifications = new Set<Notification>();
 const workers = new Map<string, SupervisedGateway>();
 const setupTasks = new Map<Promise<void>, AbortController>();
 const windowLifecycle = new DesktopWindowLifecycle(openWindow);
 const quitLifecycle = new DesktopQuitLifecycle({
   stop: async () => {
+    clearInterval(notificationTimer);
+    for (const notification of activeNotifications) notification.close();
+    activeNotifications.clear();
     const activeSetup = [...setupTasks];
     for (const [, abort] of activeSetup) abort.abort();
     await Promise.all([
@@ -123,6 +139,8 @@ async function snapshot() {
     appearance: appearance.value,
     dark: nativeTheme.shouldUseDarkColors,
     palette: controlPalette(accent, nativeTheme.shouldUseDarkColors),
+    notifications: { enabled: notifications.enabled, supported: Notification.isSupported() },
+    navigation,
     loginItem: await loginItem.read(),
     owner: {
       status: "unavailable",
@@ -152,7 +170,17 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
   if (worker === undefined) {
     worker = new SupervisedGateway({
       id: instance.id,
-      create: (onChange) => new DesktopGatewayClient({ nodePath, workerPath, instance, onChange }),
+      create: (onChange) =>
+        new DesktopGatewayClient({
+          nodePath,
+          workerPath,
+          instance,
+          onChange,
+          onNotification: (event) => {
+            if (!quitLifecycle.stopping)
+              void notifications.receive(instance.id, event).catch(() => undefined);
+          },
+        }),
       onChange: changed,
     });
     workers.set(instance.id, worker);
@@ -183,6 +211,10 @@ async function execute(input: unknown): Promise<unknown> {
     "set_launch_at_login",
     "agent_connection",
     "set_appearance",
+    "set_notifications",
+    "enrollment_register",
+    "enrollment_verify",
+    "enrollment_resend",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
@@ -195,6 +227,11 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  if (command.type === "set_notifications") {
+    await notifications.setEnabled(command.enabled);
+    changed();
+    return snapshot();
+  }
   if (command.type === "set_appearance") {
     await appearance.set(command.appearance);
     nativeTheme.themeSource = appearance.value;
@@ -590,6 +627,53 @@ else {
       });
       instances = await DesktopInstances.open(join(app.getPath("userData"), "desktop"));
       appearance = await DesktopAppearance.open(instances.directory);
+      notifications = await DesktopNotifications.open({
+        path: join(instances.directory, "notifications.json"),
+        show: (banner) => {
+          if (
+            !Notification.isSupported() ||
+            quitLifecycle.stopping ||
+            !instances.list().some((item) => item.id === banner.instanceId)
+          )
+            return;
+          const notification = new Notification({
+            title: "Embassys",
+            body:
+              banner.count === 1
+                ? "Your agent has an update. Open Embassys to review it."
+                : "Your agent has new updates. Open Embassys to review them.",
+            silent: true,
+          });
+          activeNotifications.add(notification);
+          notification.on("click", () => {
+            if (
+              quitLifecycle.stopping ||
+              !instances.list().some((item) => item.id === banner.instanceId)
+            )
+              return;
+            navigation = {
+              id: randomUUID(),
+              instanceId: banner.instanceId,
+              page: banner.page,
+              activity: banner.activity,
+            };
+            showWindow();
+            changed();
+          });
+          const release = () => activeNotifications.delete(notification);
+          notification.once("close", release);
+          notification.once("failed", release);
+          notification.show();
+          setTimeout(() => {
+            notification.close();
+            release();
+          }, 60_000).unref();
+        },
+      });
+      notificationTimer = setInterval(() => {
+        void notifications.flush().catch(() => undefined);
+      }, 10_000);
+      notificationTimer.unref();
       nativeTheme.themeSource = appearance.value;
       if (process.platform !== "darwin") systemPreferences.on("accent-color-changed", changed);
       if (process.platform === "win32") systemPreferences.on("color-changed", changed);

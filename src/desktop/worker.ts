@@ -52,6 +52,7 @@ process.on("message", (raw: unknown) => {
       ...instance,
       environment: process.env,
       onChange: (snapshot) => send({ protocol: DESKTOP_PROTOCOL, type: "state", snapshot }),
+      onNotification: (event) => send({ protocol: DESKTOP_PROTOCOL, type: "notification", event }),
     });
     clearTimeout(initializedBy);
     send({
@@ -83,6 +84,14 @@ process.on("message", (raw: unknown) => {
   void (async () => {
     let result: unknown;
     switch (command.type) {
+      case "enrollment_status":
+      case "enrollment_register":
+      case "enrollment_verify":
+      case "enrollment_resend":
+      case "permissions":
+      case "activity":
+        result = await current.desktopCommand(command);
+        break;
       case "overview":
         result = await current.overview();
         break;

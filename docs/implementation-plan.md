@@ -86,6 +86,16 @@ issue-only. These items do not authorize another release.
   Controls now use the OS accent with contrast checks, compact macOS buttons
   and a segmented theme selector, plus Windows/Linux control sizing. The UI
   remains web-rendered in the approved Electron host; no new toolkit was added.
+  ADR 0065 adds first-time registration in the app, read-only agent permissions,
+  paged local work and opt-in OS notifications for locally observed events.
+  App-owned instances direct unenrolled MCP callers to Registration. Human
+  decisions remain in email; returning-owner login, recovery and remote push
+  still require central work.
+  Its packaged server passes live first-time registration, code rejection and
+  verification, restart, permission status changes and notification-event IPC.
+  Native registration form and OS banner checks await an unlocked Mac; event
+  delivery alone does not qualify visible notification display. Latest regression
+  checks pass 420 tests with seven expected platform skips.
   Codex/Hermes helpers, native
   Windows/Linux qualification, signed distribution, trusted engine selection and
   API-dependent owner screens remain open. See the desktop plan for evidence

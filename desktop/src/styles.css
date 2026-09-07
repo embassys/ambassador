@@ -1077,3 +1077,50 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .identity-card p {
   margin: 5px 0 0;
 }
+.registration-form {
+  max-width: 640px;
+}
+.registration-form form {
+  display: grid;
+  gap: 18px;
+  margin-top: 20px;
+}
+.registration-form label,
+.status-toolbar label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+}
+.registration-form form > button {
+  justify-self: start;
+}
+.registration-form input[autocomplete="one-time-code"] {
+  max-width: 170px;
+  font-size: 22px;
+  letter-spacing: 5px;
+}
+.status-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 16px 0;
+}
+.status-toolbar select {
+  display: block;
+}
+.activity-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.activity-row .section-title {
+  margin-top: 0;
+}
+.status-json {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}

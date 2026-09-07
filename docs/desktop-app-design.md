@@ -30,6 +30,14 @@ the owner's decisions, and a push notification must not be the only copy of a
 request. Build an owner account API and recoverable event delivery before calling
 this a production-ready replacement for the CLI.
 
+The user approved an interim development flow under
+[ADR 0065](adr/0065-desktop-development-registration.md). First-time registration
+now uses an app form and a fixed executor choice. The app can read agent-scoped
+permissions and local work, and show optional OS notifications for locally
+observed events. These features use the existing agent API. Returning-user login,
+app decisions, complete owner history, revocation and remote push still depend
+on the contracts below.
+
 ## Scope and proposed changes to the current target
 
 The user approved this design and implementation on 2026-09-07. ADR 0064 records

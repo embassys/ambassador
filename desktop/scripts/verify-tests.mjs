@@ -9,6 +9,7 @@ const additional = new Set([
   "encrypted-groups.test.js",
   "visible-transcripts.test.js",
   "direct-delivery.test.js",
+  "central-agent-permission.test.js",
 ]);
 const files = (await readdir(directory))
   .filter(

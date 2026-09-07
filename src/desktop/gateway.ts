@@ -18,7 +18,8 @@ import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.
 import { desktopCredentialStores } from "./credential-stores.js";
 import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
 import { readLocalSummary } from "./local-summary.js";
-import type { GatewaySnapshot } from "./protocol.js";
+import type { LocalNotification } from "./notifications.js";
+import type { DesktopCommand, GatewaySnapshot } from "./protocol.js";
 
 export interface DesktopGatewayOptions {
   readonly id: string;
@@ -28,6 +29,7 @@ export interface DesktopGatewayOptions {
   readonly workingDirectory: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly onChange?: (snapshot: GatewaySnapshot) => void;
+  readonly onNotification?: (event: LocalNotification) => void;
 }
 
 export class DesktopGateway {
@@ -83,6 +85,10 @@ export class DesktopGateway {
           signal: this.#abort.signal,
           log: this.#diagnostics.log,
           visibleTranscriptPath: join(this.options.stateDirectory, "visible-transcripts.sqlite"),
+          desktopRegistrationPath: join(this.options.stateDirectory, "registration.json"),
+          ...(this.options.onNotification
+            ? { onDesktopNotification: this.options.onNotification }
+            : {}),
           onStopRequested: () => {
             void this.stop();
           },
@@ -255,6 +261,33 @@ export class DesktopGateway {
         return { enrollment, pendingCalls, receivedResults, sessionCount };
       } finally {
         await lock?.release();
+      }
+    });
+  }
+
+  desktopCommand(command: DesktopCommand): Promise<unknown> {
+    return this.#serial(async () => {
+      const services = this.#application?.desktop;
+      if (!services)
+        return { state: "stopped", phase: "stopped", items: [], hasMore: false, nextCursor: 0 };
+      switch (command.type) {
+        case "enrollment_status":
+          return services.registration.snapshot();
+        case "enrollment_register":
+          return services.registration.register({
+            email: command.email,
+            executor: command.executor,
+          });
+        case "enrollment_verify":
+          return services.registration.verify(command.code);
+        case "enrollment_resend":
+          return services.registration.resend();
+        case "permissions":
+          return services.permissions();
+        case "activity":
+          return services.activity(command.kind, command.after);
+        default:
+          throw new Error("Unsupported desktop operation.");
       }
     });
   }

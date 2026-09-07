@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { desktopLaunchEnvironment } from "./launch-environment.js";
+import { type LocalNotification, localNotificationSchema } from "./notifications.js";
 import {
   DESKTOP_PROTOCOL,
   type DesktopCommand,
@@ -41,6 +42,7 @@ export class DesktopGatewayClient {
       readonly workerPath: string;
       readonly instance: DesktopInstance;
       readonly onChange?: (snapshot: GatewaySnapshot) => void;
+      readonly onNotification?: (event: LocalNotification) => void;
     },
   ) {
     this.#state = { id: options.instance.id, state: "stopped" };
@@ -72,7 +74,12 @@ export class DesktopGatewayClient {
           !("type" in message)
         )
           return;
-        if (message.type === "ready" || message.type === "state") {
+        if (message.type === "notification") {
+          const parsed = localNotificationSchema.safeParse(
+            "event" in message ? message.event : undefined,
+          );
+          if (parsed.success) options.onNotification?.(parsed.data);
+        } else if (message.type === "ready" || message.type === "state") {
           const parsed = snapshotSchema.safeParse(
             "snapshot" in message ? message.snapshot : undefined,
           );

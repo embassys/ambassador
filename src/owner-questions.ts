@@ -142,6 +142,9 @@ export class OwnerQuestions {
   get(id: string): Record<string, unknown> {
     return this.#response(this.#load(id));
   }
+  page(after = 0, limit = 50) {
+    return this.#store.page(after, limit);
+  }
   forCall(callId: string): Record<string, unknown> | undefined {
     const record = this.#store.find(callId);
     return record === undefined

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { connectionOperation, connectionProvider } from "./agent-connections.js";
 import { appearanceSchema } from "./appearance.js";
 import { diagnosticQuerySchema } from "./diagnostic-query.js";
+import { registrationInput } from "./registration.js";
 
 export const DESKTOP_PROTOCOL = 1;
 export const instanceId = z.uuid().toLowerCase();
@@ -32,6 +33,26 @@ const commandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("snapshot") }),
   z.strictObject({ type: z.literal("set_appearance"), appearance: appearanceSchema }),
   z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),
+  z.strictObject({ type: z.literal("set_notifications"), enabled: z.boolean() }),
+  z.strictObject({ type: z.literal("enrollment_status"), ...selected }),
+  z.strictObject({
+    type: z.literal("enrollment_register"),
+    ...selected,
+    ...registrationInput.shape,
+  }),
+  z.strictObject({
+    type: z.literal("enrollment_verify"),
+    ...selected,
+    code: z.string().regex(/^\d{6}$/u),
+  }),
+  z.strictObject({ type: z.literal("enrollment_resend"), ...selected }),
+  z.strictObject({ type: z.literal("permissions"), ...selected }),
+  z.strictObject({
+    type: z.literal("activity"),
+    ...selected,
+    kind: z.enum(["incoming", "results", "outgoing", "questions"]),
+    after: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  }),
   z.strictObject({ type: z.literal("start"), ...selected }),
   z.strictObject({ type: z.literal("stop"), ...selected }),
   z.strictObject({

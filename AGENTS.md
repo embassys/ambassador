@@ -37,6 +37,13 @@ scope on your own.
   releases require approval. Existing CLI flags remain unchanged. Keep desktop
   build dependencies outside the CLI production graph and record exact choices.
 
+- ADR 0065 approves first-time desktop registration through the existing API,
+  read-only agent permission/status views and running-app notifications.
+  Use private app IPC with an explicitly chosen fixed direct executor; do not
+  impersonate an MCP client. App-owned instances send unenrolled MCP callers to
+  the app's Registration screen. Returning-owner login/recovery, app decisions,
+  revocation and remote push remain API work. Approval stays in email.
+
 - ADR 0061 is the user's approved delivery cutover. It supersedes the older
   serial polling, ephemeral control-message custody, separate business tools,
   console-only diagnostics and prohibition on native origin bridges below.
