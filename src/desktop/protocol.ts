@@ -28,6 +28,7 @@ export type DesktopInstance = z.infer<typeof desktopInstanceSchema>;
 const selected = { instanceId };
 const commandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("snapshot") }),
+  z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),
   z.strictObject({ type: z.literal("start"), ...selected }),
   z.strictObject({ type: z.literal("stop"), ...selected }),
   z.strictObject({

@@ -16,6 +16,8 @@ export class SupervisedGateway {
   #generation = 0;
   #tail: Promise<unknown> = Promise.resolve();
   #error: string | undefined;
+  #retired: GatewaySnapshot | undefined;
+  #reviewId: string | undefined;
   constructor(
     readonly options: {
       id: string;
@@ -26,7 +28,9 @@ export class SupervisedGateway {
   ) {}
 
   snapshot(): GatewaySnapshot {
-    const snapshot = this.#client?.snapshot() ?? { id: this.options.id, state: "stopped" };
+    let snapshot = this.#client?.snapshot() ??
+      this.#retired ?? { id: this.options.id, state: "stopped" };
+    if (snapshot.state === "stopped" && this.#retired?.state === "error") snapshot = this.#retired;
     return this.#error ? { id: this.options.id, state: "error", error: this.#error } : snapshot;
   }
 
@@ -48,6 +52,18 @@ export class SupervisedGateway {
       });
     }
     return this.#client;
+  }
+
+  async #releaseIdle(): Promise<void> {
+    const client = this.#client;
+    if (!client || this.#wanted || this.#reviewId) return;
+    const state = client.snapshot();
+    if (state.state !== "stopped" && state.state !== "error") return;
+    if (state.state === "error" || this.#retired?.state !== "error") this.#retired = state;
+    this.#generation++;
+    await client.close();
+    this.#client = undefined;
+    this.options.onChange?.();
   }
 
   #recover(): void {
@@ -78,7 +94,10 @@ export class SupervisedGateway {
         if (this.#closed || !this.#wanted) return;
         this.#error = undefined;
         try {
-          await (await this.#process()).request({ type: "start", instanceId: this.options.id });
+          const client = await this.#process();
+          await client.request({ type: "start", instanceId: this.options.id });
+          if (client.snapshot().state === "error") this.#wanted = false;
+          await this.#releaseIdle();
           this.options.onChange?.();
         } catch {
           this.#recover();
@@ -92,6 +111,7 @@ export class SupervisedGateway {
       this.#wanted = true;
       this.#attempts = 0;
       this.#error = undefined;
+      this.#retired = undefined;
       this.#cancel?.();
       this.#cancel = undefined;
     }
@@ -102,9 +122,26 @@ export class SupervisedGateway {
     }
     return this.#serial(async () => {
       try {
-        return await (await this.#process()).request(command);
+        const client = await this.#process();
+        const result = await client.request(command);
+        if (command.type === "clean_preview") {
+          const preview = result as { previewId: string };
+          this.#reviewId = preview.previewId;
+        }
+        if (
+          command.type === "clean" ||
+          command.type === "stop" ||
+          (command.type === "clean_cancel" && command.previewId === this.#reviewId)
+        )
+          this.#reviewId = undefined;
+        const state = client.snapshot();
+        const failedStart = command.type === "start" && state.state === "error";
+        if (failedStart) this.#wanted = false;
+        await this.#releaseIdle();
+        return result;
       } catch (error) {
         if (!this.#client?.available()) this.#recover();
+        else await this.#releaseIdle();
         throw error;
       }
     });

@@ -111,3 +111,79 @@ test("intentional shutdown cancels a pending restart", async () => {
   assert.equal(creations, 1);
   await assert.rejects(supervisor.request({ type: "start", instanceId: id }));
 });
+
+test("failed starts and stopped reads release workers while preserving the visible error", async () => {
+  const id = randomUUID();
+  let closed = 0;
+  let mode: "error" | "stopped" = "error";
+  const supervisor = new SupervisedGateway({
+    id,
+    create: () => ({
+      available: () => true,
+      snapshot: () => ({
+        id,
+        state: mode,
+        ...(mode === "error" ? { error: "Port is occupied" } : {}),
+      }),
+      request: async () => ({}),
+      close: async () => {
+        closed++;
+      },
+    }),
+  });
+  await supervisor.request({ type: "start", instanceId: id });
+  assert.equal(closed, 1);
+  assert.match(supervisor.snapshot().error ?? "", /occupied/u);
+  mode = "stopped";
+  await supervisor.request({ type: "logs", instanceId: id });
+  assert.equal(closed, 2);
+  assert.match(supervisor.snapshot().error ?? "", /occupied/u);
+  await supervisor.close();
+});
+
+test("a read during Clean review preserves its worker and exclusive custody", async () => {
+  const id = randomUUID();
+  const previewId = randomUUID();
+  let closed = 0;
+  const supervisor = new SupervisedGateway({
+    id,
+    create: () => ({
+      available: () => true,
+      snapshot: () => ({ id, state: "stopped" }),
+      request: async () => ({ previewId }),
+      close: async () => {
+        closed++;
+      },
+    }),
+  });
+  await supervisor.request({ type: "clean_preview", instanceId: id });
+  await supervisor.request({ type: "logs", instanceId: id });
+  assert.equal(closed, 0);
+  await supervisor.request({ type: "clean_cancel", instanceId: id, previewId });
+  assert.equal(closed, 1);
+  await supervisor.close();
+});
+
+test("a failed stopped read releases the worker without hiding the failure", async () => {
+  const id = randomUUID();
+  let closed = false;
+  const supervisor = new SupervisedGateway({
+    id,
+    create: () => ({
+      available: () => true,
+      snapshot: () => ({ id, state: "stopped" }),
+      request: async () => {
+        throw new Error("Cannot review saved work");
+      },
+      close: async () => {
+        closed = true;
+      },
+    }),
+  });
+  await assert.rejects(
+    supervisor.request({ type: "clean_preview", instanceId: id }),
+    /Cannot review/,
+  );
+  assert.equal(closed, true);
+  await supervisor.close();
+});

@@ -112,3 +112,23 @@ test("Clean preview holds exclusive custody; cancellation and stale confirmation
   const lock = await ProcessLock.acquire(join(root, "ambassador.lock"));
   await lock.release();
 });
+
+test("Clean cannot claim zero work when the credential is missing but custody remains", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-clean-missing-identity-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = pathsForStateDirectory(root);
+  await writeFile(paths.pendingActionPath, "unreadable custody");
+  const gateway = new DesktopGateway({
+    id: randomUUID(),
+    name: "Missing identity",
+    stateDirectory: root,
+    workingDirectory: join(root, "workspace"),
+    port: 0,
+    environment: {},
+  });
+  await assert.rejects(gateway.prepareClean(), /identity.*missing/iu);
+  assert.equal(await readFile(paths.pendingActionPath, "utf8"), "unreadable custody");
+  const lock = await ProcessLock.acquire(paths.lockPath);
+  await lock.release();
+  await gateway.stop();
+});

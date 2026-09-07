@@ -106,3 +106,33 @@ replays the IPC command that lost its response. Intentional stop cancels recover
 Linux package directories omit spaces because the tested Ubuntu sandbox launcher
 split the executable path. The development CI provisions only its bundled
 `chrome-sandbox` helper with the required ownership/mode and keeps sandboxing on.
+
+Stopped and failed-start workers exit after their read or failed start finishes.
+A Clean review retains its worker and exclusive lock until confirmation or
+cancellation, including while the window refreshes diagnostics. Missing identity
+credentials alongside encrypted work prevent a zero-count Clean preview.
+
+Desktop credential stores use the same scrypt parameters and encrypted envelope
+as the CLI. Derivation runs in a short-lived child of the bundled Node worker so
+the operating system releases its temporary native allocation. The fixed helper
+accepts one 24-byte wrapping key and 16-byte salt over private binary IPC, returns
+one 32-byte derived key, then exits. Calls are serialized with an eight-request
+bound and a 15-second deadline. Nothing is written to a temporary file or log;
+parent disconnect terminates the helper. The CLI retains in-process derivation.
+
+GUI workers put the bundled Node directory first in a bounded absolute PATH,
+preserve existing absolute entries, and add reviewed user/system install
+locations. They never load login-shell configuration or add the current directory.
+Windows environment-key casing is normalized. Provider commands, capability
+selection and authentication policies remain unchanged.
+
+Launch at login is an explicit app preference. Windows uses Electron's fixed
+executable/argument registration and checks the exact registry item, including
+OS startup approval. Linux creates one app-owned Desktop Entry with an exclusive
+atomic link, and refuses to replace or remove an externally changed entry. It
+uses the Freedesktop Exec escaping rules without a shell. macOS uses the main
+app service only after distribution is signed and notarized; this unsigned
+preview leaves the control unavailable. A login launch opens the background host;
+normal launch or a later activation opens the window. No public CLI flag changed.
+See the [Electron login-item contract](https://www.electronjs.org/docs/latest/api/app#appsetloginitemsettingssettings-macos-windows)
+and [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html).

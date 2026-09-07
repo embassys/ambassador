@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
+import type { LoginItemState } from "../../src/desktop/login-item.js";
 import type {
   DesktopCommand,
   DesktopInstance,
@@ -11,6 +12,7 @@ import type { TranscriptPage } from "../../src/visible-transcripts.js";
 interface AppSnapshot {
   appVersion: string;
   build: string;
+  loginItem: LoginItemState;
   owner: { status: string; message: string };
   instances: (DesktopInstance & { runtime: GatewaySnapshot })[];
 }
@@ -845,6 +847,41 @@ function App() {
             {page === "settings" && (
               <>
                 <section className="settings-section">
+                  <h3>Startup</h3>
+                  <div className="settings-row">
+                    <div>
+                      <strong>Launch at login</strong>
+                      <p>{snapshot.loginItem.message}</p>
+                      <p>Stopping an individual server keeps it stopped on the next app launch.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy || !snapshot.loginItem.canChange}
+                      onClick={() =>
+                        void mutate({
+                          type: "set_launch_at_login",
+                          enabled: !snapshot.loginItem.configured,
+                        })
+                      }
+                    >
+                      {snapshot.loginItem.canChange
+                        ? snapshot.loginItem.configured
+                          ? "Turn off"
+                          : "Turn on"
+                        : "Unavailable"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="text-button"
+                    disabled={busy}
+                    onClick={() => void refresh()}
+                  >
+                    Refresh startup status
+                  </button>
+                </section>
+                <section className="settings-section">
                   <h3>Account</h3>
                   <div className="settings-row">
                     <div>
@@ -998,8 +1035,7 @@ function App() {
                 </section>
                 <p className="body-note">
                   Closing the window keeps Ambassador in the menu bar. Quit Ambassador stops its
-                  servers. Launch-at-login, updates and account recovery will follow in later
-                  development stages.
+                  servers. Updates and account recovery will follow in later development stages.
                 </p>
               </>
             )}

@@ -1,14 +1,14 @@
-import { join } from "node:path";
+import { readdir } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { AcpSessionStore } from "../acp-session-store.js";
 import { ActionResultInbox } from "../action-result-inbox.js";
-import { EncryptedFileCredentialStore } from "../credential-store.js";
-import { CENTRAL_ORIGIN } from "../gateway-application.js";
 import type { GatewayPaths } from "../gateway-paths.js";
 import { GatewayIdentity } from "../identity.js";
 import { NotificationStore } from "../notification-store.js";
 import { OutboundActions } from "../outbound-actions.js";
 import { OwnerQuestions } from "../owner-questions.js";
 import { PendingActionInbox } from "../pending-action-inbox.js";
+import { desktopCredentialStores } from "./credential-stores.js";
 
 export interface LocalSummary {
   readonly enrollment: Record<string, string | boolean>;
@@ -22,13 +22,7 @@ export interface LocalSummary {
 
 /** The caller must hold the stopped instance's process lock throughout this read. */
 export async function readLocalSummary(paths: GatewayPaths): Promise<LocalSummary> {
-  const identity = await GatewayIdentity.open(
-    new EncryptedFileCredentialStore(
-      paths.credentialPath,
-      paths.credentialKeyPath,
-      JSON.stringify({ centralOrigin: CENTRAL_ORIGIN }),
-    ),
-  );
+  const identity = await GatewayIdentity.open(desktopCredentialStores(paths).credentialStore);
   const stores: { close(): void }[] = [];
   try {
     const sessions = new AcpSessionStore(paths.acpSessionPath);
@@ -42,7 +36,22 @@ export async function readLocalSummary(paths: GatewayPaths): Promise<LocalSummar
       unresolvedNotifications: 0,
       sessionCount: sessions.list().length,
     };
-    if (!identity.enrolled) return summary;
+    if (!identity.enrolled) {
+      const encrypted = new Set([
+        basename(paths.pendingActionPath),
+        basename(paths.actionResultPath),
+        basename(paths.outboundActionPath),
+        "owner-questions.sqlite",
+        "notification-custody.sqlite",
+        "human-input-responses.sqlite",
+        "operations.sqlite",
+        "visible-transcripts.sqlite",
+      ]);
+      const files = await readdir(paths.stateDirectory);
+      if (files.some((name) => encrypted.has(name.replace(/-(?:wal|shm)$/u, ""))))
+        throw new Error("The local identity is missing, so saved work cannot be counted safely.");
+      return summary;
+    }
     const credential = identity.localCredential();
     const pending = new PendingActionInbox(paths.pendingActionPath, credential);
     stores.push(pending);

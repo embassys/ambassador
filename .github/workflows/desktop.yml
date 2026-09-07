@@ -30,7 +30,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @embassys/ambassador-desktop run typecheck
       - run: pnpm run test:build
-      - run: node --test .test-dist/test/desktop-foundation.test.js .test-dist/test/desktop-worker.test.js
+      - run: node desktop/scripts/verify-tests.mjs
       - run: pnpm --filter @embassys/ambassador-desktop run build
       - run: pnpm --filter @embassys/ambassador-desktop run verify
       - run: pnpm --filter @embassys/ambassador-desktop run package

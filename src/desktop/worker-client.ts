@@ -1,6 +1,9 @@
 import { type ChildProcess, fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { z } from "zod";
+import { desktopLaunchEnvironment } from "./launch-environment.js";
 import {
   DESKTOP_PROTOCOL,
   type DesktopCommand,
@@ -41,9 +44,7 @@ export class DesktopGatewayClient {
     },
   ) {
     this.#state = { id: options.instance.id, state: "stopped" };
-    const environment = { ...process.env };
-    delete environment.NODE_OPTIONS;
-    delete environment.ELECTRON_RUN_AS_NODE;
+    const environment = desktopLaunchEnvironment(process.env, dirname(options.nodePath), homedir());
     const childOptions = {
       execPath: options.nodePath,
       execArgv: [],

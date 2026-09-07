@@ -65,8 +65,10 @@ issue-only. These items do not authorize another release.
   worker, isolated instances and basic query views are implemented on
   `codex/desktop-app`. Packaged host probes passed on macOS, Windows and Linux. Native Mac
   instance/log-export/Clean-review checks passed. Searchable diagnostics, exclusive
-  Clean previews and encrypted visible-history capture are implemented; connection
-  helpers, import, resource/native-provider qualification and API-dependent screens
+  Clean previews, encrypted visible-history capture, bounded background workers
+  and launch-at-login controls are implemented. The unsigned Mac build leaves
+  login startup unavailable. Baseline Mac memory/CPU checks pass; connection
+  helpers, import, enrolled resource/native-provider qualification and API-dependent screens
   remain open. See the desktop plan for measured
   progress. Owner API features depend on server issues 7–10.
 
