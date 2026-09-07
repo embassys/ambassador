@@ -503,6 +503,13 @@ The current protected routes are:
 | Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
 | Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
 
+Permission-list records recognize `pending`, `granted`, `denied`, `revoked` and
+`expired`; unknown statuses fail validation. A `permission_revoked` notification
+must match the saved permission ID, catalog action and grantor. It rejects
+undispatched work and wakes its observer without creating another permission
+request. It does not cancel or replay an already submitted action. A stale later
+grant cannot reopen a revoked saved intent. See ADR 0069 and the workflow tests.
+
 The permission-request response always includes `permission_id`, `status`, and
 `message`. The current deployment may also include `already_granted` and
 `decision`; Ambassador validates and returns those fields when present.

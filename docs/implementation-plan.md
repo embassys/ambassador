@@ -55,70 +55,13 @@ issue-only. These items do not authorize another release.
   and separately qualified artifacts are still required before enabling version
   installation or selection.
 
-- [ ] Finish the approved Embassys desktop app under ADR 0064. The
-  [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
-  agent setup, conversations, approvals, notifications, isolated instances and
-  central API requirements. The [plan](desktop-app-plan.md) defines delivery
-  phases, dependencies and regression/live release gates. The user approved
-  the recommendations and implementation on 2026-09-07. The first shell, bundled
-  worker, isolated instances and basic query views are implemented on
-  `codex/desktop-app`. Packaged host probes passed on macOS, Windows and Linux. Native Mac
-  instance/log-export/Clean-review checks passed. Searchable diagnostics, exclusive
-  Clean previews, encrypted visible-history capture, bounded background workers
-  and launch-at-login controls are implemented. The unsigned Mac build leaves
-  login startup unavailable. The app is named Embassys; CLI import and migration
-  are outside scope. Native archive display, custom storage selection and guarded
-  Claude Code setup passed with isolated test data. Native testing also caught
-  and fixed a hidden process after keyboard Quit and a reused port suggestion.
-  The new candidate adds platform-specific appearance, the supplied branding,
-  light/dark/system preferences and guarded OpenClaw setup. Both provider helpers
-  support checking, repair and disconnect of app-owned entries. The full check
-  passes 403 tests with seven expected skips. Two requests through the packaged
-  app, deployed central API and real Claude executor passed exact synthetic result
-  and receipt; the first completed turn was seen in the native app and survived
-  restart. Live tests found and fixed repeated tool-summary rows and an enrolled
-  identity still showing onboarding. Native inspection of the second turn passed after unlock,
-  including stopped-server history, light/dark appearance, enlarged layout and
-  keyboard Quit. A redundant Dock-icon allocation was fixed; the
-  verified background instance now measures 167.5 MiB and 0.10% of one core.
-  Code `8a6c105` passed package builds and actual host probes on macOS, Windows
-  and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
-  including the macOS background resource gate. A live diagnostic export also
-  passed body-inclusion and credential-redaction checks.
-  Controls now use the OS accent with contrast checks, compact macOS buttons
-  and a segmented theme selector, plus Windows/Linux control sizing. The UI
-  remains web-rendered in the approved Electron host; no new toolkit was added.
-  ADR 0065 adds first-time registration in the app, read-only agent permissions,
-  paged local work and opt-in OS notifications for locally observed events.
-  App-owned instances direct unenrolled MCP callers to Registration. Human
-  decisions remain in email; returning-owner login, recovery and remote push
-  still require central work.
-  Its packaged server passes live first-time registration, code rejection and
-  verification, restart, permission status changes and notification-event IPC.
-  Native registration form and OS banner checks await an unlocked Mac; event
-  delivery alone does not qualify visible notification display. Latest regression
-  checks pass 420 tests with seven expected platform skips.
-  Code `e800b84` also passes desktop tests, package builds and actual host probes
-  on macOS, Windows and Linux in
-  [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
-  Codex/Hermes helpers passed isolated native Mac setup and installed-provider
-  checks under ADR 0067. Its 1 GiB/seven-day logs and Clear logs control are
-  implemented. Code `31531b2` passes 435 regression tests, nine parser/artifact
-  tests and all three desktop CI jobs in
-  [run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381). Native
-  Windows/Linux qualification, signed distribution and trusted engine selection
-  remain open. ADR 0068 now implements owner email sign-in, session renewal and
-  sign-out, plus bounded read-only account requests, permissions and central
-  messages through the APIs identified in the
-  [web app review](desktop-web-app-review-2026-09-07.md). The separate owner worker
-  keeps tokens in encrypted custody outside gateway instances. Controlled live
-  login, reads, restart, refresh and sign-out passed, as did native Mac account
-  form and view checks. Owner runtime code `f3b5cfd` passes all three desktop CI
-  jobs in [run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469).
-  In-app decisions, full owner history, identity recovery,
-  and native remote push remain open. Explicit revocation-event handling is
-  implemented in the current ADR 0069 candidate. See the
-  desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.
+- [ ] Complete desktop production prerequisites. The local app, owner sign-in,
+  read-only account views, setup helpers, logs, shared CLI installation and native
+  Mac controls are implemented. Owner decisions, complete history, agent identity
+  recovery and native remote push still need central contracts. Signed distribution,
+  trusted engine selection and native Windows/Linux/provider qualification need
+  the release infrastructure and environments described in the
+  [desktop plan](desktop-app-plan.md). API gaps remain in issues 7–10.
 
 The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
@@ -328,3 +271,70 @@ requires that exact agent's native qualification under ADR 0040.
 Optional central service work remains in
 [Central follow-ups](central-follow-ups.md). It does not authorize client-side
 fallbacks or compatibility code.
+
+## Earlier desktop implementation evidence
+
+The Embassys desktop app is approved under ADR 0064. The
+  [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
+  agent setup, conversations, approvals, notifications, isolated instances and
+  central API requirements. The [plan](desktop-app-plan.md) defines delivery
+  phases, dependencies and regression/live release gates. The user approved
+  the recommendations and implementation on 2026-09-07. The first shell, bundled
+  worker, isolated instances and basic query views are implemented on
+  `codex/desktop-app`. Packaged host probes passed on macOS, Windows and Linux. Native Mac
+  instance/log-export/Clean-review checks passed. Searchable diagnostics, exclusive
+  Clean previews, encrypted visible-history capture, bounded background workers
+  and launch-at-login controls are implemented. The unsigned Mac build leaves
+  login startup unavailable. The app is named Embassys; CLI import and migration
+  are outside scope. Native archive display, custom storage selection and guarded
+  Claude Code setup passed with isolated test data. Native testing also caught
+  and fixed a hidden process after keyboard Quit and a reused port suggestion.
+  The new candidate adds platform-specific appearance, the supplied branding,
+  light/dark/system preferences and guarded OpenClaw setup. Both provider helpers
+  support checking, repair and disconnect of app-owned entries. The full check
+  passes 403 tests with seven expected skips. Two requests through the packaged
+  app, deployed central API and real Claude executor passed exact synthetic result
+  and receipt; the first completed turn was seen in the native app and survived
+  restart. Live tests found and fixed repeated tool-summary rows and an enrolled
+  identity still showing onboarding. Native inspection of the second turn passed after unlock,
+  including stopped-server history, light/dark appearance, enlarged layout and
+  keyboard Quit. A redundant Dock-icon allocation was fixed; the
+  verified background instance now measures 167.5 MiB and 0.10% of one core.
+  Code `8a6c105` passed package builds and actual host probes on macOS, Windows
+  and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
+  including the macOS background resource gate. A live diagnostic export also
+  passed body-inclusion and credential-redaction checks.
+  Controls now use the OS accent with contrast checks, compact macOS buttons
+  and a segmented theme selector, plus Windows/Linux control sizing. The UI
+  remains web-rendered in the approved Electron host; no new toolkit was added.
+  ADR 0065 adds first-time registration in the app, read-only agent permissions,
+  paged local work and opt-in OS notifications for locally observed events.
+  App-owned instances direct unenrolled MCP callers to Registration. Human
+  decisions remain in email; returning-owner login, recovery and remote push
+  still require central work.
+  Its packaged server passes live first-time registration, code rejection and
+  verification, restart, permission status changes and notification-event IPC.
+  Native registration form and OS banner checks await an unlocked Mac; event
+  delivery alone does not qualify visible notification display. Latest regression
+  checks pass 420 tests with seven expected platform skips.
+  Code `e800b84` also passes desktop tests, package builds and actual host probes
+  on macOS, Windows and Linux in
+  [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
+  Codex/Hermes helpers passed isolated native Mac setup and installed-provider
+  checks under ADR 0067. Its 1 GiB/seven-day logs and Clear logs control are
+  implemented. Code `31531b2` passes 435 regression tests, nine parser/artifact
+  tests and all three desktop CI jobs in
+  [run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381). Native
+  Windows/Linux qualification, signed distribution and trusted engine selection
+  remain open. ADR 0068 now implements owner email sign-in, session renewal and
+  sign-out, plus bounded read-only account requests, permissions and central
+  messages through the APIs identified in the
+  [web app review](desktop-web-app-review-2026-09-07.md). The separate owner worker
+  keeps tokens in encrypted custody outside gateway instances. Controlled live
+  login, reads, restart, refresh and sign-out passed, as did native Mac account
+  form and view checks. Owner runtime code `f3b5cfd` passes all three desktop CI
+  jobs in [run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469).
+  In-app decisions, full owner history, identity recovery,
+  and native remote push remain open. Explicit revocation-event handling is
+  implemented in the current ADR 0069 candidate. See the
+  desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.

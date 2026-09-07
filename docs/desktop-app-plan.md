@@ -756,9 +756,9 @@ rendering/parser/artifact tests. The encrypted fixture test verifies registratio
 and pending work across CLI → app → CLI, with one registration and one verification.
 The actual packaged process test also passes on this Mac: public CLI startup,
 fresh app attachment, authenticated handoff, persisted stopped preference and
-app restart while the CLI continues running. The packaged runtime and extracted
-DMG checks passed before the final revocation-reader correction; the final
-package and shared-host probe have been rebuilt and repeated afterward.
+app restart while the CLI continues running. The final packaged runtime,
+shared-host probe, actual host lifecycle and extracted DMG checks all pass after
+the revocation-reader and native UI corrections.
 
 The live revocation test exposed a permission-list parser that rejected revoked
 records. It now accepts the five statuses in the reviewed server contract and
@@ -778,5 +778,13 @@ down cleanly and started the app. Clean removed only a disposable local marker,
 preserved logs, and allowed the matching public CLI to start afterward. Native
 inspection moved Start/Stop above the other preferences and collapsed connection
 and storage details. Both temporary processes stopped before their test profile
-was removed. Evidence is in `.build/desktop-design/native-shared-qualification.json`.
+was removed. The original Personal app profile is open again, still stopped,
+with its three pre-existing log records intact. Evidence is in
+`.build/desktop-design/native-shared-qualification.json`.
 No server code changed or release was published.
+
+Runtime `2a35086` passes all three desktop CI jobs in
+[run 34167476745](https://github.com/embassys/ambassador/actions/runs/34167476745).
+macOS, Windows and Linux passed regression tests, packaging, extracted distribution,
+actual host startup/shutdown and the public CLI → app → CLI handoff. This does not
+qualify native Windows/Linux UI, provider-specific native return or remote push.
