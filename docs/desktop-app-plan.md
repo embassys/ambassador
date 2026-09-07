@@ -62,13 +62,19 @@ on `codex/desktop-app`; this is not a release candidate.
   encrypted group indexes, transcript normalization/Unicode/pagination/retention,
   quota gaps, stopped-instance history, Clean custody and bounded worker recovery.
   This check predates the remaining connection and performance work.
-- Follow-up checks pass 383 tests with seven expected skips. Desktop CI now runs
+- Follow-up checks pass 385 tests with seven expected skips. Desktop CI now runs
   the complete desktop suite plus encrypted groups, visible transcripts and mock
   direct delivery, rather than only the initial foundation and worker cases.
   New cases cover temporary key derivation, release of idle workers, Clean review
   during background reads, missing credentials, GUI launch paths and startup settings.
+- Commit `f859fb1` passed the expanded tests, package builds and actual host
+  start/duplicate-launch/stop probes on macOS, Windows and Linux in
+  [run 34110440688](https://github.com/embassys/ambassador/actions/runs/34110440688).
+  The preceding run exposed a test cleanup order that deleted an open SQLite file
+  on Windows. All transcript fixtures now close the archive before deleting their
+  directory. Early window requests also wait until host IPC and assets are ready.
 - The packaged background host measured 165.0 MiB physical footprint and 0.10% of
-  one CPU core over a ten-second idle sample on an Apple M1 Max, macOS kernel
+  one CPU core over a ten-second idle sample on an Apple M1 Max, Darwin
   25.6.0, arm64. This includes all five app-owned processes and one unenrolled
   instance, with no provider running. Electron can prewarm a renderer even when
   there are no BrowserWindows. The check includes its memory. It uses macOS
