@@ -11,11 +11,20 @@ import type {
 } from "../../src/desktop/protocol.js";
 import type { GatewayOverview } from "../../src/gateway-application.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
+import { Activity, Permissions } from "./agent-status.js";
+import { Registration } from "./registration.js";
 
 interface AppSnapshot {
   platform: string;
   appearance: "system" | "light" | "dark";
   dark: boolean;
+  notifications: { enabled: boolean; supported: boolean };
+  navigation?: {
+    id: string;
+    instanceId: string;
+    page: "attention" | "permissions";
+    activity: "incoming" | "results";
+  };
   palette: ReturnType<typeof controlPalette>;
   appVersion: string;
   build: string;
@@ -49,6 +58,7 @@ declare global {
 }
 
 const paths = {
+  registration: "M3 5h18v14H3zM3 6l9 7 9-7",
   attention: "M12 3 3 7v6c0 4 9 8 9 8s9-4 9-8V7L12 3ZM12 8v5m0 3h.01",
   conversations: "M21 11a8 8 0 0 1-8 8H6l-4 3V11a9 9 0 1 1 19 0ZM7 9h10M7 13h6",
   permissions: "M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5zM12 14v3",
@@ -59,7 +69,14 @@ const paths = {
   check: "m5 12 4 4L19 6",
   server: "M3 3h18v7H3zM3 14h18v7H3zM7 6h.01M7 17h.01M11 6h6M11 17h6",
 } as const;
-type Page = "attention" | "conversations" | "permissions" | "agents" | "diagnostics" | "settings";
+type Page =
+  | "attention"
+  | "registration"
+  | "conversations"
+  | "permissions"
+  | "agents"
+  | "diagnostics"
+  | "settings";
 function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) {
   return (
     <svg
@@ -79,6 +96,11 @@ function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) 
 }
 const pages: { id: Page; label: string; description: string }[] = [
   { id: "attention", label: "Attention", description: "Requests and questions that need you." },
+  {
+    id: "registration",
+    label: "Registration",
+    description: "Register this instance with your email and choose its agent.",
+  },
   {
     id: "conversations",
     label: "Conversations",
@@ -152,6 +174,7 @@ function App() {
   const proposedPort = newPort || String(suggestedInstancePort(snapshot?.instances ?? []));
   const [loading, setLoading] = useState(false);
   const viewGeneration = useRef(0);
+  const lastNavigation = useRef(localStorage.getItem("ambassador.navigation") ?? "");
 
   const call = useCallback(async (command: DesktopCommand) => {
     const reply = await window.ambassador.command(command);
@@ -175,6 +198,13 @@ function App() {
     snapshot?.instances.find((instance) => instance.id === selectedId) ?? snapshot?.instances[0];
   const id = selected?.id;
   const runtimeState = selected?.runtime.state;
+  useEffect(() => {
+    if (!snapshot?.navigation || snapshot.navigation.id === lastNavigation.current) return;
+    lastNavigation.current = snapshot.navigation.id;
+    localStorage.setItem("ambassador.navigation", snapshot.navigation.id);
+    setSelectedId(snapshot.navigation.instanceId);
+    setPage(snapshot.navigation.page);
+  }, [snapshot?.navigation]);
   useEffect(() => {
     if (!id || (page !== "attention" && page !== "settings")) return;
     let current = true;
@@ -585,9 +615,21 @@ function App() {
                       </div>
                     </div>
                   </div>
+                  {selected && (
+                    <Activity
+                      key={`${id}-${runtimeState}-${snapshot.navigation?.id ?? ""}`}
+                      instanceId={selected.id}
+                      command={call}
+                      initialKind={
+                        snapshot.navigation?.instanceId === selected.id
+                          ? snapshot.navigation.activity
+                          : "incoming"
+                      }
+                    />
+                  )}
                   <p className="quiet-note">
-                    App sign-in, approval controls and push notifications are not available in this
-                    preview. Use the email sent for each owner decision.
+                    Human decisions use their email links. Desktop notifications cover locally
+                    observed work while Embassys runs; remote push is not connected.
                   </p>
                 </>
               ) : (
@@ -596,8 +638,12 @@ function App() {
                     <img className="welcome-logo" src="/brand.svg" alt="" />
                     <h2>Welcome to Embassys</h2>
                     <p>Connect your agent to exchange requests with other people's agents.</p>
-                    <button type="button" className="primary" onClick={() => setPage("agents")}>
-                      Set up an agent <Icon name="arrow" size={16} />
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => setPage("registration")}
+                    >
+                      Register with Embassys <Icon name="arrow" size={16} />
                     </button>
                   </section>
                   <div className="section-title">
@@ -642,20 +688,37 @@ function App() {
                     <div className="step">
                       <div className="step-number muted">3</div>
                       <div>
-                        <h4>Sign in to your account</h4>
-                        <p>App sign-in and approval notifications are being built next.</p>
+                        <h4>Register your email</h4>
+                        <p>Enter your email and verification code in this app.</p>
                       </div>
-                      <span className="subtle-tag">Coming next</span>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => setPage("registration")}
+                      >
+                        Register
+                      </button>
                     </div>
                   </div>
                   <div className="quiet-note">
                     <Icon name="attention" size={18} />
                     <span>
-                      This preview runs the real local server. The owner inbox is not connected yet.
+                      This preview supports first-time registration. Returning-user sign-in and
+                      central recovery are not available yet.
                     </span>
                   </div>
                 </>
               ))}
+            {page === "registration" && selected && (
+              <Registration
+                key={`${selected.id}-${running}`}
+                instanceId={selected.id}
+                running={running}
+                command={call}
+                start={() => void mutate({ type: "start", instanceId: selected.id })}
+                connected={() => setPage("agents")}
+              />
+            )}
             {page === "agents" && (
               <>
                 <div className="endpoint-card">
@@ -880,18 +943,12 @@ function App() {
                 )}
               </>
             )}
-            {page === "permissions" && (
-              <>
-                <div className="segmented">
-                  <span className="chosen">Access I granted</span>
-                  <span>Access granted to me</span>
-                </div>
-                <Empty
-                  icon="permissions"
-                  title="Your permissions, in one place"
-                  text="Owner sign-in will connect your permission history and requests. This preview does not grant, revoke or change access."
-                />
-              </>
+            {page === "permissions" && selected && (
+              <Permissions
+                key={`${selected.id}-${runtimeState}-${snapshot.navigation?.id ?? ""}`}
+                instanceId={selected.id}
+                command={call}
+              />
             )}
             {page === "diagnostics" && (
               <>
@@ -1072,6 +1129,38 @@ function App() {
             {page === "settings" && (
               <>
                 <section className="settings-section">
+                  <h3>Notifications</h3>
+                  <div className="settings-row">
+                    <div>
+                      <strong>Agent updates</strong>
+                      <p>
+                        Show a desktop notification when this running app receives work, a result or
+                        a recorded question. Notifications contain no personal details.
+                      </p>
+                      <p>
+                        {snapshot.notifications.supported
+                          ? "Delivery also depends on your system notification settings and Do Not Disturb. Remote push is not available yet."
+                          : "System notifications are unavailable on this desktop. Saved work remains visible in Attention."}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy || !snapshot.notifications.supported}
+                      onClick={() =>
+                        void mutate({
+                          type: "set_notifications",
+                          enabled: !snapshot.notifications.enabled,
+                        })
+                      }
+                    >
+                      {snapshot.notifications.enabled
+                        ? "Turn notifications off"
+                        : "Turn notifications on"}
+                    </button>
+                  </div>
+                </section>
+                <section className="settings-section">
                   <h3>Appearance</h3>
                   <div className="settings-row">
                     <div>
@@ -1167,13 +1256,19 @@ function App() {
                   )}
                   <div className="settings-row">
                     <div>
-                      <strong>Sign in with your email</strong>
+                      <strong>Register this instance</strong>
                       <p>
-                        App sign-in is not available in this build. Existing agent registration is
-                        separate.
+                        First-time registration is available in the app. Returning-user sign-in and
+                        identity recovery need central support.
                       </p>
                     </div>
-                    <span className="subtle-tag">Coming next</span>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setPage("registration")}
+                    >
+                      Open registration
+                    </button>
                   </div>
                 </section>
                 {selected && (

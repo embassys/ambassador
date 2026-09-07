@@ -20,6 +20,9 @@ import {
   DeliveryProfileStore,
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
+import { type ActivityKind, type ActivityPage, activityPage } from "./desktop/activity.js";
+import type { LocalNotification } from "./desktop/notifications.js";
+import { DesktopRegistration } from "./desktop/registration.js";
 import {
   type AcpPermissionApproval,
   AcpSessionController,
@@ -111,6 +114,8 @@ export interface GatewayApplicationOptions {
   readonly onStopRequested?: () => void;
   readonly log?: VerboseLogger;
   readonly visibleTranscriptPath?: string;
+  readonly desktopRegistrationPath?: string;
+  readonly onDesktopNotification?: (event: LocalNotification) => void;
 }
 
 export interface GatewayOverview {
@@ -124,6 +129,16 @@ export interface RunningGatewayApplication {
   readonly endpoint: string;
   readonly failure: Promise<Error>;
   localOverview(): GatewayOverview;
+  readonly desktop?: {
+    registration: DesktopRegistration;
+    permissions(): Promise<{
+      state: "ready" | "not_registered" | "expired" | "unavailable";
+      items: import("./central-rest.js").CentralPermission[];
+      fetchedAt?: string;
+      email?: string;
+    }>;
+    activity(kind: ActivityKind, after?: number): ActivityPage;
+  };
   visibleHistory(sessionId: string, after?: number): TranscriptPage | undefined;
   deleteVisibleHistory(sessionId: string): Promise<void>;
   close(): Promise<void>;
@@ -356,6 +371,7 @@ export async function openGatewayApplication(
       ? controller.signal
       : AbortSignal.any([controller.signal, options.signal]);
   let identity!: GatewayIdentity;
+  let desktopRegistration: DesktopRegistration | undefined;
   let local!: LocalMcpServer;
   let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
@@ -585,11 +601,36 @@ export async function openGatewayApplication(
         log("delivery.received", { message });
         const internal = mailbox.capture(message);
         const owned = await box.capture(message);
+        const kind =
+          message.payload.type === "action_call"
+            ? "incoming"
+            : message.payload.type === "action_response"
+              ? "result"
+              : message.payload.type === "permission_outcome"
+                ? "permission"
+                : undefined;
+        if (kind && message.id) {
+          try {
+            options.onDesktopNotification?.({
+              id: message.id,
+              enrollmentId: String(identity.enrollment.agent_id),
+              kind,
+            });
+          } catch {
+            /* UI delivery never interrupts durable custody. */
+          }
+        }
         return internal ? owned && owners.deliveryMessage(message) !== undefined : !owned;
       };
       const permissionCoordinator = new CentralAgentPermissionCoordinator({
         transport: nextRest,
         log,
+        onQuestion: (id) =>
+          options.onDesktopNotification?.({
+            id,
+            enrollmentId: String(identity.enrollment.agent_id),
+            kind: "question",
+          }),
         waitForResponse: (id, signal) => mailbox.wait(id, signal),
       });
       const baseTarget = await createDeliveryTarget({
@@ -733,6 +774,8 @@ export async function openGatewayApplication(
         });
         let result: Record<string, unknown>;
         if (!identity.enrolled) {
+          if (desktopRegistration && REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name))
+            throw new LocalMcpToolError("registration_in_app");
           switch (name) {
             case "register_agent":
               result = await guidedRegistration.register(arguments_, clientInfo, signal);
@@ -784,6 +827,21 @@ export async function openGatewayApplication(
           case "message_box":
             if (messageBox === undefined) throw safeFailure();
             result = await messageBox.call(arguments_, signal);
+            if (
+              arguments_.type === "ask_owner" &&
+              result.status === "waiting_for_owner" &&
+              typeof arguments_.request_id === "string"
+            ) {
+              try {
+                options.onDesktopNotification?.({
+                  id: arguments_.request_id,
+                  enrollmentId: String(identity.enrollment.agent_id),
+                  kind: "question",
+                });
+              } catch {
+                /* UI delivery is independent. */
+              }
+            }
             break;
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
@@ -823,6 +881,16 @@ export async function openGatewayApplication(
   try {
     const localControlSecret = await localControlSecretStore.createOrLoad();
     identity = await GatewayIdentity.open(store, nowSeconds);
+    if (options.desktopRegistrationPath)
+      desktopRegistration = await DesktopRegistration.open({
+        path: options.desktopRegistrationPath,
+        profileStore,
+        workingDirectory: options.workingDirectory,
+        identity,
+        client: enrollment,
+        activate: enableEnrolledIdentity,
+        signal: lifetimeSignal,
+      });
     if (identity.enrolled) await loadProfile();
     local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
@@ -857,6 +925,40 @@ export async function openGatewayApplication(
   return {
     endpoint: local.endpoint,
     failure,
+    ...(desktopRegistration
+      ? {
+          desktop: {
+            registration: desktopRegistration,
+            permissions: async () => {
+              if (!identity.enrolled) return { state: "not_registered" as const, items: [] };
+              if (identity.expired) return { state: "expired" as const, items: [] };
+              try {
+                return {
+                  state: "ready" as const,
+                  items: await requireRest().getMyPermissions(lifetimeSignal),
+                  fetchedAt: new Date().toISOString(),
+                  email: String(identity.enrollment.email),
+                };
+              } catch {
+                return { state: "unavailable" as const, items: [] };
+              }
+            },
+            activity: (kind: ActivityKind, after = 0): ActivityPage =>
+              pendingActionInbox && actionResultInbox && outboundActions && ownerQuestions
+                ? activityPage(
+                    {
+                      pending: pendingActionInbox,
+                      results: actionResultInbox,
+                      outbound: outboundActions,
+                      questions: ownerQuestions,
+                    },
+                    kind,
+                    after,
+                  )
+                : { state: "not_registered", items: [], hasMore: false, nextCursor: after },
+          },
+        }
+      : {}),
     localOverview: () => ({
       enrollment: identity.enrollment,
       pendingCalls: pendingActionInbox?.count() ?? 0,

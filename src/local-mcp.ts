@@ -47,6 +47,8 @@ const SERVER_INSTRUCTIONS =
 
 function toolErrorMessage(code: string): string {
   switch (code) {
+    case "registration_in_app":
+      return "This instance is managed by the Embassys app. Ask the user to open its Registration screen and enter their email and verification code there. Do not ask for a website or collect their code in this chat.";
     case "unsupported_email_format":
       return "Embassys rejected this email address format. The current service does not accept '+' email aliases; use the mailbox address without its +tag.";
     case "registration_conflict":

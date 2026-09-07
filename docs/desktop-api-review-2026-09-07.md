@@ -38,9 +38,9 @@ The form would use the existing encrypted credential path and a reviewed executo
 chosen by the user, without impersonating an MCP client. It must say registration,
 not promise returning-user login or recovery after Clean.
 
-ADR 0064 currently specifies separate owner authentication and leaves owner
-screens unavailable until those contracts exist. The smaller flow is a proposed
-scope amendment, not implemented or approved by this review. It must not turn an
+The user subsequently approved this smaller flow. ADR 0065 amends ADR 0064's
+requirement to wait for separate owner authentication before providing these
+development features. Implementation is tracked in the desktop plan. It must not turn an
 agent credential into authority for human decisions. Running-app notifications
 for locally observed work are also distinct from server push and could be built
 without claiming a complete remote owner inbox.

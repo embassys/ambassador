@@ -230,10 +230,32 @@ window captures, not renderings of Windows/Linux controls.
 
 Remaining desktop work:
 
-The [2026-09-07 API review](desktop-api-review-2026-09-07.md) confirms existing
-first-time agent registration and agent-scoped permission/status reads. A smaller
-development app flow could use these before owner APIs are ready; this is a
-proposed amendment to owner onboarding, not a completed or approved change.
+The user approved the [2026-09-07 API review](desktop-api-review-2026-09-07.md)
+proposal. [ADR 0065](adr/0065-desktop-development-registration.md) records the
+first-time registration, read-only permission/status views and running-app
+notifications implemented using existing APIs. The app saves each attempt before
+submission, binds verification to the saved email and executor, and does not
+repeat uncertain requests. Resend is explicit with a persisted cooldown. MCP
+callers use the app's enrolled identity and are directed to the app while it is
+unenrolled. The permission view distinguishes failed reads from empty lists;
+local work is paged without consuming results or restarting a stopped server.
+OS banners are opt-in, generic, coalesced and deduplicated across restart. They
+include provider-tool approval requests after the email submission succeeds.
+No app approval, returning-user login or remote push has been added.
+
+The 2026-09-07 regression run passes 420 tests with seven platform skips.
+Desktop typechecking, package inspection and the actual packaged Mac host probe
+pass. The final background probe measures 165.7 MiB and 0.10% of one core.
+Using private IPC to the packaged server and a disposable email, live central
+testing passes first-time registration, rejected/valid code handling, restart,
+empty/pending/granted permission snapshots and a correlated notification event.
+The grant did not create an action. The verification code and email decision
+credential were absent from the diagnostic files. This is server/IPC evidence,
+not native form or OS banner evidence. The Mac locked before those new UI checks;
+native form entry, banner display/click and Windows/Linux notification behavior
+remain unqualified. Local evidence is saved under
+`.build/desktop-design/live-development-flows.json` and
+`.build/desktop-design/development-final-check.log`.
 
 - Complete Codex and Hermes configuration helpers after the requested parser
   dependency decision; qualify each helper on its supported native systems.
