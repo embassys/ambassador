@@ -61,9 +61,11 @@ issue-only. These items do not authorize another release.
   agent setup, conversations, approvals, notifications, isolated instances and
   central API requirements. The [plan](desktop-app-plan.md) defines delivery
   phases, dependencies and regression/live release gates. The user approved
-  the recommendations and implementation on 2026-09-07. Start with the packaged
-  shell, background lifecycle and isolated instances; owner API features depend
-  on central changes tracked as issues.
+  the recommendations and implementation on 2026-09-07. The first shell, bundled
+  worker, isolated instances and basic query views are implemented on
+  `codex/desktop-app`. Local runtime and host-startup probes passed; native UI and
+  cross-platform qualification remain open. See the desktop plan for measured
+  progress. Owner API features depend on server issues 7–10.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

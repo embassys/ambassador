@@ -1,0 +1,195 @@
+import { type ChildProcess, fork } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import {
+  DESKTOP_PROTOCOL,
+  type DesktopCommand,
+  type DesktopInstance,
+  type GatewaySnapshot,
+  parseDesktopCommand,
+} from "./protocol.js";
+
+const snapshotSchema = z.strictObject({
+  id: z.uuid(),
+  state: z.enum(["stopped", "starting", "running", "stopping", "error"]),
+  endpoint: z.string().max(512).optional(),
+  error: z.string().max(1000).optional(),
+  startedAt: z.iso.datetime().optional(),
+});
+
+interface Pending {
+  resolve(value: unknown): void;
+  reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export class DesktopGatewayClient {
+  readonly #child: ChildProcess;
+  readonly #pending = new Map<string, Pending>();
+  readonly #ready: Promise<void>;
+  readonly #exited: Promise<void>;
+  #state: GatewaySnapshot;
+  #closed = false;
+  #closeResult: Promise<void> | undefined;
+
+  constructor(
+    readonly options: {
+      readonly nodePath: string;
+      readonly workerPath: string;
+      readonly instance: DesktopInstance;
+      readonly onChange?: (snapshot: GatewaySnapshot) => void;
+    },
+  ) {
+    this.#state = { id: options.instance.id, state: "stopped" };
+    const environment = { ...process.env };
+    delete environment.NODE_OPTIONS;
+    delete environment.ELECTRON_RUN_AS_NODE;
+    const childOptions = {
+      execPath: options.nodePath,
+      execArgv: [],
+      env: environment,
+      stdio: ["ignore", "ignore", "ignore", "ipc"] as ["ignore", "ignore", "ignore", "ipc"],
+      serialization: "json" as const,
+      windowsHide: true,
+    };
+    this.#child = fork(options.workerPath, [], childOptions);
+    this.#exited = new Promise<void>((resolve) => {
+      this.#child.once("exit", () => resolve());
+      this.#child.once("error", () => resolve());
+    });
+    this.#ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("The server process did not initialize."));
+        void this.close();
+      }, 15_000);
+      this.#child.on("message", (message: unknown) => {
+        if (
+          message === null ||
+          typeof message !== "object" ||
+          !("protocol" in message) ||
+          message.protocol !== DESKTOP_PROTOCOL ||
+          !("type" in message)
+        )
+          return;
+        if (message.type === "ready" || message.type === "state") {
+          const parsed = snapshotSchema.safeParse(
+            "snapshot" in message ? message.snapshot : undefined,
+          );
+          if (!parsed.success || parsed.data.id !== options.instance.id) return;
+          this.#state = {
+            id: parsed.data.id,
+            state: parsed.data.state,
+            ...(parsed.data.endpoint === undefined ? {} : { endpoint: parsed.data.endpoint }),
+            ...(parsed.data.error === undefined ? {} : { error: parsed.data.error }),
+            ...(parsed.data.startedAt === undefined ? {} : { startedAt: parsed.data.startedAt }),
+          };
+          options.onChange?.(this.snapshot());
+          if (message.type === "ready") {
+            clearTimeout(timer);
+            resolve();
+          }
+        } else if (
+          message.type === "reply" &&
+          "requestId" in message &&
+          typeof message.requestId === "string"
+        ) {
+          const pending = this.#pending.get(message.requestId);
+          if (pending === undefined) return;
+          clearTimeout(pending.timer);
+          this.#pending.delete(message.requestId);
+          if ("ok" in message && message.ok === true && "result" in message)
+            pending.resolve(message.result);
+          else pending.reject(new Error("The server could not complete this operation."));
+        }
+      });
+      const ended = () => {
+        clearTimeout(timer);
+        reject(new Error("The server process is unavailable."));
+        for (const pending of this.#pending.values()) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error("The server process disconnected."));
+        }
+        this.#pending.clear();
+        if (!this.#closed) {
+          this.#state = {
+            id: options.instance.id,
+            state: "error",
+            error: "The server process exited. Start it again to resume saved work.",
+          };
+          options.onChange?.(this.snapshot());
+        }
+      };
+      this.#child.once("error", ended);
+      this.#child.once("exit", ended);
+      this.#child.send(
+        { protocol: DESKTOP_PROTOCOL, type: "initialize", instance: options.instance },
+        (error) => {
+          if (error) ended();
+        },
+      );
+    });
+    // A worker can fail before its first caller awaits ready.
+    void this.#ready.catch(() => undefined);
+  }
+
+  snapshot(): GatewaySnapshot {
+    return { ...this.#state };
+  }
+  ready(): Promise<void> {
+    return this.#ready;
+  }
+
+  async request(input: DesktopCommand): Promise<unknown> {
+    if (this.#closed) throw new Error("This server process is closed.");
+    const command = parseDesktopCommand(input);
+    if (!("instanceId" in command) || command.instanceId !== this.options.instance.id)
+      throw new Error("Wrong instance.");
+    await this.#ready;
+    if (this.#closed || !this.#child.connected)
+      throw new Error("This server process is disconnected.");
+    if (this.#pending.size >= 16) throw new Error("The server is busy. Try again shortly.");
+    const requestId = randomUUID();
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(requestId);
+        reject(
+          new Error("The operation is still unresolved. Refresh its state before trying again."),
+        );
+      }, 45_000);
+      this.#pending.set(requestId, { resolve, reject, timer });
+      this.#child.send({ protocol: DESKTOP_PROTOCOL, requestId, command }, (error) => {
+        if (error) {
+          clearTimeout(timer);
+          this.#pending.delete(requestId);
+          reject(new Error("The server process disconnected."));
+        }
+      });
+    });
+  }
+
+  close(): Promise<void> {
+    if (this.#closeResult !== undefined) return this.#closeResult;
+    this.#closed = true;
+    this.#closeResult = (async () => {
+      if (this.#child.connected) this.#child.disconnect();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          this.#exited,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new Error("The server has not confirmed shutdown. Its data was left untouched."),
+                ),
+              40_000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+    return this.#closeResult;
+  }
+}

@@ -1,0 +1,49 @@
+name: Desktop development
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Unsigned desktop / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.19.0
+      - name: Enable qualified pnpm
+        shell: bash
+        run: |
+          corepack enable pnpm
+          corepack install
+          test "$(pnpm --version)" = 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @embassys/ambassador-desktop run typecheck
+      - run: pnpm run test:build
+      - run: node --test .test-dist/test/desktop-foundation.test.js .test-dist/test/desktop-worker.test.js
+      - run: pnpm --filter @embassys/ambassador-desktop run build
+      - run: pnpm --filter @embassys/ambassador-desktop run verify
+      - run: pnpm --filter @embassys/ambassador-desktop run package
+      - name: Verify packaged host startup and shutdown
+        if: runner.os != 'Linux'
+        run: pnpm --filter @embassys/ambassador-desktop run verify:package
+      - name: Verify packaged host under a Linux test display
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @embassys/ambassador-desktop run verify:package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-evidence-${{ matrix.os }}
+          path: .build/desktop/app/build-manifest.json
+
+# Packages are unsigned development artifacts. This job neither publishes a
+# release nor qualifies native UI, notifications or installed provider behavior.
