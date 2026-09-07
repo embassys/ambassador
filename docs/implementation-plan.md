@@ -112,7 +112,9 @@ issue-only. These items do not authorize another release.
   [web app review](desktop-web-app-review-2026-09-07.md). The separate owner worker
   keeps tokens in encrypted custody outside gateway instances. Controlled live
   login, reads, restart, refresh and sign-out passed, as did native Mac account
-  form and view checks. In-app decisions, full owner history, identity recovery,
+  form and view checks. Owner runtime code `f3b5cfd` passes all three desktop CI
+  jobs in [run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469).
+  In-app decisions, full owner history, identity recovery,
   explicit revocation-event handling and native remote push remain open. See the
   desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.
 
