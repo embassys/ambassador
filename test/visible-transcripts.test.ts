@@ -130,3 +130,49 @@ test("quota failure records a durable gap without altering workflow or hiding a 
   assert.ok(archive.page("session").warnings.length > 0);
   archive.close();
 });
+
+test("streamed tool updates become one summary per call and survive restart without raw arguments", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-visible-tools-"));
+  const path = join(root, "visible.sqlite");
+  const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
+  let archive = new VisibleTranscripts(path, credential);
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  archive.begin("session", message);
+  archive.update(message.id, 1, {
+    sessionUpdate: "tool_call",
+    toolCallId: "a",
+    title: "Message Box",
+    status: "pending",
+  });
+  archive.update(message.id, 2, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "a",
+    title: "Message Box",
+    rawInput: { result: "private-argument-marker" },
+  });
+  archive.update(message.id, 3, {
+    sessionUpdate: "tool_call",
+    toolCallId: "b",
+    title: "Read inbox",
+    status: "pending",
+  });
+  archive.close();
+  archive = new VisibleTranscripts(path, credential);
+  archive.update(message.id, 4, {
+    sessionUpdate: "tool_call_update",
+    toolCallId: "a",
+    status: "completed",
+  });
+  archive.update(message.id, 5, text("The result was sent."));
+  archive.finish(message.id, "complete");
+  const tools = archive
+    .page("session")
+    .items.filter((item) => item.kind === "entry" && item.role === "tool");
+  assert.equal(tools.length, 2);
+  assert.equal(tools[0]?.kind === "entry" && tools[0].text, "Message Box\ncompleted");
+  assert.equal(tools[1]?.kind === "entry" && tools[1].text, "Read inbox\npending");
+  assert.doesNotMatch(JSON.stringify(archive.page("session")), /private-argument-marker/);
+});

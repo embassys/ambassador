@@ -83,6 +83,9 @@ process.on("message", (raw: unknown) => {
   void (async () => {
     let result: unknown;
     switch (command.type) {
+      case "overview":
+        result = await current.overview();
+        break;
       case "start":
         await current.start();
         result = current.snapshot();

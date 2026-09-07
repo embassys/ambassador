@@ -19,17 +19,23 @@ test("desktop IPC rejects unknown commands, paths and unconfirmed destructive in
   assert.deepEqual(parseDesktopCommand({ type: "snapshot" }), { type: "snapshot" });
   const instanceId = crypto.randomUUID();
   assert.equal(
-    parseDesktopCommand({ type: "connect_agent", instanceId, provider: "claude_code" }).type,
-    "connect_agent",
+    parseDesktopCommand({
+      type: "agent_connection",
+      instanceId,
+      provider: "claude_code",
+      operation: "connect",
+    }).type,
+    "agent_connection",
   );
   assert.throws(() =>
-    parseDesktopCommand({ type: "connect_agent", instanceId, provider: "arbitrary" }),
+    parseDesktopCommand({ type: "agent_connection", instanceId, provider: "arbitrary" }),
   );
   assert.throws(() =>
     parseDesktopCommand({
-      type: "connect_agent",
+      type: "agent_connection",
       instanceId,
       provider: "claude_code",
+      operation: "connect",
       configurationPath: "/arbitrary",
     }),
   );
@@ -147,6 +153,7 @@ test("gateway cannot start or clean another process's state and never stops a po
   await gateway.start();
   assert.equal(gateway.snapshot().state, "error");
   await assert.rejects(gateway.clean());
+  await assert.rejects(gateway.overview());
   await lock.release();
   const occupant = createServer();
   await new Promise<void>((resolve) => occupant.listen(0, "127.0.0.1", resolve));

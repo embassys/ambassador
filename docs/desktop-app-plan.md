@@ -135,11 +135,81 @@ on `codex/desktop-app`; this is not a release candidate.
   [run 34123765678](https://github.com/embassys/ambassador/actions/runs/34123765678).
   This does not qualify a native Windows/Linux desktop or provider session.
 
-Next: qualify enrolled resource use and real-provider archive capture, then finish
-connection helpers and their repair/disconnect flows. Owner login/decisions/push
-still need the central contracts. Engine-version selection requires published trusted builds;
-launch-at-login still needs installed OS-session qualification. Signed installers
-and updates remain to be completed and qualified.
+### Native polish and live app qualification
+
+The next development candidate adds the supplied blue/purple brand as a vector
+asset and packaged icons. It uses native window controls, system fonts, compact
+platform spacing, Mac sidebar vibrancy and Windows Mica. Light, dark and system
+appearance persist locally. The native Mac welcome and dark settings view have
+been observed; Windows/Linux visual qualification remains open.
+
+Claude Code and OpenClaw now share guarded Connect, Check, Repair and Disconnect.
+The app records ownership of its exact public MCP entry without copying unrelated
+provider configuration. Tests cover stale reviews, expiry, aliases, conflicting
+ports/profiles, modified entries, cancellation, lost command responses and false
+success. The old Claude-only helper was replaced, and its boundary cases moved
+to the shared suite. Actual installed Mac CLIs passed Connect for both providers,
+OpenClaw Cancel/Disconnect and Claude repair after a test-only external removal.
+Unrelated settings and normal user provider profiles were preserved. Automatic
+setup is enabled only on the qualified Mac arm64 platform; other platforms retain
+manual setup until their installed-client checks pass. The private command also
+enforces that boundary, including Windows npm shim limitations.
+
+A packaged app with two fresh, isolated identities passed two phone-number
+requests through the deployed central API and a real Claude ACP executor.
+Both returned the exact synthetic number and received an explicit caller receipt.
+The requester was a script; permission and provider decisions used the real email
+flow with allow-once choices. This is not qualification of owner sign-in or
+approval controls inside the app, or of a natural requester desktop conversation.
+
+The native Conversations view displayed the first completed Claude turn, then
+retained it after restart. The second request reused that peer session after
+restart. Testing exposed repeated tool-summary rows for streamed updates; a
+regression now keeps one evolving summary per tool call, including status-only
+updates and interleaved calls across archive reopening. The second live request
+completed with this change; reopening its encrypted archive confirmed two
+completed tool summaries and the complete final response. Its final native
+visual check is pending because the
+Mac locked. The app also now reads existing enrollment through private local IPC:
+the native Attention view shows the verified agent after restart instead of
+onboarding. Reads never submit a receipt or add another central poller.
+
+Local evidence is under `.build/desktop-design/`: `connections-ui-result.json`,
+`live-app-result.json`, `live-app-repeat-result.json`, `live-app-archive-result.json`,
+`live-app-registered.png`
+and `live-app-first-conversation.png`. These are qualification artifacts, not
+application fixtures. Disposable test addresses and the synthetic phone number
+were used; credentials and email decision tokens are excluded from evidence.
+
+An enrolled background measurement exposed a redundant Dock-icon bitmap: the
+one-instance packaged host exceeded its budget at 312 MiB. Using the packaged
+icon directly reduced an unenrolled instance to 169 MiB and a verified instance
+with an active central receiver to 167.5 MiB, across five app-owned processes.
+The enrolled ten-second CPU sample was 0.10% of one core on an Apple M1 Max,
+Darwin 25.6.0. No provider was executing during those samples. The macOS CI lane
+now runs the existing 250 MiB / 1% background gate and retains its report.
+Evidence: `icon-memory-before.log`, `icon-memory-after.log` and
+`single-enrolled-resource-qualification.json` in the same local evidence directory.
+This does not settle active-provider or other-platform resource budgets.
+
+The latest complete repository check passes 402 tests with seven expected skips.
+The lower total than the intermediate 405-test run reflects consolidation of the
+old Claude-only tests, with additional shared-helper edge cases. Desktop
+compilation and the bundled runtime/SQLite/MCP probe pass. New branch CI results
+will be recorded after this candidate is pushed.
+
+Remaining desktop work:
+
+- Complete Codex and Hermes configuration helpers after the requested parser
+  dependency decision; qualify each helper on its supported native systems.
+- Finish the unlocked Mac visual pass, keyboard/zoom checks and final screenshots.
+  Qualify native Windows/Linux appearance, tray behavior and provider setup.
+- Qualify active-provider resource use and native Windows/Linux resource budgets.
+- Integrate owner sign-in, decisions, permissions and push when API issues 7–10
+  provide the accepted contracts. Recovery issues 1–6 remain release risks.
+- Complete trusted engine selection, signed installers/updates and installed
+  launch-at-login qualification. These need trusted builds and signing inputs.
+
 The current checks are not completion of the full matrix below.
 
 ## Delivery sequence

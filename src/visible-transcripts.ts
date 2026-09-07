@@ -157,6 +157,37 @@ export class VisibleTranscripts {
       turn.lastRole = role;
     }
   }
+  #tool(turn: Turn, toolId: string, title: string | undefined, status: string | undefined): void {
+    const id = `${turn.id}:tool:${digest(toolId)}`;
+    const previous = this.#store.get(id);
+    const entry: Entry =
+      previous?.kind === "entry"
+        ? previous
+        : {
+            id,
+            kind: "entry",
+            sessionId: turn.sessionId,
+            messageId: turn.messageId,
+            createdAt: this.#now(),
+            role: "tool",
+            text: "",
+          };
+    const [oldTitle, oldStatus] = entry.text.split("\n");
+    const nextTitle = title?.replaceAll(/\s+/gu, " ") || oldTitle || "Tool activity";
+    const nextStatus = status?.replaceAll(/\s+/gu, " ") || oldStatus;
+    const text = String(redactVerboseValue(nextStatus ? `${nextTitle}\n${nextStatus}` : nextTitle));
+    const chars = turn.chars - entry.text.length + text.length;
+    if (chars > 4 * 1024 * 1024) throw new Error("Visible turn exceeds its archive limit.");
+    turn.chars = chars;
+    if (!previous) turn.parts++;
+    entry.text = text;
+    this.#store.put(entry, {
+      replace: true,
+      groups: [sessionGroup(turn.sessionId), turnGroup(turn.messageId)],
+      state: 2,
+    });
+    turn.lastRole = "tool";
+  }
   begin(sessionId: string, message: CentralMessage): boolean {
     try {
       if (!message.id || sessionId.length > 512 || message.id.length > 512)
@@ -197,6 +228,9 @@ export class VisibleTranscripts {
       if (!value || typeof value !== "object" || !("sessionUpdate" in value)) return true;
       let role: Entry["role"];
       let text: string;
+      let toolId: string | undefined;
+      let toolTitle: string | undefined;
+      let toolStatus: string | undefined;
       if (
         value.sessionUpdate === "agent_message_chunk" &&
         "content" in value &&
@@ -221,15 +255,26 @@ export class VisibleTranscripts {
         const status =
           "status" in value && typeof value.status === "string" ? value.status.slice(0, 80) : "";
         text = status ? `${title}\n${status}` : title;
+        if (
+          "toolCallId" in value &&
+          typeof value.toolCallId === "string" &&
+          value.toolCallId.length > 0 &&
+          value.toolCallId.length <= 512
+        ) {
+          toolId = value.toolCallId;
+          toolTitle = "title" in value && typeof value.title === "string" ? title : undefined;
+          toolStatus = status || undefined;
+        }
       } else return true;
       const turn = this.#turn(messageId);
       if (!turn || turn.status !== "recording" || !Number.isSafeInteger(sequence) || sequence < 1)
         return false;
-      const fingerprint = digest({ role, text });
+      const fingerprint = digest({ role, text, toolId });
       if (sequence < turn.sourceSequence) return true;
       if (sequence === turn.sourceSequence) return turn.sourceFingerprint === fingerprint;
       this.#store.transaction(() => {
-        this.#append(turn, role, text);
+        if (toolId) this.#tool(turn, toolId, toolTitle, toolStatus);
+        else this.#append(turn, role, text);
         turn.sourceSequence = sequence;
         turn.sourceFingerprint = fingerprint;
         this.#saveTurn(turn);

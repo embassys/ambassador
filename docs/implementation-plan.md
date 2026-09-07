@@ -68,10 +68,21 @@ issue-only. These items do not authorize another release.
   are outside scope. Native archive display, custom storage selection and guarded
   Claude Code setup passed with isolated test data. Native testing also caught
   and fixed a hidden process after keyboard Quit and a reused port suggestion.
-  The current local check passes 395 tests with seven expected skips. Code commit
-  `dfbb8ec` also passed desktop CI on all three platforms. Remaining work includes the other provider helpers, repair/disconnect, enrolled resource
-  and native-provider qualification, signed distribution and API-dependent screens.
-  See the desktop plan for measured progress. Owner API features depend on server issues 7–10.
+  The new candidate adds platform-specific appearance, the supplied branding,
+  light/dark/system preferences and guarded OpenClaw setup. Both provider helpers
+  support checking, repair and disconnect of app-owned entries. The full check
+  passes 402 tests with seven expected skips. Two requests through the packaged
+  app, deployed central API and real Claude executor passed exact synthetic result
+  and receipt; the first completed turn was seen in the native app and survived
+  restart. Live tests found and fixed repeated tool-summary rows and an enrolled
+  identity still showing onboarding. Final native inspection of the second turn
+  awaits an unlocked Mac. A redundant Dock-icon allocation was fixed; the
+  verified background instance now measures 167.5 MiB and 0.10% of one core.
+  The macOS CI lane includes the existing background resource gate.
+  Codex/Hermes helpers, native
+  Windows/Linux qualification, signed distribution, trusted engine selection and
+  API-dependent owner screens remain open. See the desktop plan for evidence
+  and the remaining matrix. Owner API features depend on server issues 7–10.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

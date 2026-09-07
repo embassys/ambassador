@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { AcpSessionStore } from "../acp-session-store.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { GatewayError } from "../errors.js";
-import { openGatewayApplication, type RunningGatewayApplication } from "../gateway-application.js";
+import {
+  type GatewayOverview,
+  openGatewayApplication,
+  type RunningGatewayApplication,
+} from "../gateway-application.js";
 import { pathsForStateDirectory } from "../gateway-paths.js";
 import { GatewayIdentity } from "../identity.js";
 import { LocalControlClient } from "../local-control.js";
@@ -236,6 +240,21 @@ export class DesktopGateway {
         }
       } finally {
         await lock.release();
+      }
+    });
+  }
+
+  overview(): Promise<GatewayOverview> {
+    return this.#serial(async () => {
+      if (this.#application) return this.#application.localOverview();
+      const lock = this.#cleanPreview ? undefined : await ProcessLock.acquire(this.#paths.lockPath);
+      try {
+        const { enrollment, pendingCalls, receivedResults, sessionCount } = await readLocalSummary(
+          this.#paths,
+        );
+        return { enrollment, pendingCalls, receivedResults, sessionCount };
+      } finally {
+        await lock?.release();
       }
     });
   }

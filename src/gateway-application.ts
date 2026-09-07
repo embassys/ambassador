@@ -113,9 +113,17 @@ export interface GatewayApplicationOptions {
   readonly visibleTranscriptPath?: string;
 }
 
+export interface GatewayOverview {
+  readonly enrollment: Record<string, string | boolean>;
+  readonly pendingCalls: number;
+  readonly receivedResults: number;
+  readonly sessionCount: number;
+}
+
 export interface RunningGatewayApplication {
   readonly endpoint: string;
   readonly failure: Promise<Error>;
+  localOverview(): GatewayOverview;
   visibleHistory(sessionId: string, after?: number): TranscriptPage | undefined;
   deleteVisibleHistory(sessionId: string): Promise<void>;
   close(): Promise<void>;
@@ -849,6 +857,12 @@ export async function openGatewayApplication(
   return {
     endpoint: local.endpoint,
     failure,
+    localOverview: () => ({
+      enrollment: identity.enrollment,
+      pendingCalls: pendingActionInbox?.count() ?? 0,
+      receivedResults: actionResultInbox?.count() ?? 0,
+      sessionCount: acpSessionStore?.list().length ?? 0,
+    }),
     visibleHistory: (sessionId, after) =>
       transcripts?.page(sessionId, after) ??
       (transcriptWarning
