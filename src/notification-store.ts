@@ -212,6 +212,17 @@ export class NotificationStore {
     }
     return this.#records.nextInStates(interrupted) !== undefined;
   }
+  unresolvedCount(): number {
+    return this.#records.countInStates(
+      statesFor(
+        (record) =>
+          !record.processed ||
+          !["completed", "skipped"].includes(record.delivery) ||
+          record.acknowledgement !== "acked",
+      ),
+    );
+  }
+
   close(): void {
     this.#records.close();
   }

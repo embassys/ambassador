@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { diagnosticQuerySchema } from "./diagnostic-query.js";
 
 export const DESKTOP_PROTOCOL = 1;
 export const instanceId = z.uuid().toLowerCase();
@@ -33,19 +34,38 @@ const commandSchema = z.discriminatedUnion("type", [
     type: z.literal("clean"),
     ...selected,
     confirmation: z.literal("clear-local-instance"),
+    previewId: instanceId.optional(),
   }),
+  z.strictObject({ type: z.literal("clean_preview"), ...selected }),
+  z.strictObject({ type: z.literal("clean_cancel"), ...selected, previewId: instanceId }),
   z.strictObject({
     type: z.literal("create"),
     name: label,
     port: z.number().int().min(1024).max(65535),
+    requestId: instanceId,
+    chooseLocation: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal("sessions"), ...selected }),
   z.strictObject({
     type: z.literal("history"),
     ...selected,
     sessionId: z.string().min(1).max(512),
+    after: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   }),
-  z.strictObject({ type: z.literal("logs"), ...selected }),
+  z.strictObject({
+    type: z.literal("history_delete"),
+    ...selected,
+    sessionId: z.string().min(1).max(512),
+  }),
+  z.strictObject({ type: z.literal("logs"), ...selected, query: diagnosticQuerySchema.optional() }),
+  z.strictObject({ type: z.literal("reveal_logs"), ...selected }),
+  z.strictObject({
+    type: z.literal("export_prepare"),
+    ...selected,
+    includeBodies: z.boolean(),
+    query: diagnosticQuerySchema.optional(),
+  }),
+  z.strictObject({ type: z.literal("export_save"), ...selected, previewId: instanceId }),
   z.strictObject({ type: z.literal("setup"), ...selected }),
 ]);
 export type DesktopCommand = z.infer<typeof commandSchema>;

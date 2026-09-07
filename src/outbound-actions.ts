@@ -397,6 +397,10 @@ export class OutboundActions {
     return this.#store.get(identifier({ target_email: targetEmail, action_type: actionType }));
   }
 
+  count(): number {
+    return this.#store.count();
+  }
+
   close(): void {
     this.#store.close();
   }

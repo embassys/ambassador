@@ -92,17 +92,29 @@ process.on("message", (raw: unknown) => {
         result = current.snapshot();
         break;
       case "clean":
-        await current.clean();
+        if (!command.previewId) throw new Error("Review this instance before cleaning.");
+        await current.clean(command.previewId);
+        result = current.snapshot();
+        break;
+      case "clean_preview":
+        result = await current.prepareClean();
+        break;
+      case "clean_cancel":
+        await current.cancelClean(command.previewId);
         result = current.snapshot();
         break;
       case "sessions":
         result = await current.sessions();
         break;
       case "history":
-        result = await current.history(command.sessionId);
+        result = await current.history(command.sessionId, command.after);
+        break;
+      case "history_delete":
+        await current.deleteHistory(command.sessionId);
+        result = { deleted: true };
         break;
       case "logs":
-        result = await current.logs();
+        result = await current.logs(command.query);
         break;
       default:
         throw new Error("Command unavailable in this worker.");

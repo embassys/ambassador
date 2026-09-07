@@ -135,6 +135,14 @@ export class DesktopGatewayClient {
   snapshot(): GatewaySnapshot {
     return { ...this.#state };
   }
+  available(): boolean {
+    return (
+      !this.#closed &&
+      this.#child.connected &&
+      this.#child.exitCode === null &&
+      this.#child.signalCode === null
+    );
+  }
   ready(): Promise<void> {
     return this.#ready;
   }

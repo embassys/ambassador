@@ -141,13 +141,27 @@ export class DesktopInstances {
     name: string;
     port: number;
     parentDirectory?: string;
+    requestId?: string;
   }): Promise<DesktopInstance> {
     return this.#serial(async () => {
+      const previous = this.#instances.find((item) => item.id === input.requestId);
+      if (previous) {
+        const expectedParent = await realpath(
+          input.parentDirectory ?? join(this.directory, "instances"),
+        );
+        if (
+          previous.name !== input.name.trim() ||
+          previous.port !== input.port ||
+          dirname(previous.stateDirectory) !== expectedParent
+        )
+          throw new Error("This creation request was already used for a different instance.");
+        return { ...previous };
+      }
       if (this.#instances.length >= 8)
         throw new Error("This build supports up to eight instances.");
       if (this.#instances.some((item) => item.port === input.port))
         throw new Error("Another instance uses this port.");
-      const id = randomUUID();
+      const id = input.requestId ?? randomUUID();
       const parent =
         input.parentDirectory === undefined
           ? join(this.directory, "instances")
