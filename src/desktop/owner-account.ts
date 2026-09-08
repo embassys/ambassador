@@ -281,7 +281,8 @@ export class OwnerAccount {
         ...(session ? { issue: "signout_unconfirmed" as const } : {}),
       };
       await this.#save(state);
-      this.#assign(state);
+      // Persist uncertainty for a crash, but do not display failure before the request ends.
+      this.#assign({ status: "signed_out" });
       if (session && session.expiresAt > this.#now()) {
         try {
           z.object({ status: z.literal("ok") }).parse(
@@ -291,8 +292,9 @@ export class OwnerAccount {
           this.#assign({ status: "signed_out" });
         } catch (error) {
           if (this.#unavailable) throw error;
+          this.#assign(state);
         }
-      }
+      } else if (session) this.#assign(state);
       return this.#reply();
     }
     if (!(await this.#ensureSession()))

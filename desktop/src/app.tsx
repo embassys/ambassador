@@ -10,6 +10,7 @@ import type {
   DesktopInstance,
   GatewaySnapshot,
 } from "../../src/desktop/protocol.js";
+import { createViewReader } from "../../src/desktop/view-reader.js";
 import type { GatewayOverview } from "../../src/gateway-application.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
 import { Account } from "./account.js";
@@ -197,6 +198,7 @@ function App() {
   const proposedPort = newPort || String(suggestedInstancePort(snapshot?.instances ?? []));
   const [loading, setLoading] = useState(false);
   const viewGeneration = useRef(0);
+  const sessionReader = useRef<{ refresh: () => Promise<void> } | undefined>(undefined);
   const lastNavigation = useRef(localStorage.getItem("ambassador.navigation") ?? "");
 
   const call = useCallback(async (command: DesktopCommand) => {
@@ -298,6 +300,7 @@ function App() {
     if (
       (!onboarded && !setupSettings) ||
       !id ||
+      (page === "conversations" && dataSource !== "local") ||
       !["conversations", "diagnostics", "agents"].includes(page)
     )
       return;
@@ -308,23 +311,35 @@ function App() {
         : page === "diagnostics"
           ? { type: "logs", instanceId: id }
           : { type: "setup", instanceId: id };
-    void call(command)
-      .then((result) => {
-        if (!current) return;
+    const reader = createViewReader({
+      read: () => call(command),
+      publish: (result) => {
         if (page === "conversations") setSessions(result as Session[]);
         else if (page === "diagnostics") setLogs(result as DiagnosticPage);
         else setSetup(result as Setup);
-      })
-      .catch((cause: unknown) => {
-        if (current) setError(cause instanceof Error ? cause.message : "This view is unavailable.");
-      })
-      .finally(() => {
-        if (current) setLoading(false);
-      });
+      },
+      failed: (cause) => {
+        setError(cause instanceof Error ? cause.message : "This view is unavailable.");
+      },
+    });
+    if (page === "conversations") sessionReader.current = reader;
+    void reader.refresh().finally(() => {
+      if (current) setLoading(false);
+    });
+    const refreshVisible = () => {
+      if (!document.hidden) void reader.refresh();
+    };
+    const liveSessions = page === "conversations" && runtimeState === "running";
+    const timer = liveSessions ? setInterval(refreshVisible, 5000) : undefined;
+    if (liveSessions) document.addEventListener("visibilitychange", refreshVisible);
     return () => {
       current = false;
+      reader.close();
+      if (sessionReader.current === reader) sessionReader.current = undefined;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshVisible);
     };
-  }, [id, page, call, onboarded, setupSettings]);
+  }, [id, page, call, onboarded, setupSettings, dataSource, runtimeState]);
 
   async function chooseAppearance(value: AppSnapshot["appearance"]) {
     pendingAppearance.current = value;
@@ -878,6 +893,16 @@ function App() {
             )}
             {page === "conversations" && dataSource === "local" && (
               <>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={loading}
+                    onClick={() => void sessionReader.current?.refresh()}
+                  >
+                    Refresh conversations
+                  </button>
+                </div>
                 <div className="quiet-note">
                   <Icon name="conversations" size={18} />
                   <span>

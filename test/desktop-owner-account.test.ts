@@ -463,6 +463,43 @@ test("sign-out commits locally despite a lost response and never touches instanc
   assert.equal(s.f.calls.filter((c) => c.path === "/api/app/session/signout").length, 1);
 });
 
+test("sign-out does not show a failure while its confirmation is still pending", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let finish!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  s.f.override((path) => {
+    if (path !== "/api/app/session/signout") return;
+    entered();
+    return response;
+  });
+  const pending = s.request({ type: "owner_signout" });
+  await started;
+  try {
+    assert.equal(s.service.snapshot().status, "signed_out");
+    assert.equal(s.service.snapshot().issue, undefined);
+    assert.deepEqual(
+      await s.service.store.load(),
+      {
+        status: "signed_out",
+        issue: "signout_unconfirmed",
+      },
+      "A crash still records that remote sign-out was not confirmed.",
+    );
+  } finally {
+    finish(Response.json({ status: "ok", message: "Signed out on this device." }));
+    await pending;
+  }
+  assert.equal(s.service.snapshot().issue, undefined);
+  assert.deepEqual(await s.service.store.load(), { status: "signed_out" });
+});
+
 test("account storage refuses concurrent owners and aliased session files", async (t) => {
   const s = await setup(t);
   await s.login();

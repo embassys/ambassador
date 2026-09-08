@@ -820,9 +820,10 @@ current work plan. No signing identity is installed on this Mac and no repositor
 release secrets are configured. Signing, updates and engine installation need
 the distribution inputs above; there are no signed compatible artifacts to
 select yet. Calendar invitation testing needs the owner's chosen account and
-consenting recipient. Codex computer control is unavailable, standalone Claude
-Chat/Cowork has no configured Ambassador connector, and the installed Hermes
-API still lacks the required trusted origin and idle-only injection behavior.
+consenting recipient. Codex computer control is unavailable. The later combined
+completion section records standalone Claude Chat/Cowork's new local client and
+separate qualification. The installed Hermes API still lacks the required
+trusted origin and idle-only injection behavior.
 Native Windows/Linux qualification remains excluded from this request.
 
 ## Executor checks and Mac sidebar, 2026-09-08
@@ -883,3 +884,34 @@ remain local in `.build/onboarding-screenshots/`; see the
 [qualification record](qualification.md#embassys-account-first-onboarding-2026-09-08)
 for the limits of this live run. Test profiles were removed after sign-out and
 shutdown. No release was published.
+
+## Combined live completion, 2026-09-08
+
+Native Embassys signup, verification, owner login and connection of an existing
+Claude entry now pass in one deployed-central run with a real Claude requester
+and real OpenClaw target. The target asked its owner for the synthetic number;
+the emailed answer resumed the same session. Claude displayed the exact number
+and acknowledged the result. The opposite direction also passed through real
+Claude ACP, including exact one-use provider approval. Cleaning the separate
+OpenClaw instance preserved the running Claude enrollment.
+
+ADR 0073 fixes setup rejecting compatible existing entries. A further native
+check found a stale Conversations list; bounded visible refresh and a manual
+refresh button now keep it current without replacing the selected history page.
+After rebuilding and restarting the app, another live action updated the open
+list and reused the same Claude session without navigation.
+
+A fresh Codex desktop task recognized Embassys and returned the exact active
+registration without a website question or tool hint. See the
+[completion record](client-completion-2026-09-08.md) for screenshots, operation
+references, test-driver mistakes, provider-source findings and qualification
+limits. The sign-out progress snapshot no longer flashes an unconfirmed warning
+before its successful request finishes; persisted crash uncertainty is retained.
+ADR 0074 adds a local stdio client for standalone Claude Chat and Cowork while
+keeping the native app's registration and incoming executor authoritative.
+Both native surfaces now pass a natural request to real OpenClaw, exact result
+display and explicit receipt. See the completion record for separate wait
+measurements and manual development setup; no connector was published.
+Current checks pass 494 core tests with seven expected skips and 18
+desktop tests. Central API changes, distribution and the previously deferred
+native Windows/Linux matrix are outside this pass.
