@@ -15,6 +15,13 @@ test("archive failures retain bounded tool diagnostics and enforce a deadline", 
   await assert.rejects(
     runArchiveTool(process.execPath, [
       "-e",
+      "process.stdout.write('x'.repeat(10000) + 'final image error', () => process.exit(1))",
+    ]),
+    (error) => error.message.endsWith("final image error") && error.message.length < 5000,
+  );
+  await assert.rejects(
+    runArchiveTool(process.execPath, [
+      "-e",
       "process.stderr.write('disk image failure'); process.exit(7)",
     ]),
     /exited 7: disk image failure/u,
