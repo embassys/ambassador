@@ -43,6 +43,20 @@ test("desktop appearance follows the platform and respects reduced transparency"
   assert.equal(windowAppearance("linux", true, false).backgroundColor, "#1e1e20");
 });
 
+test("Mac vibrancy stays visible in both themes and becomes opaque when transparency is reduced", () => {
+  for (const dark of [false, true]) {
+    const vibrant = windowAppearance("darwin", dark, false);
+    assert.equal(vibrant.backgroundColor, "#00000000");
+    assert.equal(vibrant.vibrancy, "sidebar");
+    assert.equal(vibrant.visualEffectState, "followWindow");
+    const reduced = windowAppearance("darwin", dark, true);
+    assert.equal(reduced.backgroundColor, dark ? "#1e1e20" : "#f5f5f7");
+    assert.equal(reduced.vibrancy, undefined);
+    for (const platform of ["win32", "linux"])
+      assert.notEqual(windowAppearance(platform, dark, false).backgroundColor, "#00000000");
+  }
+});
+
 test("appearance choices survive restart and invalid input leaves the preference intact", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "embassys-appearance-"));
   t.after(() => rm(root, { recursive: true, force: true }));

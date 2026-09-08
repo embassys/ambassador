@@ -121,6 +121,7 @@ export interface GatewaySnapshot {
   readonly state: "stopped" | "starting" | "running" | "stopping" | "error";
   readonly endpoint?: string;
   readonly error?: string;
+  readonly notice?: string;
   readonly startedAt?: string;
   readonly stopReason?: "handoff";
 }

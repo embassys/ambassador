@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,7 +10,7 @@ const root = await mkdtemp(join(tmpdir(), "embassys-parser-test-"));
 await build({
   stdin: {
     contents:
-      'export { providerDocument } from "./src/provider-config.ts"; export { AgentConnection, connectionEntry } from "../src/desktop/agent-connections.ts";',
+      'export { providerDocument } from "./src/provider-config.ts"; export { AgentConnection, connectionEntry } from "../src/desktop/agent-connections.ts"; export { verifyExecutorConnection } from "../src/desktop/executor-connection.ts";',
     resolveDir: process.cwd(),
     sourcefile: "provider-test-entry.ts",
   },
@@ -24,9 +24,8 @@ await build({
   format: "esm",
   packages: "bundle",
 });
-const { providerDocument, AgentConnection, connectionEntry } = await import(
-  pathToFileURL(join(root, "config.mjs")).href
-);
+const { providerDocument, AgentConnection, connectionEntry, verifyExecutorConnection } =
+  await import(pathToFileURL(join(root, "config.mjs")).href);
 test.after(() => rm(root, { recursive: true, force: true }));
 
 for (const provider of ["codex", "hermes"]) {
@@ -34,6 +33,35 @@ for (const provider of ["codex", "hermes"]) {
     provider === "codex"
       ? '# Keep my preferences\nmodel = "example" # inline comment\n[mcp_servers.calendar]\nurl = "http://localhost:9999/mcp"\n'
       : "# Keep my preferences\nmodel: example # inline comment\nmcp_servers:\n  calendar:\n    url: http://localhost:9999/mcp\n";
+  test(`${provider} executor check uses its real parser and refuses changed bindings`, async () => {
+    const dir = await mkdtemp(join(root, `${provider}-executor-`));
+    const workingDirectory = join(dir, "work");
+    await mkdir(workingDirectory);
+    const configurationPath = join(dir, "config");
+    const document = providerDocument(provider);
+    const text = document.edit(original, connectionEntry(provider, 9797));
+    await writeFile(configurationPath, text);
+    const options = { provider, configurationPath, workingDirectory, port: 9797, document };
+    assert.equal(await verifyExecutorConnection(options), true);
+    assert.equal(await verifyExecutorConnection({ ...options, port: 8787 }), false);
+    if (provider === "codex") {
+      const projectDirectory = join(workingDirectory, ".codex");
+      await mkdir(projectDirectory);
+      const project = join(projectDirectory, "config.toml");
+      await writeFile(project, 'model = "example"\n');
+      assert.equal(await verifyExecutorConnection(options), true);
+      await writeFile(project, document.edit("", connectionEntry(provider, 8787)));
+      assert.equal(await verifyExecutorConnection(options), false);
+      await rm(project);
+    }
+    await writeFile(
+      configurationPath,
+      provider === "codex"
+        ? `${text}\n[mcp_servers.ambassador]\nurl = "http://127.0.0.1:8787/mcp"\n`
+        : `${text}\nmcp_servers: {}\n`,
+    );
+    assert.equal(await verifyExecutorConnection(options), false);
+  });
   test(`${provider} connect, ownership conflict, repair and disconnect preserve unrelated settings`, async (_t) => {
     const dir = await mkdtemp(join(root, `${provider}-`));
     const path = join(dir, provider === "codex" ? "config.toml" : "config.yaml");

@@ -36,7 +36,7 @@ issue-only. These items do not authorize another release.
   and a five-second wait received its later answer without a detached polling
   task. A completely unenrolled fixture also reached registration without a
   tool hint, but the host refused verification codes in chat. The new guidance
-  directs the owner to the app's Registration view in that case. The pending
+  directs the owner to Account > Set up this device in that case. The pending
   reply still disappeared from the view. See the
   [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
 - [ ] Calendar invitations. Verify an invitation actually reaches another
@@ -55,8 +55,12 @@ issue-only. These items do not authorize another release.
   Remote Control evidence does not qualify standalone Claude Chat or Cowork.
 - [ ] Multiple engine versions and provider isolation. Embassys now supports
   named instances with separate ports, locations, credentials, locks, workflow
-  state and logs under ADR 0064. Finish trusted engine-version selection and
-  provider configuration isolation. Qualify MCP setup and native return against
+  state and logs under ADR 0064. ADR 0071 now checks the desktop executor's
+  configured MCP binding before dispatch. Failed checks pause delivery with the
+  message still pending; fixing the connection and restarting can resume it.
+  Unsupported project overrides are refused. This does not pin cached provider
+  connections or provision independent profiles. Finish trusted engine-version
+  selection and qualify simultaneous provider profiles. Qualify MCP setup and native return against
   the selected instance, including concurrent providers and independent stop/clean.
   The published CLI remains fixed to its original port and state location; no
   new CLI selectors or migration are planned. ADR 0069 adds a shared installation
@@ -81,7 +85,7 @@ The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
 registration across hosts, confirmed authenticated process handoff and stopped
 state after handoff. Existing isolated instances remain separate. Current local
-checks pass 472 tests with seven expected skips, plus 14 desktop rendering,
+checks pass 480 tests with seven expected skips, plus 16 desktop rendering,
 parser and artifact tests. Final native and live evidence belongs in the desktop
 plan; these counts alone do not qualify a user-visible result.
 

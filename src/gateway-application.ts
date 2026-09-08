@@ -104,6 +104,10 @@ export interface GatewayApplicationOptions {
   readonly webhookSecretStore?: WebhookSecretStore;
   readonly localControlSecretStore?: LocalControlSecretStore;
   readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
+  readonly beforeDirectDelivery?: (
+    context: { agent: string; workingDirectory: string },
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly acpSessionControllerFactory?: (
     capability: NonNullable<AgentCapability["direct"]>,
   ) => Pick<AcpSessionController, "delete" | "show">;
@@ -249,6 +253,13 @@ function runtimeFailure(error: unknown, agentName: string): GatewayError {
     return new GatewayError(
       "direct_agent_startup_failed",
       `Ambassador paused incoming delivery because ${agentName} could not start. Confirm the agent is signed in, then restart Ambassador to resume delivery`,
+      0,
+    );
+  }
+  if (direct === "invalid_configuration") {
+    return new GatewayError(
+      "direct_agent_configuration_invalid",
+      `Incoming delivery is paused because ${agentName}'s connection could not be verified for this instance. Check its Ambassador connection in Agents and any project overrides, then restart this server. The message has not been sent to the agent`,
       0,
     );
   }
@@ -447,8 +458,20 @@ export async function openGatewayApplication(
 
   const createDeliveryTarget = async (context: DeliveryTargetContext): Promise<DeliveryTarget> => {
     const serializeDirectTarget = (target: DeliveryTarget): DeliveryTarget => {
-      if (context.profile.mode !== "direct") return target;
+      const profile = context.profile;
+      if (profile.mode !== "direct") return target;
       return {
+        prepare: async (signal) => {
+          try {
+            await options.beforeDirectDelivery?.(
+              { agent: context.capability.kind, workingDirectory: profile.working_directory },
+              signal,
+            );
+          } catch {
+            throw new DirectDeliveryError("invalid_configuration");
+          }
+          await target.prepare?.(signal);
+        },
         deliver: (message, signal) =>
           runSessionOperation(async () => await target.deliver(message, signal)),
         close: async () => await target.close(),
@@ -666,6 +689,9 @@ export async function openGatewayApplication(
             error: describeVerboseError(error),
           }),
         deliveryTarget: {
+          prepare: async (signal) => {
+            await baseTarget.prepare?.(signal);
+          },
           deliver: async (message, signal) => {
             if (
               message.payload.type === "owner_input" &&

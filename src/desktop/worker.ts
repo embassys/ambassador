@@ -1,3 +1,4 @@
+import { ExecutorGuard, executorContextSchema } from "./executor-guard.js";
 import { DesktopGateway } from "./gateway.js";
 import { DESKTOP_PROTOCOL, workerInitSchema, workerRequestSchema } from "./protocol.js";
 
@@ -8,6 +9,7 @@ const initializedBy = setTimeout(() => {
   void shutdown();
 }, 15_000);
 let pending = 0;
+const executorGuard = new ExecutorGuard(send);
 
 function send(value: unknown): void {
   if (process.connected && Buffer.byteLength(JSON.stringify(value)) <= maximumBytes) {
@@ -18,6 +20,7 @@ function send(value: unknown): void {
 async function shutdown(): Promise<void> {
   if (closing) return;
   closing = true;
+  executorGuard.close();
   clearTimeout(initializedBy);
   const deadline = setTimeout(() => process.exit(1), 35_000);
   try {
@@ -40,6 +43,10 @@ process.on("SIGINT", () => {
 
 process.on("message", (raw: unknown) => {
   if (closing) return;
+  if (raw && typeof raw === "object" && "type" in raw && raw.type === "executor_check_result") {
+    if (!executorGuard.receive(raw)) void shutdown();
+    return;
+  }
   if (gateway === undefined) {
     const initial = workerInitSchema.safeParse(raw);
     if (!initial.success) {
@@ -52,6 +59,8 @@ process.on("message", (raw: unknown) => {
       ...instance,
       diagnostics: initial.data.diagnostics,
       environment: process.env,
+      beforeDirectDelivery: (context, signal) =>
+        executorGuard.check(executorContextSchema.parse(context), signal),
       onChange: (snapshot) => send({ protocol: DESKTOP_PROTOCOL, type: "state", snapshot }),
       onNotification: (event) => send({ protocol: DESKTOP_PROTOCOL, type: "notification", event }),
     });

@@ -35,6 +35,7 @@ export interface DesktopGatewayOptions {
   readonly diagnostics?: DiagnosticMode;
   readonly onChange?: (snapshot: GatewaySnapshot) => void;
   readonly onNotification?: (event: LocalNotification) => void;
+  readonly beforeDirectDelivery?: GatewayApplicationOptions["beforeDirectDelivery"];
   readonly testOverrides?: Pick<
     GatewayApplicationOptions,
     "centralOrigin" | "nowSeconds" | "deliveryTargetFactory"
@@ -99,6 +100,9 @@ export class DesktopGateway {
             await realpath(this.options.workingDirectory),
           ),
           environment: this.options.environment,
+          ...(this.options.beforeDirectDelivery
+            ? { beforeDirectDelivery: this.options.beforeDirectDelivery }
+            : {}),
           localMcpPort: this.options.port,
           signal: this.#abort.signal,
           log: this.#diagnostics.log,
@@ -111,8 +115,10 @@ export class DesktopGateway {
             this.#handedOff = true;
             void this.stop();
           },
-          onRuntimeNotice: (notice) =>
-            this.#diagnostics?.log("gateway.notice", { message: notice.message }),
+          onRuntimeNotice: (notice) => {
+            this.#diagnostics?.log("gateway.notice", { message: notice.message });
+            this.#changed({ ...this.#state, notice: notice.message });
+          },
         });
         this.#application = application;
         this.#changed({
@@ -120,6 +126,7 @@ export class DesktopGateway {
           state: "running",
           endpoint: application.endpoint,
           startedAt: new Date().toISOString(),
+          ...(this.#state.notice ? { notice: this.#state.notice } : {}),
         });
         this.#diagnostics.log("desktop.gateway.ready", {
           instance_id: this.options.id,

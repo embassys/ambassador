@@ -6,7 +6,7 @@ import type { DesktopCommand } from "../../src/desktop/protocol.js";
 type Command = (input: DesktopCommand) => Promise<unknown>;
 const unavailable: Record<string, string> = {
   stopped: "Start this instance's server to read its current status.",
-  not_registered: "Register this instance in Registration first.",
+  not_registered: "Open Account > Set up this device to register this instance.",
   expired:
     "The saved credential has expired. Local history is still available; central identity recovery is not supported yet.",
   unavailable:

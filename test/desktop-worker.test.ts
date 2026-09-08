@@ -11,6 +11,59 @@ import { setTimeout as delay } from "node:timers/promises";
 import { DesktopGatewayClient } from "../src/desktop/worker-client.js";
 import { ProcessLock } from "../src/process-lock.js";
 
+test("worker executor checks cross private IPC and default to refusal when the host cannot verify", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-worker-executor-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workerPath = join(root, "fixture.cjs");
+  await writeFile(
+    workerPath,
+    `let instance, request;
+    process.on('message', message => {
+      if(message.type === 'initialize') { instance=message.instance; process.send({protocol:1,type:'ready',runtime:process.version,snapshot:{id:instance.id,state:'stopped'}}); }
+      else if(message.command?.type === 'overview') { request=message.requestId; process.send({protocol:1,type:'executor_check',requestId:request,context:{agent:'claude',workingDirectory:instance.workingDirectory}}); }
+      else if(message.type === 'executor_check_result') process.send({protocol:1,type:'reply',requestId:request,ok:true,result:{allowed:message.allowed}});
+      else if(message.command?.type === 'stop') { process.send({protocol:1,type:'reply',requestId:message.requestId,ok:true,result:{}}); }
+    }); process.on('disconnect',()=>process.exit(0));`,
+  );
+  let allowed = true;
+  for (const configured of [true, false]) {
+    const id = randomUUID();
+    const client = new DesktopGatewayClient({
+      nodePath: process.execPath,
+      workerPath,
+      instance: {
+        id,
+        name: "Executor check",
+        port: 19789,
+        stateDirectory: root,
+        workingDirectory: root,
+        enabled: false,
+        createdAt: new Date().toISOString(),
+      },
+      ...(configured
+        ? {
+            checkExecutor: async (context) => {
+              assert.deepEqual(context, { agent: "claude", workingDirectory: root });
+              return allowed;
+            },
+          }
+        : {}),
+    });
+    try {
+      await client.ready();
+      assert.deepEqual(await client.request({ type: "overview", instanceId: id }), {
+        allowed: configured,
+      });
+      allowed = false;
+      assert.deepEqual(await client.request({ type: "overview", instanceId: id }), {
+        allowed: false,
+      });
+    } finally {
+      await client.close();
+    }
+  }
+});
+
 test("worker startup rejects an incompatible runtime before accepting commands", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "embassys-worker-version-"));
   t.after(() => rm(root, { recursive: true, force: true }));
