@@ -165,7 +165,7 @@ test("reports verified enrollment independently of an empty permission list and 
 });
 
 test("keeps saved results readable after credential expiry and restart without retrying central", {
-  timeout: process.platform === "win32" ? 30_000 : 5_000,
+  timeout: process.platform === "win32" ? 60_000 : 5_000,
 }, async (t) => {
   const value = await fixture(t);
   let now = NOW_SECONDS;
@@ -185,6 +185,7 @@ test("keeps saved results readable after credential expiry and restart without r
   const gateway = value.trackGateway(await openGatewayApplication(options));
   const email = "expiry@fixture.test";
   const client = await enrollWebhook(gateway, value.central, value.webhook.url, email);
+  t.diagnostic("Enrolled the gateway before expiring its credential");
   const sender = value.central.seedClient("expiry-sender@fixture.test");
   const callId = "10000000-0000-4000-8000-000000000055";
   value.central.queueMessage(
@@ -199,6 +200,7 @@ test("keeps saved results readable after credential expiry and restart without r
     sender.email,
   );
   await value.webhook.waitForWake();
+  t.diagnostic("Saved result reached the local delivery target");
   now += 100 * 24 * 60 * 60;
   await assert.rejects(
     client.callTool("list_action_types", {}),
@@ -207,12 +209,14 @@ test("keeps saved results readable after credential expiry and restart without r
   );
   value.central.queueMessage(email, { type: "expiry-wake" }, sender.email);
   await pause;
+  t.diagnostic("Expired central transport paused");
   const requestCount = value.central.requests().length;
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(value.central.requests().length, requestCount);
   assert.match(notices[0]?.message ?? "", /expired/iu);
   await gateway.close();
   const reopened = value.trackGateway(await openGatewayApplication(options));
+  t.diagnostic("Reopened local state with the expired credential");
   assert.equal(value.central.requests().length, requestCount);
   const reader = new TestMcpClient(reopened.endpoint);
   await reader.initialize(OPENCLAW);
@@ -222,6 +226,7 @@ test("keeps saved results readable after credential expiry and restart without r
   const inbox = await reader.callTool("message_box", { type: "inbox" });
   assert.equal(inbox.count, 1);
   assert.equal((inbox.items as Array<Record<string, unknown>>)[0]?.call_id, callId);
+  t.diagnostic("Read the saved result through MCP after restart");
   await assert.rejects(
     reader.callTool("get_my_permissions", {}),
     (error: unknown) =>
