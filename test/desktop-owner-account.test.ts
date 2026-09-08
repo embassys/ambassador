@@ -531,3 +531,321 @@ test("cleaning a stopped local instance preserves the shared owner session and o
   assert.equal(s.service.snapshot().status, "signed_in");
   assert.equal((await s.request({ type: "owner_requests" })).state, "ready");
 });
+
+const permissionId = "00000000-0000-4000-8000-000000000031";
+const inputId = "00000000-0000-4000-8000-000000000032";
+function ownerRequests() {
+  return {
+    total: 2,
+    permission_requests: [
+      {
+        id: permissionId,
+        decision_options: "once_always",
+        scope: { calendar_id: "primary" },
+        created_at: "2026-09-08T10:00:00Z",
+        expires_at: null,
+        action_type: "get_phone_number",
+        action_description: null,
+        requester_email: "peer@fixture.test",
+        requester_name: null,
+      },
+    ],
+    input_requests: [
+      {
+        id: inputId,
+        prompt: "Which option?",
+        input_type: "buttons",
+        options: [{ label: "Only this invocation", value: "provider:allow-once" }],
+        created_at: "2026-09-08T10:00:00Z",
+        action_type: "get_phone_number",
+      },
+    ],
+  };
+}
+function reviewId(reply: Awaited<ReturnType<OwnerAccount["command"]>>) {
+  assert.equal(reply.data?.kind, "review");
+  return (reply.data as unknown as { review_id: string }).review_id;
+}
+
+test("owner mutations review exact options, confirm once and persist receipt across restart", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  s.f.override((path, init) => {
+    if (path === "/api/app/requests") return Response.json(ownerRequests());
+    if (path.endsWith("/decide")) {
+      assert.deepEqual(JSON.parse(String(init?.body)), { decision: "allow_once" });
+      return Response.json({
+        status: "ok",
+        permission_id: permissionId,
+        decision: "allow_once",
+        action_type: "get_phone_number",
+      });
+    }
+    return undefined;
+  });
+  const review = reviewId(
+    await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+  );
+  const result = await s.request({
+    type: "owner_submit",
+    review_id: review,
+    decision: "allow_once",
+  });
+  assert.equal((result.data as unknown as { status: string }).status, "confirmed");
+  await s.request({ type: "owner_submit", review_id: review, decision: "allow_once" });
+  assert.equal(
+    (await s.request({ type: "owner_submit", review_id: review, decision: "deny" })).issue,
+    "request_unavailable",
+  );
+  await s.restart();
+  const repeat = await s.request({ type: "owner_review", kind: "permission", id: permissionId });
+  assert.equal((repeat.data as unknown as { status: string }).status, "confirmed");
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("/decide")).length, 1);
+});
+
+test("owner unknown menus, malformed options, stale and expired reviews never submit", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  let current = ownerRequests();
+  s.f.override((path) => (path === "/api/app/requests" ? Response.json(current) : undefined));
+  assert.ok(current.permission_requests[0]);
+  current.permission_requests[0].decision_options = "future_menu";
+  assert.equal(
+    (await s.request({ type: "owner_review", kind: "permission", id: permissionId })).issue,
+    "request_unavailable",
+  );
+  current = ownerRequests();
+  current.input_requests[0]?.options.push({
+    label: "Different label",
+    value: "provider:allow-once",
+  });
+  assert.equal(
+    (await s.request({ type: "owner_review", kind: "input", id: inputId })).issue,
+    "request_unavailable",
+  );
+  current = ownerRequests();
+  let review = reviewId(
+    await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+  );
+  assert.ok(current.permission_requests[0]);
+  current.permission_requests[0].scope.calendar_id = "other";
+  assert.equal(
+    (await s.request({ type: "owner_submit", review_id: review, decision: "allow_once" })).issue,
+    "review_expired",
+  );
+  review = reviewId(await s.request({ type: "owner_review", kind: "input", id: inputId }));
+  assert.equal(
+    (await s.request({ type: "owner_submit", review_id: review, value: "allow_once" })).issue,
+    "request_unavailable",
+  );
+  review = reviewId(
+    await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+  );
+  s.f.advance(300001);
+  assert.equal(
+    (await s.request({ type: "owner_submit", review_id: review, decision: "allow_once" })).issue,
+    "review_expired",
+  );
+  assert.equal(
+    s.f.calls.filter((c) => c.path.endsWith("/decide") || c.path.endsWith("/answer")).length,
+    0,
+  );
+});
+
+test("lost owner answers survive sign-out and restart without replay or inferred success", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  let answered = false;
+  s.f.override((path, init) => {
+    if (path === "/api/app/requests")
+      return Response.json(
+        answered ? { total: 0, permission_requests: [], input_requests: [] } : ownerRequests(),
+      );
+    if (path.endsWith("/answer")) {
+      assert.deepEqual(JSON.parse(String(init?.body)), { value: "provider:allow-once" });
+      answered = true;
+      throw new Error("Response lost after commit");
+    }
+    return undefined;
+  });
+  const review = reviewId(await s.request({ type: "owner_review", kind: "input", id: inputId }));
+  const result = await s.request({
+    type: "owner_submit",
+    review_id: review,
+    value: "provider:allow-once",
+  });
+  assert.equal((result.data as unknown as { status: string }).status, "unconfirmed");
+  await s.request({ type: "owner_signout" });
+  await s.restart();
+  await s.login();
+  const feed = await s.request({ type: "owner_requests" });
+  assert.match(JSON.stringify(feed.data), /unconfirmed/);
+  const repeat = await s.request({ type: "owner_review", kind: "input", id: inputId });
+  assert.equal((repeat.data as unknown as { status: string }).status, "unconfirmed");
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("/answer")).length, 1);
+  const files = await readdir(join(s.root, "account"));
+  for (const name of files.filter((n) => n.startsWith("mutations.sqlite")))
+    assert.doesNotMatch(
+      (await readFile(join(s.root, "account", name))).toString(),
+      /provider:allow-once|Which option|owner@fixture.test|00000000-0000-4000-8000-000000000032/,
+    );
+});
+
+test("email/app conflict is settled, mismatched success is unconfirmed, and rejection permits fresh review", async (t) => {
+  for (const status of [409, 400, 503, 200]) {
+    const s = await setup(t);
+    await s.login();
+    s.f.override((path) => {
+      if (path === "/api/app/requests") return Response.json(ownerRequests());
+      if (path.endsWith("/decide"))
+        return Response.json(
+          {
+            status: "ok",
+            permission_id: randomUUID(),
+            decision: "deny",
+            action_type: "get_phone_number",
+          },
+          { status },
+        );
+      return undefined;
+    });
+    const review = reviewId(
+      await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+    );
+    const result = await s.request({
+      type: "owner_submit",
+      review_id: review,
+      decision: "allow_once",
+    });
+    if (status === 400) {
+      assert.equal(result.issue, "request_unavailable");
+      reviewId(await s.request({ type: "owner_review", kind: "permission", id: permissionId }));
+    } else
+      assert.equal(
+        (result.data as unknown as { status: string }).status,
+        status === 409 ? "settled" : "unconfirmed",
+      );
+  }
+});
+
+test("owner text answers and active grant revocation use the exact owner routes", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  s.f.override((path, init) => {
+    if (path === "/api/app/requests") {
+      const current = ownerRequests();
+      const item = current.input_requests[0];
+      assert.ok(item);
+      item.input_type = "text";
+      item.options = [];
+      return Response.json(current);
+    }
+    if (path.endsWith("/answer")) {
+      assert.deepEqual(JSON.parse(String(init?.body)), { text: "My exact answer" });
+      return Response.json({
+        status: "ok",
+        request_id: inputId,
+        answer: "My exact answer",
+        action_type: "get_phone_number",
+      });
+    }
+    if (path.startsWith("/api/app/permissions?"))
+      return Response.json({
+        direction: "granted",
+        permissions: [
+          {
+            id: permissionId,
+            status: "granted",
+            decision: "allow_always",
+            decision_options: "once_always",
+            uses_remaining: null,
+            scope: null,
+            created_at: "2026-09-08T10:00:00Z",
+            decided_at: null,
+            expires_at: null,
+            action_type: "get_phone_number",
+            action_description: null,
+            grantor_email: email,
+            grantor_name: null,
+            grantee_email: "peer@fixture.test",
+            grantee_name: null,
+            direction: "granted_by_me",
+          },
+        ],
+      });
+    if (path.endsWith("/revoke")) {
+      assert.equal(init?.body, undefined);
+      assert.equal(init?.method, "POST");
+      return Response.json({
+        status: "ok",
+        permission_id: permissionId,
+        action_type: "get_phone_number",
+      });
+    }
+    return undefined;
+  });
+  for (const [kind, id, answer] of [
+    ["input", inputId, { text: "My exact answer" }],
+    ["revoke", permissionId, {}],
+  ] as const) {
+    const review = reviewId(await s.request({ type: "owner_review", kind, id }));
+    const result = await s.request({ type: "owner_submit", review_id: review, ...answer });
+    assert.equal((result.data as unknown as { status: string }).status, "confirmed");
+  }
+});
+
+test("owner mutation must save before sending, and a failed confirmation save remains uncertain", async (t) => {
+  for (const failConfirmed of [false, true]) {
+    const s = await setup(t);
+    await s.login();
+    s.f.override((path) =>
+      path === "/api/app/requests"
+        ? Response.json(ownerRequests())
+        : path.endsWith("/decide")
+          ? Response.json({
+              status: "ok",
+              permission_id: permissionId,
+              decision: "deny",
+              action_type: "get_phone_number",
+            })
+          : undefined,
+    );
+    const review = reviewId(
+      await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+    );
+    const save = s.service.decisions.save.bind(s.service.decisions);
+    s.service.decisions.save = (agent, mutation, submissionHash) => {
+      if (!failConfirmed || mutation.status === "confirmed") throw new Error("disk full");
+      save(agent, mutation, submissionHash);
+    };
+    await assert.rejects(s.request({ type: "owner_submit", review_id: review, decision: "deny" }));
+    assert.equal(s.f.calls.filter((c) => c.path.endsWith("/decide")).length, failConfirmed ? 1 : 0);
+    await s.restart();
+    const result = await s.request({ type: "owner_review", kind: "permission", id: permissionId });
+    if (failConfirmed)
+      assert.equal((result.data as unknown as { status: string }).status, "unconfirmed");
+    else reviewId(result);
+  }
+});
+
+test("owner context changes invalidate a reviewed decision", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  s.f.override((path) =>
+    path === "/api/app/requests" ? Response.json(ownerRequests()) : undefined,
+  );
+  const context = s.service.snapshot().context;
+  const review = reviewId(
+    await s.request({ type: "owner_review", kind: "permission", id: permissionId }),
+  );
+  await s.request({ type: "owner_signout" });
+  await s.login();
+  await assert.rejects(
+    s.service.command({ type: "owner_submit", context, review_id: review, decision: "deny" }),
+  );
+  assert.equal(
+    (await s.request({ type: "owner_submit", review_id: review, decision: "deny" })).issue,
+    "review_expired",
+  );
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("/decide")).length, 0);
+});

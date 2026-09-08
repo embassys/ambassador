@@ -1,7 +1,8 @@
 # 0074. Local stdio client for standalone desktop hosts
 
 Status: accepted within the owner's request to complete local client support
-and qualification, September 8, 2026. Distribution remains excluded.
+and qualification, September 8, 2026. Distribution remains excluded. ADR 0075 supersedes the shorter-wait recommendation
+below with the owner's explicit ten-minute default; measurements remain evidence.
 
 Standalone Claude's documented local connector launches a process. The current
 Ambassador listener serves Streamable HTTP. The experimental Claude Code channel

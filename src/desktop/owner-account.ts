@@ -1,11 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { redactVerboseValue, type VerboseLogger } from "../verbose-log.js";
+import { permissionChoices } from "./owner-choices.js";
+import { OwnerDecisions, reviewable } from "./owner-decisions.js";
 import {
   communicationsSchema,
   type OwnerCommand,
   type OwnerIssue,
+  type OwnerMutation,
   type OwnerReply,
+  type OwnerReview,
   type OwnerSnapshot,
   type OwnerView,
   ownerCommandSchema,
@@ -90,6 +94,7 @@ function checkDepth(value: unknown): void {
 
 export class OwnerAccount {
   #state: OwnerState;
+  readonly decisions: OwnerDecisions;
   #context = randomUUID();
   #tail: Promise<unknown> = Promise.resolve();
   #pending = 0;
@@ -109,6 +114,7 @@ export class OwnerAccount {
     state: OwnerState,
   ) {
     this.#state = state;
+    this.decisions = new OwnerDecisions(store);
   }
 
   static async open(options: OwnerAccount["options"]): Promise<OwnerAccount> {
@@ -301,6 +307,8 @@ export class OwnerAccount {
       return this.#reply(undefined, this.snapshot().issue ?? "session_expired");
     if (this.#state.status !== "signed_in") return this.#reply(undefined, "session_expired");
     const state = this.#state;
+    if (command.type === "owner_review" || command.type === "owner_submit")
+      return this.#decision(command, state.credential);
     const path =
       command.type === "owner_profile"
         ? "/me"
@@ -332,7 +340,11 @@ export class OwnerAccount {
         const requests = requestsSchema.parse(raw);
         if (requests.total !== requests.permission_requests.length + requests.input_requests.length)
           throw new InvalidResponse();
-        data = { kind: "requests", ...requests };
+        data = {
+          kind: "requests",
+          ...requests,
+          ...this.decisions.unconfirmed(state.credential.agentId),
+        };
       } else if (command.type === "owner_permissions") {
         const permissions = permissionsSchema.parse(raw);
         if (
@@ -363,6 +375,190 @@ export class OwnerAccount {
           : error instanceof HttpFailure && error.status === 429
             ? "rate_limited"
             : "offline",
+      );
+    }
+  }
+
+  #mutationReply(mutation: OwnerMutation): OwnerReply {
+    return this.#reply({ kind: "mutation", mutation, status: mutation.status });
+  }
+  async #target(
+    kind: OwnerMutation["kind"],
+    id: string,
+    access: string,
+  ): Promise<OwnerReview["target"] | undefined> {
+    if (kind === "revoke") {
+      const data = permissionsSchema.parse(
+        await this.#request("/permissions?direction=granted&limit=200", { access }),
+      );
+      if (data.direction !== "granted") throw new InvalidResponse();
+      const matches = data.permissions.filter((item) => item.id === id);
+      return matches.length === 1 && matches[0] ? { kind, item: matches[0] } : undefined;
+    }
+    const data = requestsSchema.parse(await this.#request("/requests", { access }));
+    if (data.total !== data.permission_requests.length + data.input_requests.length)
+      throw new InvalidResponse();
+    if (kind === "permission") {
+      const matches = data.permission_requests.filter((item) => item.id === id);
+      return matches.length === 1 && matches[0] ? { kind, item: matches[0] } : undefined;
+    }
+    const matches = data.input_requests.filter((item) => item.id === id);
+    return matches.length === 1 && matches[0] ? { kind, item: matches[0] } : undefined;
+  }
+  async #decision(
+    command: Extract<OwnerCommand, { type: "owner_review" | "owner_submit" }>,
+    session: OwnerCredential,
+  ): Promise<OwnerReply> {
+    try {
+      if (command.type === "owner_review") {
+        const previous = this.decisions.get(session.agentId, command.kind, command.id);
+        if (previous) return this.#mutationReply(previous);
+        const target = await this.#target(command.kind, command.id, session.access);
+        if (!target || !reviewable(target, this.#now()))
+          return this.#reply(undefined, "request_unavailable");
+        // Keep the comparison record intact. Only public copies are credential-redacted.
+        const review = this.decisions.review(this.#context, target, this.#now());
+        return this.#reply(redactVerboseValue(review) as OwnerReview);
+      }
+      const entry = this.decisions.reviews.get(command.review_id);
+      if (!entry || entry.context !== this.#context)
+        return this.#reply(undefined, "review_expired");
+      const { review } = entry;
+      const { target } = review;
+      if (Date.parse(review.expires_at) <= this.#now())
+        return this.#reply(undefined, "review_expired");
+      let body: { decision?: string; value?: string; text?: string } | undefined;
+      if (target.kind === "permission") {
+        if (
+          command.decision === undefined ||
+          command.value !== undefined ||
+          command.text !== undefined ||
+          !permissionChoices(target.item.decision_options).some(
+            (choice) => choice.value === command.decision,
+          )
+        )
+          return this.#reply(undefined, "request_unavailable");
+        body = { decision: command.decision ?? "" };
+      } else if (target.kind === "input") {
+        if (command.decision !== undefined) return this.#reply(undefined, "request_unavailable");
+        if (target.item.input_type === "buttons") {
+          if (
+            command.text !== undefined ||
+            !target.item.options?.some((option) => option.value === command.value)
+          )
+            return this.#reply(undefined, "request_unavailable");
+          body = { value: command.value ?? "" };
+        } else {
+          if (command.value !== undefined || !command.text?.trim())
+            return this.#reply(undefined, "request_unavailable");
+          body = { text: command.text };
+        }
+      } else if (
+        command.decision !== undefined ||
+        command.value !== undefined ||
+        command.text !== undefined
+      )
+        return this.#reply(undefined, "request_unavailable");
+      const submissionHash = createHash("sha256")
+        .update(JSON.stringify(body ?? {}))
+        .digest("hex");
+      const previous = this.decisions.get(session.agentId, target.kind, target.item.id);
+      if (previous)
+        return this.decisions.matches(session.agentId, target.kind, target.item.id, submissionHash)
+          ? this.#mutationReply(previous)
+          : this.#reply(undefined, "request_unavailable");
+      const fresh = await this.#target(target.kind, target.item.id, session.access);
+      if (
+        Date.parse(review.expires_at) <= this.#now() ||
+        !fresh ||
+        !reviewable(fresh, this.#now()) ||
+        JSON.stringify(fresh) !== JSON.stringify(target)
+      )
+        return this.#reply(undefined, "review_expired");
+      const mutation: OwnerMutation = {
+        kind: target.kind,
+        id: target.item.id,
+        action_type: target.item.action_type,
+        status: "unconfirmed",
+        updated_at: new Date(this.#now()).toISOString(),
+      };
+      try {
+        this.decisions.save(session.agentId, mutation, submissionHash);
+      } catch {
+        this.#unavailable = true;
+        throw new Error("Decision could not be saved.");
+      }
+      const path =
+        target.kind === "permission"
+          ? `/requests/permission/${target.item.id}/decide`
+          : target.kind === "input"
+            ? `/requests/input/${target.item.id}/answer`
+            : `/permissions/${target.item.id}/revoke`;
+      try {
+        const raw = await this.#request(path, {
+          access: session.access,
+          ...(body ? { body } : { post: true }),
+        });
+        if (target.kind === "permission") {
+          const result = z.object({
+            status: z.literal("ok"),
+            permission_id: z.literal(target.item.id),
+            decision: z.literal(command.decision ?? ""),
+            action_type: z.literal(target.item.action_type),
+          });
+          result.parse(raw);
+        } else if (target.kind === "input") {
+          const answer =
+            command.text?.trim() ??
+            target.item.options?.find((option) => option.value === command.value)?.label;
+          z.object({
+            status: z.literal("ok"),
+            request_id: z.literal(target.item.id),
+            answer: z.literal(answer ?? ""),
+            action_type: z.literal(target.item.action_type),
+          }).parse(raw);
+        } else
+          z.object({
+            status: z.literal("ok"),
+            permission_id: z.literal(target.item.id),
+            action_type: z.literal(target.item.action_type),
+          }).parse(raw);
+        mutation.status = "confirmed";
+      } catch (error) {
+        if (error instanceof HttpFailure) {
+          if ([404, 409].includes(error.status)) mutation.status = "settled";
+          else if ([400, 401, 403, 422, 429].includes(error.status)) {
+            this.decisions.remove(session.agentId, target.kind, target.item.id);
+            if (error.status === 401) await this.#invalidate("session_expired", session.email);
+            return this.#reply(
+              undefined,
+              error.status === 401
+                ? "session_expired"
+                : error.status === 429
+                  ? "rate_limited"
+                  : "request_unavailable",
+            );
+          }
+        }
+      }
+      try {
+        this.decisions.save(session.agentId, mutation, submissionHash);
+      } catch {
+        this.#unavailable = true;
+        throw new Error("Decision confirmation could not be saved.");
+      }
+      return this.#mutationReply(mutation);
+    } catch (error) {
+      if (this.#unavailable) throw error;
+      if (error instanceof HttpFailure && error.status === 401) {
+        await this.#invalidate("session_expired", session.email);
+        return this.#reply(undefined, "session_expired");
+      }
+      return this.#reply(
+        undefined,
+        error instanceof z.ZodError || error instanceof InvalidResponse
+          ? "invalid_response"
+          : "offline",
       );
     }
   }
@@ -489,6 +685,7 @@ export class OwnerAccount {
     this.#abort.abort();
     await this.#tail;
     this.#assign({ status: "signed_out" });
+    this.decisions.close();
     await this.store.close();
   }
 }

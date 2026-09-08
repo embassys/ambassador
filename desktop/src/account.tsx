@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import { permissionChoices } from "../../src/desktop/owner-choices.js";
 import type {
   OwnerCommand,
   OwnerIssue,
+  OwnerMutation,
   OwnerReply,
+  OwnerReview,
   OwnerSnapshot,
   OwnerView,
 } from "../../src/desktop/owner-protocol.js";
 
 export const notices: Record<OwnerIssue, string> = {
+  review_expired: "This request changed or the review expired. Refresh and review it again.",
+  request_unavailable:
+    "This request or choice is no longer available. Refresh or use the email or web app.",
   invalid_code: "That code is invalid or expired. Check it or request a new code.",
   code_unconfirmed: "We couldn't confirm the code email. If it arrives, you can still use it.",
   code_expired: "That code expired. Request a new one to sign in.",
@@ -38,18 +44,33 @@ function Details({ value, label = "Details" }: { value: unknown; label?: string 
   );
 }
 
-export function AccountData({ data }: { data: OwnerView }) {
-  if (data.kind === "profile") return null;
+export function AccountData({
+  data,
+  review,
+  busy = false,
+}: {
+  data: OwnerView;
+  review?(kind: OwnerMutation["kind"], id: string): void;
+  busy?: boolean;
+}) {
+  if (data.kind === "profile" || data.kind === "review" || data.kind === "mutation") return null;
   if (data.kind === "requests")
     return (
       <>
-        <p className="body-note">
-          Review requests here. Use the email or web app to approve or answer.
-        </p>
+        <p className="body-note">Review a request to approve it or send an answer.</p>
         <p className="account-limit">
           Showing up to 200 permissions and 200 questions. This snapshot may not include every
           pending request.
         </p>
+        {data.unconfirmed?.map((item) => (
+          <p className="account-notice" role="status" key={`${item.kind}:${item.id}`}>
+            Confirmation unavailable for {action(item.action_type)}. Your submission may have been
+            accepted; it will not be sent again. <small className="break">Request {item.id}</small>
+          </p>
+        ))}
+        {data.unconfirmedMore && (
+          <p className="body-note">Showing the first 100 unconfirmed submissions.</p>
+        )}
         <section className="settings-section">
           <h3>Permission requests · {data.permission_requests.length} shown</h3>
           {data.permission_requests.length === 0 && (
@@ -69,6 +90,21 @@ export function AccountData({ data }: { data: OwnerView }) {
               <p className="body-note">Request reason isn't included by the server.</p>
               {item.expires_at && <p className="body-note">Expires {when(item.expires_at)}</p>}
               <Details label="Permission scope" value={item.scope} />
+              {review && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy || !permissionChoices(item.decision_options).length}
+                  onClick={() => review("permission", item.id)}
+                >
+                  Review request
+                </button>
+              )}
+              {!permissionChoices(item.decision_options).length && (
+                <p className="body-note">
+                  This app does not recognize these choices. Use the email or web app.
+                </p>
+              )}
             </article>
           ))}
         </section>
@@ -88,6 +124,16 @@ export function AccountData({ data }: { data: OwnerView }) {
                 <p className="body-note">
                   Offered choices: {item.options.map((option) => option.label).join(" · ")}
                 </p>
+              )}
+              {review && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => review("input", item.id)}
+                >
+                  Review question
+                </button>
               )}
             </article>
           ))}
@@ -130,6 +176,20 @@ export function AccountData({ data }: { data: OwnerView }) {
                 </div>
               </dl>
               <Details label="Permission scope" value={item.scope} />
+              {review &&
+                item.direction === "granted_by_me" &&
+                item.status === "granted" &&
+                item.uses_remaining !== 0 &&
+                (!item.expires_at || Date.parse(item.expires_at) > Date.now()) && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => review("revoke", item.id)}
+                  >
+                    Review revocation
+                  </button>
+                )}
             </article>
           ))}
         </section>
@@ -165,6 +225,154 @@ export function AccountData({ data }: { data: OwnerView }) {
   );
 }
 
+export function OwnerDecisionForm({
+  review,
+  busy,
+  submit,
+  cancel,
+}: {
+  review: OwnerReview;
+  busy: boolean;
+  submit(command: Omit<Extract<OwnerCommand, { type: "owner_submit" }>, "context">): void;
+  cancel(): void;
+}) {
+  const [choice, setChoice] = useState("");
+  const [answer, setAnswer] = useState("");
+  const target = review.target;
+  const options =
+    target.kind === "permission"
+      ? permissionChoices(target.item.decision_options)
+      : target.kind === "input" && target.item.input_type === "buttons"
+        ? (target.item.options ?? [])
+        : [];
+  const typed = target.kind === "input" && target.item.input_type === "text";
+  const revoked = target.kind === "revoke";
+  return (
+    <section className="owner-review settings-section" aria-label="Review request">
+      <h3>
+        {revoked
+          ? "Revoke permission"
+          : target.kind === "input"
+            ? "Answer your agent"
+            : "Decide permission"}
+      </h3>
+      <strong>{action(target.item.action_type)}</strong>
+      {target.kind === "permission" && (
+        <>
+          <p className="break">
+            Requested by{" "}
+            {target.item.requester_name ||
+              target.item.requester_email ||
+              "an unavailable requester"}
+            {target.item.requester_name && target.item.requester_email
+              ? ` · ${target.item.requester_email}`
+              : ""}
+          </p>
+          {target.item.action_description && <p>{target.item.action_description}</p>}
+          <p className="body-note">Request reason isn't included by the server.</p>
+        </>
+      )}
+      {target.kind === "input" ? (
+        <>
+          <p className="account-question">{target.item.prompt}</p>
+          <p className="body-note">The server does not include the originating conversation.</p>
+        </>
+      ) : (
+        <>
+          {target.kind === "revoke" && (
+            <p>
+              Withdraw access from{" "}
+              {target.item.grantee_name || target.item.grantee_email || "this agent"}. This does not
+              undo completed actions.
+            </p>
+          )}
+          <p className="body-note">
+            {target.item.expires_at
+              ? `Expires ${when(target.item.expires_at)}`
+              : "No expiry provided."}
+          </p>
+          {target.item.scope != null && (
+            <div className="account-details">
+              <p>Permission scope</p>
+              <pre>{JSON.stringify(target.item.scope, null, 2)}</pre>
+            </div>
+          )}
+        </>
+      )}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit({
+            type: "owner_submit",
+            review_id: review.review_id,
+            ...(revoked
+              ? {}
+              : typed
+                ? { text: answer }
+                : target.kind === "permission"
+                  ? { decision: choice as "accept" | "deny" | "allow_once" | "allow_always" }
+                  : { value: choice }),
+          });
+        }}
+      >
+        {typed ? (
+          <label>
+            Your answer
+            <textarea
+              maxLength={4000}
+              required
+              disabled={busy}
+              value={answer}
+              onChange={(event) => setAnswer(event.target.value)}
+            />
+          </label>
+        ) : (
+          !revoked && (
+            <fieldset disabled={busy} className="owner-choices">
+              <legend>Choose a response</legend>
+              {options.map((option) => (
+                <label key={option.value}>
+                  <input
+                    type="radio"
+                    name="owner-choice"
+                    value={option.value}
+                    checked={choice === option.value}
+                    onChange={() => setChoice(option.value ?? "")}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+          )
+        )}
+        {target.kind === "permission" && ["accept", "allow_always"].includes(choice) && (
+          <p className="body-note">
+            This choice grants ongoing access within the displayed scope and expiry.
+          </p>
+        )}
+        <div className="account-actions">
+          <button type="button" className="secondary" disabled={busy} onClick={cancel}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy || (!revoked && !(typed ? answer.trim() : choice))}
+          >
+            {busy
+              ? "Sending…"
+              : revoked
+                ? "Confirm revocation"
+                : typed || target.kind === "input"
+                  ? "Confirm answer"
+                  : "Confirm decision"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 export function Account({
   snapshot,
   call,
@@ -186,6 +394,9 @@ export function Account({
   const [email, setEmail] = useState(snapshot.email ?? initialEmail);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [decisionReview, setDecisionReview] = useState<OwnerReview>();
+  const [confirmation, setConfirmation] = useState("");
+  const submitting = useRef(false);
   const [operation, setOperation] = useState<OwnerCommand["type"]>();
   const [error, setError] = useState("");
   const tab = section;
@@ -210,6 +421,8 @@ export function Account({
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new account context must discard any typed code, even for the same email.
   useEffect(() => {
     setCode("");
+    setDecisionReview(undefined);
+    setConfirmation("");
     if (owner.email) setEmail(owner.email);
   }, [owner.context, owner.email]);
   useEffect(() => {
@@ -261,7 +474,8 @@ export function Account({
   }, [call, owner.context, owner.status, tab, direction, refresh]);
 
   async function run(command: OwnerCommand) {
-    if (busy) return;
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true);
     setOperation(command.type);
     setError("");
@@ -270,18 +484,48 @@ export function Account({
       setData(undefined);
       setFetchedAt("");
     }
+    const version = generation.current;
     try {
       const result = await call(command);
       if (mounted.current && result && typeof result === "object" && "snapshot" in result) {
         const reply = result as OwnerReply;
+        if (
+          (command.type === "owner_review" || command.type === "owner_submit") &&
+          (version !== generation.current || reply.snapshot.context !== owner.context)
+        )
+          return;
         setOwner(reply.snapshot);
-        if (reply.state === "unavailable" && reply.issue) setError(notices[reply.issue]);
+        if (reply.data?.kind === "review") {
+          setDecisionReview(reply.data);
+          setConfirmation("");
+        }
+        if (reply.data?.kind === "mutation") {
+          setDecisionReview(undefined);
+          setConfirmation(
+            reply.data.status === "confirmed"
+              ? "Confirmed by Embassys."
+              : reply.data.status === "settled"
+                ? "This request is no longer available to answer. It may have been handled elsewhere or expired."
+                : "Confirmation unavailable. Your submission may have been accepted; it will not be sent again. Check the email or web app for its status.",
+          );
+          setRefresh((value) => value + 1);
+        }
+        if (reply.state === "unavailable" && reply.issue) {
+          if (command.type === "owner_submit") {
+            setDecisionReview(undefined);
+            setConfirmation(notices[reply.issue]);
+            setRefresh((value) => value + 1);
+          } else setError(notices[reply.issue]);
+        }
       }
       await changed();
     } catch {
-      if (mounted.current)
+      if (mounted.current && version === generation.current) {
+        if (command.type === "owner_submit") setDecisionReview(undefined);
         setError("That operation couldn't finish. Refresh your account before trying again.");
+      }
     } finally {
+      submitting.current = false;
       if (mounted.current) {
         setBusy(false);
         setOperation(undefined);
@@ -483,6 +727,20 @@ export function Account({
           {error}
         </p>
       )}
+      {owner.status === "signed_in" && confirmation && (
+        <p className="account-notice" role="status">
+          {confirmation}
+        </p>
+      )}
+      {owner.status === "signed_in" && decisionReview && (
+        <OwnerDecisionForm
+          key={decisionReview.review_id}
+          review={decisionReview}
+          busy={busy}
+          cancel={() => setDecisionReview(undefined)}
+          submit={(command) => void run({ ...command, context: owner.context })}
+        />
+      )}
       {owner.status === "signed_in" && section !== "profile" && (
         <>
           {tab === "permissions" && (
@@ -514,7 +772,15 @@ export function Account({
                 Loading account…
               </p>
             ) : (
-              data && <AccountData data={data} />
+              data && (
+                <AccountData
+                  data={data}
+                  busy={busy}
+                  review={(kind, id) =>
+                    void run({ type: "owner_review", context: owner.context, kind, id })
+                  }
+                />
+              )
             )}
           </div>
           {fetchedAt && (

@@ -63,8 +63,9 @@ issue-only. These items do not authorize another release.
   the separate local client for standalone Claude Chat and Cowork. Both native
   surfaces pass natural phone-number requests, actual OpenClaw results and explicit
   receipts. Fresh Cowork discovery of Embassys remains intermittent. Standalone
-  host and desktop-bridge deadlines require explicit 45-second waits; the gateway does not rewrite
-  requests to impose that recommendation.
+  hosts may end observation before ten minutes. The owner explicitly retained the
+  600-second default under ADR 0075; pre-dispatch guidance explains later checks
+  of the same request. The gateway never shortens or resubmits it.
   Manual development setup is documented; connector packaging and automated
   installation remain excluded distribution work. See the current
   [client completion record](client-completion-2026-09-08.md).
@@ -94,8 +95,13 @@ issue-only. These items do not authorize another release.
 
 - [ ] Complete desktop production prerequisites. The local app, owner sign-in,
   read-only account views, setup helpers, logs, shared CLI installation and native
-  Mac controls are implemented. Owner decisions, complete history, agent identity
-  recovery and native remote push still need central contracts. Signed distribution,
+  Mac controls are implemented. Owner-authenticated approval, answer and revocation
+  endpoints already exist and the web app uses them. ADR 0075 now implements
+  desktop review, approval, exact button/text answers and
+  revocation with durable no-replay markers. Full server-side mutation recovery
+  and complete request context remain separate follow-ups. Complete history, agent
+  identity recovery and native
+  remote push still need central contracts. Signed distribution,
   trusted engine selection and native Windows/Linux/provider qualification need
   the release infrastructure and environments described in the
   [desktop plan](desktop-app-plan.md). API gaps remain in issues 7–10.
@@ -112,7 +118,7 @@ The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
 registration across hosts, confirmed authenticated process handoff and stopped
 state after handoff. Existing isolated instances remain separate. Current local
-checks pass 494 tests with seven expected skips, plus 18 desktop rendering,
+checks pass 503 tests with seven expected skips, plus 19 desktop rendering,
 parser and artifact tests. Final native and live evidence belongs in the desktop
 plan; these counts alone do not qualify a user-visible result.
 
@@ -131,6 +137,12 @@ for evidence and the remaining two-code limitation.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.
+
+ADR 0075 adds native owner approvals, exact button/text answers and revocation
+through the deployed web app API. Native Mac and correlated central outcomes pass;
+see [owner decision qualification](owner-decisions-qualification-2026-09-08.md).
+It also restores ten-minute standalone waits and fixes stdio startup through
+filesystem aliases. Server recovery and fuller request context remain open.
 
 ## Implementation and qualification evidence
 

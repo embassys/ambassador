@@ -915,3 +915,24 @@ measurements and manual development setup; no connector was published.
 Current checks pass 494 core tests with seven expected skips and 18
 desktop tests. Central API changes, distribution and the previously deferred
 native Windows/Linux matrix are outside this pass.
+
+
+## Owner decisions and wait policy, 2026-09-08
+
+ADR 0075 implements the owner-approved development decision controls through the
+web app's existing API. The native packaged Mac app passed Allow once, exact
+provider button answers, text answers, revocation and Deny against deployed
+central. The requesting test identity received each correlated outcome. Fresh
+reviews, expiry/context checks and an encrypted no-replay journal cover uncertain
+submissions without claiming server recovery. See the
+[qualification record](owner-decisions-qualification-2026-09-08.md) for screenshots,
+identifiers, test-driver failures and the separate model-execution boundary.
+
+Standalone Claude retains the ten-minute default at the owner's explicit request.
+Early host disconnects remain possible, with continuation instructions supplied
+before dispatch. The local relay's startup now resolves filesystem aliases, fixing
+the copied Mac package connection failure. Core checks pass 503 tests with seven
+expected skips; desktop rendering, parser and artifact checks pass 19 tests.
+One-code signup, complete server history, identity recovery, native remote push
+and server mutation recovery remain API work. Distribution and native Windows/Linux
+qualification remain excluded.

@@ -8,6 +8,7 @@ export const ownerEmail = z
   .max(320)
   .regex(/^[^@\s]+@[^@\s]+\.[^@\s]+$/u);
 const context = z.uuid();
+export const mutationKind = z.enum(["permission", "input", "revoke"]);
 export const ownerCommands = [
   z.strictObject({ type: z.literal("owner_status") }),
   z.strictObject({ type: z.literal("owner_request_code"), context, email: ownerEmail }),
@@ -21,6 +22,15 @@ export const ownerCommands = [
     direction: z.enum(["granted", "received"]),
   }),
   z.strictObject({ type: z.literal("owner_communications"), context }),
+  z.strictObject({ type: z.literal("owner_review"), context, kind: mutationKind, id: z.uuid() }),
+  z.strictObject({
+    type: z.literal("owner_submit"),
+    context,
+    review_id: z.uuid(),
+    decision: z.enum(["accept", "deny", "allow_once", "allow_always"]).optional(),
+    value: z.string().min(1).max(256).optional(),
+    text: z.string().min(1).max(4000).optional(),
+  }),
   z.strictObject({ type: z.literal("owner_open_web") }),
   z.strictObject({ type: z.literal("owner_reveal_logs") }),
 ] as const;
@@ -40,6 +50,8 @@ export const ownerIssue = z.enum([
   "invalid_response",
   "storage_unavailable",
   "worker_unavailable",
+  "review_expired",
+  "request_unavailable",
 ]);
 export type OwnerIssue = z.infer<typeof ownerIssue>;
 export const ownerProfile = z.object({
@@ -157,11 +169,41 @@ export const permissionsSchema = z.object({
 export const communicationsSchema = z.object({
   communications: z.array(communicationSchema).max(200),
 });
+export const mutationSchema = z.object({
+  kind: mutationKind,
+  id: z.uuid(),
+  action_type: text,
+  status: z.enum(["confirmed", "unconfirmed", "settled"]),
+  updated_at: timestamp,
+});
+export type OwnerMutation = z.infer<typeof mutationSchema>;
+export const reviewSchema = z.object({
+  kind: z.literal("review"),
+  review_id: z.uuid(),
+  expires_at: timestamp,
+  target: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("permission"), item: permissionRequestSchema }),
+    z.object({ kind: z.literal("input"), item: inputRequestSchema }),
+    z.object({ kind: z.literal("revoke"), item: permissionSchema }),
+  ]),
+});
+export type OwnerReview = z.infer<typeof reviewSchema>;
 export const ownerViewSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("profile"), profile: publicOwnerProfile }),
-  z.object({ kind: z.literal("requests"), ...requestsSchema.shape }),
+  z.object({
+    kind: z.literal("requests"),
+    ...requestsSchema.shape,
+    unconfirmed: z.array(mutationSchema).max(100).optional(),
+    unconfirmedMore: z.boolean().optional(),
+  }),
   z.object({ kind: z.literal("permissions"), ...permissionsSchema.shape }),
   z.object({ kind: z.literal("communications"), ...communicationsSchema.shape }),
+  reviewSchema,
+  z.object({
+    kind: z.literal("mutation"),
+    mutation: mutationSchema,
+    status: mutationSchema.shape.status,
+  }),
 ]);
 export type OwnerView = z.infer<typeof ownerViewSchema>;
 export const ownerReplySchema = z.strictObject({

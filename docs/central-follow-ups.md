@@ -196,7 +196,9 @@ The following issues define server work without changing the API here:
 
 Owner sign-in, refresh, sign-out and bounded read-only account views now pass
 controlled live qualification under ADR 0068. Revocation reception and revoked
-permission reads also pass. The app keeps decisions and remote native push
-unavailable while their remaining contracts are incomplete. It does not
+permission reads also pass. ADR 0075 adds development decision, answer and revocation controls through the
+existing owner routes. Lost confirmations remain explicitly unconfirmed and are
+never replayed. Fuller request context and server-side mutation recovery remain
+open; remote native push is still unavailable. It does not
 impersonate an owner through the agent API or present a limited snapshot as a
 complete account history.

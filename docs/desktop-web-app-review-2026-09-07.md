@@ -114,3 +114,42 @@ Native Mac account entry and view checks also passed. See the final evidence in
 
 No central or web app files were edited. No live login, decision, revocation,
 message submission or push was issued as part of this read-only review.
+
+## One-code signup and web parity recheck, 2026-09-08
+
+The owner asked to remove the second first-time code and questioned why desktop
+features were described as requiring APIs that the web app already uses. GitHub
+main still points to the two source revisions above. This recheck inspected those
+sources; it did not repeat live authentication or decision tests.
+
+The web sign-in screen uses `/api/app/login/request` and `/api/app/login/verify`.
+These require an existing agent row and issue only an owner session. They do not
+create an agent or issue its DPoP credential. Agent `/api/verify_email` checks a
+different code, clears it, and returns only the agent credential. Calling the two
+verification endpoints with the same code cannot combine signup. Issue 7 already
+requests one owner verification followed by authenticated local-agent enrollment,
+with separate credentials and recovery after a lost response. There is no current
+client-only exchange to implement that flow. Returning-owner login already uses
+one code.
+
+Approvals and answers are available through the web app's owner-authenticated
+`/api/app/requests/permission/{id}/decide` and
+`/api/app/requests/input/{id}/answer` routes. The server scopes requests to the
+signed-in owner, checks stored choices, and conditionally updates pending state
+in a transaction with email-token invalidation and the agent outcome message.
+Missing source-call fields in the owner list affect the context shown to the
+human; they do not mean the server cannot correlate the submitted answer.
+
+ADR 0068 deliberately leaves desktop controls read-only until its stronger
+context and mutation-recovery requirements are met. A narrower development flow
+could use the existing routes, show only recognized permission menus and exact
+input options, disable duplicate submissions, and retain an explicit unconfirmed
+outcome after a lost response. It must not infer a successful decision from a
+request disappearing, replay an uncertain answer, or guess an unknown menu. The
+owner subsequently approved this narrower flow in ADR 0075. The current work
+plan and qualification record distinguish implementation from live evidence.
+
+The web history uses the same bounded lists, capped at 200 with no cursor. Browser
+push uses a service worker and VAPID subscriptions. Neither supplies complete
+history, agent credential recovery, or the native desktop push contract. These
+remain distinct server or distribution requirements.

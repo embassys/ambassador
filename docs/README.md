@@ -26,6 +26,7 @@ plan contains only work that is not complete.
 | Implement the approved durable workflow and client matrix | [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) |
 | Check workflow regression and live acceptance requirements | [Workflow test plan](workflow-test-plan.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
+| Review native owner approvals, answers, revocation and default waits | [Owner decision qualification](owner-decisions-qualification-2026-09-08.md) |
 | Review combined app onboarding, real-agent delivery and remaining client limits | [September 8 client completion](client-completion-2026-09-08.md) |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |
