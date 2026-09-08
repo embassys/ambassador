@@ -51,6 +51,13 @@ Default output is explicitly unsigned development output. Request signing only
 with configured release infrastructure. The build fails on missing inputs or
 failed verification; it never falls back to unsigned output.
 
+Mac previews use an ad hoc signature to seal the complete application after
+packaging. This replaces Electron's invalid inherited resource seal; it does not
+provide a verified publisher or notarization. Packaging and extracted-DMG checks
+both require strict signature integrity. The manifest records `macAdHocSigned`
+separately from `applicationCodeSigned`, which means verified publisher signing.
+The regular Mac app-specific opening exception can still be required.
+
 - Mac: set `EMBASSYS_DESKTOP_SIGN=1`, `EMBASSYS_MAC_IDENTITY` to the installed
   Developer ID Application identity, and `EMBASSYS_NOTARY_PROFILE` to an existing
   notary keychain profile. No passwords enter these arguments. Packager signs

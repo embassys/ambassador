@@ -78,6 +78,7 @@ try {
     artifact: basename(archive),
     sha256: await sha256(archive),
     applicationCodeSigned: evidence.signed,
+    macAdHocSigned: evidence.adHocSigned === true,
     archiveSigned: false,
     build: evidence.manifest,
     inventory: files,
