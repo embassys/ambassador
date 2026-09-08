@@ -144,3 +144,11 @@ the suite when CI cancelled it. Native ACL tests retain their serial execution;
 the Windows check job now has a 45-minute budget for the expanded suite. Other
 platform budgets, test selection, audits and required publication gates remain
 unchanged. The workflow regression checks both serial execution and the budget.
+
+The Windows core suite subsequently passed, including its separate native ACL
+checks. A duplicate desktop job first failed when GitHub rejected artifact
+finalization with HTTP 403. Its retry passed the desktop tests but reached the
+archive verifier's 60-second extraction deadline; `tar.exe` was terminated with
+no reported extraction error. Windows archive extraction now has a bounded
+three-minute allowance. Checksum, inventory, extracted-runtime verification and
+cleanup remain required. This changes the development verifier only.

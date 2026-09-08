@@ -42,7 +42,8 @@ try {
     mounted = false;
   } else {
     await execute(process.platform === "win32" ? "tar.exe" : "tar", ["-xf", archive, "-C", root], {
-      timeout: 60_000,
+      // Extracting the bundled runtime exceeded one minute on a Windows CI runner.
+      timeout: process.platform === "win32" ? 180_000 : 60_000,
     });
     application = join(root, `Embassys-${process.platform}-${process.arch}`);
   }
