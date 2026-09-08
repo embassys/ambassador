@@ -11,6 +11,8 @@ import { MESSAGE_BOX_TOOL } from "../src/message-box.js";
 
 test("desktop relay keeps the ten-minute default and continuation in tool help without changing validation", () => {
   const adapted = desktopRelayTool(MESSAGE_BOX_TOOL);
+  assert.match(adapted.description?.slice(0, 160) ?? "", /Embassys/u);
+  assert.match(adapted.description?.slice(0, 160) ?? "", /agent/u);
   assert.match(adapted.description ?? "", /600/u);
   assert.match(adapted.description ?? "", /request_id/u);
   assert.doesNotMatch(JSON.stringify(adapted), /wait_seconds: 45|use 45 seconds/u);
@@ -101,6 +103,7 @@ test("desktop stdio preserves the foreground request and explicit receipt", {
   assert.match(client.getInstructions() ?? "", /Embassys/);
   assert.match(client.getInstructions() ?? "", /600/u);
   assert.match(client.getInstructions() ?? "", /does not mean the server crashed/u);
+  assert.doesNotMatch(client.getInstructions() ?? "", /known client timeout requires it/u);
   const tool = (await client.listTools()).tools[0];
   assert.equal(tool?.name, "message_box");
   assert.match(tool?.description ?? "", /600/u);

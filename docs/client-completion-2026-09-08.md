@@ -124,14 +124,18 @@ from private state or asynchronous acceptance.
 OpenClaw's September 8 native retest already reproduced the duplicate badge and
 hidden waiting text while saved history contained one answer. The duplicate
 badge also appeared before any Ambassador injection. Keep return experimental.
-The current investigation does not establish the renderer's exact defect or a
-safe Ambassador-side correction. Changing saved text or sending another result
-to hide the badge would invalidate the delivery evidence.
+The final review found the waiting text inside "Worked for…" and verified
+expansion plus window resizing as display workarounds. The bundled UI also has
+a non-idempotent duplicate counter. Its precise role in the original live badge
+remains uncertain. Changing saved text or sending another result to hide the
+badge would invalidate delivery evidence. See the
+[desktop PR review](desktop-pr-review-2026-09-08.md).
 
-Native Calendar currently lists only "On My Mac". Invitation delivery remains
-pending the owner's chosen sending account. Claude Chat also shows a connected
-Google Calendar connector; the owner has been asked whether to use that account
-for one disposable test invitation. No account or recipient was guessed.
+The earlier native Calendar inspection found only "On My Mac". The owner later
+authorized Claude Chat's connected Google Calendar for one disposable test.
+Invitation and cancellation reached the test inbox for the same event, with
+attendee and time checked in the calendar attachments. This qualifies that
+provider path separately from the agent-to-agent coordination tests.
 
 ## Standalone Claude Chat and Cowork
 

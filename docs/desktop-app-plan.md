@@ -937,3 +937,16 @@ expected skips; desktop rendering, parser and artifact checks pass 19 tests.
 One-code signup, complete server history, identity recovery, native remote push
 and server mutation recovery remain API work. Distribution and native Windows/Linux
 qualification remain excluded.
+
+
+## Final desktop PR review, 8 September 2026
+
+[PR 40](https://github.com/embassys/ambassador/pull/40) contains the desktop
+implementation and the [final client review](desktop-pr-review-2026-09-08.md).
+The connected Google Calendar invitation and cancellation reached the disposable
+recipient inbox with matching calendar metadata. OpenClaw's waiting reply is
+available under "Worked for…"; resizing restored its blank Mac view. Its
+accumulating duplicate counter remains a provider defect. Fresh Sonnet Cowork
+still needs a connector hint in the tested prompts; the guided action, result and
+receipt pass. Neither limitation is hidden by the metadata changes. Merge requires
+the final PR checks; publication and distribution remain excluded.

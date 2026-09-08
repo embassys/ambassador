@@ -24,6 +24,13 @@ client. It cannot act as the app's incoming ACP executor.
 Fresh Cowork tasks sometimes miss an enabled local connector. If that happens,
 say "Use the Embassys connector". This is a known client-discovery limitation;
 renaming the connector helped one trial but did not make discovery reliable.
+The September 8 final review reproduced two misses for "Am I registered with
+Embassys?" in fresh Sonnet 5 Cowork tasks, before any local tool call. Adding
+"Use the Embassys connector" reached the same working connection. Tool
+metadata now leads with the product and its purpose, but that cannot force
+Cowork to search its tools. Do not re-register, expose the loopback server
+publicly, or reinstall the connection solely because the model asks for a website.
+See the [final review](desktop-pr-review-2026-09-08.md) for evidence.
 
 For a Mac app placed at `/Applications/Embassys.app`, the entry is:
 
