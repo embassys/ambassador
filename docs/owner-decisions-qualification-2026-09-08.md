@@ -68,6 +68,13 @@ clock beyond both deadlines only after the real mock-agent approval arrives.
 It still fails when either deadline's pause is removed, without counting process
 startup and durable writes against a one-second wall-clock budget. Production
 timeouts are unchanged.
+The next Windows run passed that test but exposed the same timing assumption in
+the close-timeout test. It now waits for the mock agent to report that close is
+pending before advancing the clock. It still requires a bounded close failure,
+a preserved completed prompt and no replay.
+The shared fixture gives healthy process/disk stages five seconds and cleanup
+two seconds. Deadline-specific cases still select their own budgets. Removing
+the outer deadline makes the close regression fail its test timeout.
 
 Ten-minute waits and exact shorter user requests are preserved by the relay.
 Initialization and tool metadata explain that an early host disconnect leaves

@@ -45,6 +45,7 @@ async function target(
   scenario: string,
   options: {
     platform?: NodeJS.Platform;
+    sessionDeadlineMs?: number;
     promptDeadlineMs?: number;
     outerDeadlineMs?: number;
     maximumOutputBytes?: number;
@@ -96,12 +97,14 @@ async function target(
       return await (options.permissionApproval?.(request, signal) ??
         Promise.resolve("allow" as const));
     },
-    initializationDeadlineMs: 2_000,
-    sessionDeadlineMs: 2_000,
-    promptDeadlineMs: options.promptDeadlineMs ?? 2_000,
+    // Healthy fixture stages include real process and disk work. Tests of an
+    // expiring deadline choose that stage's budget explicitly below.
+    initializationDeadlineMs: 5_000,
+    sessionDeadlineMs: options.sessionDeadlineMs ?? 5_000,
+    promptDeadlineMs: options.promptDeadlineMs ?? 5_000,
     ...(options.outerDeadlineMs === undefined ? {} : { outerDeadlineMs: options.outerDeadlineMs }),
     cancellationGraceMs: 100,
-    cleanupDeadlineMs: 500,
+    cleanupDeadlineMs: 2_000,
     maximumOutputBytes: options.maximumOutputBytes ?? 16 * 1024,
     maximumStartupAttempts: options.maximumStartupAttempts ?? 2,
     ...(options.log === undefined ? {} : { log: options.log }),
@@ -341,18 +344,36 @@ test("passes provider options to the human and returns the exact selected ID", a
 });
 
 test("bounds an unanswered session close without replaying the completed prompt", {
-  timeout: process.platform === "win32" ? 30_000 : 5_000,
+  timeout: 15_000,
 }, async (t) => {
-  const value = await target(t, "close-hang", { outerDeadlineMs: 500 });
-  const started = Date.now();
-  await assert.rejects(
-    value.delivery.deliver(MESSAGE, new AbortController().signal),
-    (error: unknown) => error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
-  );
-  assert.ok(Date.now() - started < 2_000);
-  assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
-  await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
-  assert.equal(value.spawnCount(), 1);
+  let closing = false;
+  const value = await target(t, "close-hang", {
+    outerDeadlineMs: 500,
+    // The stage timeout cannot mask a broken outer deadline within this test.
+    sessionDeadlineMs: 60_000,
+    log(event, data) {
+      if (event !== "acp.update" || !JSON.stringify(data).includes("fixture-close-waiting")) return;
+      closing = true;
+      // Expire the outer deadline after the fixture confirms close is pending.
+      t.mock.timers.tick(500);
+    },
+  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    const started = Date.now();
+    await assert.rejects(
+      value.delivery.deliver(MESSAGE, new AbortController().signal),
+      (error: unknown) =>
+        error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
+    );
+    assert.equal(closing, true);
+    assert.equal(Date.now() - started, 500);
+    assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
+    await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
+    assert.equal(value.spawnCount(), 1);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("reuses a peer session across messages while keeping each action correlation", async (t) => {
