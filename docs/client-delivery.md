@@ -7,16 +7,18 @@ that a client displayed a result. Evidence belongs in [qualification](qualificat
 | --- | --- | --- |
 | OpenClaw | Foreground wait; experimental hook bridge to the captured logical session key | Real ACP, two-conversation history routing and foreground deferral pass. Idle return appears, but the desktop shows a duplicate badge despite one saved answer |
 | Hermes CLI/gateway | Foreground wait and durable inbox/check | Real ACP and current real webhook action/result/receipt pass; native return deferred pending a trusted gateway routing key and idle-only injection |
-| Codex | Foreground wait and later check | Real ACP and corrected desktop MCP registration/result/receipt pass; user confirmation of first-turn discovery and final UI remains pending |
-| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP flow, a full ten-minute desktop Code wait with later result/receipt, and CLI channel return shown through Remote Control pass |
-| Claude Desktop | No inherited Claude Code support claim | Separate transport, registration/executor and UI qualification required |
+| Codex | Foreground wait and later check | Real ACP and desktop registration/result/receipt pass; a fresh September 8 desktop task recognized Embassys immediately through the configured integration |
+| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP, ten-minute desktop wait and experimental channel tests pass; September 8 combined native app signup → deployed central → real OpenClaw owner input → visible Claude result and receipt also passes |
+| Claude Desktop Chat | Local stdio client; app owns enrollment and incoming executor | Natural request, real OpenClaw result and receipt pass. The default remains 600 seconds; the measured host ceiling was 240 seconds. An early disconnect needs a later user-driven check |
+| Claude Desktop Cowork | Local stdio client; app owns enrollment and incoming executor | Natural phone request, real OpenClaw result and receipt pass. The default remains 600 seconds. Fresh Embassys discovery is intermittent; a desktop bridge can time out at 60 seconds |
 
 ## Configure the foreground wait
 
 Ambassador's business deadline is 600 seconds and its wait transport budget is
 640 seconds. Configure the caller for 660 seconds or longer. Connection/startup
 timeouts are different from tool-call timeouts. If a client cannot hold the full
-wait, use a shorter explicit `wait_seconds` and retain the same request UUID.
+wait, retain the same request UUID for a later user-driven check. Use a shorter
+explicit `wait_seconds` only when the user asks.
 
 For Codex, add `tool_timeout_sec = 660` to its existing
 `[mcp_servers.ambassador]` configuration. For OpenClaw, set the Ambassador
@@ -24,7 +26,9 @@ server's `requestTimeoutMs` to `660000`. For Hermes, set the Ambassador
 MCP server's `timeout` to `660`. These are provider settings, not Ambassador
 CLI flags. Restart/reload the provider's MCP connection after changing them.
 For Claude Code, add `"timeout": 660000` to the existing Ambassador server's
-MCP configuration. Claude Desktop must be measured separately. Current Claude
+MCP configuration. Standalone Claude Desktop uses the separately measured
+[local client](claude-desktop-local-client.md) with the ten-minute default. Standalone hosts may disconnect sooner; check the same request later.
+Current Claude
 Code can move a long call into a provider background task while the original
 MCP request remains open; its eventual task notification is different from
 resubmitting the action. Do not create a separate scheduled check-in.
@@ -56,16 +60,40 @@ a failed check or receipt once with a fresh connection after an Ambassador resta
 gateway after enabling the extension or changing its startup manifest.
 
 No model argument chooses the destination. A background check observes the same
-request ID through the fixed local Ambassador endpoint. It does not register an
+request ID through the enabled local `mcp.servers.ambassador` connection in
+OpenClaw's configuration. Only literal loopback Streamable HTTP URLs are accepted;
+missing or incompatible settings disable native return without falling back to
+port 8787. Restart OpenClaw after changing that connection. It does not register an
 identity or submit another action.
 
+The optional prompt hook adds fixed Embassys discovery and continuation guidance
+before the model chooses a tool. It does not read the prompt/history or add
+visible conversation messages. OpenClaw requires the extension's
+`hooks.allowConversationAccess` setting for this hook and must not have
+`hooks.allowPromptInjection` disabled. These settings are owner choices and are
+not changed by the desktop connection helper. Without the hook, MCP initialization
+and the existing tool descriptions still provide the workflow guidance.
+If the host forbids verification codes in chat, the guidance directs the owner
+to Account > Set up this device in the Embassys app for the same installation.
+
 A provider-owned, owner-only route database lives beneath OpenClaw's state
-directory at `ambassador-conversation-return/routes.sqlite`. Its instance lock
+directory at `ambassador-conversation-return/<endpoint-sha256>/routes.sqlite`. Its instance lock
 prevents competing observers. The bridge calls the reviewed `chat.inject`
 API. Success means OpenClaw accepted and appended the result. It does not prove
 that the desktop rendered it. A terminal result remains unread in Ambassador
 until the agent sends its explicit receipt. A session reset can replace the history behind the same logical
 session key; the bridge does not claim to pin an old history instance.
+
+Endpoint namespaces keep independent instances' routes separate. The old unscoped
+route journal is left untouched and is not replayed; existing results remain
+available through foreground checks and the inbox. No provider configuration or
+credential is copied between instances. See [ADR 0070](adr/0070-instance-scoped-native-observers.md).
+
+Desktop direct delivery also checks the selected executor's configured Ambassador
+binding before dispatch. A mismatch, disabled connection or unsupported project
+override pauses delivery with the message still pending. The app shows a notice
+to repair the connection and restart. This does not pin cached provider connections
+or create independent provider profiles. See [ADR 0071](adr/0071-desktop-executor-checks-and-mac-vibrancy.md).
 
 Controlled tests on OpenClaw 2026.8.2 used the owner's approved current profile
 and Codex backend. Requests from two desktop conversations received exact
@@ -82,6 +110,15 @@ The desktop showed a “×2” duplicate badge and obscured the earlier waiting 
 although gateway history contained one native answer and the original waiting
 reply. Ordinary navigation did not clear that display discrepancy. The result
 remained unread in Ambassador, with its receipt available.
+
+The final September 8 review identified a display workaround. Expand the
+"Worked for…" section above the result to read the earlier waiting reply. If the
+Mac view is blank, resizing the window restored it in the observed test. Neither
+action resubmits the request. The bundled UI also mutates cached duplicate counts
+during grouping: repeating the same two-row grouping pass produced counts 2, 3
+and 4. This is a provider counter defect, not evidence of repeated delivery.
+Its role in the original live badge is not fully established. See the
+[desktop PR review](desktop-pr-review-2026-09-08.md).
 
 Native return remains experimental because of this provider UI behavior. The
 activity check and injection are also separate calls; there is no atomic display

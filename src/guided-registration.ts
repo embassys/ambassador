@@ -7,6 +7,7 @@ import {
 import {
   createDeliveryProfile,
   type DeliveryInput,
+  type DeliveryProfile,
   type DeliveryProfileStore,
 } from "./delivery-profile.js";
 import type { WebhookSecretStore } from "./webhook-secret-store.js";
@@ -26,6 +27,11 @@ export interface CentralRegistrationArguments {
 }
 
 export interface GuidedRegistrationOptions {
+  readonly registerPrepared?: (
+    profile: DeliveryProfile,
+    arguments_: CentralRegistrationArguments,
+    signal: AbortSignal,
+  ) => Promise<Record<string, unknown>>;
   readonly registry?: readonly AgentCapability[];
   readonly profileStore: DeliveryProfileStore;
   readonly webhookSecretStore: WebhookSecretStore;
@@ -95,6 +101,7 @@ export class GuidedRegistration {
   readonly #webhookSecretStore: WebhookSecretStore;
   readonly #workingDirectory: string;
   readonly #registerCentral: GuidedRegistrationOptions["registerCentral"];
+  readonly #registerPrepared: GuidedRegistrationOptions["registerPrepared"];
 
   constructor(options: GuidedRegistrationOptions) {
     this.#registry = options.registry ?? PRODUCTION_AGENT_CAPABILITIES;
@@ -102,6 +109,7 @@ export class GuidedRegistration {
     this.#webhookSecretStore = options.webhookSecretStore;
     this.#workingDirectory = options.workingDirectory;
     this.#registerCentral = options.registerCentral;
+    this.#registerPrepared = options.registerPrepared;
   }
 
   async register(
@@ -168,6 +176,8 @@ export class GuidedRegistration {
       };
     }
     const profile = await createDeliveryProfile(capability, delivery, this.#workingDirectory);
+    signal.throwIfAborted();
+    if (this.#registerPrepared) return await this.#registerPrepared(profile, registration, signal);
     await this.#profileStore.save(profile);
     return await this.#registerCentral(registration, signal);
   }

@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { callGatewayFromCli } from "openclaw/plugin-sdk/gateway-runtime";
 import { NativeBoxClient } from "../../dist/native-box-client.js";
@@ -5,7 +6,9 @@ import {
   NativeConversationBridge,
   NativeRouteStore,
 } from "../../dist/native-conversation-bridge.js";
+import { registerOpenClawGuidance } from "../../dist/openclaw-guidance.js";
 import { registerOpenClawBridge } from "../../dist/openclaw-native-bridge.js";
+import { nativeRouteNamespace } from "../../dist/openclaw-return-endpoint.js";
 import { ProcessLock } from "../../dist/process-lock.js";
 
 // OpenClaw activates tools separately from gateway services. Both registrations
@@ -17,18 +20,23 @@ const bridgeState = globalThis[stateKey];
 export default {
   id: "ambassador-conversation-return",
   register(api) {
+    registerOpenClawGuidance(api);
     registerOpenClawBridge(
       api,
-      async (stateDir) => {
-        const client = new NativeBoxClient();
+      async (stateDir, endpoint) => {
+        const client = new NativeBoxClient(endpoint);
         const lock = await ProcessLock.acquire(
           join(stateDir, "ambassador-conversation-return", "bridge.lock"),
         );
         let store;
         try {
-          store = new NativeRouteStore(
-            join(stateDir, "ambassador-conversation-return", "routes.sqlite"),
+          const routeDirectory = join(
+            stateDir,
+            "ambassador-conversation-return",
+            nativeRouteNamespace(endpoint),
           );
+          await mkdir(routeDirectory, { recursive: true, mode: 0o700 });
+          store = new NativeRouteStore(join(routeDirectory, "routes.sqlite"));
         } catch (error) {
           store?.close();
           await client.close();

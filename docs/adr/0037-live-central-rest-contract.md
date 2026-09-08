@@ -1,11 +1,17 @@
 # 0037 Central REST integration
 
 Status: accepted; local delivery, encrypted action persistence, and permission
-decisions amended by ADRs 0038, 0046, 0051, 0054, and 0057
+decisions amended by ADRs 0038, 0046, 0051, 0054, 0057 and 0069
 
 Date: 2026-09-01
 
-Updated: 2026-09-04
+Updated: 2026-09-07
+
+ADR 0069 adds the reviewed `permission_revoked` notification and permission-list
+statuses `revoked` and `expired`. The notification, desktop permission event and
+subsequent permission-list read passed controlled live qualification. Revocation
+cannot invent a new request or replay submitted work. The permission-request
+response contract is unchanged.
 
 ## Problem
 

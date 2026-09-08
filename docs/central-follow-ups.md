@@ -84,6 +84,16 @@ worker's listen pool. Bound listener setup, release listeners that are no
 longer active, and cover listen-pool exhaustion in the server tests. The HTTP
 request must return within the requested hold plus a small response margin.
 
+The 2026-09-07 desktop portability qualification saw this again. Central returned
+`200` and `status: delivered` for a synthetic `get_phone_number` call at
+18:54:20 UTC. The new recipient's packaged app was running, but its repeated
+30-second polls exceeded the client's 40-second budget and the app did not
+capture the action during the test. The requester also saw timed-out polls.
+This is consistent with issue 3's listener acquisition problem and issue 1's
+consuming-read risk; it does not identify which server worker or response lost
+progress. Do not call this a successful live exchange or resubmit the action to
+work around it. Registration and permission reads passed separately.
+
 Fix this in central with a database-backed delivery lease, stable message IDs,
 lease expiry, and idempotent acknowledgement. Add server tests for a client
 disconnect after claim, concurrent polls for one identity, worker handoff, and
@@ -147,3 +157,48 @@ a new ID; old permissions cannot be assumed to authorize that replacement.
 The server needs an owner-verified recovery contract that distinguishes token
 renewal with the existing key from recovery after losing it. Recovery cannot
 restore local data that the owner deleted.
+
+
+## Desktop owner account and notifications
+
+The later [web app and server review](desktop-web-app-review-2026-09-07.md)
+finds deployed owner session, request, permission/revocation and browser-push
+endpoints. Issues 7–10 now concern qualification and remaining contract gaps,
+not the complete absence of an owner API. Device/executor recovery, complete
+pages, mutation recovery and native push remain open.
+
+The [2026-09-07 source and deployed-schema review](desktop-api-review-2026-09-07.md)
+distinguishes existing first-time agent enrollment and permission reads from the
+missing owner contracts. Legacy approval and OAuth endpoints are not suitable
+substitutes for the owner flow.
+
+The user approved ADR 0064 on 2026-09-07. The desktop engine and shell can be
+built locally; agent enrollment tokens do not authorize the new owner UI.
+The following issues define server work without changing the API here:
+
+- [Issue 7](https://github.com/embassys/agent2agent/issues/7) covers email sign-in,
+  returning owners, owner sessions and device/executor binding. Identity recovery
+  continues in issue 2; this does not replace existing agent identities.
+  A [2026-09-08 onboarding observation](https://github.com/embassys/agent2agent/issues/7#issuecomment-5581439259)
+  records the two-code first-time flow: agent enrollment verifies email, then
+  owner login sends another code. A supported first-time owner signup/session
+  contract should remove that duplicate step while keeping agent and owner
+  credentials separate and handling uncertain responses without new identities.
+- [Issue 8](https://github.com/embassys/agent2agent/issues/8) covers the owner inbox,
+  exact decisions and answers, email/app races, and resumable owner observation.
+  The owner feed must not consume execution messages. Issues 1, 3 and 4 remain
+  prerequisites for custody, bounded listening and uncertain submission recovery.
+- [Issue 9](https://github.com/embassys/agent2agent/issues/9) covers permission
+  history, current grants and authoritative revocation.
+- [Issue 10](https://github.com/embassys/agent2agent/issues/10) covers device push
+  registration and dispatch for saved requests. Push prompts a current-state
+  fetch; it is not the request store or an approval channel.
+
+Owner sign-in, refresh, sign-out and bounded read-only account views now pass
+controlled live qualification under ADR 0068. Revocation reception and revoked
+permission reads also pass. ADR 0075 adds development decision, answer and revocation controls through the
+existing owner routes. Lost confirmations remain explicitly unconfirmed and are
+never replayed. Fuller request context and server-side mutation recovery remain
+open; remote native push is still unavailable. It does not
+impersonate an owner through the agent API or present a limited snapshot as a
+complete account history.

@@ -20,6 +20,7 @@ import {
   type RunningGatewayApplication,
 } from "./gateway-application.js";
 import { defaultGatewayPaths, pathsForStateDirectory } from "./gateway-paths.js";
+import { gatewayWorkingDirectory } from "./gateway-working-directory.js";
 import {
   EncryptedFileLocalControlSecretStore,
   LocalControlClient,
@@ -436,7 +437,9 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       outboundActionPath: paths.outboundActionPath,
       acpSessionPath: paths.acpSessionPath,
       profilePath: paths.profilePath,
-      workingDirectory: context.cwd,
+      workingDirectory: await gatewayWorkingDirectory(paths.profilePath, context.cwd),
+      visibleTranscriptPath: join(paths.stateDirectory, "visible-transcripts.sqlite"),
+      toolRegistrationPath: join(paths.stateDirectory, "registration.json"),
       environment: context.env,
       signal,
       onStopRequested: () => stopController.abort(),

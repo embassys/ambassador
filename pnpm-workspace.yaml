@@ -1,8 +1,11 @@
 packages:
   - .
+  - desktop
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 blockExoticSubdeps: true
 allowBuilds:
   better-sqlite3: true
+  electron: true
+  esbuild: true

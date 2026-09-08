@@ -19,6 +19,7 @@ export interface CentralAgentPermissionTransport {
 export interface CentralAgentPermissionCoordinatorOptions {
   readonly transport: CentralAgentPermissionTransport;
   readonly log?: VerboseLogger;
+  readonly onQuestion?: (requestId: string) => void;
   readonly waitForResponse: (requestId: string, signal: AbortSignal) => Promise<CentralMessage>;
 }
 
@@ -128,6 +129,11 @@ export class CentralAgentPermissionCoordinator {
     if (signal.aborted) throw new CentralAgentPermissionError("cancelled");
     const args = humanInputArguments(request);
     const result = await this.#options.transport.requestHumanInput(args, signal);
+    try {
+      this.#options.onQuestion?.(result.request_id);
+    } catch {
+      /* A desktop banner is separate from the pending provider decision. */
+    }
     this.#log("acp.permission.email_requested", {
       request_id: result.request_id,
       status: result.status,

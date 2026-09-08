@@ -4,6 +4,8 @@ import type { NotificationStore } from "./notification-store.js";
 
 export type DeliveryResult = { readonly status: "accepted" | "completed" };
 export interface DeliveryTarget {
+  /** A local check only, before dispatch intent or message content leaves custody. */
+  prepare?(signal: AbortSignal): Promise<void>;
   deliver(message: CentralMessage, signal: AbortSignal): Promise<DeliveryResult>;
   close(): Promise<void>;
 }
@@ -174,11 +176,15 @@ export class NotificationRelay {
         continue;
       }
       if (record.message === undefined) throw new NotificationRelayError("journal_failed");
-      this.#options.store.beginDelivery(record.id);
+      let dispatched = false;
       try {
+        await this.#options.deliveryTarget.prepare?.(signal);
+        if (signal.aborted) return;
+        this.#options.store.beginDelivery(record.id);
+        dispatched = true;
         await this.#options.deliveryTarget.deliver(record.message, signal);
       } catch (error) {
-        this.#options.store.deliveryUncertain(record.id);
+        if (dispatched) this.#options.store.deliveryUncertain(record.id);
         if (signal.aborted) return;
         this.#options.onDeliveryError?.(error);
         await this.#closeTarget();

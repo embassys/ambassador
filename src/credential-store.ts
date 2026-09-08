@@ -1,10 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes, scrypt } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { type BigIntStats, constants } from "node:fs";
 import { type FileHandle, link, lstat, mkdir, open, rename, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { TextDecoder } from "node:util";
-
 import { parseCentralCredential } from "./central-credential.js";
+import { CREDENTIAL_KDF, deriveCredentialKey } from "./credential-kdf.js";
 import {
   secureWindowsArtifact,
   type WindowsAccessControl,
@@ -12,11 +12,9 @@ import {
 } from "./windows-access-control.js";
 
 const FILE_FORMAT = 1;
-const SCRYPT_N = 131_072;
-const SCRYPT_R = 8;
-const SCRYPT_P = 1;
-const SCRYPT_MAXMEM = 256 * 1024 * 1024;
-const KEY_BYTES = 32;
+const SCRYPT_N = CREDENTIAL_KDF.N;
+const SCRYPT_R = CREDENTIAL_KDF.r;
+const SCRYPT_P = CREDENTIAL_KDF.p;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
@@ -71,6 +69,7 @@ export interface EncryptedFileCredentialStoreOptions {
   readonly platform?: NodeJS.Platform;
   readonly windowsAccessControl?: WindowsCredentialAccessControl;
   readonly validatePlaintext?: (plaintext: string) => void;
+  readonly deriveKey?: typeof deriveCredentialKey;
 }
 
 interface SecuredDirectory {
@@ -146,18 +145,6 @@ function parseEnvelope(bytes: Buffer): {
   };
 }
 
-function deriveKey(stateKey: Buffer, salt: Buffer): Promise<Buffer> {
-  return new Promise((resolveKey, reject) => {
-    scrypt(
-      stateKey,
-      salt,
-      KEY_BYTES,
-      { N: SCRYPT_N, r: SCRYPT_R, p: SCRYPT_P, maxmem: SCRYPT_MAXMEM },
-      (error, key) => (error === null ? resolveKey(key) : reject(error)),
-    );
-  });
-}
-
 class BuiltInWindowsCredentialAccessControl implements WindowsCredentialAccessControl {
   async secure(path: string, kind: CredentialArtifactKind): Promise<void> {
     await secureWindowsArtifact(path, kind);
@@ -172,6 +159,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   readonly #platform: NodeJS.Platform;
   readonly #windowsAccessControl?: WindowsCredentialAccessControl;
   readonly #validatePlaintext: (plaintext: string) => void;
+  readonly #deriveKey: typeof deriveCredentialKey;
 
   constructor(
     path: string,
@@ -189,6 +177,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       throw new Error("The credential key path is invalid");
     }
     this.#credentialScope = credentialScope;
+    this.#deriveKey = options.deriveKey ?? deriveCredentialKey;
     this.#validatePlaintext =
       options.validatePlaintext ??
       ((value) => parseCentralCredential(value, undefined, { allowExpired: true }));
@@ -247,7 +236,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       let ciphertext: Buffer;
       let tag: Buffer;
       try {
-        key = await deriveKey(stateKey, salt);
+        key = await this.#deriveKey(stateKey, salt);
         const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
         cipher.setAAD(this.#additionalData());
         ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
@@ -354,7 +343,7 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       let key: Buffer | undefined;
       let decoded: Buffer | undefined;
       try {
-        key = await deriveKey(stateKey, envelope.salt);
+        key = await this.#deriveKey(stateKey, envelope.salt);
         const decipher = createDecipheriv("aes-256-gcm", key, envelope.iv, {
           authTagLength: TAG_BYTES,
         });

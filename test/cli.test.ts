@@ -71,8 +71,12 @@ function captureTerminal() {
   };
 }
 
-async function waitForOutput(output: () => string, pattern: RegExp): Promise<string> {
-  for (let attempt = 0; attempt < 300; attempt += 1) {
+async function waitForOutput(
+  output: () => string,
+  pattern: RegExp,
+  attempts = 300,
+): Promise<string> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const match = pattern.exec(output());
     if (match !== null) return match[1] ?? match[0];
     await delay(10);
@@ -453,7 +457,6 @@ for (const verbose of [false, true])
     assert.ok(endpoint !== undefined);
     const client = new TestMcpClient(endpoint);
     await client.initialize({ name: "codex-mcp-client", version: "qualification" });
-    await client.callTool("register_agent", { email: "verbose@fixture.test" });
     await assert.rejects(
       client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
       (error: unknown) =>
@@ -464,6 +467,7 @@ for (const verbose of [false, true])
         (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
           "central_enrollment",
     );
+    await client.callTool("register_agent", { email: "verbose@fixture.test" });
     if (verbose) {
       assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
       assert.match(output.stderr(), /mcp\.tool\.request/u);
@@ -552,7 +556,16 @@ test("lists, shows, deletes, and forgets persisted ACP sessions while stopped", 
 
 test("lists and shows sessions through the running Ambassador process", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-sessions-live-cli-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let running: Promise<number> | undefined;
+  t.after(async () => {
+    controller.abort();
+    try {
+      await running;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   const seed = new AcpSessionStore(join(root, "acp-sessions.sqlite"));
   seed.create({
     session_id: "session-live-show",
@@ -575,9 +588,8 @@ test("lists and shows sessions through the running Ambassador process", async (t
     },
   };
   const shown: Array<{ id: string; verbose: boolean }> = [];
-  const controller = new AbortController();
   const startOutput = captureIo();
-  const running = runCli(["start"], {
+  running = runCli(["start"], {
     io: startOutput.io,
     env: {},
     cwd: root,
@@ -725,7 +737,16 @@ test("explains invalid local state and gives the supported reset command", async
 
 test("keeps MCP running and explains an unavailable direct agent without leaking the child error", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-direct-unavailable-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let running: Promise<number> | undefined;
+  t.after(async () => {
+    controller.abort();
+    try {
+      await running;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   const central = await startFakeCentral(t);
   const enrollment = new CentralEnrollmentClient({
     centralOrigin: central.apiUrl,
@@ -743,9 +764,8 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
   central.queueMessage(email, { type: "fixture_delivery" });
   const output = captureIo();
   let deliveryAttempts = 0;
-  const controller = new AbortController();
   let settled = false;
-  const running = runCli(["start"], {
+  running = runCli(["start"], {
     io: output.io,
     env: {},
     cwd: root,
@@ -767,6 +787,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
       deliveryTargetFactory: () => ({
         async deliver() {
           deliveryAttempts += 1;
+          await delay(100);
           throw new DirectDeliveryError("agent_unavailable");
         },
         async close() {},
@@ -775,9 +796,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
   }).finally(() => {
     settled = true;
   });
-  for (let attempt = 0; attempt < 100 && deliveryAttempts === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u, 1_500);
   assert.equal(deliveryAttempts, 1);
   assert.equal(settled, false);
   assert.match(
@@ -785,13 +804,27 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
     /Ambassador paused incoming delivery because Codex is unavailable\. Confirm Codex is installed and signed in, then restart Ambassador to resume delivery\n/u,
   );
   assert.doesNotMatch(output.stderr(), /ENOENT|spawn|node:events/iu);
+  const endpoint = await waitForOutput(
+    output.stdout,
+    /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+  );
+  assert.equal((await fetch(endpoint, { signal: AbortSignal.timeout(5_000) })).status, 400);
   controller.abort();
   assert.equal(await running, 0);
 });
 
 test("keeps MCP running and explains a failed webhook without leaking transport details", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-webhook-unavailable-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  const controller = new AbortController();
+  let running: Promise<number> | undefined;
+  t.after(async () => {
+    controller.abort();
+    try {
+      await running;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   const central = await startFakeCentral(t);
   const enrollment = new CentralEnrollmentClient({
     centralOrigin: central.apiUrl,
@@ -809,9 +842,8 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
   central.queueMessage(email, { type: "fixture_delivery" });
   const output = captureIo();
   let deliveryAttempts = 0;
-  const controller = new AbortController();
   let settled = false;
-  const running = runCli(["start"], {
+  running = runCli(["start"], {
     io: output.io,
     env: {},
     cwd: root,
@@ -833,6 +865,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
       deliveryTargetFactory: () => ({
         async deliver() {
           deliveryAttempts += 1;
+          await delay(100);
           throw new WebhookDeliveryError("delivery_failed");
         },
         async close() {},
@@ -841,9 +874,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
   }).finally(() => {
     settled = true;
   });
-  for (let attempt = 0; attempt < 100 && deliveryAttempts === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u, 1_500);
   assert.equal(deliveryAttempts, 1);
   assert.equal(settled, false);
   assert.equal(
@@ -851,6 +882,11 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
     "Ambassador paused incoming delivery because the configured webhook could not accept a message. Check the webhook and restart Ambassador to resume delivery\n",
   );
   assert.doesNotMatch(output.stderr(), /ECONNREFUSED|fetch|socket/iu);
+  const endpoint = await waitForOutput(
+    output.stdout,
+    /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+  );
+  assert.equal((await fetch(endpoint, { signal: AbortSignal.timeout(5_000) })).status, 400);
   controller.abort();
   assert.equal(await running, 0);
 });

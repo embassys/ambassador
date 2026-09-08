@@ -14,6 +14,49 @@ import { OutboundActions } from "../src/outbound-actions.js";
 import { PendingActionInbox } from "../src/pending-action-inbox.js";
 import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 
+test("revoked permission wakes a pending action without dispatch or automatic re-request", async (t) => {
+  const f = await fixture(t, false, 2000);
+  const request_id = randomUUID();
+  await f.box.call(
+    {
+      type: "request_action",
+      request_id,
+      action_type: "lookup",
+      target_email: "peer@example.test",
+      payload: { query: "saved private intent" },
+      wait_seconds: 0,
+    },
+    new AbortController().signal,
+  );
+  const waiting = f.box.call(
+    { type: "check", request_id, wait_seconds: 1 },
+    new AbortController().signal,
+  );
+  const revoked = {
+    ...f.outcome,
+    payload: {
+      ...f.outcome.payload,
+      type: "permission_revoked",
+      granted: false,
+      status: "revoked",
+    },
+  };
+  assert.equal(await f.box.capture({ ...revoked, action_type_id: "wrong-action" }), false);
+  assert.equal(
+    (await f.box.call({ type: "check", request_id, wait_seconds: 0 }, new AbortController().signal))
+      .status,
+    "pending",
+  );
+  await f.box.capture(revoked);
+  const reply = await waiting;
+  assert.equal(reply.status, "rejected");
+  assert.match(JSON.stringify(reply), /revoked/u);
+  await f.restart();
+  await f.box.capture(f.outcome);
+  assert.equal(f.calls, 0);
+  assert.equal(f.requests, 1);
+});
+
 async function fixture(t: TestContext, granted = false, waitMs = 35) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-message-box-"));
   const credential = parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS);
@@ -288,7 +331,10 @@ test("the tool publishes visible message fields even when a provider simplifies 
   assert.ok(Array.isArray(MESSAGE_BOX_TOOL.inputSchema.oneOf));
   const wait = properties.wait_seconds as Record<string, unknown>;
   assert.match(String(wait.description), /Omit.*600 seconds/u);
-  assert.match(String(wait.description), /known.*client.*limit/u);
+  assert.match(String(wait.description), /host disconnects.*same.*request later/u);
+  assert.doesNotMatch(String(wait.description), /known.*client.*limit/u);
+  assert.match(MESSAGE_BOX_TOOL.description ?? "", /human.*email.*Embassys app/u);
+  assert.doesNotMatch(MESSAGE_BOX_TOOL.description ?? "", /no Ambassador UI/u);
   assert.match(
     MESSAGE_BOX_TOOL.description ?? "",
     /Do not schedule a background check unless the user asks/u,
@@ -296,11 +342,11 @@ test("the tool publishes visible message fields even when a provider simplifies 
 });
 
 test("initial call long polls, timeout preserves intent, and a grant submits exactly once", async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, false, 5_000);
   const input = request();
   const started = performance.now();
-  const first = await f.box.call(input, new AbortController().signal);
-  assert.ok(performance.now() - started >= 25);
+  const first = await f.box.call({ ...input, wait_seconds: 1 }, new AbortController().signal);
+  assert.ok(performance.now() - started >= 900);
   assert.equal(first.reason, "wait_timeout");
   assert.equal(f.requests, 1);
   assert.equal(f.calls, 0);
@@ -319,10 +365,18 @@ test("initial call long polls, timeout preserves intent, and a grant submits exa
     f.box.call({ ...input, payload: { query: "changed" } }, new AbortController().signal),
     { code: "request_id_conflict" },
   );
-  const next = f.box.call(
-    { type: "check", request_id: input.request_id, cursor: grant.cursor },
-    new AbortController().signal,
-  );
+  let settled = false;
+  const next = f.box
+    .call(
+      { type: "check", request_id: input.request_id, cursor: grant.cursor },
+      new AbortController().signal,
+    )
+    .finally(() => {
+      settled = true;
+    });
+  // The result must wake an open check even when receipt is not immediate.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(settled, false);
   await f.capture(f.result());
   const result = await next;
   assert.equal((result.events as Array<{ type: string }>)[0]?.type, "action_result");

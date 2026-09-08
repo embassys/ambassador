@@ -1,0 +1,33 @@
+{
+  "name": "@embassys/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/launch.mjs",
+    "package": "node scripts/package.mjs",
+    "distribute": "node scripts/distribute.mjs",
+    "test:artifacts": "node --test scripts/artifact-tools.test.mjs scripts/provider-config.test.mjs scripts/account.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "node scripts/verify.mjs",
+    "verify:host": "node scripts/verify-host.mjs",
+    "verify:package": "node scripts/verify-host.mjs --packaged",
+    "verify:shared": "node scripts/verify-shared.mjs",
+    "verify:portable": "node scripts/verify-portable.mjs",
+    "verify:distribution": "node scripts/verify-distribution.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "smol-toml": "1.8.0",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "electron": "44.2.0",
+    "esbuild": "0.28.2"
+  }
+}

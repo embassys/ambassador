@@ -108,8 +108,17 @@ const app = acp
     }
     return {};
   })
-  .onRequest(acp.methods.agent.session.close, async () => {
-    if (scenario === "close-hang") return await new Promise<never>(() => undefined);
+  .onRequest(acp.methods.agent.session.close, async (context) => {
+    if (scenario === "close-hang") {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "fixture-close-waiting" },
+        },
+      });
+      return await new Promise<never>(() => undefined);
+    }
     if (scenario === "close-error") throw new Error("close failed");
     return {};
   })
@@ -187,6 +196,22 @@ const app = acp
         update: {
           sessionUpdate: "agent_message_chunk",
           content: { type: "text", text: "x".repeat(2_048) },
+        },
+      });
+    }
+    if (scenario === "visible-transcript") {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "private-reasoning-marker" },
+        },
+      });
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "visible-answer-marker" },
         },
       });
     }

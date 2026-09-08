@@ -28,7 +28,18 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 
 | ADR | Decision |
 | --- | --- |
+| [0075](0075-owner-decisions-and-default-waits.md) | App approvals, answers and revocation through existing owner APIs; ten-minute waits with durable continuation |
+| [0074](0074-desktop-stdio-client.md) | Standalone Claude local stdio connection |
 | [0064](0064-desktop-application.md) | Desktop app, owner controls, conversation archive and isolated instances |
+| [0069](0069-shared-cli-and-desktop-installation.md) | Shared CLI/app installation, confirmed handoff, simpler navigation and revocation events |
+| [0070](0070-instance-scoped-native-observers.md) | Bind OpenClaw observers and route journals to its configured local instance, with optional fixed discovery guidance |
+| [0071](0071-desktop-executor-checks-and-mac-vibrancy.md) | Check desktop executor connections before dispatch and expose native Mac sidebar vibrancy |
+| [0072](0072-account-first-onboarding.md) | Log in or register first, then guided agent setup, then the main app |
+| [0073](0073-existing-provider-connections.md) | Reuse valid owner-managed connections without changing or claiming them |
+| [0068](0068-desktop-owner-account-views.md) | Separate owner session worker, email sign-in and bounded read-only account views using deployed APIs |
+| [0065](0065-desktop-development-registration.md) | First-time app registration, read-only permissions and running-app notifications with the existing API |
+| [0067](0067-desktop-setup-and-log-retention.md) | Desktop TOML/YAML setup, 1 GiB logs, seven-day retention and Clear logs |
+| [0066](0066-desktop-completion.md) | Portable locked desktop builds, integrity checks, distribution verification and remaining external inputs |
 | [0062](0062-explicit-local-enrollment-context.md) | Explicit local enrollment context independent of permission count |
 | [0063](0063-persistent-openclaw-webhook-peers.md) | Persistent OpenClaw webhook conversations per enrolled requester |
 | [0006](0006-toolchain.md) | Repository toolchain |
@@ -95,3 +106,4 @@ Add an ADR when changing a public CLI, dependency, trust boundary, credential
 location, content-persistence rule, central transport, or agent-execution
 safety property. Routine server contract updates may amend ADR 0037 and the
 protocol instead of creating an API generation number.
+- [0074: Local stdio client for standalone desktop hosts](0074-desktop-stdio-client.md)
