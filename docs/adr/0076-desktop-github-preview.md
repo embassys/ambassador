@@ -42,6 +42,13 @@ verified publisher signing; no certificate, notarization, login-startup or
 Gatekeeper qualification is implied. Requested Developer ID signing still
 requires its existing identity, notarization and Gatekeeper gates.
 
+The app's optional login-startup qualification first reads the public signing
+identity. Ad hoc, unknown and Apple Development identities return unavailable
+without waiting for Gatekeeper or notarization. That avoids a preview spending
+its startup deadline on checks it cannot pass. A Developer ID identity still
+requires deep signature, Gatekeeper and stapled-notarization verification;
+reading an identity alone never enables login startup.
+
 The preview retains the approved development logging policy with credential
 redaction, a seven-day expiry and a 1 GiB per-instance limit. The release page
 must disclose body logging, existing API recovery gaps, two-code signup and
