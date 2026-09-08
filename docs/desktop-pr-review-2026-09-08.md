@@ -160,3 +160,13 @@ locally. The timeout phase now requests one second, while the later result wait
 has a five-second fixture allowance and must remain open across a delayed reply.
 The test still checks exact-once dispatch, restart, result retention and receipt.
 Production wait durations are unchanged.
+
+The next full Windows run stopped progressing after two CLI delivery-failure
+tests failed. Both fixtures stopped their server only on the successful assertion
+path, leaving background work alive until the 45-minute CI limit. Delaying the
+mock delivery error reproduced their premature output assertions locally. They
+now wait for the visible paused status, check that MCP still responds, and always
+abort and await their server before removing state. The live session CLI fixture
+received the same cleanup guard. The deliberately failing local reproduction
+exited promptly, and the corrected CLI suite passed. This fixes test ownership
+and observation rather than extending the job deadline again.
