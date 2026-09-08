@@ -1,35 +1,15 @@
 import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
-import { z } from "zod";
 import { openClawReturnEndpoint } from "../openclaw-return-endpoint.js";
 import {
   type ConnectionDocument,
   type ConnectionProvider,
   readBoundedConfiguration,
 } from "./agent-connections.js";
+import { matchesConnectionEntry } from "./connection-entry.js";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
-const timeout = z
-  .number()
-  .int()
-  .positive()
-  .max(24 * 60 * 60 * 1000)
-  .optional();
-const connection = {
-  url: z.string(),
-  enabled: z.literal(true).optional(),
-};
-const shapes = {
-  claude_code: z.strictObject({ ...connection, type: z.literal("http"), timeout }),
-  codex: z.strictObject({ ...connection, tool_timeout_sec: timeout, startup_timeout_sec: timeout }),
-  hermes: z.strictObject({ ...connection, timeout }),
-  openclaw: z.strictObject({
-    ...connection,
-    transport: z.literal("streamable-http").optional(),
-    requestTimeoutMs: timeout,
-  }),
-};
 
 /** Reads only public MCP bindings. It never edits settings or obtains provider credentials. */
 export async function verifyExecutorConnection(options: {
@@ -82,8 +62,7 @@ export async function verifyExecutorConnection(options: {
         }
       }
     }
-    const validated = shapes[options.provider].parse(entry);
-    if (validated.url !== `http://127.0.0.1:${options.port}/mcp`) return false;
+    if (!matchesConnectionEntry(options.provider, entry, options.port)) return false;
 
     // Project overrides need separate qualification. Never assume the global entry wins.
     if (options.provider === "claude_code" || options.provider === "codex") {

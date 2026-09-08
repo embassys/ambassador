@@ -21,9 +21,12 @@ issue-only. These items do not authorize another release.
   [3](https://github.com/embassys/agent2agent/issues/3) and
   [4](https://github.com/embassys/agent2agent/issues/4). Local durability cannot
   recover a message that central consumed before a lost HTTP response.
-- [ ] Codex discovery. Confirm a fresh desktop chat recognizes Embassys without
-  asking for its website or needing a tool hint. Registration, the phone-number
-  exchange and explicit receipt passed; the opening UI still needs observation.
+- [x] Codex discovery. A fresh desktop task on September 8 answered "Am I
+  registered with Embassys?" through `get_my_permissions` without a website
+  question or tool hint. This test used the deployed central service and the
+  account registered in the native app. Task transcript evidence is available;
+  Codex computer-control screenshots remain unavailable. Earlier registration,
+  action/result and receipt evidence still applies.
 - [ ] OpenClaw native display. Resolve the duplicate badge and hidden waiting
   reply seen on idle return. Saved history contains one native answer, and the
   result remains unread and recoverable. Keep native return experimental and
@@ -42,17 +45,29 @@ issue-only. These items do not authorize another release.
 - [ ] Calendar invitations. Verify an invitation actually reaches another
   person using a configured calendar account and consenting test recipient.
   Availability, local event creation and denial handling passed. Local event
-  creation alone does not prove invitation delivery.
+  creation alone does not prove invitation delivery. The September 8 native
+  check found only "On My Mac". The owner has been asked to connect the sending
+  account; a disposable recipient inbox is available.
 - [ ] API result contracts and progress. Define and validate action-specific
   results, and tell callers when the other agent needs owner input. Track remote
   progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result
   schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6). Update
   Ambassador's validation, fixtures and qualification when those contracts exist.
-- [ ] Broader client qualification. Qualify Hermes native return, standalone
-  Claude Chat/Cowork, and each supported real-agent mode on Windows. Hermes
+- [ ] Broader client qualification. Qualify Hermes native return and each
+  supported real-agent mode on Windows. Hermes
   native return first needs trusted origin routing and busy-session semantics.
   Windows CI passing does not qualify every provider; Claude Code desktop and
   Remote Control evidence does not qualify standalone Claude Chat or Cowork.
+  The September 8 source review confirmed Hermes injection can interrupt active
+  work, while its API wake path has no per-session lock. ADR 0074 now implements
+  the separate local client for standalone Claude Chat and Cowork. Both native
+  surfaces pass natural phone-number requests, actual OpenClaw results and explicit
+  receipts. Fresh Cowork discovery of Embassys remains intermittent. Standalone
+  host and desktop-bridge deadlines require explicit 45-second waits; the gateway does not rewrite
+  requests to impose that recommendation.
+  Manual development setup is documented; connector packaging and automated
+  installation remain excluded distribution work. See the current
+  [client completion record](client-completion-2026-09-08.md).
 - [ ] Multiple engine versions and provider isolation. Embassys now supports
   named instances with separate ports, locations, credentials, locks, workflow
   state and logs under ADR 0064. ADR 0071 now checks the desktop executor's
@@ -68,6 +83,10 @@ issue-only. These items do not authorize another release.
   ADR 0070 now scopes OpenClaw return routes to its configured local endpoint.
   Two-server regressions and a real OpenClaw conversation on port 9797 pass;
   a separate gateway on 8787 remains untouched.
+  September 8 deployed-central tests now pass both directions with real Claude
+  ACP on 8787 and real OpenClaw ACP on 9797. Independent stop/clean of OpenClaw
+  preserved the running Claude identity. This qualifies these two existing
+  provider configurations, not two independent profiles of the same provider.
   ADR 0066 adds locked portable packages, source/host compatibility checks and
   runtime-version validation. A signed engine catalog, compatible state bounds
   and separately qualified artifacts are still required before enabling version
@@ -81,11 +100,19 @@ issue-only. These items do not authorize another release.
   the release infrastructure and environments described in the
   [desktop plan](desktop-app-plan.md). API gaps remain in issues 7–10.
 
+The owner excluded central API changes and distribution from the current work
+on September 8. Native Windows/Linux qualification remains deferred. The combined
+native signup, real Claude request, real OpenClaw owner-input continuation and
+visible result/receipt now pass. ADR 0073 fixes valid existing connections being
+rejected during setup. An open local Conversations view now refreshes its session
+list without changing the selected transcript or page. Bounded reads never
+overlap and late replies from a closed view are discarded.
+
 The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
 registration across hosts, confirmed authenticated process handoff and stopped
 state after handoff. Existing isolated instances remain separate. Current local
-checks pass 484 tests with seven expected skips, plus 18 desktop rendering,
+checks pass 494 tests with seven expected skips, plus 18 desktop rendering,
 parser and artifact tests. Final native and live evidence belongs in the desktop
 plan; these counts alone do not qualify a user-visible result.
 
@@ -170,8 +197,9 @@ provider MCP entries and the OpenClaw extension settings were restored.
 
 The user-operated Codex retest completed registration, one accepted phone action,
 exact result and receipt after fixing UUID normalization and pre-submission
-errors. Its opening website question still needs a fresh UI observation from the
-user. Discovery guidance now fits within the first 512 initialization characters.
+errors. Its opening website question prompted the subsequent fresh September 8
+desktop task, which recognized Embassys without a hint. Discovery guidance fits
+within the first 512 initialization characters.
 The successful request supplied the same neutral purpose in the action payload
 and permission reason. Exact catalog names and schemas remain authoritative.
 
@@ -179,8 +207,9 @@ Claude desktop Code completed a full 600-second wait, ended its turn on timeout,
 and displayed the late result from real OpenClaw after the ordinary follow-up
 "Any news?". The experimental Claude Code CLI channel also delivered a delayed
 result without follow-up, visible through Remote Control. Neither observation
-qualifies standalone Claude Chat or Cowork. Those clients and Hermes native
-return remain unsupported in this candidate; the matrix states their limits.
+qualifies standalone Claude Chat or Cowork. ADR 0074 and the separate September 8
+native tests now cover those clients' local transport and shorter waits; Hermes
+native return remains deferred. The current matrix states these limits.
 
 Meeting tests now cover enrollment with no grants, actual Mac Calendar busy
 intervals, a local booking, and later availability/attendee/denial corrections.

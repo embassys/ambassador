@@ -7,9 +7,10 @@ that a client displayed a result. Evidence belongs in [qualification](qualificat
 | --- | --- | --- |
 | OpenClaw | Foreground wait; experimental hook bridge to the captured logical session key | Real ACP, two-conversation history routing and foreground deferral pass. Idle return appears, but the desktop shows a duplicate badge despite one saved answer |
 | Hermes CLI/gateway | Foreground wait and durable inbox/check | Real ACP and current real webhook action/result/receipt pass; native return deferred pending a trusted gateway routing key and idle-only injection |
-| Codex | Foreground wait and later check | Real ACP and corrected desktop MCP registration/result/receipt pass; user confirmation of first-turn discovery and final UI remains pending |
-| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP flow, a full ten-minute desktop Code wait with later result/receipt, and CLI channel return shown through Remote Control pass |
-| Claude Desktop | No inherited Claude Code support claim | Separate transport, registration/executor and UI qualification required |
+| Codex | Foreground wait and later check | Real ACP and desktop registration/result/receipt pass; a fresh September 8 desktop task recognized Embassys immediately through the configured integration |
+| Claude Code | Foreground wait; optional experimental stdio channel | Real ACP, ten-minute desktop wait and experimental channel tests pass; September 8 combined native app signup → deployed central → real OpenClaw owner input → visible Claude result and receipt also passes |
+| Claude Desktop Chat | Local stdio client; app owns enrollment and incoming executor | Natural request, real OpenClaw result and receipt pass. A 150-second pending reply displays correctly; 240-second host ceiling. Shared connector recommends 45 seconds to cover Cowork too |
+| Claude Desktop Cowork | Local stdio client; app owns enrollment and incoming executor | Natural phone request, real OpenClaw result and receipt pass. Guided 45-second pending reply displays correctly and ends without retry. Fresh Embassys discovery is intermittent; a desktop bridge can time out at 60 seconds |
 
 ## Configure the foreground wait
 
@@ -24,7 +25,9 @@ server's `requestTimeoutMs` to `660000`. For Hermes, set the Ambassador
 MCP server's `timeout` to `660`. These are provider settings, not Ambassador
 CLI flags. Restart/reload the provider's MCP connection after changing them.
 For Claude Code, add `"timeout": 660000` to the existing Ambassador server's
-MCP configuration. Claude Desktop must be measured separately. Current Claude
+MCP configuration. Standalone Claude Desktop uses the separately measured
+[local client](claude-desktop-local-client.md) with explicit 45-second waits.
+Current Claude
 Code can move a long call into a provider background task while the original
 MCP request remains open; its eventual task notification is different from
 resubmitting the action. Do not create a separate scheduled check-in.

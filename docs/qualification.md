@@ -1,5 +1,11 @@
 # Delivery qualification
 
+The [September 8 client completion](client-completion-2026-09-08.md) records the
+combined native Embassys onboarding and deployed-central two-real-agent flow,
+opposite-direction instance check, fresh Codex discovery and current client
+limits. Screenshots and exact operation evidence remain local in
+`.build/client-completion/`.
+
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 

@@ -6,6 +6,7 @@ import { dirname, isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { secureWindowsArtifact } from "../windows-access-control.js";
+import { matchesConnectionEntry } from "./connection-entry.js";
 
 export const connectionProvider = z.enum(["claude_code", "openclaw", "codex", "hermes"]);
 export const connectionOperation = z.enum(["connect", "repair", "disconnect"]);
@@ -202,7 +203,12 @@ export class AgentConnection {
             ? "This app's connection is missing. Repair can restore it."
             : "No Embassys connection is saved in this provider profile.",
         };
-      if (!isDeepStrictEqual(current.entry, expected)) return conflict;
+      if (
+        owned
+          ? !isDeepStrictEqual(current.entry, expected)
+          : !matchesConnectionEntry(this.options.provider, current.entry, port)
+      )
+        return conflict;
       return {
         state: "configured",
         owned,

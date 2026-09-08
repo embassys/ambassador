@@ -17,6 +17,64 @@ test("automatic setup is exposed only on a natively qualified platform", () => {
   assert.equal(connectionAvailable("darwin", "x64"), false);
 });
 
+test("setup recognizes a valid existing connection without taking ownership or changing it", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-existing-connect-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const provider of ["claude_code", "openclaw", "codex", "hermes"] as const) {
+    const path = join(root, `${provider}.json`);
+    const ownershipPath = join(root, `${provider}-ownership.json`);
+    const entry =
+      provider === "claude_code"
+        ? { type: "http", url: "http://127.0.0.1:8789/mcp" }
+        : { url: "http://127.0.0.1:8789/mcp" };
+    const contents = JSON.stringify({ ambassador: entry, unrelated: "keep" });
+    await writeFile(path, contents);
+    const setup = new AgentConnection({
+      provider,
+      configurationPath: path,
+      ownershipPath,
+      run: async () => assert.fail("Existing settings must not be rewritten."),
+      document: {
+        read: (text) => JSON.parse(text).ambassador,
+        edit: () => assert.fail("Existing settings must not be edited."),
+      },
+    });
+    const result = await setup.prepare("connect", 8789);
+    assert.equal(result.state, "configured", provider);
+    assert.equal(result.owned, false);
+    assert.equal(result.previewId, undefined);
+    assert.equal((await setup.prepare("disconnect", 8789)).previewId, undefined);
+    assert.equal(await readFile(path, "utf8"), contents);
+    await assert.rejects(readFile(ownershipPath), { code: "ENOENT" });
+    assert.equal((await setup.inspect(8790)).state, "conflict");
+    for (const extra of [
+      { enabled: false },
+      { headers: {} },
+      { command: "something" },
+      { unknown: true },
+    ]) {
+      await writeFile(path, JSON.stringify({ ambassador: { ...entry, ...extra } }));
+      assert.equal((await setup.prepare("connect", 8789)).state, "conflict");
+    }
+    await writeFile(
+      ownershipPath,
+      JSON.stringify({
+        version: 1,
+        provider,
+        configurationPath: path,
+        port: 8789,
+        phase: "configured",
+      }),
+    );
+    await writeFile(path, contents);
+    assert.equal(
+      (await setup.prepare("disconnect", 8789)).state,
+      "conflict",
+      "An owner-edited app entry is not removable.",
+    );
+  }
+});
+
 for (const provider of ["claude_code", "openclaw"] as const) {
   test(`${provider} connects, repairs a removed owned entry and disconnects only its own entry`, async (t) => {
     const root = await mkdtemp(join(tmpdir(), "embassys-connect-"));

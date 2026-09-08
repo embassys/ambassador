@@ -8,6 +8,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const resourceArgument = process.argv.indexOf("--resources");
@@ -117,10 +119,39 @@ try {
   });
   assert.equal(response.status, 200);
   assert.match(await response.text(), /serverInfo/u);
+  const desktopClient = new Client({ name: "desktop-local-client-probe", version: "1" });
+  try {
+    await desktopClient.connect(
+      new StdioClientTransport({
+        command: node,
+        args: [join(gateway, "dist/desktop-stdio.js")],
+        env: { PATH: join(gateway, "runtime"), NODE_OPTIONS: "", EMBASSYS_MCP_PORT: String(port) },
+        stderr: "pipe",
+      }),
+    );
+    assert.match(desktopClient.getInstructions() ?? "", /Embassys app/u);
+    assert.deepEqual((await desktopClient.listTools()).tools.map((tool) => tool.name).sort(), [
+      "get_my_permissions",
+      "list_action_types",
+      "message_box",
+      "register_agent",
+      "resend_verification",
+      "verify_email",
+    ]);
+    await assert.rejects(
+      desktopClient.callTool({
+        name: "register_agent",
+        arguments: { email: "local-package-probe@fixture.test" },
+      }),
+      (error) => error.data?.code === "registration_in_app",
+    );
+  } finally {
+    await desktopClient.close();
+  }
   child.disconnect();
   assert.equal((await exited)[0], 0);
   console.log(
-    "Packaged Node, SQLite, ACP dependency and real MCP worker passed with an isolated PATH.",
+    "Packaged Node, SQLite, ACP dependency, real MCP worker and local desktop client passed with an isolated PATH.",
   );
 } finally {
   clearTimeout(limit);
