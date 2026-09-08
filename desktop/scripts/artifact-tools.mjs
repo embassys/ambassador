@@ -1,8 +1,48 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { lstat, readdir, readFile, readlink, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+
+export async function runArchiveTool(executable, args, timeoutMs = 5 * 60_000) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      stdio: ["ignore", "ignore", "pipe"],
+      shell: false,
+      windowsHide: true,
+    });
+    let diagnostic = Buffer.alloc(0);
+    let timedOut = false;
+    let forceStop;
+    child.stderr.on("data", (chunk) => {
+      if (diagnostic.length < 4096)
+        diagnostic = Buffer.concat([diagnostic, chunk.subarray(0, 4096 - diagnostic.length)]);
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+      forceStop = setTimeout(() => child.kill("SIGKILL"), 5000);
+    }, timeoutMs);
+    const clear = () => {
+      clearTimeout(timeout);
+      clearTimeout(forceStop);
+    };
+    child.once("error", () => {
+      clear();
+      reject(new Error(`Archive tool ${basename(executable)} is unavailable.`));
+    });
+    child.once("close", (code, signal) => {
+      clear();
+      if (code === 0 && !timedOut) return resolve();
+      const outcome = timedOut ? "timed out" : `exited ${code ?? signal}`;
+      reject(
+        new Error(
+          `Archive tool ${basename(executable)} ${outcome}: ${diagnostic.toString("utf8").trim()}`,
+        ),
+      );
+    });
+  });
+}
 
 export async function sha256(path) {
   const hash = createHash("sha256");
@@ -190,3 +230,5 @@ export function signingOptions(platform, environment) {
   }
   throw new Error("Linux artifact signing requires a configured release-signing policy.");
 }
+
+import { spawn } from "node:child_process";

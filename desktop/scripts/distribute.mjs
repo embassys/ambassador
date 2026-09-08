@@ -1,8 +1,7 @@
-import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dependencyBom, sha256, verifyInventory } from "./artifact-tools.mjs";
+import { dependencyBom, runArchiveTool, sha256, verifyInventory } from "./artifact-tools.mjs";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const evidence = JSON.parse(
@@ -28,19 +27,7 @@ const extension =
 const archive = join(directory, `${stem}.${extension}`);
 await verifyInventory(source, evidence.inventory);
 const files = evidence.inventory;
-const run = (executable, args) =>
-  new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: "ignore", shell: false, windowsHide: true });
-    const timeout = setTimeout(() => child.kill(), 5 * 60_000);
-    child.once("error", () => {
-      clearTimeout(timeout);
-      reject(new Error("Archive tool is unavailable."));
-    });
-    child.once("exit", (code) => {
-      clearTimeout(timeout);
-      code === 0 ? resolve() : reject(new Error("Archive command failed."));
-    });
-  });
+const run = runArchiveTool;
 for (const path of [
   archive,
   ...["manifest.json", "cdx.json", "sha256"].map((suffix) => join(directory, `${stem}.${suffix}`)),
