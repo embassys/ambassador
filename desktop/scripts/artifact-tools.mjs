@@ -117,7 +117,25 @@ export function signingOptions(platform, environment) {
   const requested = environment.EMBASSYS_DESKTOP_SIGN;
   if (requested !== undefined && requested !== "1")
     throw new Error("Signing mode must be explicitly set to 1 or omitted.");
-  if (!requested) return { signed: false, options: { osxSign: false, osxNotarize: false } };
+  if (!requested) {
+    if (platform === "darwin")
+      return {
+        signed: false,
+        adHocSigned: true,
+        options: {
+          osxSign: {
+            identity: "-",
+            identityValidation: false,
+            continueOnError: false,
+            preEmbedProvisioningProfile: false,
+            preAutoEntitlements: false,
+            optionsForFile: () => ({ hardenedRuntime: false }),
+          },
+          osxNotarize: false,
+        },
+      };
+    return { signed: false, options: { osxSign: false, osxNotarize: false } };
+  }
   const bounded = (value) =>
     typeof value === "string" &&
     value.length > 0 &&

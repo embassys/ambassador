@@ -55,10 +55,15 @@ test("inventory bounds entries and refuses links outside the package", {
 });
 
 test("requested signing never silently downgrades to unsigned output", () => {
-  assert.deepEqual(signingOptions("darwin", {}), {
-    signed: false,
-    options: { osxSign: false, osxNotarize: false },
-  });
+  const preview = signingOptions("darwin", {});
+  assert.equal(preview.signed, false);
+  assert.equal(preview.adHocSigned, true);
+  assert.equal(preview.options.osxSign.identity, "-");
+  assert.equal(preview.options.osxSign.identityValidation, false);
+  assert.equal(preview.options.osxSign.continueOnError, false);
+  assert.equal(preview.options.osxNotarize, false);
+  assert.equal(signingOptions("win32", {}).options.osxSign, false);
+  assert.equal(signingOptions("linux", {}).options.osxSign, false);
   assert.throws(() => signingOptions("darwin", { EMBASSYS_DESKTOP_SIGN: "1" }));
   assert.throws(() => signingOptions("win32", { EMBASSYS_DESKTOP_SIGN: "1" }));
   assert.throws(() => signingOptions("linux", { EMBASSYS_DESKTOP_SIGN: "1" }));

@@ -33,6 +33,15 @@ device policy. Mac login startup stays unavailable. Linux requires its normal
 Electron sandbox setup; never recommend disabling the sandbox or system-wide
 security controls to make the app run.
 
+Release checks found two packaging defects. Clear the compiled output before
+building so removed source cannot remain in a local package. For Mac previews,
+use the approved packager's ad hoc signing option to replace Electron's invalid
+inherited resource seal. Verify the complete bundle with strict codesign checks
+both before archiving and after extracting the DMG. Record this separately from
+verified publisher signing; no certificate, notarization, login-startup or
+Gatekeeper qualification is implied. Requested Developer ID signing still
+requires its existing identity, notarization and Gatekeeper gates.
+
 The preview retains the approved development logging policy with credential
 redaction, a seven-day expiry and a 1 GiB per-instance limit. The release page
 must disclose body logging, existing API recovery gaps, two-code signup and
