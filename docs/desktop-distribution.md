@@ -1,5 +1,11 @@
 # Desktop development packages
 
+For ready-made downloads, use the [preview installation guide](desktop-install.md).
+The owner authorized the first GitHub prerelease under
+[ADR 0076](adr/0076-desktop-github-preview.md). CI retains verified archives for
+seven days; publication still requires successful core and desktop checks for
+the exact release source. This does not configure signing or automatic updates.
+
 The desktop build uses the approved Electron Packager, bundled Node 24.19.0 and
 the production dependencies in the repository's frozen lockfile. It creates a
 fresh hoisted dependency tree outside the checkout's node_modules. Do not use
