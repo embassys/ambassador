@@ -91,9 +91,9 @@ async function target(
     environment: options.sourceEnvironment ?? process.env,
     sessionStore,
     ...(options.transcript ? { transcript: options.transcript } : {}),
-    approvePermission: async (request) => {
+    approvePermission: async (request, signal) => {
       permissionRequests.push(request);
-      return await (options.permissionApproval?.(request, new AbortController().signal) ??
+      return await (options.permissionApproval?.(request, signal) ??
         Promise.resolve("allow" as const));
     },
     initializationDeadlineMs: 2_000,
@@ -465,20 +465,29 @@ test("keeps a peer conversation across owner replies, completed actions and a st
   assert.equal(store.list().length, 3);
 });
 
-test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {
+test("pauses prompt and delivery deadlines while human approval is pending", {
+  timeout: 15_000,
+}, async (t) => {
   const value = await target(t, "permission-session-mcp", {
     promptDeadlineMs: 1_000,
     outerDeadlineMs: 4_000,
-    permissionApproval: async () => {
-      // Leave time for process startup on Windows while exceeding both deadlines.
-      await new Promise((resolve) => setTimeout(resolve, 4_500));
+    permissionApproval: async (_request, signal) => {
+      // Advance past both deadlines only after the real ACP approval arrives.
+      // Process startup and durable writes must not consume this test's budget.
+      t.mock.timers.tick(4_500);
+      assert.equal(signal.aborted, false, "Human approval must pause the outer deadline.");
       return "allow";
     },
   });
-
-  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
-    status: "completed",
-  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+      status: "completed",
+    });
+    assert.equal(value.permissionRequests.length, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("verbose ACP logging omits the available command catalog", async (t) => {

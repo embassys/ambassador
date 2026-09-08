@@ -268,9 +268,10 @@ those systems.
   including tray behavior and provider setup. A system-widget UI would need a
   separately approved toolkit prototype; none has been selected or installed.
 - Qualify active-provider resource use and native Windows/Linux resource budgets.
-- Complete owner decisions, recovery, revocation handling and native push as the
+- Complete server recovery, fuller request context and native push as the
   remaining contracts in API issues 7–10 become available. Owner sign-in and
-  read-only account views now use the deployed APIs. Issues 1–6 remain release risks.
+  account views use the deployed APIs; ADR 0075 now adds decisions, answers and
+  revocation. Issues 1–6 remain release risks.
 - Complete trusted engine selection, signed installers/updates and installed
   launch-at-login qualification. These need trusted builds and signing inputs.
 
