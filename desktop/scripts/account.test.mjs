@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData} from './src/account.tsx'; import {Navigation} from './src/navigation.tsx'; import {Onboarding} from './src/onboarding.tsx'; export {onboardingKey} from './src/onboarding-state.ts'; export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = page => renderToStaticMarkup(createElement(Navigation,{page,select:()=>{}})); export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm} from './src/account.tsx'; import {Navigation} from './src/navigation.tsx'; import {Onboarding} from './src/onboarding.tsx'; export {onboardingKey} from './src/onboarding-state.ts'; export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = page => renderToStaticMarkup(createElement(Navigation,{page,select:()=>{}})); export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -22,7 +22,7 @@ await build({
   },
   jsx: "automatic",
 });
-const { view, account, nav, onboarding, onboardingKey } = await import(
+const { view, decision, account, nav, onboarding, onboardingKey } = await import(
   pathToFileURL(join(root, "account.mjs")).href
 );
 test.after(() => rm(root, { recursive: true, force: true }));
@@ -153,4 +153,41 @@ test("primary account views have one purpose and redirect sign-in to Account", (
   );
   assert.match(signedIn, /Shared by you|Shared with you/);
   assert.doesNotMatch(signedIn, /Sign out|name="account-tab"/);
+});
+
+test("owner review exposes exact choices and escapes remote content", () => {
+  const review = {
+    kind: "review",
+    review_id: "review-1",
+    expires_at: "2099-01-01T00:00:00Z",
+    target: {
+      kind: "input",
+      item: {
+        id: "input-1",
+        action_type: "get_phone_number",
+        prompt: "<script>steal()</script>",
+        input_type: "buttons",
+        options: [{ label: "Only this invocation", value: "provider:allow-once" }],
+      },
+    },
+  };
+  const html = decision(review);
+  assert.match(html, /&lt;script/);
+  assert.doesNotMatch(html, /<script/);
+  assert.match(html, /Only this invocation/);
+  assert.match(html, /Cancel/);
+  assert.match(html, /Confirm answer/);
+  const unknown = decision({
+    ...review,
+    target: {
+      kind: "permission",
+      item: {
+        id: "request-1",
+        action_type: "get_phone_number",
+        decision_options: "future-menu",
+        expires_at: null,
+      },
+    },
+  });
+  assert.doesNotMatch(unknown, /value="accept"|value="allow_always"/);
 });

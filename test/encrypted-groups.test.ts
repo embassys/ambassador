@@ -50,3 +50,53 @@ test("encrypted groups provide isolated bounded pages and cascade deletion witho
     () => new EncryptedRecordStore(path, credential, { ...options, indexedGroups: false }),
   );
 });
+
+test("owner record secrets remain separate from agent keys and other scopes", async (t) => {
+  const { randomBytes } = await import("node:crypto");
+  const root = await mkdtemp(join(tmpdir(), "embassys-owner-records-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const key = randomBytes(32);
+  const original = Buffer.from(key);
+  const path = join(root, "records.sqlite");
+  const options = {
+    scope: "owner-record-test",
+    identifier: (value: { id: string }) => value.id,
+    parse: (bytes: Buffer) => JSON.parse(bytes.toString()) as { id: string },
+    error: () => new Error("invalid"),
+  };
+  let store = new EncryptedRecordStore(path, { storageSecret: key, salt: "owner-test" }, options);
+  store.put({ id: "private-owner-id" });
+  store.close();
+  assert.deepEqual(key, original);
+  store = new EncryptedRecordStore(path, { storageSecret: key, salt: "owner-test" }, options);
+  assert.equal(store.get("private-owner-id")?.id, "private-owner-id");
+  store.close();
+  assert.throws(
+    () =>
+      new EncryptedRecordStore(
+        path,
+        { storageSecret: randomBytes(32), salt: "owner-test" },
+        options,
+      ),
+  );
+  assert.throws(
+    () => new EncryptedRecordStore(path, { storageSecret: key, salt: "another-owner" }, options),
+  );
+  assert.throws(
+    () =>
+      new EncryptedRecordStore(
+        path,
+        { storageSecret: key, salt: "owner-test" },
+        { ...options, scope: "different-scope" },
+      ),
+  );
+  assert.throws(
+    () =>
+      new EncryptedRecordStore(
+        path,
+        { storageSecret: Buffer.alloc(0), salt: "owner-test" },
+        options,
+      ),
+  );
+  assert.doesNotMatch((await readFile(path)).toString(), /private-owner-id/);
+});

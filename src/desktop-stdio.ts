@@ -1,10 +1,11 @@
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { Server, type Tool } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 
 const DESKTOP_WAIT_GUIDANCE =
-  "For this standalone Claude connection, set wait_seconds: 45 on request_action, request_permission and check, or shorter if requested. This client limit overrides the general ten-minute guidance. For check, use the saved operation's request_id, not call_id; include its cursor when supplied. Inbox accepts only type, limit and cursor; omit wait_seconds. On a pending reply, explain that no update arrived and the user can ask to check the same request again. Never automatically retry, resubmit, or offer an unsupported resend/nudge. A host timeout does not mean the server crashed or the saved action failed.";
+  "Wait up to 600 seconds on request_action, request_permission and check by omitting wait_seconds; use a shorter wait only when explicitly requested. The host may disconnect sooner. If that happens, tell the user they can ask to check the same saved request later. A disconnected call cannot receive a later reply. For check, use the saved operation's request_id, not call_id; include its cursor when supplied. Inbox accepts only type, limit and cursor; omit wait_seconds. On a pending reply, explain that no update arrived and the user can ask to check the same request again. Never automatically retry, resubmit, or offer an unsupported resend/nudge. A host timeout does not mean the server crashed or the saved action failed.";
 
 /** Hosts can omit initialization instructions from tool-search context. */
 export function desktopRelayTool(tool: {
@@ -16,7 +17,7 @@ export function desktopRelayTool(tool: {
   const schema = structuredClone(tool.inputSchema);
   const help: Record<string, string> = {
     wait_seconds:
-      "For Claude Chat/Cowork waiting operations, explicitly use 45 seconds or a shorter requested wait. Omission waits 600 seconds and exceeds the host deadline. This field applies only to request_action, request_permission and check; omit it for inbox and other types.",
+      "Omit to wait up to 600 seconds. Use a shorter wait only when explicitly requested. If the host disconnects early, the user can ask to check the same request later. This field applies only to request_action, request_permission and check; omit it for inbox and other types.",
     request_id:
       "For check, use the saved outbound operation's request_id. For new submissions, supply a new UUID. A check uses request_id, never call_id.",
     call_id:
@@ -133,7 +134,10 @@ export async function openDesktopRelay(options: { port?: string } = {}): Promise
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === realpathSync(process.argv[1])
+) {
   void openDesktopRelay({
     ...(process.env.EMBASSYS_MCP_PORT ? { port: process.env.EMBASSYS_MCP_PORT } : {}),
   }).catch(() => {

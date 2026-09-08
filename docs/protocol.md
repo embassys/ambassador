@@ -20,7 +20,10 @@ progress and visible history. No credential copying or state migration is used. 
 [design](desktop-app-design.md) records the new boundaries and required central
 contracts. [ADR 0068](adr/0068-desktop-owner-account-views.md) now qualifies the
 deployed `/api/app` login/session and read-only account routes through a separate
-desktop owner worker. Owner commands never enter MCP or the gateway's private
+desktop owner worker. ADR 0075 adds fresh owner reviews and confirmed decisions, answers and revocation
+through those existing app routes. Encrypted no-replay markers retain uncertain
+submissions independently of owner login and gateway Clean.
+Owner commands never enter MCP or the gateway's private
 control route. CLI options remain unchanged; current development builds reuse
 the saved canonical executor directory when switching hosts. The published
 0.2.19 executable is not qualified to read newer development state.

@@ -54,13 +54,13 @@ and restart the local connector using Claude's normal controls.
 
 ## Waiting and stopping
 
-The gateway supports ten-minute waits, but this Claude Desktop build cancelled
-Cowork calls at three minutes and Chat calls at four minutes. Cowork also reported
-a separate 60-second connection-to-desktop timeout. This connection's tool help
-asks the model to supply `wait_seconds: 45` explicitly, allowing a normal pending
-response before these observed deadlines. The client forwards the
-model's exact arguments; it does not silently shorten calls. Progress passes
-through when the host requests it.
+The gateway defaults to ten-minute waits. The owner explicitly retained this
+behavior after tests found earlier host deadlines in standalone Chat and Cowork.
+Omit `wait_seconds`, or explicitly supply 600. Use a shorter wait only when the
+user asks for one. The relay forwards exact arguments and progress when requested.
+Its initialization and tool help explain before dispatch that an early host
+timeout leaves the same request available for a later user-driven check. A
+connection that has already closed cannot receive a late tool reply.
 Stopping the conversation cancels its observation; the saved operation remains
 available through a later check. Closing Claude also closes that client's local
 MCP session. Neither event cancels or replays an already submitted remote action.

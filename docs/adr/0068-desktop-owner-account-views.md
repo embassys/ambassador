@@ -1,6 +1,7 @@
 # 0068 Owner sign-in and account views with the deployed app API
 
-Status: accepted
+Status: accepted. ADR 0075 supersedes the read-only decision boundary below with
+the owner-approved development controls through the existing APIs.
 
 Date: 2026-09-07
 

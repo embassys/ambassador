@@ -26,7 +26,7 @@ MCP server's `timeout` to `660`. These are provider settings, not Ambassador
 CLI flags. Restart/reload the provider's MCP connection after changing them.
 For Claude Code, add `"timeout": 660000` to the existing Ambassador server's
 MCP configuration. Standalone Claude Desktop uses the separately measured
-[local client](claude-desktop-local-client.md) with explicit 45-second waits.
+[local client](claude-desktop-local-client.md) with the ten-minute default. Standalone hosts may disconnect sooner; check the same request later.
 Current Claude
 Code can move a long call into a provider background task while the original
 MCP request remains open; its eventual task notification is different from

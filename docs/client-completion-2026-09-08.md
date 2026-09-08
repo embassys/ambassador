@@ -243,3 +243,13 @@ distribution or release were performed. The baseline `37ed888`
 also passed all three desktop CI jobs in
 [run 34203928949](https://github.com/embassys/ambassador/actions/runs/34203928949).
 That CI run does not qualify subsequent changes in this record.
+
+
+## Subsequent owner decision on wait policy
+
+After reviewing these measurements, the owner explicitly chose to keep the
+ten-minute default even when Chat or Cowork ends observation earlier. ADR 0075
+supersedes the 45-second recommendation. Initialization and tool help retain
+continuation instructions before dispatch; no reply can be delivered over a
+connection after the host closes it. The test results above are historical
+measurements, not a claim that either host now holds ten minutes.

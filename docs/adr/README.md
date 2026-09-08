@@ -28,6 +28,8 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 
 | ADR | Decision |
 | --- | --- |
+| [0075](0075-owner-decisions-and-default-waits.md) | App approvals, answers and revocation through existing owner APIs; ten-minute waits with durable continuation |
+| [0074](0074-desktop-stdio-client.md) | Standalone Claude local stdio connection |
 | [0064](0064-desktop-application.md) | Desktop app, owner controls, conversation archive and isolated instances |
 | [0069](0069-shared-cli-and-desktop-installation.md) | Shared CLI/app installation, confirmed handoff, simpler navigation and revocation events |
 | [0070](0070-instance-scoped-native-observers.md) | Bind OpenClaw observers and route journals to its configured local instance, with optional fixed discovery guidance |

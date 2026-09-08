@@ -60,21 +60,31 @@ export class EncryptedRecordStore<T> {
 
   constructor(
     path: string,
-    credential: LoadedCentralCredential,
+    credential: LoadedCentralCredential | { readonly storageSecret: Buffer; readonly salt: string },
     options: EncryptedRecordStoreOptions<T>,
   ) {
     this.#options = options;
     this.#maximumBytes = options.maximumBytes ?? ENCRYPTED_STORE_QUOTA_BYTES;
     if (!Number.isSafeInteger(this.#maximumBytes) || this.#maximumBytes < 1) throw options.error();
-    const material = credential.privateKey.export({ format: "der", type: "pkcs8" });
+    const material =
+      "storageSecret" in credential
+        ? Buffer.from(credential.storageSecret)
+        : credential.privateKey.export({ format: "der", type: "pkcs8" });
     if (!Buffer.isBuffer(material)) throw options.error();
+    if ("storageSecret" in credential && material.length !== 32) {
+      material.fill(0);
+      throw options.error();
+    }
     try {
       const derive = (purpose: string) =>
         Buffer.from(
           hkdfSync(
             "sha256",
             material,
-            Buffer.from(credential.keyThumbprint, "ascii"),
+            Buffer.from(
+              "storageSecret" in credential ? credential.salt : credential.keyThumbprint,
+              "ascii",
+            ),
             Buffer.from(
               JSON.stringify({ kind: `${options.scope}-${purpose}`, version: 1 }),
               "utf8",
