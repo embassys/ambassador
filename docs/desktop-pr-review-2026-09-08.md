@@ -170,3 +170,11 @@ abort and await their server before removing state. The live session CLI fixture
 received the same cleanup guard. The deliberately failing local reproduction
 exited promptly, and the corrected CLI suite passed. This fixes test ownership
 and observation rather than extending the job deadline again.
+
+With the CLI cleanup corrected, the Windows suite finished and reported one
+deadline failure: the complete credential-expiry/restart test exceeded its
+30-second Windows allowance. Nearby enrollment/restart workflows took 16–22
+seconds on that runner. The expiry workflow now uses the same 60-second Windows
+allowance as the other complete integration scenario and reports its completed
+stages. It still must prove saved-result access after expiry and restart, and
+that central requests stop. The job budget and application timeouts do not change.
