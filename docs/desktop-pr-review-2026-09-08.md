@@ -137,3 +137,10 @@ The bundled Node, SQLite, ACP dependency, real MCP worker and local desktop
 client probe pass with an isolated PATH. The PR's Linux, macOS and Windows
 checks must pass before merge. CI artifacts remain unsigned development packages. Platform qualification,
 signed distribution and the central follow-ups in the work plan remain excluded.
+
+The first full Windows PR run reached the existing 25-minute job limit after
+357 passing tests, with no assertion failures. It was still progressing through
+the suite when CI cancelled it. Native ACL tests retain their serial execution;
+the Windows check job now has a 45-minute budget for the expanded suite. Other
+platform budgets, test selection, audits and required publication gates remain
+unchanged. The workflow regression checks both serial execution and the budget.

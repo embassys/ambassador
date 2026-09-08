@@ -39,8 +39,11 @@ test("main publishes the Ambassador 0.2.19 candidate through npm OIDC after appr
 
 test("the Windows test runner serializes files that exercise native ACLs", async () => {
   const runner = await readFile(join(process.cwd(), "scripts", "run-tests.mjs"), "utf8");
+  const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(runner, /process\.platform === "win32" \? \["--test-concurrency=1"\] : \[\]/u);
+  assert.ok(workflow.includes("timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 25 }}"));
+  assert.doesNotMatch(workflow, /continue-on-error:/u);
 });
 
 test("every supported-agent guide uses latest Ambassador without pinning a provider release", async () => {
