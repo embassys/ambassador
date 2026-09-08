@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
+test("desktop packaging clears removed compiled sources before compiling the gateway", async () => {
+  const build = await readFile("desktop/scripts/build.mjs", "utf8");
+  const clean = build.indexOf(
+    'await run(process.execPath, [join(repository, "scripts/clean.mjs"), "dist"])',
+  );
+  const compile = build.indexOf('await run(process.execPath, [packageManager, "run", "build"])');
+  assert.ok(clean >= 0 && clean < compile, "old dist files must not enter the engine inventory");
+});
+
 test("desktop downloads are retained only after archive, host and handoff checks pass", async () => {
   const workflow = await readFile(".github/workflows/desktop.yml", "utf8");
   const upload = workflow.indexOf("name: desktop-downloads-");
