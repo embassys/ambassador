@@ -28,6 +28,17 @@ issue-only. These items do not authorize another release.
   reply seen on idle return. Saved history contains one native answer, and the
   result remains unread and recoverable. Keep native return experimental and
   foreground waits the default until the desktop behavior passes a retest.
+  The September 8 retest reproduced both defects with one injected answer in
+  saved history. A separate registration attempt also showed the duplicate badge
+  before any Ambassador return. ADR 0070 fixes the bridge's hardcoded port and
+  adds optional fixed discovery/continuation guidance; provider rendering remains open.
+  With that guidance, a fresh conversation recognized the existing enrollment
+  and a five-second wait received its later answer without a detached polling
+  task. A completely unenrolled fixture also reached registration without a
+  tool hint, but the host refused verification codes in chat. The new guidance
+  directs the owner to the app's Registration view in that case. The pending
+  reply still disappeared from the view. See the
+  [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
 - [ ] Calendar invitations. Verify an invitation actually reaches another
   person using a configured calendar account and consenting test recipient.
   Availability, local event creation and denial handling passed. Local event
@@ -50,6 +61,9 @@ issue-only. These items do not authorize another release.
   The published CLI remains fixed to its original port and state location; no
   new CLI selectors or migration are planned. ADR 0069 adds a shared installation
   and confirmed CLI/app handoffs using matching builds, not multiple engine versions.
+  ADR 0070 now scopes OpenClaw return routes to its configured local endpoint.
+  Two-server regressions and a real OpenClaw conversation on port 9797 pass;
+  a separate gateway on 8787 remains untouched.
   ADR 0066 adds locked portable packages, source/host compatibility checks and
   runtime-version validation. A signed engine catalog, compatible state bounds
   and separately qualified artifacts are still required before enabling version
@@ -67,7 +81,7 @@ The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
 registration across hosts, confirmed authenticated process handoff and stopped
 state after handoff. Existing isolated instances remain separate. Current local
-checks pass 465 tests with seven expected skips, plus 14 desktop rendering,
+checks pass 472 tests with seven expected skips, plus 14 desktop rendering,
 parser and artifact tests. Final native and live evidence belongs in the desktop
 plan; these counts alone do not qualify a user-visible result.
 

@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { type OpenClawBridgeState, registerOpenClawBridge } from "../src/openclaw-native-bridge.js";
 
+const config = { mcp: { servers: { ambassador: { url: "http://127.0.0.1:9797/mcp" } } } };
+
 test("tool activation reuses the bridge started by a separate gateway registration", async () => {
   type Api = Parameters<typeof registerOpenClawBridge>[0];
   const state: OpenClawBridgeState = {};
@@ -11,7 +13,8 @@ test("tool activation reuses the bridge started by a separate gateway registrati
   let hook: Parameters<Api["on"]>[1] | undefined;
   let starts = 0;
   let bound = 0;
-  const create = async () => {
+  const create = async (_directory: string, endpoint: string) => {
+    assert.equal(endpoint, "http://127.0.0.1:9797/mcp");
     starts++;
     return {
       bind() {
@@ -24,6 +27,7 @@ test("tool activation reuses the bridge started by a separate gateway registrati
   };
   registerOpenClawBridge(
     {
+      config,
       on() {},
       registerService(value) {
         service = value;
@@ -37,6 +41,7 @@ test("tool activation reuses the bridge started by a separate gateway registrati
   await service.start({ stateDir: "/tmp/provider-owned-state" });
   registerOpenClawBridge(
     {
+      config,
       on(name, value) {
         if (name === "after_tool_call") hook = value;
       },
@@ -59,6 +64,69 @@ test("tool activation reuses the bridge started by a separate gateway registrati
   await service.stop();
 });
 
+test("invalid or changed OpenClaw configuration cannot bind a request to another running instance", async () => {
+  type Api = Parameters<typeof registerOpenClawBridge>[0];
+  const state: OpenClawBridgeState = {};
+  const services: Parameters<Api["registerService"]>[0][] = [];
+  const hooks: Parameters<Api["on"]>[1][] = [];
+  const endpoints: string[] = [];
+  let bindings = 0;
+  let closures = 0;
+  const register = (value: unknown) =>
+    registerOpenClawBridge(
+      {
+        config: value,
+        on(name, hook) {
+          if (name === "after_tool_call") hooks.push(hook);
+        },
+        registerService(service) {
+          services.push(service);
+        },
+        logger: { warn() {} },
+      },
+      async (_directory, endpoint) => {
+        endpoints.push(endpoint);
+        return {
+          bind() {
+            bindings++;
+          },
+          async observe() {},
+          async resume() {},
+          async close() {
+            closures++;
+          },
+        };
+      },
+      state,
+    );
+  register({});
+  await services[0]?.start({ stateDir: "/tmp/provider-owned-state" });
+  assert.equal(endpoints.length, 0);
+  register(config);
+  const event = {
+    toolName: "ambassador.message_box",
+    params: {
+      type: "request_action",
+      request_id: randomUUID(),
+      endpoint: "http://127.0.0.1:8787/mcp",
+    },
+  };
+  await hooks[1]?.(event, { sessionKey: "trusted" });
+  assert.deepEqual(endpoints, ["http://127.0.0.1:9797/mcp"]);
+  assert.equal(bindings, 1);
+  register({ mcp: { servers: { ambassador: { url: "http://127.0.0.1:9898/mcp" } } } });
+  await hooks[2]?.(event, { sessionKey: "other" });
+  assert.equal(bindings, 1);
+  assert.equal(endpoints.length, 1);
+  await services[0]?.stop();
+  assert.equal(closures, 1);
+  await services[2]?.start({ stateDir: "/tmp/provider-owned-state" });
+  await hooks[2]?.(event, { sessionKey: "other" });
+  assert.deepEqual(endpoints, ["http://127.0.0.1:9797/mcp", "http://127.0.0.1:9898/mcp"]);
+  assert.equal(bindings, 2);
+  await services[2]?.stop();
+});
+
 test("the packaged native bridge requests gateway startup activation", async () => {
   const manifest = JSON.parse(await readFile("extensions/openclaw/openclaw.plugin.json", "utf8"));
   assert.equal(manifest.activation?.onStartup, true);
@@ -73,6 +141,7 @@ test("OpenClaw retries bridge startup on a later request when Ambassador was off
   let closed = 0;
   registerOpenClawBridge(
     {
+      config,
       on: (name, callback) => {
         hooks.set(name, callback);
       },
@@ -118,6 +187,7 @@ test("OpenClaw hooks bind the provider session and preserve the foreground wait"
   const observed: unknown[] = [];
   registerOpenClawBridge(
     {
+      config,
       on: (name, callback) => {
         hooks.set(name, callback);
       },

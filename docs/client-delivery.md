@@ -56,16 +56,34 @@ a failed check or receipt once with a fresh connection after an Ambassador resta
 gateway after enabling the extension or changing its startup manifest.
 
 No model argument chooses the destination. A background check observes the same
-request ID through the fixed local Ambassador endpoint. It does not register an
+request ID through the enabled local `mcp.servers.ambassador` connection in
+OpenClaw's configuration. Only literal loopback Streamable HTTP URLs are accepted;
+missing or incompatible settings disable native return without falling back to
+port 8787. Restart OpenClaw after changing that connection. It does not register an
 identity or submit another action.
 
+The optional prompt hook adds fixed Embassys discovery and continuation guidance
+before the model chooses a tool. It does not read the prompt/history or add
+visible conversation messages. OpenClaw requires the extension's
+`hooks.allowConversationAccess` setting for this hook and must not have
+`hooks.allowPromptInjection` disabled. These settings are owner choices and are
+not changed by the desktop connection helper. Without the hook, MCP initialization
+and the existing tool descriptions still provide the workflow guidance.
+If the host forbids verification codes in chat, the guidance directs the owner
+to Registration in the Embassys app for the same installation.
+
 A provider-owned, owner-only route database lives beneath OpenClaw's state
-directory at `ambassador-conversation-return/routes.sqlite`. Its instance lock
+directory at `ambassador-conversation-return/<endpoint-sha256>/routes.sqlite`. Its instance lock
 prevents competing observers. The bridge calls the reviewed `chat.inject`
 API. Success means OpenClaw accepted and appended the result. It does not prove
 that the desktop rendered it. A terminal result remains unread in Ambassador
 until the agent sends its explicit receipt. A session reset can replace the history behind the same logical
 session key; the bridge does not claim to pin an old history instance.
+
+Endpoint namespaces keep independent instances' routes separate. The old unscoped
+route journal is left untouched and is not replayed; existing results remain
+available through foreground checks and the inbox. No provider configuration or
+credential is copied between instances. See [ADR 0070](adr/0070-instance-scoped-native-observers.md).
 
 Controlled tests on OpenClaw 2026.8.2 used the owner's approved current profile
 and Codex backend. Requests from two desktop conversations received exact
