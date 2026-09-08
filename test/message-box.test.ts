@@ -342,11 +342,11 @@ test("the tool publishes visible message fields even when a provider simplifies 
 });
 
 test("initial call long polls, timeout preserves intent, and a grant submits exactly once", async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, false, 5_000);
   const input = request();
   const started = performance.now();
-  const first = await f.box.call(input, new AbortController().signal);
-  assert.ok(performance.now() - started >= 25);
+  const first = await f.box.call({ ...input, wait_seconds: 1 }, new AbortController().signal);
+  assert.ok(performance.now() - started >= 900);
   assert.equal(first.reason, "wait_timeout");
   assert.equal(f.requests, 1);
   assert.equal(f.calls, 0);
@@ -365,10 +365,18 @@ test("initial call long polls, timeout preserves intent, and a grant submits exa
     f.box.call({ ...input, payload: { query: "changed" } }, new AbortController().signal),
     { code: "request_id_conflict" },
   );
-  const next = f.box.call(
-    { type: "check", request_id: input.request_id, cursor: grant.cursor },
-    new AbortController().signal,
-  );
+  let settled = false;
+  const next = f.box
+    .call(
+      { type: "check", request_id: input.request_id, cursor: grant.cursor },
+      new AbortController().signal,
+    )
+    .finally(() => {
+      settled = true;
+    });
+  // The result must wake an open check even when receipt is not immediate.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(settled, false);
   await f.capture(f.result());
   const result = await next;
   assert.equal((result.events as Array<{ type: string }>)[0]?.type, "action_result");

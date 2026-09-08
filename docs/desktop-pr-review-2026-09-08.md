@@ -152,3 +152,11 @@ archive verifier's 60-second extraction deadline; `tar.exe` was terminated with
 no reported extraction error. Windows archive extraction now has a bounded
 three-minute allowance. Checksum, inventory, extracted-runtime verification and
 cleanup remain required. This changes the development verifier only.
+
+A subsequent Windows run exposed a timing flaw in the long-poll regression: it
+used the same 35-millisecond fixture deadline for both an intentional timeout and
+receipt of a later result. A delayed-result assertion reproduced that failure
+locally. The timeout phase now requests one second, while the later result wait
+has a five-second fixture allowance and must remain open across a delayed reply.
+The test still checks exact-once dispatch, restart, result retention and receipt.
+Production wait durations are unchanged.
