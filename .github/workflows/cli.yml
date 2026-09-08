@@ -18,7 +18,8 @@ jobs:
   check:
     name: Check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # Native Windows ACL checks run serially; the desktop suite outgrew 25 minutes.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 25 }}
     strategy:
       fail-fast: false
       matrix:
