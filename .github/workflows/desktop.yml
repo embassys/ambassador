@@ -66,6 +66,19 @@ jobs:
             .build/desktop/distribution/*.manifest.json
             .build/desktop/distribution/*.cdx.json
             .build/desktop/distribution/*.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-downloads-${{ matrix.os }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          path: |
+            .build/desktop/distribution/*.dmg
+            .build/desktop/distribution/*.zip
+            .build/desktop/distribution/*.tar.gz
+            .build/desktop/distribution/*.manifest.json
+            .build/desktop/distribution/*.cdx.json
+            .build/desktop/distribution/*.sha256
 
-# Packages are unsigned development artifacts. This job neither publishes a
-# release nor qualifies native UI, notifications or installed provider behavior.
+# Verified downloads are retained for an explicitly authorized GitHub prerelease.
+# This read-only workflow does not publish or qualify native provider behavior.
