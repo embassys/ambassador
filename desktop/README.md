@@ -1,8 +1,10 @@
 # Embassys desktop development
 
 This private workspace implements the desktop app approved in
-[ADR 0064](../docs/adr/0064-desktop-application.md). Embassys replaces the CLI experience and creates fresh app-owned instances. CLI
-import and migration are outside scope; existing installations are left untouched.
+[ADR 0064](../docs/adr/0064-desktop-application.md). For a ready-made development
+download, see the [installation guide](../docs/desktop-install.md). The app and
+its matching bundled CLI share one installation under ADR 0069. Additional
+instances stay isolated; credential import and migration remain outside scope.
 
 ## Build and run
 
@@ -41,21 +43,22 @@ run `verify:package` to repeat the check against the packaged application binary
   error; it does not stop the process using it.
 - Explicit Stop and Clean controls. Clean confirms in a native dialog and
   retains the state lock during identity and work-count review. It preserves logs and provider configuration.
-- Reviewed Claude Code setup through its installed CLI, with the tool timeout saved
-  and existing connections preserved. Other providers have manual guidance.
+- Account-first login and registration, owner approval and answer controls,
+  permission review and revocation through existing central APIs.
+- Reviewed agent connection helpers on qualified platforms, with existing
+  connections preserved and manual guidance elsewhere.
 - Encrypted visible conversation archives and labelled
   provider history previews. Bodies are retained for 30 days within a 1 GiB cap.
 - Searchable, paged diagnostics with native export preview/save and folder reveal.
 - Native storage-location selection, bounded worker restart and opt-in startup
   settings. Startup remains unavailable in the unsigned Mac preview.
-- Workers release idle resources. The packaged unenrolled Mac background host
-  measured 165 MiB and 0.10% of one CPU core; enrolled workloads remain unqualified.
+- Workers release idle resources; the Mac packaged host has an automated
+  background resource gate.
 
-App sign-in, the owner inbox, permission decisions and push delivery depend on
-central contracts in issues 7–10. Their screens disclose that they are unavailable.
-Other automatic provider helpers, connection repair/disconnect, alternative engine
-versions, signed distribution and update/install integration remain in the
-[implementation plan](../docs/desktop-app-plan.md).
+Central recovery, complete history, one-code signup and native remote push
+remain API follow-ups. Alternative engine versions, signed distribution,
+automatic updates and further native platform/provider qualification remain in
+the [implementation plan](../docs/desktop-app-plan.md).
 
 ## Boundaries
 
@@ -65,5 +68,5 @@ to the host and the host to each worker. Each worker retains the existing
 loopback MCP, encrypted state, singleton lock and central delivery protections.
 
 Closing the window is intended to leave the tray and servers active. Quitting
-stops the owned workers. Native window/tray behavior and provider process cleanup
-still require installed-app qualification on macOS, Linux and Windows.
+stops the owned workers. Native Mac behavior has been qualified; Windows and
+Linux native window/tray and provider behavior still need qualification.

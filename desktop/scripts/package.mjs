@@ -42,13 +42,15 @@ const paths = await packager({
   ],
   ...signing.options,
 });
-if (signing.signed && process.platform === "darwin") {
+if (process.platform === "darwin") {
   for (const path of paths) {
     const bundle = join(path, "Embassys.app");
     const run = promisify(execFile);
     await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle]);
-    await run("/usr/sbin/spctl", ["--assess", "--type", "execute", bundle]);
-    await run("/usr/bin/xcrun", ["stapler", "validate", bundle]);
+    if (signing.signed) {
+      await run("/usr/sbin/spctl", ["--assess", "--type", "execute", bundle]);
+      await run("/usr/bin/xcrun", ["stapler", "validate", bundle]);
+    }
   }
 }
 if (signing.signed && process.platform === "win32") {
@@ -78,6 +80,7 @@ await writeFile(
       platform: process.platform,
       arch: process.arch,
       signed: signing.signed,
+      adHocSigned: signing.adHocSigned === true,
       manifest,
       paths,
       inventory: files,

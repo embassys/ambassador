@@ -3,7 +3,41 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { dependencyBom, inventory, signingOptions, verifyInventory } from "./artifact-tools.mjs";
+import {
+  dependencyBom,
+  inventory,
+  runArchiveTool,
+  signingOptions,
+  verifyInventory,
+} from "./artifact-tools.mjs";
+
+test("archive failures retain bounded tool diagnostics and enforce a deadline", async () => {
+  await assert.rejects(
+    runArchiveTool(process.execPath, [
+      "-e",
+      "process.stdout.write('x'.repeat(10000) + 'final image error', () => process.exit(1))",
+    ]),
+    (error) => error.message.endsWith("final image error") && error.message.length < 5000,
+  );
+  await assert.rejects(
+    runArchiveTool(process.execPath, [
+      "-e",
+      "process.stderr.write('disk image failure'); process.exit(7)",
+    ]),
+    /exited 7: disk image failure/u,
+  );
+  await assert.rejects(
+    runArchiveTool(process.execPath, [
+      "-e",
+      "process.stderr.write('x'.repeat(100000)); process.exit(1)",
+    ]),
+    (error) => error.message.includes("exited 1") && error.message.length < 5000,
+  );
+  await assert.rejects(
+    runArchiveTool(process.execPath, ["-e", "setInterval(()=>{},1000)"], 100),
+    /timed out/u,
+  );
+});
 
 test("package inventory verifies exact bytes and detects additions, changes and missing files", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "embassys-artifact-"));
@@ -55,10 +89,15 @@ test("inventory bounds entries and refuses links outside the package", {
 });
 
 test("requested signing never silently downgrades to unsigned output", () => {
-  assert.deepEqual(signingOptions("darwin", {}), {
-    signed: false,
-    options: { osxSign: false, osxNotarize: false },
-  });
+  const preview = signingOptions("darwin", {});
+  assert.equal(preview.signed, false);
+  assert.equal(preview.adHocSigned, true);
+  assert.equal(preview.options.osxSign.identity, "-");
+  assert.equal(preview.options.osxSign.identityValidation, false);
+  assert.equal(preview.options.osxSign.continueOnError, false);
+  assert.equal(preview.options.osxNotarize, false);
+  assert.equal(signingOptions("win32", {}).options.osxSign, false);
+  assert.equal(signingOptions("linux", {}).options.osxSign, false);
   assert.throws(() => signingOptions("darwin", { EMBASSYS_DESKTOP_SIGN: "1" }));
   assert.throws(() => signingOptions("win32", { EMBASSYS_DESKTOP_SIGN: "1" }));
   assert.throws(() => signingOptions("linux", { EMBASSYS_DESKTOP_SIGN: "1" }));

@@ -1,5 +1,11 @@
 # Current work
 
+PR 40 merged the desktop app. On September 8 the owner authorized a downloadable
+GitHub preview under [ADR 0076](adr/0076-desktop-github-preview.md).
+`desktop-v0.1.0-preview.1` is being prepared through the existing CI gates with
+unsigned Mac, Windows and Linux downloads. Signed production distribution and
+automatic updates remain separate. See the [installation guide](desktop-install.md).
+
 The 0.2.19 development release is complete. [PR 39](https://github.com/embassys/ambassador/pull/39)
 is merged; publication and artifact verification are recorded in the
 [release notes](https://github.com/embassys/ambassador/releases/tag/v0.2.19).
