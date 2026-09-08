@@ -12,12 +12,18 @@ test("Mac startup requires signature, Gatekeeper and stapled notarization verifi
       run: async (executable, args) => {
         calls.push(executable);
         assert.equal(args.at(-1), "/Applications/Embassys.app");
+        return "Authority=Developer ID Application: Embassys fixture\n";
       },
     }),
     true,
   );
-  assert.deepEqual(calls, ["/usr/bin/codesign", "/usr/sbin/spctl", "/usr/bin/xcrun"]);
-  for (let rejectedAt = 0; rejectedAt < 3; rejectedAt++) {
+  assert.deepEqual(calls, [
+    "/usr/bin/codesign",
+    "/usr/bin/codesign",
+    "/usr/sbin/spctl",
+    "/usr/bin/xcrun",
+  ]);
+  for (let rejectedAt = 0; rejectedAt < 4; rejectedAt++) {
     let count = 0;
     assert.equal(
       await verifyMacDistribution({
@@ -26,11 +32,31 @@ test("Mac startup requires signature, Gatekeeper and stapled notarization verifi
         bundle: "/Applications/Embassys.app",
         run: async () => {
           if (count++ === rejectedAt) throw new Error("Not verified");
+          return "Authority=Developer ID Application: Embassys fixture\n";
         },
       }),
       false,
     );
     assert.equal(count, rejectedAt + 1);
+  }
+});
+
+test("ad hoc previews cannot enable login startup or wait on notarization assessment", async () => {
+  for (const output of ["Signature=adhoc\n", "", "Authority=Apple Development: Fixture\n"]) {
+    const calls: string[] = [];
+    assert.equal(
+      await verifyMacDistribution({
+        platform: "darwin",
+        packaged: true,
+        bundle: "/Applications/Embassys.app",
+        run: async (executable, args) => {
+          calls.push(`${executable} ${args[0]}`);
+          return output;
+        },
+      }),
+      false,
+    );
+    assert.deepEqual(calls, ["/usr/bin/codesign --display"]);
   }
 });
 
