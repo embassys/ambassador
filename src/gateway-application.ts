@@ -20,6 +20,9 @@ import {
   DeliveryProfileStore,
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
+import { type ActivityKind, type ActivityPage, activityPage } from "./desktop/activity.js";
+import type { LocalNotification } from "./desktop/notifications.js";
+import { DesktopRegistration } from "./desktop/registration.js";
 import {
   type AcpPermissionApproval,
   AcpSessionController,
@@ -60,6 +63,7 @@ import { OwnerQuestionError, OwnerQuestions } from "./owner-questions.js";
 import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
 import { SessionMaintenance } from "./session-maintenance.js";
 import { describeVerboseError, traceFetch, type VerboseLogger } from "./verbose-log.js";
+import { type TranscriptPage, VisibleTranscripts } from "./visible-transcripts.js";
 import { WebhookDeliveryError, WebhookDeliveryTarget } from "./webhook-delivery.js";
 import {
   EncryptedFileWebhookSecretStore,
@@ -100,6 +104,10 @@ export interface GatewayApplicationOptions {
   readonly webhookSecretStore?: WebhookSecretStore;
   readonly localControlSecretStore?: LocalControlSecretStore;
   readonly deliveryTargetFactory?: (context: DeliveryTargetContext) => DeliveryTarget;
+  readonly beforeDirectDelivery?: (
+    context: { agent: string; workingDirectory: string },
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly acpSessionControllerFactory?: (
     capability: NonNullable<AgentCapability["direct"]>,
   ) => Pick<AcpSessionController, "delete" | "show">;
@@ -109,11 +117,35 @@ export interface GatewayApplicationOptions {
   readonly onRuntimeNotice?: (notice: GatewayError) => void;
   readonly onStopRequested?: () => void;
   readonly log?: VerboseLogger;
+  readonly visibleTranscriptPath?: string;
+  readonly desktopRegistrationPath?: string;
+  readonly toolRegistrationPath?: string;
+  readonly onDesktopNotification?: (event: LocalNotification) => void;
+}
+
+export interface GatewayOverview {
+  readonly enrollment: Record<string, string | boolean>;
+  readonly pendingCalls: number;
+  readonly receivedResults: number;
+  readonly sessionCount: number;
 }
 
 export interface RunningGatewayApplication {
   readonly endpoint: string;
   readonly failure: Promise<Error>;
+  localOverview(): GatewayOverview;
+  readonly desktop?: {
+    registration: DesktopRegistration;
+    permissions(): Promise<{
+      state: "ready" | "not_registered" | "expired" | "unavailable";
+      items: import("./central-rest.js").CentralPermission[];
+      fetchedAt?: string;
+      email?: string;
+    }>;
+    activity(kind: ActivityKind, after?: number): ActivityPage;
+  };
+  visibleHistory(sessionId: string, after?: number): TranscriptPage | undefined;
+  deleteVisibleHistory(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -221,6 +253,13 @@ function runtimeFailure(error: unknown, agentName: string): GatewayError {
     return new GatewayError(
       "direct_agent_startup_failed",
       `Ambassador paused incoming delivery because ${agentName} could not start. Confirm the agent is signed in, then restart Ambassador to resume delivery`,
+      0,
+    );
+  }
+  if (direct === "invalid_configuration") {
+    return new GatewayError(
+      "direct_agent_configuration_invalid",
+      `Incoming delivery is paused because ${agentName}'s connection could not be verified for this instance. Check its Ambassador connection in Agents and any project overrides, then restart this server. The message has not been sent to the agent`,
       0,
     );
   }
@@ -344,6 +383,7 @@ export async function openGatewayApplication(
       ? controller.signal
       : AbortSignal.any([controller.signal, options.signal]);
   let identity!: GatewayIdentity;
+  let desktopRegistration: DesktopRegistration | undefined;
   let local!: LocalMcpServer;
   let rest: CentralRestClient | undefined;
   let relay: NotificationRelay | undefined;
@@ -351,6 +391,9 @@ export async function openGatewayApplication(
   let humanInputMailbox: HumanInputMailbox | undefined;
   let messageBox: MessageBox | undefined;
   let ownerQuestions: OwnerQuestions | undefined;
+  let transcripts: VisibleTranscripts | undefined;
+  let transcriptMaintenance: NodeJS.Timeout | undefined;
+  let transcriptWarning: string | undefined;
   let relayRun: Promise<void> | undefined;
   let pendingActionInbox: PendingActionInbox | undefined;
   let outboundActions: OutboundActions | undefined;
@@ -381,6 +424,17 @@ export async function openGatewayApplication(
     nowSeconds,
   });
   const guidedRegistration = new GuidedRegistration({
+    ...(options.desktopRegistrationPath || options.toolRegistrationPath
+      ? {
+          registerPrepared: (
+            profile: DeliveryProfile,
+            arguments_: { email: string; display_name?: string },
+          ) => {
+            if (!desktopRegistration) throw new Error("Registration state is unavailable.");
+            return desktopRegistration.registerFromTools(arguments_, profile);
+          },
+        }
+      : {}),
     profileStore,
     webhookSecretStore,
     workingDirectory: options.workingDirectory,
@@ -404,8 +458,20 @@ export async function openGatewayApplication(
 
   const createDeliveryTarget = async (context: DeliveryTargetContext): Promise<DeliveryTarget> => {
     const serializeDirectTarget = (target: DeliveryTarget): DeliveryTarget => {
-      if (context.profile.mode !== "direct") return target;
+      const profile = context.profile;
+      if (profile.mode !== "direct") return target;
       return {
+        prepare: async (signal) => {
+          try {
+            await options.beforeDirectDelivery?.(
+              { agent: context.capability.kind, workingDirectory: profile.working_directory },
+              signal,
+            );
+          } catch {
+            throw new DirectDeliveryError("invalid_configuration");
+          }
+          await target.prepare?.(signal);
+        },
         deliver: (message, signal) =>
           runSessionOperation(async () => await target.deliver(message, signal)),
         close: async () => await target.close(),
@@ -443,6 +509,7 @@ export async function openGatewayApplication(
       approvePermission: context.approvePermission,
       nowMs: () => Math.floor(nowSeconds() * 1_000),
       log,
+      ...(transcripts ? { transcript: transcripts } : {}),
     });
     return serializeDirectTarget(direct);
   };
@@ -452,6 +519,32 @@ export async function openGatewayApplication(
     if (activation !== undefined) return activation;
     activation = (async () => {
       const profile = await loadProfile();
+      if (options.visibleTranscriptPath && !transcripts) {
+        try {
+          transcripts = new VisibleTranscripts(
+            options.visibleTranscriptPath,
+            identity.localCredential(),
+            { now: () => nowSeconds() * 1000 },
+          );
+          while (transcripts.recoverInterrupted())
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          transcripts.maintain();
+          transcriptMaintenance = setInterval(() => {
+            try {
+              transcripts?.maintain();
+            } catch {
+              log("transcript.maintenance.failed", {});
+            }
+          }, 60_000);
+          transcriptMaintenance.unref();
+        } catch {
+          transcripts?.close();
+          transcripts = undefined;
+          transcriptWarning =
+            "The local conversation archive is unavailable. Workflow processing continues; check Diagnostics and storage.";
+          log("transcript.open.failed", {});
+        }
+      }
       if (profile.profile.mode === "direct" && acpSessionStore === undefined) {
         acpSessionStore = new AcpSessionStore(options.acpSessionPath);
         sessionMaintenance = new SessionMaintenance({
@@ -543,11 +636,37 @@ export async function openGatewayApplication(
         log("delivery.received", { message });
         const internal = mailbox.capture(message);
         const owned = await box.capture(message);
+        const kind =
+          message.payload.type === "action_call"
+            ? "incoming"
+            : message.payload.type === "action_response"
+              ? "result"
+              : message.payload.type === "permission_outcome" ||
+                  message.payload.type === "permission_revoked"
+                ? "permission"
+                : undefined;
+        if (kind && message.id) {
+          try {
+            options.onDesktopNotification?.({
+              id: message.id,
+              enrollmentId: String(identity.enrollment.agent_id),
+              kind,
+            });
+          } catch {
+            /* UI delivery never interrupts durable custody. */
+          }
+        }
         return internal ? owned && owners.deliveryMessage(message) !== undefined : !owned;
       };
       const permissionCoordinator = new CentralAgentPermissionCoordinator({
         transport: nextRest,
         log,
+        onQuestion: (id) =>
+          options.onDesktopNotification?.({
+            id,
+            enrollmentId: String(identity.enrollment.agent_id),
+            kind: "question",
+          }),
         waitForResponse: (id, signal) => mailbox.wait(id, signal),
       });
       const baseTarget = await createDeliveryTarget({
@@ -570,6 +689,9 @@ export async function openGatewayApplication(
             error: describeVerboseError(error),
           }),
         deliveryTarget: {
+          prepare: async (signal) => {
+            await baseTarget.prepare?.(signal);
+          },
           deliver: async (message, signal) => {
             if (
               message.payload.type === "owner_input" &&
@@ -690,18 +812,30 @@ export async function openGatewayApplication(
           client_info: clientInfo,
         });
         let result: Record<string, unknown>;
+        if (desktopRegistration?.needsExecutor) throw new LocalMcpToolError("registration_in_app");
         if (!identity.enrolled) {
+          if (
+            options.desktopRegistrationPath &&
+            REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name)
+          )
+            throw new LocalMcpToolError("registration_in_app");
           switch (name) {
             case "register_agent":
               result = await guidedRegistration.register(arguments_, clientInfo, signal);
               break;
             case "resend_verification":
-              result = await enrollment.resend(arguments_, signal);
+              result = desktopRegistration
+                ? await desktopRegistration.resendFromTools(arguments_)
+                : await enrollment.resend(arguments_, signal);
               break;
             case "verify_email":
-              await loadProfile();
-              result = await identity.enroll(() => enrollment.verify(arguments_, signal));
-              await enableEnrolledIdentity();
+              if (!desktopRegistration?.defersExecutor) await loadProfile();
+              if (desktopRegistration)
+                result = await desktopRegistration.verifyFromTools(arguments_);
+              else {
+                result = await identity.enroll(() => enrollment.verify(arguments_, signal));
+                await enableEnrolledIdentity();
+              }
               break;
             default:
               if (
@@ -742,6 +876,21 @@ export async function openGatewayApplication(
           case "message_box":
             if (messageBox === undefined) throw safeFailure();
             result = await messageBox.call(arguments_, signal);
+            if (
+              arguments_.type === "ask_owner" &&
+              result.status === "waiting_for_owner" &&
+              typeof arguments_.request_id === "string"
+            ) {
+              try {
+                options.onDesktopNotification?.({
+                  id: arguments_.request_id,
+                  enrollmentId: String(identity.enrollment.agent_id),
+                  kind: "question",
+                });
+              } catch {
+                /* UI delivery is independent. */
+              }
+            }
             break;
           case "get_my_permissions":
             if (Object.keys(arguments_).length !== 0) throw new McpContractError();
@@ -781,7 +930,18 @@ export async function openGatewayApplication(
   try {
     const localControlSecret = await localControlSecretStore.createOrLoad();
     identity = await GatewayIdentity.open(store, nowSeconds);
-    if (identity.enrolled) await loadProfile();
+    const registrationPath = options.desktopRegistrationPath ?? options.toolRegistrationPath;
+    if (registrationPath)
+      desktopRegistration = await DesktopRegistration.open({
+        path: registrationPath,
+        profileStore,
+        workingDirectory: options.workingDirectory,
+        identity,
+        client: enrollment,
+        activate: enableEnrolledIdentity,
+        signal: lifetimeSignal,
+      });
+    if (identity.enrolled && !desktopRegistration?.needsExecutor) await loadProfile();
     local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
       control: {
@@ -791,13 +951,15 @@ export async function openGatewayApplication(
       },
     });
     await local.listen();
-    if (identity.enrolled) await enableEnrolledIdentity();
+    if (identity.enrolled && !desktopRegistration?.needsExecutor) await enableEnrolledIdentity();
   } catch (error) {
     controller.abort();
     if (sessionCleanupTimer !== undefined) clearInterval(sessionCleanupTimer);
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
     await messageBox?.close();
+    if (transcriptMaintenance) clearInterval(transcriptMaintenance);
+    transcripts?.close();
     ownerQuestions?.close();
     pendingActionInbox?.close();
     actionResultInbox?.close();
@@ -813,6 +975,61 @@ export async function openGatewayApplication(
   return {
     endpoint: local.endpoint,
     failure,
+    ...(desktopRegistration
+      ? {
+          desktop: {
+            registration: desktopRegistration,
+            permissions: async () => {
+              if (!identity.enrolled) return { state: "not_registered" as const, items: [] };
+              if (identity.expired) return { state: "expired" as const, items: [] };
+              try {
+                return {
+                  state: "ready" as const,
+                  items: await requireRest().getMyPermissions(lifetimeSignal),
+                  fetchedAt: new Date().toISOString(),
+                  email: String(identity.enrollment.email),
+                };
+              } catch {
+                return { state: "unavailable" as const, items: [] };
+              }
+            },
+            activity: (kind: ActivityKind, after = 0): ActivityPage =>
+              pendingActionInbox && actionResultInbox && outboundActions && ownerQuestions
+                ? activityPage(
+                    {
+                      pending: pendingActionInbox,
+                      results: actionResultInbox,
+                      outbound: outboundActions,
+                      questions: ownerQuestions,
+                    },
+                    kind,
+                    after,
+                  )
+                : { state: "not_registered", items: [], hasMore: false, nextCursor: after },
+          },
+        }
+      : {}),
+    localOverview: () => ({
+      enrollment: identity.enrollment,
+      pendingCalls: pendingActionInbox?.count() ?? 0,
+      receivedResults: actionResultInbox?.count() ?? 0,
+      sessionCount: acpSessionStore?.list().length ?? 0,
+    }),
+    visibleHistory: (sessionId, after) =>
+      transcripts?.page(sessionId, after) ??
+      (transcriptWarning
+        ? {
+            source: "archive",
+            items: [],
+            nextCursor: after ?? 0,
+            hasMore: false,
+            warnings: [transcriptWarning],
+          }
+        : undefined),
+    deleteVisibleHistory: async (sessionId) => {
+      while (transcripts?.deleteSession(sessionId))
+        await new Promise<void>((resolve) => setImmediate(resolve));
+    },
     async close() {
       if (closed) return;
       closed = true;
@@ -822,6 +1039,8 @@ export async function openGatewayApplication(
       await relayRun?.catch(() => undefined);
       await local.close();
       await messageBox?.close();
+      if (transcriptMaintenance) clearInterval(transcriptMaintenance);
+      transcripts?.close();
       ownerQuestions?.close();
       pendingActionInbox?.close();
       actionResultInbox?.close();

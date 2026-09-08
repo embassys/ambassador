@@ -13,10 +13,28 @@ This document defines the current target without a compatibility or migration
 promise.
 
 The approved desktop work in [ADR 0064](adr/0064-desktop-application.md) adds
-private owner controls, isolated instances and deliberate import/migration. Its
+private owner controls and isolated instances in the Embassys app.
+[ADR 0069](adr/0069-shared-cli-and-desktop-installation.md) adds direct access to
+the CLI's fixed installation, confirmed process handoffs, shared registration
+progress and visible history. No credential copying or state migration is used. Its
 [design](desktop-app-design.md) records the new boundaries and required central
-contracts. Those contracts are not deployed API routes; the CLI protocol below
-remains the published baseline until the corresponding implementation is qualified.
+contracts. [ADR 0068](adr/0068-desktop-owner-account-views.md) now qualifies the
+deployed `/api/app` login/session and read-only account routes through a separate
+desktop owner worker. ADR 0075 adds fresh owner reviews and confirmed decisions, answers and revocation
+through those existing app routes. Encrypted no-replay markers retain uncertain
+submissions independently of owner login and gateway Clean.
+Owner commands never enter MCP or the gateway's private
+control route. CLI options remain unchanged; current development builds reuse
+the saved canonical executor directory when switching hosts. The published
+0.2.19 executable is not qualified to read newer development state.
+
+[ADR 0072](adr/0072-account-first-onboarding.md) makes desktop onboarding start
+with Log in or Register, followed by agent setup. Email-only desktop enrollment
+records an unfinished executor selection. Verification saves the credential but
+does not start polling or delivery until the owner selects a reviewed provider.
+That state survives app/CLI handoff; MCP-origin registration still resolves its
+fixed provider before enrollment. Owner login remains a separate credential realm
+and currently requires a second email code after first-time registration.
 
 ## Startup
 
@@ -495,6 +513,13 @@ The current protected routes are:
 | List permissions | `GET /api/get_my_permissions` | none |
 | Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
 | Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
+
+Permission-list records recognize `pending`, `granted`, `denied`, `revoked` and
+`expired`; unknown statuses fail validation. A `permission_revoked` notification
+must match the saved permission ID, catalog action and grantor. It rejects
+undispatched work and wakes its observer without creating another permission
+request. It does not cancel or replay an already submitted action. A stale later
+grant cannot reopen a revoked saved intent. See ADR 0069 and the workflow tests.
 
 The permission-request response always includes `permission_id`, `status`, and
 `message`. The current deployment may also include `already_granted` and

@@ -16,16 +16,23 @@ plan contains only work that is not complete.
 | --- | --- |
 | Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
 | Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
+| Review the new web app and owner API availability | [Web app and server review](desktop-web-app-review-2026-09-07.md) |
 | Review the approved desktop product and central API requirements | [Desktop app design](desktop-app-design.md) |
 | Plan desktop implementation and platform acceptance testing | [Desktop app plan](desktop-app-plan.md) |
+| Switch between CLI and app using the same installation | [Shared installation](adr/0069-shared-cli-and-desktop-installation.md) |
+| Build and verify desktop distribution files | [Desktop development packages](desktop-distribution.md) |
 | Understand the supplied examples of users getting stuck | [Stalled-session review](stalled-session-review.md) |
 | Configure foreground waits and optional native return | [Client delivery](client-delivery.md) |
 | Implement the approved durable workflow and client matrix | [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) |
 | Check workflow regression and live acceptance requirements | [Workflow test plan](workflow-test-plan.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
+| Review the desktop PR, Cowork discovery, OpenClaw display and real calendar invitation | [Desktop PR review](desktop-pr-review-2026-09-08.md) |
+| Review native owner approvals, answers, revocation and default waits | [Owner decision qualification](owner-decisions-qualification-2026-09-08.md) |
+| Review combined app onboarding, real-agent delivery and remaining client limits | [September 8 client completion](client-completion-2026-09-08.md) |
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |
 | Set up Claude Code | [Claude Code setup](getting-started-claude.md) |
+| Connect standalone Claude Chat or Cowork locally | [Desktop local client](claude-desktop-local-client.md) |
 | Set up Hermes | [Hermes setup](getting-started-hermes.md) |
 | Set up OpenClaw | [OpenClaw setup](getting-started-openclaw.md) |
 | Remove local test residue | [Local development reset](development-reset.md) |

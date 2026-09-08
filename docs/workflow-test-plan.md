@@ -117,3 +117,58 @@ capabilities, steps and outcomes. Native bridge and desktop claims remain
 unqualified until their exact user-facing path passes. Central failure modes
 that cannot safely be induced live remain deterministic regression cases plus
 explicit API limitations. Do not publish while release blockers remain.
+
+## Account-first onboarding (ADR 0072)
+
+- Signed-out users see Log in and Register without the dashboard. A temporary
+  sign-out uncertainty notice must not leave the UI stuck in the login form.
+- Registration without an executor sends the existing email-only contract.
+  Verify, close and reopen before choosing a provider. No central receiver or
+  provider dispatch may start until that choice is saved.
+- Invalid codes and uncertain verification preserve the existing retry rules.
+  Choosing or retrying a saved provider must not re-register or re-verify.
+- Owner login is a separate realm and challenge. Reuse the email, never its
+  registration code or agent token. After login show guided setup first.
+- Remember setup completion or deferral by account and instance. Account changes,
+  sign-out, missing credentials and a new installation must not inherit another
+  account's completion. A stored UI preference grants no permissions.
+- Use the native app for registration, login, connection review, completion,
+  restart and sign-out. Distinguish a saved provider configuration from a real
+  provider conversation.
+
+## Desktop executor binding (ADR 0071)
+
+- Check each reviewed provider against the selected instance's port before
+  recording dispatch. A missing, disabled, authenticated or different binding
+  must not expose the incoming message to that provider.
+- Refuse malformed configuration, linked files and unqualified project overrides.
+  Exercise the actual desktop TOML/YAML parsers as well as the shared validator.
+- Correlate the private host reply. Cover wrong IDs, overlap, timeout, cancellation,
+  missing handlers, disconnect and late replies. No renderer command can permit
+  an executor check.
+- Prove a refused check leaves durable delivery pending while independent central
+  receipt and processing continue. Repair and restart must deliver once. Preserve
+  the existing prohibition on replay after an uncertain actual dispatch.
+- Native qualification must distinguish the checked file from a provider's cached
+  connection. Qualify independent provider profiles before claiming simultaneous
+  instance support for a real provider.
+
+## Shared CLI and desktop installation (ADR 0069)
+
+The same-build handoff regressions cover fixed-path attachment without copying
+credentials, preserved isolated instances, linked-directory rejection, saved
+canonical executor directories, pending registration in either direction,
+unchanged encrypted identity, durable pending actions, stale process identifiers
+and authenticated stop. Supervisor tests prove handoff disables crash recovery.
+A packaged process test runs the public CLI, starts the fresh app against its
+installation, hands back to the CLI, and reopens the app without interrupting it.
+This test runs on all three desktop CI platforms with isolated user data.
+
+Revocation tests cover pending and ready actions, submitted and uncertain calls,
+wrong permission/action/grantor metadata, a stale later grant, restart and an
+explicit new user request. A waiting observer must wake without an automatic
+permission request. Permission-list tests accept all five reviewed statuses,
+including revoked and expired, and still reject unknown values. The exact
+revocation rejection is classified as a confirmed refusal, not uncertain delivery.
+Live qualification must also read the resulting permission list: successfully
+receiving a notification alone does not prove the app can display its status.

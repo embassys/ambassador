@@ -13,6 +13,9 @@ const USAGE_SQL =
 const STATES_SQL =
   "CREATE TABLE record_states (sequence INTEGER PRIMARY KEY REFERENCES records(sequence) ON DELETE CASCADE, state INTEGER NOT NULL CHECK (state BETWEEN 0 AND 255)) STRICT";
 const STATES_INDEX_SQL = "CREATE INDEX records_by_state ON record_states (state, sequence)";
+const GROUPS_SQL =
+  "CREATE TABLE record_groups (sequence INTEGER NOT NULL REFERENCES records(sequence) ON DELETE CASCADE, group_key TEXT NOT NULL CHECK (length(group_key) = 43), PRIMARY KEY (sequence, group_key)) STRICT";
+const GROUPS_INDEX_SQL = "CREATE INDEX records_by_group ON record_groups (group_key, sequence)";
 
 interface Row {
   sequence: bigint;
@@ -30,6 +33,7 @@ export interface EncryptedRecordStoreOptions<T> {
   readonly error: () => Error;
   readonly maximumBytes?: number;
   readonly indexedStates?: boolean;
+  readonly indexedGroups?: boolean;
 }
 
 export interface RecordPage<T> {
@@ -56,21 +60,31 @@ export class EncryptedRecordStore<T> {
 
   constructor(
     path: string,
-    credential: LoadedCentralCredential,
+    credential: LoadedCentralCredential | { readonly storageSecret: Buffer; readonly salt: string },
     options: EncryptedRecordStoreOptions<T>,
   ) {
     this.#options = options;
     this.#maximumBytes = options.maximumBytes ?? ENCRYPTED_STORE_QUOTA_BYTES;
     if (!Number.isSafeInteger(this.#maximumBytes) || this.#maximumBytes < 1) throw options.error();
-    const material = credential.privateKey.export({ format: "der", type: "pkcs8" });
+    const material =
+      "storageSecret" in credential
+        ? Buffer.from(credential.storageSecret)
+        : credential.privateKey.export({ format: "der", type: "pkcs8" });
     if (!Buffer.isBuffer(material)) throw options.error();
+    if ("storageSecret" in credential && material.length !== 32) {
+      material.fill(0);
+      throw options.error();
+    }
     try {
       const derive = (purpose: string) =>
         Buffer.from(
           hkdfSync(
             "sha256",
             material,
-            Buffer.from(credential.keyThumbprint, "ascii"),
+            Buffer.from(
+              "storageSecret" in credential ? credential.salt : credential.keyThumbprint,
+              "ascii",
+            ),
             Buffer.from(
               JSON.stringify({ kind: `${options.scope}-${purpose}`, version: 1 }),
               "utf8",
@@ -124,12 +138,20 @@ export class EncryptedRecordStore<T> {
           )
           .all();
         if (version === 0 && definitions.length !== 0) throw this.#options.error();
-        const expectedVersion = this.#options.indexedStates ? 3 : 2;
+        const expectedVersion = this.#options.indexedGroups
+          ? this.#options.indexedStates
+            ? 5
+            : 4
+          : this.#options.indexedStates
+            ? 3
+            : 2;
         if (version !== 0 && version !== expectedVersion) throw this.#options.error();
         if (version === 0) {
           this.#database.exec(`${RECORD_SQL}; ${USAGE_SQL}`);
           if (this.#options.indexedStates)
             this.#database.exec(`${STATES_SQL}; ${STATES_INDEX_SQL}`);
+          if (this.#options.indexedGroups)
+            this.#database.exec(`${GROUPS_SQL}; ${GROUPS_INDEX_SQL}`);
           this.#database
             .prepare("INSERT INTO usage VALUES (1, ?, 0, 0)")
             .run(this.#key("store-identity"));
@@ -144,6 +166,7 @@ export class EncryptedRecordStore<T> {
           RECORD_SQL,
           USAGE_SQL,
           ...(this.#options.indexedStates ? [STATES_SQL, STATES_INDEX_SQL] : []),
+          ...(this.#options.indexedGroups ? [GROUPS_SQL, GROUPS_INDEX_SQL] : []),
         ]
           .map(sql)
           .sort();
@@ -172,6 +195,27 @@ export class EncryptedRecordStore<T> {
       .get();
     if (row === undefined) throw this.#options.error();
     return { identity: row.identity, records: integer(row.records), bytes: integer(row.bytes) };
+  }
+
+  count(): number {
+    return this.#usage().records;
+  }
+
+  countInStates(states: readonly number[]): number {
+    if (
+      !this.#options.indexedStates ||
+      states.length < 1 ||
+      states.length > 256 ||
+      states.some((state) => !Number.isInteger(state) || state < 0 || state > 255)
+    )
+      throw this.#options.error();
+    const row = this.#database
+      .prepare<number[], { count: bigint }>(
+        `SELECT count(*) AS count FROM record_states WHERE state IN (${states.map(() => "?").join(",")})`,
+      )
+      .get(...states);
+    if (!row) throw this.#options.error();
+    return integer(row.count);
   }
 
   #decrypt(row: Row): T {
@@ -220,8 +264,16 @@ export class EncryptedRecordStore<T> {
       readonly replace?: boolean;
       readonly correlation?: string;
       readonly state?: number;
+      readonly groups?: readonly string[];
     } = {},
   ): boolean {
+    if (
+      options.groups &&
+      (!this.#options.indexedGroups ||
+        options.groups.length > 2 ||
+        options.groups.some((group) => group.length < 1 || group.length > 1024))
+    )
+      throw this.#options.error();
     if (
       options.state !== undefined &&
       (!this.#options.indexedStates ||
@@ -278,6 +330,19 @@ export class EncryptedRecordStore<T> {
               )
               .run(options.state ?? 0, key);
           }
+          if (this.#options.indexedGroups) {
+            this.#database
+              .prepare(
+                "DELETE FROM record_groups WHERE sequence = (SELECT sequence FROM records WHERE record_key = ?)",
+              )
+              .run(key);
+            for (const group of new Set(options.groups ?? []))
+              this.#database
+                .prepare(
+                  "INSERT INTO record_groups (sequence, group_key) SELECT sequence, ? FROM records WHERE record_key = ?",
+                )
+                .run(this.#key(`group:${group}`), key);
+          }
           return true;
         })
         .immediate();
@@ -286,7 +351,12 @@ export class EncryptedRecordStore<T> {
     }
   }
 
-  page(after = 0, limit = 50, maximumBytes = 512 * 1024): RecordPage<T> {
+  #page(
+    next: (sequence: number) => Row | undefined,
+    after: number,
+    limit: number,
+    maximumBytes: number,
+  ): RecordPage<T> {
     if (
       !Number.isSafeInteger(after) ||
       after < 0 ||
@@ -294,23 +364,57 @@ export class EncryptedRecordStore<T> {
       limit < 1 ||
       limit > 256 ||
       !Number.isSafeInteger(maximumBytes) ||
-      maximumBytes < 1
+      maximumBytes < 1 ||
+      maximumBytes > 4 * 1024 * 1024
     )
       throw this.#options.error();
     const items: { sequence: number; value: T }[] = [];
     let bytes = 0;
-    const next = this.#database.prepare<[number], Row>(
-      "SELECT * FROM records WHERE sequence > ? ORDER BY sequence LIMIT 1",
-    );
-    let row = next.get(after);
+    let row = next(after);
     while (row !== undefined && items.length < limit) {
       if (items.length > 0 && bytes + row.ciphertext.length > maximumBytes) break;
       const sequence = integer(row.sequence);
       items.push({ sequence, value: this.#decrypt(row) });
       bytes += row.ciphertext.length;
-      row = next.get(sequence);
+      row = next(sequence);
     }
     return { items, hasMore: row !== undefined };
+  }
+
+  page(after = 0, limit = 50, maximumBytes = 512 * 1024): RecordPage<T> {
+    const next = this.#database.prepare<[number], Row>(
+      "SELECT * FROM records WHERE sequence > ? ORDER BY sequence LIMIT 1",
+    );
+    return this.#page((sequence) => next.get(sequence), after, limit, maximumBytes);
+  }
+
+  pageGroup(group: string, after = 0, limit = 50, maximumBytes = 512 * 1024): RecordPage<T> {
+    if (!this.#options.indexedGroups || group.length < 1 || group.length > 1024)
+      throw this.#options.error();
+    const key = this.#key(`group:${group}`);
+    const next = this.#database.prepare<[string, number], Row>(
+      "SELECT r.* FROM records r JOIN record_groups g ON r.sequence = g.sequence WHERE g.group_key = ? AND g.sequence > ? ORDER BY g.sequence LIMIT 1",
+    );
+    return this.#page((sequence) => next.get(key, sequence), after, limit, maximumBytes);
+  }
+
+  pageStates(
+    states: readonly number[],
+    after = 0,
+    limit = 50,
+    maximumBytes = 512 * 1024,
+  ): RecordPage<T> {
+    if (
+      !this.#options.indexedStates ||
+      states.length < 1 ||
+      states.length > 256 ||
+      states.some((state) => !Number.isInteger(state) || state < 0 || state > 255)
+    )
+      throw this.#options.error();
+    const next = this.#database.prepare<number[], Row>(
+      `SELECT r.* FROM records r JOIN record_states s ON r.sequence = s.sequence WHERE s.state IN (${states.map(() => "?").join(",")}) AND s.sequence > ? ORDER BY s.sequence LIMIT 1`,
+    );
+    return this.#page((sequence) => next.get(...states, sequence), after, limit, maximumBytes);
   }
 
   remove(identifiers: readonly string[]): number {

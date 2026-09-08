@@ -1,4 +1,13 @@
-# Embassys Ambassador
+# Embassys
+
+The Embassys desktop app is in development for macOS, Windows and Linux. It
+replaces the CLI experience with a menu/tray app and creates fresh app-owned
+instances. CLI import and migration are outside scope. See the
+[desktop build guide](desktop/README.md), [design](docs/desktop-app-design.md)
+and [implementation plan](docs/desktop-app-plan.md).
+
+The instructions below describe the released `@embassys/ambassador` gateway.
+The desktop branch is an unsigned preview, not a published desktop release.
 
 Embassys Ambassador is a local bridge between an agent and the Embassys REST
 service. Agents call it through MCP. Incoming messages go directly to a local

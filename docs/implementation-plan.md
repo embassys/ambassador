@@ -21,52 +21,134 @@ issue-only. These items do not authorize another release.
   [3](https://github.com/embassys/agent2agent/issues/3) and
   [4](https://github.com/embassys/agent2agent/issues/4). Local durability cannot
   recover a message that central consumed before a lost HTTP response.
-- [ ] Codex discovery. Confirm a fresh desktop chat recognizes Embassys without
-  asking for its website or needing a tool hint. Registration, the phone-number
-  exchange and explicit receipt passed; the opening UI still needs observation.
+- [x] Codex discovery. A fresh desktop task on September 8 answered "Am I
+  registered with Embassys?" through `get_my_permissions` without a website
+  question or tool hint. This test used the deployed central service and the
+  account registered in the native app. Task transcript evidence is available;
+  Codex computer-control screenshots remain unavailable. Earlier registration,
+  action/result and receipt evidence still applies.
 - [ ] OpenClaw native display. Resolve the duplicate badge and hidden waiting
   reply seen on idle return. Saved history contains one native answer, and the
   result remains unread and recoverable. Keep native return experimental and
   foreground waits the default until the desktop behavior passes a retest.
-- [ ] Calendar invitations. Verify an invitation actually reaches another
-  person using a configured calendar account and consenting test recipient.
-  Availability, local event creation and denial handling passed. Local event
-  creation alone does not prove invitation delivery.
+  The September 8 retest reproduced both defects with one injected answer in
+  saved history. A separate registration attempt also showed the duplicate badge
+  before any Ambassador return. ADR 0070 fixes the bridge's hardcoded port and
+  adds optional fixed discovery/continuation guidance; provider rendering remains open.
+  With that guidance, a fresh conversation recognized the existing enrollment
+  and a five-second wait received its later answer without a detached polling
+  task. A completely unenrolled fixture also reached registration without a
+  tool hint, but the host refused verification codes in chat. The new guidance
+  directs the owner to Account > Set up this device in that case. The final review
+  found the waiting reply inside the collapsed "Worked for…" section. Expanding
+  it and resizing a blank Mac window are verified display workarounds. The
+  renderer also has a reproducible accumulating duplicate counter; its correction
+  remains upstream work. See the [desktop PR review](desktop-pr-review-2026-09-08.md)
+  and the
+  [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
+- [x] Calendar invitation delivery. On September 8 the owner authorized the
+  connected Google Calendar for one disposable invitation. Native Claude Chat
+  sent it to the test inbox; the delivered calendar attachment matched the
+  attendee, title and September 9, 10:00–10:15 Europe/London time. Claude then
+  deleted it, and the same inbox received cancellation for the same event UID.
+  This qualifies the calendar connector's invitation path, separately from the
+  earlier Embassys scheduling coordination tests. See the
+  [desktop PR review](desktop-pr-review-2026-09-08.md).
 - [ ] API result contracts and progress. Define and validate action-specific
   results, and tell callers when the other agent needs owner input. Track remote
   progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result
   schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6). Update
   Ambassador's validation, fixtures and qualification when those contracts exist.
-- [ ] Broader client qualification. Qualify Hermes native return, standalone
-  Claude Chat/Cowork, and each supported real-agent mode on Windows. Hermes
+- [ ] Broader client qualification. Qualify Hermes native return and each
+  supported real-agent mode on Windows. Hermes
   native return first needs trusted origin routing and busy-session semantics.
   Windows CI passing does not qualify every provider; Claude Code desktop and
   Remote Control evidence does not qualify standalone Claude Chat or Cowork.
-- [ ] Production logging policy. Decide retention before a production rollout.
-  Detailed request/response body logs with credential redaction are approved for
-  development; that approval does not settle the production policy.
-- [ ] Multiple local instances and versions. Add a way to choose a local port,
-  state location and process name so different Ambassador versions can run at
-  the same time. Record the CLI and isolation design in an ADR before writing
-  tests and implementation. Each instance needs separate enrollment,
-  credentials, locks, workflow state, sessions and logs. Route MCP setup,
-  native bridges, session commands and confirmed stop/clean to the selected
-  instance, with Host/Origin checks matching its loopback port. Cover port and
-  state collisions, restart, and stopping or cleaning one instance while another
-  continues. The current public CLI remains fixed to port 8787 and its default
-  state directory; internal test overrides are not a supported user option.
+  The September 8 source review confirmed Hermes injection can interrupt active
+  work, while its API wake path has no per-session lock. ADR 0074 now implements
+  the separate local client for standalone Claude Chat and Cowork. Both native
+  surfaces pass natural phone-number requests, actual OpenClaw results and explicit
+  receipts. Fresh Cowork discovery of Embassys remains intermittent. Standalone
+  hosts may end observation before ten minutes. The owner explicitly retained the
+  600-second default under ADR 0075; pre-dispatch guidance explains later checks
+  of the same request. The gateway never shortens or resubmits it.
+  Manual development setup is documented; connector packaging and automated
+  installation remain excluded distribution work. See the current
+  [client completion record](client-completion-2026-09-08.md).
+- [ ] Multiple engine versions and provider isolation. Embassys now supports
+  named instances with separate ports, locations, credentials, locks, workflow
+  state and logs under ADR 0064. ADR 0071 now checks the desktop executor's
+  configured MCP binding before dispatch. Failed checks pause delivery with the
+  message still pending; fixing the connection and restarting can resume it.
+  Unsupported project overrides are refused. This does not pin cached provider
+  connections or provision independent profiles. Finish trusted engine-version
+  selection and qualify simultaneous provider profiles. Qualify MCP setup and native return against
+  the selected instance, including concurrent providers and independent stop/clean.
+  The published CLI remains fixed to its original port and state location; no
+  new CLI selectors or migration are planned. ADR 0069 adds a shared installation
+  and confirmed CLI/app handoffs using matching builds, not multiple engine versions.
+  ADR 0070 now scopes OpenClaw return routes to its configured local endpoint.
+  Two-server regressions and a real OpenClaw conversation on port 9797 pass;
+  a separate gateway on 8787 remains untouched.
+  September 8 deployed-central tests now pass both directions with real Claude
+  ACP on 8787 and real OpenClaw ACP on 9797. Independent stop/clean of OpenClaw
+  preserved the running Claude identity. This qualifies these two existing
+  provider configurations, not two independent profiles of the same provider.
+  ADR 0066 adds locked portable packages, source/host compatibility checks and
+  runtime-version validation. A signed engine catalog, compatible state bounds
+  and separately qualified artifacts are still required before enabling version
+  installation or selection.
 
-- [ ] Implement the approved desktop app under ADR 0064. The
-  [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
-  agent setup, conversations, approvals, notifications, isolated instances and
-  central API requirements. The [plan](desktop-app-plan.md) defines delivery
-  phases, dependencies and regression/live release gates. The user approved
-  the recommendations and implementation on 2026-09-07. Start with the packaged
-  shell, background lifecycle and isolated instances; owner API features depend
-  on central changes tracked as issues.
+- [ ] Complete desktop production prerequisites. The local app, owner sign-in,
+  read-only account views, setup helpers, logs, shared CLI installation and native
+  Mac controls are implemented. Owner-authenticated approval, answer and revocation
+  endpoints already exist and the web app uses them. ADR 0075 now implements
+  desktop review, approval, exact button/text answers and
+  revocation with durable no-replay markers. Full server-side mutation recovery
+  and complete request context remain separate follow-ups. Complete history, agent
+  identity recovery and native
+  remote push still need central contracts. Signed distribution,
+  trusted engine selection and native Windows/Linux/provider qualification need
+  the release infrastructure and environments described in the
+  [desktop plan](desktop-app-plan.md). API gaps remain in issues 7–10.
+
+The owner excluded central API changes and distribution from the current work
+on September 8. Native Windows/Linux qualification remains deferred. The combined
+native signup, real Claude request, real OpenClaw owner-input continuation and
+visible result/receipt now pass. ADR 0073 fixes valid existing connections being
+rejected during setup. An open local Conversations view now refreshes its session
+list without changing the selected transcript or page. Bounded reads never
+overlap and late replies from a closed view are discarded.
+
+The current candidate also implements ADR 0069: the web app's four-section
+navigation and teal/ink visual language, a shared CLI installation, saved
+registration across hosts, confirmed authenticated process handoff and stopped
+state after handoff. Existing isolated instances remain separate. Current local
+checks pass 503 tests with seven expected skips, plus 19 desktop rendering,
+parser and artifact tests. Final native and live evidence belongs in the desktop
+plan; these counts alone do not qualify a user-visible result.
+
+ADR 0072 adds account-first onboarding. Signed-out users see Log in and Register;
+email verification precedes executor choice. After login, one guided connection
+screen leads into the main app. Setup can be explicitly deferred for account-only
+access. Registration and owner login still require separate codes under the
+current API; that gap is recorded in issue 7. Unfinished executor setup survives
+restart without polling or dispatch. Completion is an account/instance-scoped UI
+preference, never an authorization or proof of provider availability.
+The native Mac app passed fresh registration and owner login against deployed
+central, guarded Claude Code connection in an isolated profile, restart,
+returning login, sign-out and existing-email recovery into login. See the
+[onboarding qualification](qualification.md#embassys-account-first-onboarding-2026-09-08)
+for evidence and the remaining two-code limitation.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.
+
+ADR 0075 adds native owner approvals, exact button/text answers and revocation
+through the deployed web app API. Native Mac and correlated central outcomes pass;
+see [owner decision qualification](owner-decisions-qualification-2026-09-08.md).
+It also restores ten-minute standalone waits and fixes stdio startup through
+filesystem aliases. Server recovery and fuller request context remain open.
 
 ## Implementation and qualification evidence
 
@@ -133,8 +215,9 @@ provider MCP entries and the OpenClaw extension settings were restored.
 
 The user-operated Codex retest completed registration, one accepted phone action,
 exact result and receipt after fixing UUID normalization and pre-submission
-errors. Its opening website question still needs a fresh UI observation from the
-user. Discovery guidance now fits within the first 512 initialization characters.
+errors. Its opening website question prompted the subsequent fresh September 8
+desktop task, which recognized Embassys without a hint. Discovery guidance fits
+within the first 512 initialization characters.
 The successful request supplied the same neutral purpose in the action payload
 and permission reason. Exact catalog names and schemas remain authoritative.
 
@@ -142,8 +225,9 @@ Claude desktop Code completed a full 600-second wait, ended its turn on timeout,
 and displayed the late result from real OpenClaw after the ordinary follow-up
 "Any news?". The experimental Claude Code CLI channel also delivered a delayed
 result without follow-up, visible through Remote Control. Neither observation
-qualifies standalone Claude Chat or Cowork. Those clients and Hermes native
-return remain unsupported in this candidate; the matrix states their limits.
+qualifies standalone Claude Chat or Cowork. ADR 0074 and the separate September 8
+native tests now cover those clients' local transport and shorter waits; Hermes
+native return remains deferred. The current matrix states these limits.
 
 Meeting tests now cover enrollment with no grants, actual Mac Calendar busy
 intervals, a local booking, and later availability/attendee/denial corrections.
@@ -265,3 +349,70 @@ requires that exact agent's native qualification under ADR 0040.
 Optional central service work remains in
 [Central follow-ups](central-follow-ups.md). It does not authorize client-side
 fallbacks or compatibility code.
+
+## Earlier desktop implementation evidence
+
+The Embassys desktop app is approved under ADR 0064. The
+  [design](desktop-app-design.md) covers the menu/tray app, owner email sign-in,
+  agent setup, conversations, approvals, notifications, isolated instances and
+  central API requirements. The [plan](desktop-app-plan.md) defines delivery
+  phases, dependencies and regression/live release gates. The user approved
+  the recommendations and implementation on 2026-09-07. The first shell, bundled
+  worker, isolated instances and basic query views are implemented on
+  `codex/desktop-app`. Packaged host probes passed on macOS, Windows and Linux. Native Mac
+  instance/log-export/Clean-review checks passed. Searchable diagnostics, exclusive
+  Clean previews, encrypted visible-history capture, bounded background workers
+  and launch-at-login controls are implemented. The unsigned Mac build leaves
+  login startup unavailable. The app is named Embassys; CLI import and migration
+  are outside scope. Native archive display, custom storage selection and guarded
+  Claude Code setup passed with isolated test data. Native testing also caught
+  and fixed a hidden process after keyboard Quit and a reused port suggestion.
+  The new candidate adds platform-specific appearance, the supplied branding,
+  light/dark/system preferences and guarded OpenClaw setup. Both provider helpers
+  support checking, repair and disconnect of app-owned entries. The full check
+  passes 403 tests with seven expected skips. Two requests through the packaged
+  app, deployed central API and real Claude executor passed exact synthetic result
+  and receipt; the first completed turn was seen in the native app and survived
+  restart. Live tests found and fixed repeated tool-summary rows and an enrolled
+  identity still showing onboarding. Native inspection of the second turn passed after unlock,
+  including stopped-server history, light/dark appearance, enlarged layout and
+  keyboard Quit. A redundant Dock-icon allocation was fixed; the
+  verified background instance now measures 167.5 MiB and 0.10% of one core.
+  Code `8a6c105` passed package builds and actual host probes on macOS, Windows
+  and Linux in [run 34139768294](https://github.com/embassys/ambassador/actions/runs/34139768294),
+  including the macOS background resource gate. A live diagnostic export also
+  passed body-inclusion and credential-redaction checks.
+  Controls now use the OS accent with contrast checks, compact macOS buttons
+  and a segmented theme selector, plus Windows/Linux control sizing. The UI
+  remains web-rendered in the approved Electron host; no new toolkit was added.
+  ADR 0065 adds first-time registration in the app, read-only agent permissions,
+  paged local work and opt-in OS notifications for locally observed events.
+  App-owned instances direct unenrolled MCP callers to Registration. Human
+  decisions remain in email; returning-owner login, recovery and remote push
+  still require central work.
+  Its packaged server passes live first-time registration, code rejection and
+  verification, restart, permission status changes and notification-event IPC.
+  Native registration form and OS banner checks await an unlocked Mac; event
+  delivery alone does not qualify visible notification display. Latest regression
+  checks pass 420 tests with seven expected platform skips.
+  Code `e800b84` also passes desktop tests, package builds and actual host probes
+  on macOS, Windows and Linux in
+  [run 34147214481](https://github.com/embassys/ambassador/actions/runs/34147214481).
+  Codex/Hermes helpers passed isolated native Mac setup and installed-provider
+  checks under ADR 0067. Its 1 GiB/seven-day logs and Clear logs control are
+  implemented. Code `31531b2` passes 435 regression tests, nine parser/artifact
+  tests and all three desktop CI jobs in
+  [run 34160941381](https://github.com/embassys/ambassador/actions/runs/34160941381). Native
+  Windows/Linux qualification, signed distribution and trusted engine selection
+  remain open. ADR 0068 now implements owner email sign-in, session renewal and
+  sign-out, plus bounded read-only account requests, permissions and central
+  messages through the APIs identified in the
+  [web app review](desktop-web-app-review-2026-09-07.md). The separate owner worker
+  keeps tokens in encrypted custody outside gateway instances. Controlled live
+  login, reads, restart, refresh and sign-out passed, as did native Mac account
+  form and view checks. Owner runtime code `f3b5cfd` passes all three desktop CI
+  jobs in [run 34164481469](https://github.com/embassys/ambassador/actions/runs/34164481469).
+  In-app decisions, full owner history, identity recovery,
+  and native remote push remain open. Explicit revocation-event handling is
+  implemented in the current ADR 0069 candidate. See the
+  desktop plan for evidence and the remaining matrix; API gaps stay in issues 7–10.

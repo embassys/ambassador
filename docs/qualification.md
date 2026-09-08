@@ -1,9 +1,171 @@
 # Delivery qualification
 
+The [September 8 client completion](client-completion-2026-09-08.md) records the
+combined native Embassys onboarding and deployed-central two-real-agent flow,
+opposite-direction instance check, fresh Codex discovery and current client
+limits. Screenshots and exact operation evidence remain local in
+`.build/client-completion/`.
+
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
 ## Current candidate checks
+
+The unpublished desktop branch was checked again on 2026-09-08 with the bundled
+Node 24.19.0. All 484 default-suite tests passed, with seven expected platform or
+opt-in skips. Lint, typechecking and 18 desktop rendering,
+parser and artifact tests also passed. This includes OpenClaw instance
+isolation and fixed guidance in ADR 0070, executor binding checks in ADR 0071,
+and account-first onboarding in ADR 0072.
+The native observations below
+qualify only the described client behavior, not the central fixture or a release.
+
+## Embassys account-first onboarding, 2026-09-08
+
+Used the rebuilt unsigned Mac app against deployed central with a disposable
+Mailosaur address. The welcome screen showed Log in and Register without the
+dashboard. Register started the local server, collected email and accepted the
+actual emailed verification code before asking for any provider. The following
+owner login reused that email and accepted a separate emailed code. Agent setup
+then offered a single guarded Connect Claude Code action with manual instructions
+collapsed. The actual Claude CLI wrote only an isolated test configuration. The
+main app appeared after Open Embassys; registration and setup did not expose the
+main navigation early.
+
+Quit/relaunch retained login and setup completion. Returning login resumed the
+main app. A transient sign-out status initially left the login form visible;
+the corrected build returned to the welcome buttons, and its regression test
+passes. A second fresh installation registered the same disposable email and
+received the deployed existing-account conflict. Log in instead opened a login
+form with the same email prefilled. It did not retry registration.
+
+Deployed catalog and permission reads passed through the configured local MCP
+server after setup. No model conversation or remote action was initiated in
+this run. Configuring Claude is not proof that a running Claude conversation
+reloaded MCP. The separate Claude model test below uses fixture central and
+does not remove that distinction. The deployed first-time flow still needs two
+email codes; issue 7 records the requested owner signup/session contract.
+
+Inspected native screenshots are in `.build/onboarding-screenshots/`:
+`01-welcome.png`, `02-registration-code.png`, `03-registration-complete.png`,
+`04-login-code.png`, `05-choose-agent.png`, `06-connection-saved.png`,
+`07-main-app.png`, `08-signed-out.png`, `09-existing-email.png` and
+`10-existing-email-login.png`. The illustrated `walkthrough.md` remains local.
+No verification code is visible in these screenshots. The test owner was signed
+out and its local profiles removed. The disposable central identity was not
+deleted. The user's original Claude configuration was untouched.
+
+Core regressions cover deferred executor selection across restart and app/CLI
+verification, no polling before selection, invalid or changed providers and
+activation retry without repeated enrollment. UI checks cover signed-out,
+loading and code-entry states and account/instance-scoped completion. The
+packaged host also passed startup, duplicate launch, CLI → app → CLI handoff
+and app restart. The preceding commit
+`52c5be6` passed all CI jobs in
+[run 34198950937](https://github.com/embassys/ambassador/actions/runs/34198950937);
+that run does not cover this subsequent onboarding change.
+
+## Claude Mac onboarding screenshots, 2026-09-08
+
+Used Claude Code in the installed Claude Mac app with Sonnet 5 High and the
+existing Ambassador connection. The requesting agent was real; central and the
+recipient were fixtures. No provider settings or credentials were changed.
+This does not qualify standalone Chat/Cowork, production email delivery or a
+two-real-agent exchange.
+
+In a fresh conversation, the ordinary prompt "Register me with Embassys using
+claude-onboarding@fixture.test" called Ambassador immediately. Claude asked for
+the six-digit code and completed verification after the fixture code was entered.
+It did not ask for a website or need a tool hint. The next prompt was "Can you
+get the phone number of alex@fixture.test from their agent?" Claude requested
+permission, reported the grant, checked for the result and displayed the exact
+synthetic number `+44 7700 900728` in the same conversation.
+
+The final sentence attributed approval to Alex's agent, although the preceding
+progress text correctly said the human decides. The fixture supplied permission
+and the delayed action result as separate events. That wording is not evidence
+that an agent made the owner's permission decision.
+
+Conversation: `local_6c6c6f84-e52b-4c59-9354-9da7fddd5201`, titled
+"Embassy registration setup". Inspected screenshot sequence:
+`.build/claude-onboarding/01-registration-prompt.png`,
+`02-verification-request.png`, `03-registration-complete.png` and
+`04-first-request-result.png`. A local illustrated walkthrough is in
+`.build/claude-onboarding/walkthrough.md`. Screenshots remain local and are not
+part of the published package or repository history.
+
+The same day's rebuilt unsigned Mac package passed native account/device setup
+navigation, light/dark/system appearance changes and server Stop/Start. The
+sidebar exposes Electron's native material; the content area remains opaque.
+Reduce Transparency has deterministic fallback coverage, not a native OS-setting
+test in this run. App screenshots `05-embassys-mac-light.png` through
+`08-embassys-account.png` are in the same directory. These app previews do not
+represent submission of the app's email form. Both disposable servers stopped
+and their state directories were removed. The original Personal app profile was
+reopened with its server still stopped. Claude's original MCP entry was unchanged.
+
+## OpenClaw instance and discovery retest, 2026-09-08
+
+Used the installed OpenClaw Mac app 2026.8.2, source `0965053`, with its real
+GPT-5.6 Sol backend. The normal user profile temporarily loaded the local return
+extension and connected to a disposable Ambassador at port 9797. A separate,
+unenrolled gateway remained on 8787. Central and the recipient were controlled
+fixtures; the synthetic number was `+44 7700 900728`. This is a real requesting
+agent and native app test, not a two-real-agent or deployed-central pass.
+
+The first ordinary registration prompt still searched the web. An explicit
+Ambassador tool hint then completed registration and verification. An ordinary
+phone request returned the exact fixture number in the foreground and recorded
+its receipt. A second request limited the wait to five seconds. The model
+created a detached polling automation, then native return delivered the number.
+The app showed a duplicate badge and hid the model's waiting reply, while saved
+history contained one injected answer and the waiting text. A registration reply
+had also shown a duplicate badge before any Ambassador return.
+
+After enabling the fixed guidance through OpenClaw's owner-controlled
+conversation-hook permission, a fresh conversation used Ambassador immediately
+and accurately reported the existing enrollment. Its five-second action wait
+used one saved request and created no automation. The later native answer
+appeared once in both history and the native view. The waiting text remained in
+history but was absent from the native view. On returning after screen lock, the
+native window initially painted a blank conversation despite its accessibility
+tree containing the answer. Resizing the window repainted the final conversation.
+These display limitations keep native return experimental.
+
+A final new conversation against a completely unenrolled fixture used the
+ordinary prompt "Register me with Embassys using openclaw-fresh@fixture.test".
+It called `register_agent` without a website question or tool hint. The model
+then refused to collect a verification code in chat under its host credential
+policy. Discovery and registration initiation passed; code verification did not
+complete in that run. The fixed guidance now directs such hosts to Account > Set up this device
+in the Embassys app for the same installation. Its regression test passes; that
+new fallback wording has not been observed in another live model turn. The
+existing app-owned verification path remains the preferred owner flow.
+
+The bridge used the configured port 9797 throughout; it did not enroll or send
+actions to the independent gateway at 8787. Deterministic tests additionally
+exercise the same request UUID against two real local MCP servers, separate
+route stores, restarts, endpoint changes and malformed or disabled configuration.
+
+Evidence is in `.build/remaining-openclaw-foreground.png`,
+`remaining-openclaw-native-return.png`, `remaining-openclaw-history-evidence.json`,
+`remaining-guidance-action-evidence.json` and
+`remaining-openclaw-guidance-final.png`. The fresh registration boundary is in
+`remaining-openclaw-fresh-registration.png`. The final return screenshot shows the ordinary
+prompt, correct enrollment status and returned number. These local files are
+qualification artifacts, not shipped product history.
+
+Restored the original OpenClaw plugin and MCP configuration and removed the
+temporary Codex connection. The test automation was no longer present. Test
+gateways and their disposable state were removed after the runs; the older
+unscoped native journal and the user's Personal app installation were preserved.
+
+Codex first-chat discovery still needs a user-operated observation. Computer
+control explicitly refused to operate Codex itself, so no alternate UI mechanism
+was used. Standalone Claude Chat/Cowork showed calendar and browser connectors
+but no Ambassador connection. Neither client is qualified by the OpenClaw test.
+
+## Released 0.2.19 checks
 
 Commit `a59a20c` passed all required check, package and Docker jobs in
 [CI run 33987740754](https://github.com/embassys/ambassador/actions/runs/33987740754)

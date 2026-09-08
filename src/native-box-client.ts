@@ -1,10 +1,13 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { localNativeEndpoint } from "./openclaw-return-endpoint.js";
 
 /** A native observer can only read saved work or repeat an explicit receipt. */
 export class NativeBoxClient {
   readonly #lifetime = new AbortController();
   #connection: Promise<Client> | undefined;
-  constructor(readonly endpoint = "http://127.0.0.1:8787/mcp") {}
+  constructor(readonly endpoint = "http://127.0.0.1:8787/mcp") {
+    localNativeEndpoint(endpoint);
+  }
 
   #connect(): Promise<Client> {
     this.#lifetime.signal.throwIfAborted();

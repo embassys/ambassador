@@ -30,9 +30,26 @@ scope on your own.
   instances, owner controls, visible conversation retention and packaging, and
   requested implementation. Read docs/desktop-app-design.md and
   docs/desktop-app-plan.md for the amendments to the older GUI prohibition,
-  history retention and migration rules. API code remains issue-only and new
+  history retention rules. The desktop app is Embassys and replaces the CLI
+  experience. The user removed CLI import and migration from scope on
+  2026-09-07; create fresh app instances and leave old installations untouched.
+  API code remains issue-only and new
   releases require approval. Existing CLI flags remain unchanged. Keep desktop
   build dependencies outside the CLI production graph and record exact choices.
+
+- ADR 0069 supersedes the CLI-interoperability exclusion above. The user later
+  requested CLI and app handoffs and the web app's simpler visual language.
+  Open the CLI's fixed installation directly, preserve existing isolated app
+  instances, and share registration progress and visible history. Confirm the
+  exact authenticated process before a handoff, and prevent desktop restart
+  after handing control to the CLI. Keep public CLI arguments unchanged.
+
+- ADR 0065 approves first-time desktop registration through the existing API,
+  read-only agent permission/status views and running-app notifications.
+  Use private app IPC with an explicitly chosen fixed direct executor; do not
+  impersonate an MCP client. App-owned instances send unenrolled MCP callers to
+  the app's Registration screen. Returning-owner login/recovery, app decisions,
+  revocation and remote push remain API work. Approval stays in email.
 
 - ADR 0061 is the user's approved delivery cutover. It supersedes the older
   serial polling, ephemeral control-message custody, separate business tools,

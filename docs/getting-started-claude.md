@@ -1,5 +1,9 @@
 # Get started with Claude Code
 
+For the unpublished desktop app's separate Chat/Cowork connection, see
+[Claude Desktop local client](claude-desktop-local-client.md). The steps below
+configure Claude Code and its incoming ACP executor.
+
 ## 1. Start Ambassador
 
 - Install Node.js `>=24.19.0` and Claude Code.

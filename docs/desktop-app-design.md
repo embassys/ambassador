@@ -1,15 +1,32 @@
-# Ambassador desktop app
+# Embassys desktop app
 
 Status: accepted for implementation under [ADR 0064](adr/0064-desktop-application.md).
 
 Date: 2026-09-07. Companion: [implementation and test plan](desktop-app-plan.md).
 
+## First-run flow, updated 2026-09-08
+
+[ADR 0072](adr/0072-account-first-onboarding.md) replaces the initial dashboard
+with a welcome screen containing Log in and Register. Register asks for email
+and verification code before choosing an agent. Login then leads to guided
+agent setup with one selected provider and a primary connection button. Keep
+manual commands collapsed. Show the main navigation only after setup finishes
+or the owner explicitly chooses to do it later. Remember that choice per account
+and installation; sign-out and expired login return to onboarding. Server
+controls remain reachable without exposing the dashboard.
+
+The current server requires a separate owner login code after new registration.
+The UI explains the step and reuses the email. It does not exchange the agent
+credential for an owner session or repeat an uncertain verification. A returning
+owner with no local agent can continue to account views; restoring their agent
+still needs the server contract in issue 7.
+
 ## Recommendation
 
 Build a desktop app that lives in the macOS menu bar or Windows/Linux tray,
 with a proper window for requests, conversations, permissions and settings.
-Launching the app starts Ambassador in the background. Closing its window keeps
-it running; **Quit Ambassador** stops it. Users sign in, connect their agents,
+Launching Embassys starts its server in the background. Closing its window keeps
+it running; **Quit Embassys** stops it. Users sign in, connect their agents,
 answer questions and manage the server without opening a terminal.
 
 Reuse the existing TypeScript gateway and its durable workflow engine. Put the
@@ -27,8 +44,20 @@ it does not make every control an operating-system widget.
 The complete product needs central API changes. In particular, agent email
 registration is not returning-user login, an agent credential must not authorize
 the owner's decisions, and a push notification must not be the only copy of a
-request. Build an owner account API and recoverable event delivery before calling
-this a production-ready replacement for the CLI.
+request. The deployed owner account API supplies part of this boundary;
+recoverable decisions and event delivery are still needed before a production release.
+
+The user approved an interim development flow under
+[ADR 0065](adr/0065-desktop-development-registration.md). First-time registration
+now uses an app form and a fixed executor choice. The app can read agent-scoped
+permissions and local work, and show optional OS notifications for locally
+observed events. These features use the existing agent API.
+[ADR 0068](adr/0068-desktop-owner-account-views.md) adds returning-owner sign-in
+and read-only requests, permissions and central message snapshots through the
+deployed owner API. The owner session has separate encrypted custody in a bundled
+Node worker. Signing out leaves local servers running because the API has no
+executor binding to revoke. App decisions, complete owner history, local identity
+recovery, revocation controls and remote push still depend on the contracts below.
 
 ## Scope and proposed changes to the current target
 
@@ -38,12 +67,12 @@ the public CLI and release authorization remain separate.
 
 | Existing boundary | Proposed desktop boundary |
 | --- | --- |
-| GUI work is outside scope | Desktop is the primary experience; CLI remains an optional developer interface to the same core |
+| GUI work is outside scope | Embassys provides the desktop experience and shares its gateway core with the CLI |
 | Registration chooses delivery from MCP client identity | App sign-in and explicit owner selection choose a reviewed executor; agent tool calls cannot change it |
 | One default state directory and port | Isolated named instances, each with its own port, data, identity binding and engine version |
 | Human decisions happen through email | Owner-authenticated app decisions and email use one central decision transaction |
 | Provider history stays with the provider | Retain an encrypted archive of visible Ambassador-managed conversation content from the desktop cutover onward |
-| No state migration | A deliberate, tested CLI-to-app import and forward-only app schema upgrades |
+| No state migration | ADR 0069 opens the fixed CLI installation directly; additional instances remain isolated; incompatible state versions are refused |
 | No installation/publication tooling changes | Signed desktop installers, bounded agent setup helpers and an update workflow |
 
 Keep exact action schemas, explicit outbound intent, no replay of uncertain
@@ -56,7 +85,7 @@ pending operation only. It never becomes an instruction to invent another action
 ### Menu and main window
 
 The tray menu contains the active instance name, connection state, number of
-items needing attention, **Open Ambassador**, **Start/Stop server**, and **Quit**.
+items needing attention, **Open Embassys**, **Start/Stop server**, and **Quit**.
 Put Clean in Settings, away from everyday controls. With several instances,
 show each one's state in the menu and make the selected instance explicit.
 
@@ -100,6 +129,20 @@ Keep spacing consistent, use one accent color, support light/dark themes and
 high contrast, and avoid raw protocol banners in conversations. Requests need
 text labels as well as color. Preserve scroll position while new events arrive;
 offer a New messages control instead of moving the reader unexpectedly.
+
+The Electron content area uses web components; it is not an AppKit or WinUI
+widget tree. The current implementation gives macOS compact push buttons and a
+keyboard-operated segmented appearance selector, Windows larger controls with
+its field treatment, and Linux neutral desktop controls. Native window chrome,
+file dialogs and macOS menus remain OS-provided. Read the system accent through
+Electron's [system preferences API](https://www.electronjs.org/docs/latest/api/system-preferences),
+with an opaque fallback where unavailable. Keep button labels and accent links
+at least 4.5:1 against their normal backgrounds. Refresh on appearance changes
+and window focus. This does not promise to copy every Linux desktop theme.
+
+A UI drawn through platform widget frameworks would require a separate toolkit
+prototype and explicit dependency approval. No new toolkit is selected for this
+refinement; the approved Electron host and bundled server remain in place.
 
 Support keyboard-only operation, screen readers, text zoom, reduced motion,
 local date/time formatting and explicit timezones for calendar requests. Test
@@ -154,13 +197,17 @@ Expired code, resend cooldown, wrong code, email delivery failure, offline
 verification, lost verification response, expired session and revoked device
 are separate states. Never suggest Clean as the routine recovery for sign-in.
 
-For existing CLI users, offer an explicit **Use this local Ambassador identity**
-flow after stopping the existing instance. Validate identity and keys, transfer
-custody atomically, and retain a rollback record until validation succeeds.
-Never copy a live database or let CLI and app poll under the same credentials.
-Historical provider sessions remain provider-owned; import only verified local
-bindings and supported history. Recovering an already registered email without
-local credentials requires central's recovery contract.
+[ADR 0069](adr/0069-shared-cli-and-desktop-installation.md) supersedes the earlier
+exclusion of CLI interoperability. Fresh setup opens the CLI's default installation
+directly. Existing isolated desktop instances remain available; Account → Device
+settings → Use the CLI adds the shared installation without moving their data.
+Only one host runs an installation at a time, with confirmation before stopping
+its authenticated current process. Registration progress, identity, pending work,
+results and the saved executor directory remain in the same files. Use matching
+development builds; the app can copy a command for its bundled CLI. No credential
+transfer or schema migration is involved. Recovering an already registered email without local credentials
+requires central's owner recovery contract; never use Clean to create a replacement
+identity or copy a live database.
 
 ### Connection buttons
 
@@ -475,7 +522,7 @@ manifest and an owner-initiated installation flow.
 Version 0.2.19 has no desktop IPC protocol or supported instance selectors.
 Do not advertise it as app-managed merely because internal tests can override
 its port. Qualify management from the first compatible engine release onward;
-older binaries require an explicitly reviewed adapter or remain manual installs.
+older binaries are outside the app-managed version set.
 
 Provider configuration is part of isolation. A background executor for Test
 must not load the Production Ambassador endpoint from a global provider config.
@@ -524,8 +571,9 @@ silently change provider settings or install a new executor.
 Download updates in the background, but install after work drains or the owner
 accepts a clearly described interruption. Persist current custody before stopping.
 Keep the previous application artifact for rollback; do not run it against a newer
-database schema unless that combination is explicitly supported. Test migrations
-and restore procedures before enabling automatic updates. No unconditional
+database schema unless that combination is explicitly supported. Refuse
+incompatible state versions. Schema migration is outside this scope; qualify
+interruption and artifact rollback before enabling automatic updates. No unconditional
 application/schema downgrade button.
 
 ## Central API requirements
@@ -546,13 +594,13 @@ must be agreed with the API repository before the app calls them.
 
 | ID | Contract needed | Required behavior | Priority and existing issue |
 | --- | --- | --- | --- |
-| D1 | Owner email challenge, verification, session refresh and sign-out | New/returning owner, bounded single-use codes and retries, device-key binding, lost-response recovery, refresh rotation/revocation, agent IDs returned without replacement | Blocks complete sign-in; extend [issue 2](https://github.com/embassys/agent2agent/issues/2) |
-| D2 | Devices, agent ownership and execution binding | List/add/revoke devices; select/create an owned agent; one active executor per identity with server-enforced fencing; explicit recovery/transfer with existing grants preserved | Blocks safe recovery and same-account devices; related to issue 2 |
-| D3 | Owner inbox and decision/input commands | Paginated pending items and detail; owner authentication; exact choices, scopes and expiry; revision-checked idempotent decisions; shared transaction with email; provider invocation expiry | Blocks in-app permission decisions; new API issue needed |
+| D1 | Owner email challenge, verification, session refresh and sign-out | New/returning owner, bounded single-use codes and retries, device-key binding, lost-response recovery, refresh rotation/revocation, agent IDs returned without replacement | Blocks complete sign-in; [issue 7](https://github.com/embassys/agent2agent/issues/7), with recovery in issue 2 |
+| D2 | Devices, agent ownership and execution binding | List/add/revoke devices; select/create an owned agent; one active executor per identity with server-enforced fencing; explicit recovery/transfer with existing grants preserved | Blocks safe recovery and same-account devices; [issue 7](https://github.com/embassys/agent2agent/issues/7) |
+| D3 | Owner inbox and decision/input commands | Paginated pending items and detail; owner authentication; exact choices, scopes and expiry; revision-checked idempotent decisions; shared transaction with email; provider invocation expiry | Blocks in-app permission decisions; [issue 8](https://github.com/embassys/agent2agent/issues/8) |
 | D4 | Recoverable event feed and execution delivery | Transactional outbox, stable IDs, bounded pages, per-audience/device cursors, snapshot watermark and gap recovery; execution lease/capture acknowledgement distinct from observation | Production reliability gate; [issues 1](https://github.com/embassys/agent2agent/issues/1) and [3](https://github.com/embassys/agent2agent/issues/3) |
 | D5 | Submission idempotency and outcome lookup | Request ID plus body fingerprint, queryable accepted outcome, conflict on different body, all action/decision/input mutations covered | Production reliability gate; [issue 4](https://github.com/embassys/agent2agent/issues/4) |
-| D6 | Permission audit, revocation and current state | Paginated grants/history, grantor/grantee direction, actor/source, scope, expiry/use limits, current revision, authoritative revoke; no claim to undo completed work | Blocks complete Permissions screen; new API issue needed |
-| D7 | Device push registration and dispatch | Owner-authorized device endpoints, token rotation/removal, preferences, minimal payloads, expiry/coalescing, replay-safe routing, delivery metrics without false display claims | Blocks APNs/WNS delivery; new API issue needed |
+| D6 | Permission audit, revocation and current state | Paginated grants/history, grantor/grantee direction, actor/source, scope, expiry/use limits, current revision, authoritative revoke; no claim to undo completed work | Blocks complete Permissions screen; [issue 9](https://github.com/embassys/agent2agent/issues/9) |
+| D7 | Device push registration and dispatch | Owner-authorized device endpoints, token rotation/removal, preferences, minimal payloads, expiry/coalescing, replay-safe routing, delivery metrics without false display claims | Blocks APNs/WNS delivery; [issue 10](https://github.com/embassys/agent2agent/issues/10) |
 | D8 | Action results and progress | Catalog result schemas; correlated waiting-for-owner/running/result states with timestamps; owner questions do not expose private answers to the requester | [Issues 5](https://github.com/embassys/agent2agent/issues/5) and [6](https://github.com/embassys/agent2agent/issues/6) |
 
 Minimum owner request detail includes request ID and kind, owner/agent/peer IDs,
@@ -585,8 +633,9 @@ multi-instance controls. Keep the CLI available for developers without making it
 part of normal setup.
 
 The user approved the owner API boundary, visible-conversation archive and the
-30-day conversation and 90-day local audit cache defaults. Production diagnostic
-retention still needs a separate release decision. Real macOS/Windows remote push needs
+30-day conversation and 90-day local audit cache defaults. ADR 0067 records
+metadata-only production diagnostics with seven-day retention and a 1 GiB cap
+per app instance. Real macOS/Windows remote push needs
 developer accounts, signing identities and the selected Windows packaging route.
 These credentials belong in release infrastructure, never in this document.
 

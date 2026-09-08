@@ -17,6 +17,7 @@ import {
   DirectDeliveryTarget,
 } from "../src/direct-delivery.js";
 import type { VerboseLogger } from "../src/verbose-log.js";
+import type { VisibleTranscripts } from "../src/visible-transcripts.js";
 
 const MESSAGE: CentralMessage = {
   id: "message-1",
@@ -44,6 +45,7 @@ async function target(
   scenario: string,
   options: {
     platform?: NodeJS.Platform;
+    sessionDeadlineMs?: number;
     promptDeadlineMs?: number;
     outerDeadlineMs?: number;
     maximumOutputBytes?: number;
@@ -53,6 +55,7 @@ async function target(
     sourceEnvironment?: NodeJS.ProcessEnv;
     log?: VerboseLogger;
     permissionApproval?: AcpPermissionApproval;
+    transcript?: Pick<VisibleTranscripts, "begin" | "update" | "finish">;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "ambassador-acp-"));
@@ -88,17 +91,20 @@ async function target(
     workingDirectory: root,
     environment: options.sourceEnvironment ?? process.env,
     sessionStore,
-    approvePermission: async (request) => {
+    ...(options.transcript ? { transcript: options.transcript } : {}),
+    approvePermission: async (request, signal) => {
       permissionRequests.push(request);
-      return await (options.permissionApproval?.(request, new AbortController().signal) ??
+      return await (options.permissionApproval?.(request, signal) ??
         Promise.resolve("allow" as const));
     },
-    initializationDeadlineMs: 2_000,
-    sessionDeadlineMs: 2_000,
-    promptDeadlineMs: options.promptDeadlineMs ?? 2_000,
+    // Healthy fixture stages include real process and disk work. Tests of an
+    // expiring deadline choose that stage's budget explicitly below.
+    initializationDeadlineMs: 5_000,
+    sessionDeadlineMs: options.sessionDeadlineMs ?? 5_000,
+    promptDeadlineMs: options.promptDeadlineMs ?? 5_000,
     ...(options.outerDeadlineMs === undefined ? {} : { outerDeadlineMs: options.outerDeadlineMs }),
     cancellationGraceMs: 100,
-    cleanupDeadlineMs: 500,
+    cleanupDeadlineMs: 2_000,
     maximumOutputBytes: options.maximumOutputBytes ?? 16 * 1024,
     maximumStartupAttempts: options.maximumStartupAttempts ?? 2,
     ...(options.log === undefined ? {} : { log: options.log }),
@@ -135,6 +141,50 @@ test("builds a guarded prompt containing the complete canonical message", () => 
   assert.doesNotMatch(prompt, /submit_action_result/u);
   assert.equal(prompt.endsWith(`${JSON.stringify(MESSAGE, null, 2)}\n\`\`\``), true);
   assert.equal(prompt.match(/complete body marker/gu)?.length, 1);
+});
+
+test("direct delivery archives only the dispatched turn, excluding provider history replay", async (t) => {
+  const events: { type: string; value: unknown }[] = [];
+  const logs: unknown[] = [];
+  const value = await target(t, "visible-transcript", {
+    log: (_event, data) => {
+      logs.push(data);
+    },
+    transcript: {
+      begin: (sessionId, message) => {
+        events.push({ type: "begin", value: { sessionId, message } });
+        return true;
+      },
+      update: (_messageId, _sequence, update) => {
+        events.push({ type: "update", value: update });
+        return true;
+      },
+      finish: (_messageId, status) => {
+        events.push({ type: "finish", value: status });
+        return true;
+      },
+    },
+  });
+  value.sessionStore.create({
+    session_id: "mock-session",
+    agent_kind: "mock",
+    working_directory: value.root,
+    ...(MESSAGE.id ? { central_message_id: MESSAGE.id } : {}),
+    status: "active",
+    created_at_ms: 1,
+    last_used_at_ms: 1,
+  });
+  await value.delivery.deliver(MESSAGE, new AbortController().signal);
+  assert.equal(events[0]?.type, "begin");
+  assert.equal(events.at(-1)?.type, "finish");
+  assert.equal(events.at(-1)?.value, "complete");
+  assert.equal(events.filter((event) => event.type === "begin").length, 1);
+  assert.match(JSON.stringify(events), /visible-answer-marker/u);
+  assert.doesNotMatch(
+    JSON.stringify(events.filter((event) => event.type === "update")),
+    /stored request|stored answer|private-reasoning-marker/u,
+  );
+  assert.doesNotMatch(JSON.stringify(logs), /private-reasoning-marker/u);
 });
 
 test("resumes an active retry and exposes provider history through session commands", async (t) => {
@@ -294,18 +344,36 @@ test("passes provider options to the human and returns the exact selected ID", a
 });
 
 test("bounds an unanswered session close without replaying the completed prompt", {
-  timeout: process.platform === "win32" ? 30_000 : 5_000,
+  timeout: 15_000,
 }, async (t) => {
-  const value = await target(t, "close-hang", { outerDeadlineMs: 500 });
-  const started = Date.now();
-  await assert.rejects(
-    value.delivery.deliver(MESSAGE, new AbortController().signal),
-    (error: unknown) => error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
-  );
-  assert.ok(Date.now() - started < 2_000);
-  assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
-  await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
-  assert.equal(value.spawnCount(), 1);
+  let closing = false;
+  const value = await target(t, "close-hang", {
+    outerDeadlineMs: 500,
+    // The stage timeout cannot mask a broken outer deadline within this test.
+    sessionDeadlineMs: 60_000,
+    log(event, data) {
+      if (event !== "acp.update" || !JSON.stringify(data).includes("fixture-close-waiting")) return;
+      closing = true;
+      // Expire the outer deadline after the fixture confirms close is pending.
+      t.mock.timers.tick(500);
+    },
+  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    const started = Date.now();
+    await assert.rejects(
+      value.delivery.deliver(MESSAGE, new AbortController().signal),
+      (error: unknown) =>
+        error instanceof DirectDeliveryError && error.code === "uncertain_outcome",
+    );
+    assert.equal(closing, true);
+    assert.equal(Date.now() - started, 500);
+    assert.equal(value.sessionStore.messageState(MESSAGE.id as string), "completed");
+    await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
+    assert.equal(value.spawnCount(), 1);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("reuses a peer session across messages while keeping each action correlation", async (t) => {
@@ -418,20 +486,29 @@ test("keeps a peer conversation across owner replies, completed actions and a st
   assert.equal(store.list().length, 3);
 });
 
-test("pauses prompt and delivery deadlines while human approval is pending", async (t) => {
+test("pauses prompt and delivery deadlines while human approval is pending", {
+  timeout: 15_000,
+}, async (t) => {
   const value = await target(t, "permission-session-mcp", {
     promptDeadlineMs: 1_000,
     outerDeadlineMs: 4_000,
-    permissionApproval: async () => {
-      // Leave time for process startup on Windows while exceeding both deadlines.
-      await new Promise((resolve) => setTimeout(resolve, 4_500));
+    permissionApproval: async (_request, signal) => {
+      // Advance past both deadlines only after the real ACP approval arrives.
+      // Process startup and durable writes must not consume this test's budget.
+      t.mock.timers.tick(4_500);
+      assert.equal(signal.aborted, false, "Human approval must pause the outer deadline.");
       return "allow";
     },
   });
-
-  assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
-    status: "completed",
-  });
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  try {
+    assert.deepEqual(await value.delivery.deliver(MESSAGE, new AbortController().signal), {
+      status: "completed",
+    });
+    assert.equal(value.permissionRequests.length, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("verbose ACP logging omits the available command catalog", async (t) => {

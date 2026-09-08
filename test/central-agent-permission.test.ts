@@ -71,11 +71,16 @@ function outcome(
 
 test("requests one email and waits for the shared receiver without polling central", async () => {
   let requested: unknown;
+  const notifications: string[] = [];
   let release!: (value: CentralMessage) => void;
   const reply = new Promise<CentralMessage>((resolve) => {
     release = resolve;
   });
   const coordinator = new CentralAgentPermissionCoordinator({
+    onQuestion: (id) => {
+      notifications.push(id);
+      throw new Error("OS notification unavailable");
+    },
     transport: {
       async requestHumanInput(args) {
         requested = args;
@@ -94,6 +99,7 @@ test("requests one email and waits for the shared receiver without polling centr
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(finished, false);
+  assert.deepEqual(notifications, ["request-1"]);
   assert.deepEqual(requested, {
     message_id: MESSAGE_ID,
     permission_type: "ambassador_acp_tool_execution",
