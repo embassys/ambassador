@@ -38,6 +38,11 @@ try {
         recursive: true,
         verbatimSymlinks: true,
       });
+    await execute(
+      "/usr/bin/codesign",
+      ["--verify", "--deep", "--strict", join(application, "Embassys.app")],
+      { timeout: 60_000 },
+    );
     await execute("/usr/bin/hdiutil", ["detach", mount], { timeout: 30_000 });
     mounted = false;
   } else {

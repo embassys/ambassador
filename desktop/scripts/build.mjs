@@ -68,6 +68,8 @@ else {
   await run("tar", ["-xzf", cached, "-C", unpacked, "--strip-components=1"]);
   runtimeSource = join(unpacked, "bin/node");
 }
+// tsc retains outputs of deleted source files; those must not enter a package.
+await run(process.execPath, [join(repository, "scripts/clean.mjs"), "dist"]);
 await run(process.execPath, [packageManager, "run", "build"]);
 const { engineSourceDigest } = await import("../../dist/desktop/engine.js");
 await rm(destination, { recursive: true, force: true });

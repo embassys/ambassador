@@ -1,5 +1,11 @@
 # Desktop development packages
 
+For ready-made downloads, use the [preview installation guide](desktop-install.md).
+The owner authorized the first GitHub prerelease under
+[ADR 0076](adr/0076-desktop-github-preview.md). CI retains verified archives for
+seven days; publication still requires successful core and desktop checks for
+the exact release source. This does not configure signing or automatic updates.
+
 The desktop build uses the approved Electron Packager, bundled Node 24.19.0 and
 the production dependencies in the repository's frozen lockfile. It creates a
 fresh hoisted dependency tree outside the checkout's node_modules. Do not use
@@ -44,6 +50,13 @@ unsigned local checksums do not authenticate a publisher.
 Default output is explicitly unsigned development output. Request signing only
 with configured release infrastructure. The build fails on missing inputs or
 failed verification; it never falls back to unsigned output.
+
+Mac previews use an ad hoc signature to seal the complete application after
+packaging. This replaces Electron's invalid inherited resource seal; it does not
+provide a verified publisher or notarization. Packaging and extracted-DMG checks
+both require strict signature integrity. The manifest records `macAdHocSigned`
+separately from `applicationCodeSigned`, which means verified publisher signing.
+The regular Mac app-specific opening exception can still be required.
 
 - Mac: set `EMBASSYS_DESKTOP_SIGN=1`, `EMBASSYS_MAC_IDENTITY` to the installed
   Developer ID Application identity, and `EMBASSYS_NOTARY_PROFILE` to an existing
