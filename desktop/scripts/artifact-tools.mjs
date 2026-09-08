@@ -7,17 +7,18 @@ import { isDeepStrictEqual } from "node:util";
 export async function runArchiveTool(executable, args, timeoutMs = 5 * 60_000) {
   await new Promise((resolve, reject) => {
     const child = spawn(executable, args, {
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
     });
     let diagnostic = Buffer.alloc(0);
     let timedOut = false;
     let forceStop;
-    child.stderr.on("data", (chunk) => {
-      if (diagnostic.length < 4096)
-        diagnostic = Buffer.concat([diagnostic, chunk.subarray(0, 4096 - diagnostic.length)]);
-    });
+    const capture = (chunk) => {
+      diagnostic = Buffer.concat([diagnostic, chunk]).subarray(-4096);
+    };
+    child.stdout.on("data", capture);
+    child.stderr.on("data", capture);
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill();
@@ -37,7 +38,7 @@ export async function runArchiveTool(executable, args, timeoutMs = 5 * 60_000) {
       const outcome = timedOut ? "timed out" : `exited ${code ?? signal}`;
       reject(
         new Error(
-          `Archive tool ${basename(executable)} ${outcome}: ${diagnostic.toString("utf8").trim()}`,
+          `Archive tool ${basename(executable)} ${String(args[0] ?? "").slice(0, 40)} ${outcome}: ${diagnostic.toString("utf8").trim()}`,
         ),
       );
     });

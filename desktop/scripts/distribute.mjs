@@ -37,7 +37,7 @@ try {
   if (process.platform === "darwin") {
     await run("/usr/bin/hdiutil", [
       "create",
-      "-quiet",
+      "-verbose",
       "-fs",
       "HFS+",
       "-format",
@@ -48,7 +48,7 @@ try {
       source,
       archive,
     ]);
-    await run("/usr/bin/hdiutil", ["verify", "-quiet", archive]);
+    await run("/usr/bin/hdiutil", ["verify", "-verbose", archive]);
   } else {
     await run(process.platform === "win32" ? "tar.exe" : "tar", [
       process.platform === "win32" ? "-acf" : "-czf",
