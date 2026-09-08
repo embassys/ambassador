@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { NativeConversationBridge } from "./native-conversation-bridge.js";
+import { openClawReturnEndpoint } from "./openclaw-return-endpoint.js";
 
 interface ToolEvent {
   toolName: string;
@@ -9,6 +10,7 @@ interface ToolContext {
   sessionKey?: string;
 }
 interface ProviderApi {
+  config: unknown;
   on(
     name: "before_tool_call" | "after_tool_call",
     callback: (event: ToolEvent, context: ToolContext) => Promise<unknown>,
@@ -22,6 +24,7 @@ interface ProviderApi {
 }
 type Bridge = Pick<NativeConversationBridge, "bind" | "observe" | "resume" | "close">;
 export interface OpenClawBridgeState {
+  endpoint?: string | undefined;
   bridge?: Bridge | undefined;
   stateDirectory?: string | undefined;
   starting?: Promise<void> | undefined;
@@ -41,16 +44,20 @@ function eligible(event: ToolEvent, context: ToolContext): boolean {
 /** Registration seam uses OpenClaw's reviewed hook and service contracts. */
 export function registerOpenClawBridge(
   api: ProviderApi,
-  create: (stateDirectory: string) => Promise<Bridge>,
+  create: (stateDirectory: string, endpoint: string) => Promise<Bridge>,
   state: OpenClawBridgeState = {},
 ): void {
   async function ensureBridge(): Promise<void> {
+    const endpoint = openClawReturnEndpoint(api.config);
+    if (state.endpoint !== undefined && state.endpoint !== endpoint)
+      throw new Error("Restart OpenClaw after changing its Ambassador connection.");
     if (state.bridge !== undefined || state.stateDirectory === undefined) return;
     if (state.starting !== undefined) return state.starting;
     const directory = state.stateDirectory;
+    state.endpoint = endpoint;
     state.starting = (async () => {
       try {
-        const created = await create(directory);
+        const created = await create(directory, endpoint);
         if (state.stateDirectory !== directory) {
           await created.close();
           return;
@@ -75,20 +82,25 @@ export function registerOpenClawBridge(
     id: "ambassador-conversation-return",
     async start(context) {
       state.stateDirectory = context.stateDir;
-      await ensureBridge();
+      try {
+        await ensureBridge();
+      } catch {
+        api.logger.warn("Ambassador native delivery needs a configured local MCP connection.");
+      }
     },
     async stop() {
       state.stateDirectory = undefined;
       await state.starting;
       await state.bridge?.close();
       state.bridge = undefined;
+      state.endpoint = undefined;
     },
   });
   api.on("before_tool_call", async (event, context) => {
     if (!eligible(event, context)) return;
-    await ensureBridge();
-    if (state.bridge === undefined) return;
     try {
+      await ensureBridge();
+      if (state.bridge === undefined) return;
       state.bridge.bind(event.params.request_id as string, context.sessionKey as string);
       // Preserve the foreground wait until the desktop's live rendering path
       // is qualified. Codex's native relay also rejects argument rewrites.
@@ -102,9 +114,9 @@ export function registerOpenClawBridge(
   });
   api.on("after_tool_call", async (event, context) => {
     if (!eligible(event, context)) return;
-    await ensureBridge();
-    if (state.bridge === undefined) return;
     try {
+      await ensureBridge();
+      if (state.bridge === undefined) return;
       // Codex completion telemetry can arrive without a before hook. Its
       // session key is still provider context, never a tool-supplied origin.
       state.bridge.bind(event.params.request_id as string, context.sessionKey as string);

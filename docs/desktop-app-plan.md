@@ -788,3 +788,39 @@ Runtime `2a35086` passes all three desktop CI jobs in
 macOS, Windows and Linux passed regression tests, packaging, extracted distribution,
 actual host startup/shutdown and the public CLI → app → CLI handoff. This does not
 qualify native Windows/Linux UI, provider-specific native return or remote push.
+
+## Remaining-work review, 2026-09-08
+
+The user asked to complete remaining work except platform testing. Reviewed the
+current central revision `a8c0e77` and web app revision `a9cb3d3` again. Owner
+email login, account reads and permission revocation are already integrated.
+The remaining recovery, decision-context, history and native-push contracts are
+still absent. Updated existing API issues 7–10 with the deployed behavior and
+the specific missing fields or guarantees. No central or web app code changed.
+
+ADR 0070 fixes OpenClaw native return observing port 8787 regardless of the
+selected instance. The observer now follows the reviewed local MCP entry and
+keeps a separate journal for each endpoint. Missing, disabled or incompatible
+configuration disables return instead of selecting another instance. Optional,
+fixed OpenClaw prompt guidance addresses Embassys discovery and unnecessary
+detached wait tasks without changing user prompts or reading their history.
+The provider's existing hook permissions remain under owner control.
+
+Local verification on bundled Node 24.19.0 passed 472 tests with seven expected
+skips, plus 14 desktop rendering/parser/artifact tests. Lint, typechecking and
+the desktop build pass. Real OpenClaw foreground and delayed-return checks used
+port 9797 while an independent gateway stayed on 8787. The final native view
+showed the delayed synthetic result. Its hidden waiting reply and earlier
+duplicate badge remain provider display defects, so return is still experimental.
+See the [qualification record](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08)
+for prompts, fixture limits and screenshot paths.
+
+Work still requiring external input or provider capability is recorded in the
+current work plan. No signing identity is installed on this Mac and no repository
+release secrets are configured. Signing, updates and engine installation need
+the distribution inputs above; there are no signed compatible artifacts to
+select yet. Calendar invitation testing needs the owner's chosen account and
+consenting recipient. Codex computer control is unavailable, standalone Claude
+Chat/Cowork has no configured Ambassador connector, and the installed Hermes
+API still lacks the required trusted origin and idle-only injection behavior.
+Native Windows/Linux qualification remains excluded from this request.

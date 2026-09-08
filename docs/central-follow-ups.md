@@ -189,7 +189,9 @@ The following issues define server work without changing the API here:
   registration and dispatch for saved requests. Push prompts a current-state
   fetch; it is not the request store or an approval channel.
 
-Until deployed contracts pass qualification, the development app labels sign-in,
-owner requests and permissions as unavailable. It does not impersonate an owner
-through the current agent REST API or treat an empty local inbox as an account
-with no pending requests.
+Owner sign-in, refresh, sign-out and bounded read-only account views now pass
+controlled live qualification under ADR 0068. Revocation reception and revoked
+permission reads also pass. The app keeps decisions and remote native push
+unavailable while their remaining contracts are incomplete. It does not
+impersonate an owner through the agent API or present a limited snapshot as a
+complete account history.
