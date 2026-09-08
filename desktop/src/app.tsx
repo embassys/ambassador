@@ -15,6 +15,8 @@ import type { TranscriptPage } from "../../src/visible-transcripts.js";
 import { Account } from "./account.js";
 import { Activity, Permissions } from "./agent-status.js";
 import { Navigation } from "./navigation.js";
+import { Onboarding } from "./onboarding.js";
+import { onboardingKey } from "./onboarding-state.js";
 import { Registration } from "./registration.js";
 
 interface AppSnapshot {
@@ -138,6 +140,8 @@ const pages: { id: Page; label: string; description: string }[] = [
 ];
 
 function App() {
+  const [completedSetup, setCompletedSetup] = useState("");
+  const [setupSettings, setSetupSettings] = useState(false);
   const [snapshot, setSnapshot] = useState<AppSnapshot>();
   const [overview, setOverview] = useState<GatewayOverview>();
   const [overviewUnavailable, setOverviewUnavailable] = useState(false);
@@ -216,17 +220,27 @@ function App() {
   const selected =
     snapshot?.instances.find((instance) => instance.id === selectedId) ?? snapshot?.instances[0];
   const id = selected?.id;
+  const setupKey = snapshot ? onboardingKey(snapshot.owner, id) : undefined;
+  const onboarded = Boolean(
+    setupKey && (completedSetup === setupKey || localStorage.getItem(setupKey) === "done"),
+  );
   const runtimeState = selected?.runtime.state;
   useEffect(() => {
-    if (!snapshot?.navigation || snapshot.navigation.id === lastNavigation.current) return;
+    if (!onboarded || !snapshot?.navigation || snapshot.navigation.id === lastNavigation.current)
+      return;
     lastNavigation.current = snapshot.navigation.id;
     localStorage.setItem("ambassador.navigation", snapshot.navigation.id);
     setSelectedId(snapshot.navigation.instanceId);
     setPage(snapshot.navigation.page);
     setDataSource("local");
-  }, [snapshot?.navigation]);
+  }, [snapshot?.navigation, onboarded]);
   useEffect(() => {
-    if (!id || (page !== "account" && !(page === "attention" && dataSource === "local"))) return;
+    if (
+      !onboarded ||
+      !id ||
+      (page !== "account" && !(page === "attention" && dataSource === "local"))
+    )
+      return;
     let current = true;
     let reading = false;
     setOverview(undefined);
@@ -251,7 +265,7 @@ function App() {
       current = false;
       clearInterval(timer);
     };
-  }, [id, runtimeState, page, dataSource, call]);
+  }, [id, runtimeState, page, dataSource, call, onboarded]);
   useEffect(() => {
     if (!snapshot) return;
     document.documentElement.dataset.platform = snapshot.platform;
@@ -281,7 +295,12 @@ function App() {
     setLogTo("");
     setBusy(savingAppearance.current);
     setError("");
-    if (!id || !["conversations", "diagnostics", "agents"].includes(page)) return;
+    if (
+      (!onboarded && !setupSettings) ||
+      !id ||
+      !["conversations", "diagnostics", "agents"].includes(page)
+    )
+      return;
     setLoading(true);
     const command: DesktopCommand =
       page === "conversations"
@@ -305,7 +324,7 @@ function App() {
     return () => {
       current = false;
     };
-  }, [id, page, call]);
+  }, [id, page, call, onboarded, setupSettings]);
 
   async function chooseAppearance(value: AppSnapshot["appearance"]) {
     pendingAppearance.current = value;
@@ -498,6 +517,34 @@ function App() {
     description: "Your local workspace",
   };
 
+  if (!snapshot)
+    return (
+      <div className="onboarding-shell">
+        <main className="onboarding-content">
+          <p role="status">Opening Embassys…</p>
+        </main>
+      </div>
+    );
+  if (!onboarded && !setupSettings)
+    return (
+      <Onboarding
+        owner={snapshot.owner}
+        instance={selected}
+        call={call}
+        changed={refresh}
+        settings={() => {
+          setSetupSettings(true);
+          navigate("settings");
+        }}
+        complete={() => {
+          if (!setupKey) return;
+          localStorage.setItem(setupKey, "done");
+          setCompletedSetup(setupKey);
+          navigate("attention");
+        }}
+      />
+    );
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -505,7 +552,13 @@ function App() {
           <img className="brand-mark" src="/brand.svg" alt="" />
           <span>Embassys</span>
         </div>
-        <Navigation page={page} select={navigate} />
+        {onboarded ? (
+          <Navigation page={page} select={navigate} />
+        ) : (
+          <button type="button" className="text-button" onClick={() => setSetupSettings(false)}>
+            ‹ Back to setup
+          </button>
+        )}
         <div className="sidebar-bottom">
           <div className="instance-label">This device</div>
           <label className="sr-only" htmlFor="instance-select">
@@ -544,15 +597,16 @@ function App() {
         <header className="page-header">
           <div>
             <h1>{currentPage.label}</h1>
-            {!["attention", "permissions", "conversations", "account"].includes(page) && (
-              <button
-                type="button"
-                className="text-button back-link"
-                onClick={() => navigate("account")}
-              >
-                ‹ Account
-              </button>
-            )}
+            {onboarded &&
+              !["attention", "permissions", "conversations", "account"].includes(page) && (
+                <button
+                  type="button"
+                  className="text-button back-link"
+                  onClick={() => navigate("account")}
+                >
+                  ‹ Account
+                </button>
+              )}
           </div>
         </header>
         {error && (

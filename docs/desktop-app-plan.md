@@ -857,3 +857,29 @@ walkthrough remain local in `.build/claude-onboarding/`. The preceding commit
 [run 34195202482](https://github.com/embassys/ambassador/actions/runs/34195202482).
 That run does not qualify these subsequent changes. No API code changed or
 release was published.
+
+## Account-first onboarding, 2026-09-08
+
+ADR 0072 implements the owner's requested order: Log in or Register, connect an
+agent, then the main app. Signed-out windows hide the dashboard and keep server
+settings reachable. Registration saves email verification before provider choice;
+the receiver and business tools stay inactive until a reviewed executor is saved.
+That unfinished state survives restart and matching CLI handoff. After owner
+login, setup presents one selected agent and the existing guarded Connect button,
+with manual instructions collapsed. Users may explicitly defer setup. Completion
+belongs to the signed-in account and installation; sign-out returns to welcome.
+
+The actual Mac app passed new-account registration, email verification, owner
+login, isolated Claude Code configuration, restart, returning login, sign-out and
+the existing-email path against deployed central. Native testing caught and fixed
+a transient sign-out screen bug. Central still requires separate registration and
+owner login codes; the app explains the step and prefills email. Issue 7 now
+records the desired first-time owner signup/session contract. No API code changed.
+
+Validation passed 484 core tests with seven expected skips, 18 desktop tests,
+lint and typechecking. The rebuilt package passed host startup, duplicate launch,
+CLI → app → CLI handoff and app restart. Screenshots and an illustrated walkthrough
+remain local in `.build/onboarding-screenshots/`; see the
+[qualification record](qualification.md#embassys-account-first-onboarding-2026-09-08)
+for the limits of this live run. Test profiles were removed after sign-out and
+shutdown. No release was published.

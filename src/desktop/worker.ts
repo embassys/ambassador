@@ -98,6 +98,7 @@ process.on("message", (raw: unknown) => {
       case "enrollment_register":
       case "enrollment_verify":
       case "enrollment_resend":
+      case "enrollment_executor":
       case "permissions":
       case "activity":
         result = await current.desktopCommand(command);

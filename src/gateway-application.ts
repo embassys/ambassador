@@ -812,6 +812,7 @@ export async function openGatewayApplication(
           client_info: clientInfo,
         });
         let result: Record<string, unknown>;
+        if (desktopRegistration?.needsExecutor) throw new LocalMcpToolError("registration_in_app");
         if (!identity.enrolled) {
           if (
             options.desktopRegistrationPath &&
@@ -828,7 +829,7 @@ export async function openGatewayApplication(
                 : await enrollment.resend(arguments_, signal);
               break;
             case "verify_email":
-              await loadProfile();
+              if (!desktopRegistration?.defersExecutor) await loadProfile();
               if (desktopRegistration)
                 result = await desktopRegistration.verifyFromTools(arguments_);
               else {
@@ -940,7 +941,7 @@ export async function openGatewayApplication(
         activate: enableEnrolledIdentity,
         signal: lifetimeSignal,
       });
-    if (identity.enrolled) await loadProfile();
+    if (identity.enrolled && !desktopRegistration?.needsExecutor) await loadProfile();
     local = new LocalMcpServer(router, {
       ...(options.localMcpPort === undefined ? {} : { port: options.localMcpPort }),
       control: {
@@ -950,7 +951,7 @@ export async function openGatewayApplication(
       },
     });
     await local.listen();
-    if (identity.enrolled) await enableEnrolledIdentity();
+    if (identity.enrolled && !desktopRegistration?.needsExecutor) await enableEnrolledIdentity();
   } catch (error) {
     controller.abort();
     if (sessionCleanupTimer !== undefined) clearInterval(sessionCleanupTimer);

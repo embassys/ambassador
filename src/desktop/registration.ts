@@ -18,7 +18,7 @@ export const registrationInput = z.strictObject({
     .min(3)
     .max(254)
     .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/u),
-  executor: desktopExecutor,
+  executor: desktopExecutor.optional(),
 });
 const recordSchema = registrationInput.extend({
   phase: z.enum([
@@ -37,10 +37,11 @@ type RegistrationRecord = z.infer<typeof recordSchema>;
 export interface RegistrationSnapshot {
   phase: "new" | "registered" | RegistrationRecord["phase"];
   email?: string;
-  executor?: z.infer<typeof desktopExecutor>;
+  executor?: z.infer<typeof desktopExecutor> | undefined;
   message?: string | undefined;
   resendAfter?: number;
   credentialStatus?: string;
+  needsExecutor?: boolean;
 }
 interface Options {
   path: string;
@@ -68,12 +69,19 @@ export class DesktopRegistration {
   static async open(options: Options): Promise<DesktopRegistration> {
     return new DesktopRegistration(options, await readLocalSettings(options.path, recordSchema));
   }
+  get needsExecutor(): boolean {
+    return this.options.identity.enrolled && this.defersExecutor;
+  }
+  get defersExecutor(): boolean {
+    return this.#record !== undefined && !this.#record.executor;
+  }
   snapshot(): RegistrationSnapshot {
     if (this.options.identity.enrolled)
       return {
         phase: "registered",
         email: String(this.options.identity.enrollment.email),
         credentialStatus: this.options.identity.expired ? "expired" : "active",
+        needsExecutor: this.needsExecutor,
         ...(this.#record ? { executor: this.#record.executor } : {}),
       };
     return this.#record ? { ...this.#record } : { phase: "new" };
@@ -116,21 +124,22 @@ export class DesktopRegistration {
           throw new Error("Finish registration with the saved delivery profile.");
         return;
       }
-      const capability = capabilityForKind(input.executor);
-      if (!capability?.direct) throw new Error("This executor is unavailable.");
+      const capability = input.executor ? capabilityForKind(input.executor) : undefined;
+      if (input.executor && !capability?.direct) throw new Error("This executor is unavailable.");
       if (prepared) {
         await validateStoredDeliveryProfile(prepared, this.options.workingDirectory);
         if (prepared.agent_kind !== input.executor)
           throw new Error("The selected executor changed.");
       }
-      await this.options.profileStore.save(
-        prepared ??
-          (await createDeliveryProfile(
-            capability,
-            { mode: "direct" },
-            this.options.workingDirectory,
-          )),
-      );
+      if (capability)
+        await this.options.profileStore.save(
+          prepared ??
+            (await createDeliveryProfile(
+              capability,
+              { mode: "direct" },
+              this.options.workingDirectory,
+            )),
+        );
       const record: RegistrationRecord = {
         ...input,
         ...(displayName ? { displayName } : {}),
@@ -253,8 +262,46 @@ export class DesktopRegistration {
         return;
       }
       // Credential custody is authoritative even if delivery activation fails afterward.
-      await this.options.activate();
+      if (!this.needsExecutor) await this.options.activate();
     });
+  }
+  async selectExecutor(raw: unknown): Promise<RegistrationSnapshot> {
+    const executor = desktopExecutor.parse(raw);
+    if (!this.options.identity.enrolled || !this.#record)
+      throw new Error("Verify your email before choosing an agent.");
+    if (this.#busy) throw new Error("Setup is already in progress.");
+    if (this.#record.executor) {
+      if (this.#record.executor !== executor)
+        throw new Error("This instance already has an agent.");
+      this.#busy = true;
+      try {
+        await this.options.activate();
+        return this.snapshot();
+      } finally {
+        this.#busy = false;
+      }
+    }
+    this.#busy = true;
+    try {
+      const capability = capabilityForKind(executor);
+      if (!capability?.direct) throw new Error("This executor is unavailable.");
+      const profile = await createDeliveryProfile(
+        capability,
+        { mode: "direct" },
+        this.options.workingDirectory,
+      );
+      const existing = await this.options.profileStore.load();
+      if (existing && JSON.stringify(existing) !== JSON.stringify(profile))
+        throw new Error(
+          "A different agent was already saved. Review the instance before continuing.",
+        );
+      await this.options.profileStore.save(profile);
+      await this.#save({ ...this.#record, executor });
+      await this.options.activate();
+      return this.snapshot();
+    } finally {
+      this.#busy = false;
+    }
   }
   resend(): Promise<RegistrationSnapshot> {
     return this.#exclusive(async () => {

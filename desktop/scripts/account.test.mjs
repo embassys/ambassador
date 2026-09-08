@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData} from './src/account.tsx'; import {Navigation} from './src/navigation.tsx'; export const nav = page => renderToStaticMarkup(createElement(Navigation,{page,select:()=>{}})); export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData} from './src/account.tsx'; import {Navigation} from './src/navigation.tsx'; import {Onboarding} from './src/onboarding.tsx'; export {onboardingKey} from './src/onboarding-state.ts'; export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = page => renderToStaticMarkup(createElement(Navigation,{page,select:()=>{}})); export const view = data => renderToStaticMarkup(createElement(AccountData, {data})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -22,8 +22,47 @@ await build({
   },
   jsx: "automatic",
 });
-const { view, account, nav } = await import(pathToFileURL(join(root, "account.mjs")).href);
+const { view, account, nav, onboarding, onboardingKey } = await import(
+  pathToFileURL(join(root, "account.mjs")).href
+);
 test.after(() => rm(root, { recursive: true, force: true }));
+
+test("signed-out onboarding starts with login or registration, without the dashboard", () => {
+  const html = onboarding({ status: "signed_out", context: "one" });
+  assert.match(html, />Log in</);
+  assert.match(html, />Register</);
+  assert.doesNotMatch(html, /Main navigation|Permissions|<form|MCP|Selected instance|Account logs/);
+  const signingOut = onboarding({
+    status: "signed_out",
+    context: "next",
+    issue: "signout_unconfirmed",
+  });
+  assert.match(signingOut, />Log in</);
+  assert.match(signingOut, />Register</);
+  assert.match(signingOut, /couldn.*confirm sign-out/);
+  assert.doesNotMatch(signingOut, /<form/);
+  const loading = onboarding({ status: "loading", context: "one" });
+  assert.match(loading, /Opening Embassys/);
+  assert.doesNotMatch(loading, />Register</);
+  const code = onboarding({ status: "code_sent", context: "one", email: "owner@fixture.test" });
+  assert.match(code, /one-time-code/);
+});
+
+test("setup completion belongs to a signed-in account and selected installation", () => {
+  const owner = { status: "signed_in", context: "one", email: "owner@fixture.test" };
+  assert.ok(onboardingKey(owner, "instance-one"));
+  assert.equal(onboardingKey({ ...owner, status: "signed_out" }, "instance-one"), undefined);
+  assert.equal(onboardingKey({ ...owner, status: "reauth_required" }, "instance-one"), undefined);
+  assert.notEqual(onboardingKey(owner, "instance-one"), onboardingKey(owner, "instance-two"));
+  assert.notEqual(
+    onboardingKey(owner, "instance-one"),
+    onboardingKey({ ...owner, email: "someone@fixture.test" }, "instance-one"),
+  );
+  assert.equal(
+    onboardingKey(owner, "instance-one"),
+    onboardingKey({ ...owner, context: "refreshed" }, "instance-one"),
+  );
+});
 
 test("navigation has four sections and keeps device settings under Account", () => {
   const html = nav("diagnostics");

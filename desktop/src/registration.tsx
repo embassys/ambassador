@@ -11,12 +11,16 @@ export function Registration({
   command,
   start,
   connected,
+  accountFirst = false,
+  registered,
 }: {
   instanceId: string;
   running: boolean;
   command(input: DesktopCommand): Promise<unknown>;
   start(): void;
   connected(): void;
+  accountFirst?: boolean;
+  registered?(email: string): void;
 }) {
   const [state, setState] = useState<State>();
   const [email, setEmail] = useState("");
@@ -75,13 +79,50 @@ export function Registration({
         <h3>You're registered</h3>
         <p className="break">{state.email}</p>
         <p className="body-note">
-          {state.credentialStatus === "expired"
-            ? "Your saved credential has expired. Local history remains available; central identity recovery is not supported yet."
-            : "This instance uses your saved verified identity. Connect your agent's MCP tools to finish setup."}
+          {accountFirst
+            ? "Your email is verified. Log in with a new code to continue to agent setup."
+            : state.credentialStatus === "expired"
+              ? "Your saved credential has expired. Local history remains available; central identity recovery is not supported yet."
+              : "This instance uses your saved verified identity. Connect your agent's MCP tools to finish setup."}
         </p>
-        <button type="button" className="secondary" onClick={connected}>
-          Connect an agent
-        </button>
+        {accountFirst ? (
+          <button
+            type="button"
+            className="primary"
+            onClick={() => registered?.(state.email ?? email)}
+          >
+            Continue to log in
+          </button>
+        ) : state.needsExecutor ? (
+          <>
+            <label>
+              Agent for incoming requests
+              <select
+                value={executor}
+                disabled={busy}
+                onChange={(event) => setExecutor(event.target.value as typeof executor)}
+              >
+                <option value="claude">Claude Code</option>
+                <option value="codex">Codex</option>
+                <option value="openclaw">OpenClaw</option>
+                <option value="hermes">Hermes</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => void submit({ type: "enrollment_executor", instanceId, executor })}
+            >
+              Use this agent
+            </button>
+          </>
+        ) : (
+          <button type="button" className="secondary" onClick={connected}>
+            Connect an agent
+          </button>
+        )}
+        {error && <p role="alert">{error}</p>}
       </section>
     );
   const entry = state.phase === "new" || state.phase === "rejected";
@@ -89,16 +130,33 @@ export function Registration({
   const resendSeconds = Math.max(0, Math.ceil(((state.resendAfter ?? 0) - now) / 1000));
   return (
     <section className="settings-section registration-form">
-      <h3>{entry ? "Register with Embassys" : "Verify your email"}</h3>
+      <h3>
+        {entry
+          ? "Register with Embassys"
+          : state.phase === "conflict"
+            ? "Already registered"
+            : "Verify your email"}
+      </h3>
       <p className="body-note">
         {entry
-          ? "Create a new agent identity for this instance. Already registered? Use Account to sign in. Restoring a reset local agent is not supported yet."
+          ? "Enter your email to get started. You'll choose your agent after logging in."
           : state.email}
       </p>
       {state.message && (
         <p className="body-note" role="status">
-          {state.message}
+          {accountFirst && state.phase === "conflict"
+            ? "This email is already registered. Log in to your account to continue."
+            : state.message}
         </p>
+      )}
+      {accountFirst && ["conflict", "verification_uncertain"].includes(state.phase) && (
+        <button
+          type="button"
+          className="primary"
+          onClick={() => registered?.(state.email ?? email)}
+        >
+          {state.phase === "conflict" ? "Log in instead" : "Log in to check your account"}
+        </button>
       )}
       {error && (
         <p className="error-banner" role="alert">
@@ -109,7 +167,7 @@ export function Registration({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void submit({ type: "enrollment_register", instanceId, email, executor });
+            void submit({ type: "enrollment_register", instanceId, email });
           }}
         >
           <label>
@@ -124,23 +182,6 @@ export function Registration({
               onChange={(event) => setEmail(event.target.value)}
             />
           </label>
-          <label>
-            Agent for incoming requests
-            <select
-              value={executor}
-              disabled={busy}
-              onChange={(event) => setExecutor(event.target.value as typeof executor)}
-            >
-              <option value="claude">Claude Code</option>
-              <option value="codex">Codex</option>
-              <option value="openclaw">OpenClaw</option>
-              <option value="hermes">Hermes</option>
-            </select>
-          </label>
-          <p className="body-note">
-            Choose the installed agent that will handle incoming work. It uses its existing login
-            and tools. Connect its MCP tools in Agents after registration.
-          </p>
           <button type="submit" className="primary" disabled={busy}>
             {busy ? "Sending…" : "Send verification code"}
           </button>

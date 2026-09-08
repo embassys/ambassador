@@ -6,12 +6,58 @@ behavior.
 ## Current candidate checks
 
 The unpublished desktop branch was checked again on 2026-09-08 with the bundled
-Node 24.19.0. All 480 default-suite tests passed, with seven expected platform or
-opt-in skips. Lint, typechecking and 16 desktop rendering,
+Node 24.19.0. All 484 default-suite tests passed, with seven expected platform or
+opt-in skips. Lint, typechecking and 18 desktop rendering,
 parser and artifact tests also passed. This includes OpenClaw instance
-isolation and fixed guidance in ADR 0070, and executor binding checks in ADR 0071.
+isolation and fixed guidance in ADR 0070, executor binding checks in ADR 0071,
+and account-first onboarding in ADR 0072.
 The native observations below
 qualify only the described client behavior, not the central fixture or a release.
+
+## Embassys account-first onboarding, 2026-09-08
+
+Used the rebuilt unsigned Mac app against deployed central with a disposable
+Mailosaur address. The welcome screen showed Log in and Register without the
+dashboard. Register started the local server, collected email and accepted the
+actual emailed verification code before asking for any provider. The following
+owner login reused that email and accepted a separate emailed code. Agent setup
+then offered a single guarded Connect Claude Code action with manual instructions
+collapsed. The actual Claude CLI wrote only an isolated test configuration. The
+main app appeared after Open Embassys; registration and setup did not expose the
+main navigation early.
+
+Quit/relaunch retained login and setup completion. Returning login resumed the
+main app. A transient sign-out status initially left the login form visible;
+the corrected build returned to the welcome buttons, and its regression test
+passes. A second fresh installation registered the same disposable email and
+received the deployed existing-account conflict. Log in instead opened a login
+form with the same email prefilled. It did not retry registration.
+
+Deployed catalog and permission reads passed through the configured local MCP
+server after setup. No model conversation or remote action was initiated in
+this run. Configuring Claude is not proof that a running Claude conversation
+reloaded MCP. The separate Claude model test below uses fixture central and
+does not remove that distinction. The deployed first-time flow still needs two
+email codes; issue 7 records the requested owner signup/session contract.
+
+Inspected native screenshots are in `.build/onboarding-screenshots/`:
+`01-welcome.png`, `02-registration-code.png`, `03-registration-complete.png`,
+`04-login-code.png`, `05-choose-agent.png`, `06-connection-saved.png`,
+`07-main-app.png`, `08-signed-out.png`, `09-existing-email.png` and
+`10-existing-email-login.png`. The illustrated `walkthrough.md` remains local.
+No verification code is visible in these screenshots. The test owner was signed
+out and its local profiles removed. The disposable central identity was not
+deleted. The user's original Claude configuration was untouched.
+
+Core regressions cover deferred executor selection across restart and app/CLI
+verification, no polling before selection, invalid or changed providers and
+activation retry without repeated enrollment. UI checks cover signed-out,
+loading and code-entry states and account/instance-scoped completion. The
+packaged host also passed startup, duplicate launch, CLI → app → CLI handoff
+and app restart. The preceding commit
+`52c5be6` passed all CI jobs in
+[run 34198950937](https://github.com/embassys/ambassador/actions/runs/34198950937);
+that run does not cover this subsequent onboarding change.
 
 ## Claude Mac onboarding screenshots, 2026-09-08
 

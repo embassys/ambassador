@@ -7,7 +7,7 @@ import type {
   OwnerView,
 } from "../../src/desktop/owner-protocol.js";
 
-const notices: Record<OwnerIssue, string> = {
+export const notices: Record<OwnerIssue, string> = {
   invalid_code: "That code is invalid or expired. Check it or request a new code.",
   code_unconfirmed: "We couldn't confirm the code email. If it arrives, you can still use it.",
   code_expired: "That code expired. Request a new one to sign in.",
@@ -171,15 +171,19 @@ export function Account({
   changed,
   section = "profile",
   signIn,
+  compact = false,
+  initialEmail = "",
 }: {
   snapshot: OwnerSnapshot;
   call(command: OwnerCommand): Promise<unknown>;
   changed(): Promise<void>;
   section?: Tab | "profile";
   signIn?(): void;
+  compact?: boolean;
+  initialEmail?: string;
 }) {
   const [owner, setOwner] = useState(snapshot);
-  const [email, setEmail] = useState(snapshot.email ?? "");
+  const [email, setEmail] = useState(snapshot.email ?? initialEmail);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [operation, setOperation] = useState<OwnerCommand["type"]>();
@@ -416,7 +420,11 @@ export function Account({
                   <button className="primary" disabled={busy || !email.trim()} type="submit">
                     {busy ? "Requesting code…" : "Send sign-in code"}
                   </button>
-                  <p className="body-note">New to Embassys? Set up this device below first.</p>
+                  {!compact && (
+                    <p className="body-note">
+                      New to Embassys? Choose Register on the welcome screen.
+                    </p>
+                  )}
                 </>
               )}
             </form>
@@ -433,41 +441,43 @@ export function Account({
           )}
         </section>
       ) : null}
-      <div className="account-toolbar">
-        <div className="account-actions">
-          <button
-            className="text-button"
-            type="button"
-            onClick={() => void run({ type: "owner_open_web" })}
-            disabled={busy}
-          >
-            Open web app
-          </button>
-          {section === "profile" && (
+      {!compact && (
+        <div className="account-toolbar">
+          <div className="account-actions">
             <button
               className="text-button"
               type="button"
-              onClick={() => void run({ type: "owner_reveal_logs" })}
+              onClick={() => void run({ type: "owner_open_web" })}
               disabled={busy}
             >
-              Account logs
+              Open web app
+            </button>
+            {section === "profile" && (
+              <button
+                className="text-button"
+                type="button"
+                onClick={() => void run({ type: "owner_reveal_logs" })}
+                disabled={busy}
+              >
+                Account logs
+              </button>
+            )}
+          </div>
+          {owner.status === "signed_in" && (
+            <button
+              className="secondary"
+              type="button"
+              disabled={busy || loading}
+              onClick={() => {
+                setRefresh((value) => value + 1);
+                void run({ type: "owner_profile", context: owner.context });
+              }}
+            >
+              Refresh
             </button>
           )}
         </div>
-        {owner.status === "signed_in" && (
-          <button
-            className="secondary"
-            type="button"
-            disabled={busy || loading}
-            onClick={() => {
-              setRefresh((value) => value + 1);
-              void run({ type: "owner_profile", context: owner.context });
-            }}
-          >
-            Refresh
-          </button>
-        )}
-      </div>
+      )}
       {error && (
         <p className="account-notice" role="alert">
           {error}

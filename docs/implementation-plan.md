@@ -85,9 +85,22 @@ The current candidate also implements ADR 0069: the web app's four-section
 navigation and teal/ink visual language, a shared CLI installation, saved
 registration across hosts, confirmed authenticated process handoff and stopped
 state after handoff. Existing isolated instances remain separate. Current local
-checks pass 480 tests with seven expected skips, plus 16 desktop rendering,
+checks pass 484 tests with seven expected skips, plus 18 desktop rendering,
 parser and artifact tests. Final native and live evidence belongs in the desktop
 plan; these counts alone do not qualify a user-visible result.
+
+ADR 0072 adds account-first onboarding. Signed-out users see Log in and Register;
+email verification precedes executor choice. After login, one guided connection
+screen leads into the main app. Setup can be explicitly deferred for account-only
+access. Registration and owner login still require separate codes under the
+current API; that gap is recorded in issue 7. Unfinished executor setup survives
+restart without polling or dispatch. Completion is an account/instance-scoped UI
+preference, never an authorization or proof of provider availability.
+The native Mac app passed fresh registration and owner login against deployed
+central, guarded Claude Code connection in an isolated profile, restart,
+returning login, sign-out and existing-email recovery into login. See the
+[onboarding qualification](qualification.md#embassys-account-first-onboarding-2026-09-08)
+for evidence and the remaining two-code limitation.
 
 See [central follow-ups](central-follow-ups.md) for server details and
 [client delivery](client-delivery.md) for the current support matrix.

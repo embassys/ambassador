@@ -118,6 +118,24 @@ unqualified until their exact user-facing path passes. Central failure modes
 that cannot safely be induced live remain deterministic regression cases plus
 explicit API limitations. Do not publish while release blockers remain.
 
+## Account-first onboarding (ADR 0072)
+
+- Signed-out users see Log in and Register without the dashboard. A temporary
+  sign-out uncertainty notice must not leave the UI stuck in the login form.
+- Registration without an executor sends the existing email-only contract.
+  Verify, close and reopen before choosing a provider. No central receiver or
+  provider dispatch may start until that choice is saved.
+- Invalid codes and uncertain verification preserve the existing retry rules.
+  Choosing or retrying a saved provider must not re-register or re-verify.
+- Owner login is a separate realm and challenge. Reuse the email, never its
+  registration code or agent token. After login show guided setup first.
+- Remember setup completion or deferral by account and instance. Account changes,
+  sign-out, missing credentials and a new installation must not inherit another
+  account's completion. A stored UI preference grants no permissions.
+- Use the native app for registration, login, connection review, completion,
+  restart and sign-out. Distinguish a saved provider configuration from a real
+  provider conversation.
+
 ## Desktop executor binding (ADR 0071)
 
 - Check each reviewed provider against the selected instance's port before
