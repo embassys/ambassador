@@ -636,7 +636,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
             ? { connect: "claude_code" }
             : {}),
           instruction: `claude mcp add-json --scope user ambassador '{"type":"http","url":"http://127.0.0.1:${instance.port}/mcp","timeout":660000}'`,
-          note: "These settings let Claude Code wait for a reply for up to ten minutes. Reload Claude Code afterward. Standalone Chat and Cowork are not yet qualified.",
+          note: "These settings let Claude Code wait for a reply for up to ten minutes. Reload Claude Code afterward. Standalone Chat and Cowork need the separate local desktop connection.",
         },
         {
           name: "OpenClaw",

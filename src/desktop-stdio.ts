@@ -34,7 +34,7 @@ export function desktopRelayTool(tool: {
   if (Array.isArray(schema.oneOf)) schema.oneOf.forEach(annotate);
   return {
     ...tool,
-    description: `${DESKTOP_WAIT_GUIDANCE}\n${tool.description ?? ""}`,
+    description: `Embassys agent network: request another person's contact details, coordinate meetings, and check saved requests through this local connector. ${DESKTOP_WAIT_GUIDANCE}\n${tool.description ?? ""}`,
     inputSchema: schema,
   };
 }

@@ -39,15 +39,21 @@ issue-only. These items do not authorize another release.
   and a five-second wait received its later answer without a detached polling
   task. A completely unenrolled fixture also reached registration without a
   tool hint, but the host refused verification codes in chat. The new guidance
-  directs the owner to Account > Set up this device in that case. The pending
-  reply still disappeared from the view. See the
+  directs the owner to Account > Set up this device in that case. The final review
+  found the waiting reply inside the collapsed "Worked for…" section. Expanding
+  it and resizing a blank Mac window are verified display workarounds. The
+  renderer also has a reproducible accumulating duplicate counter; its correction
+  remains upstream work. See the [desktop PR review](desktop-pr-review-2026-09-08.md)
+  and the
   [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
-- [ ] Calendar invitations. Verify an invitation actually reaches another
-  person using a configured calendar account and consenting test recipient.
-  Availability, local event creation and denial handling passed. Local event
-  creation alone does not prove invitation delivery. The September 8 native
-  check found only "On My Mac". The owner has been asked to connect the sending
-  account; a disposable recipient inbox is available.
+- [x] Calendar invitation delivery. On September 8 the owner authorized the
+  connected Google Calendar for one disposable invitation. Native Claude Chat
+  sent it to the test inbox; the delivered calendar attachment matched the
+  attendee, title and September 9, 10:00–10:15 Europe/London time. Claude then
+  deleted it, and the same inbox received cancellation for the same event UID.
+  This qualifies the calendar connector's invitation path, separately from the
+  earlier Embassys scheduling coordination tests. See the
+  [desktop PR review](desktop-pr-review-2026-09-08.md).
 - [ ] API result contracts and progress. Define and validate action-specific
   results, and tell callers when the other agent needs owner input. Track remote
   progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result

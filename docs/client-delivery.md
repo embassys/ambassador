@@ -9,15 +9,16 @@ that a client displayed a result. Evidence belongs in [qualification](qualificat
 | Hermes CLI/gateway | Foreground wait and durable inbox/check | Real ACP and current real webhook action/result/receipt pass; native return deferred pending a trusted gateway routing key and idle-only injection |
 | Codex | Foreground wait and later check | Real ACP and desktop registration/result/receipt pass; a fresh September 8 desktop task recognized Embassys immediately through the configured integration |
 | Claude Code | Foreground wait; optional experimental stdio channel | Real ACP, ten-minute desktop wait and experimental channel tests pass; September 8 combined native app signup → deployed central → real OpenClaw owner input → visible Claude result and receipt also passes |
-| Claude Desktop Chat | Local stdio client; app owns enrollment and incoming executor | Natural request, real OpenClaw result and receipt pass. A 150-second pending reply displays correctly; 240-second host ceiling. Shared connector recommends 45 seconds to cover Cowork too |
-| Claude Desktop Cowork | Local stdio client; app owns enrollment and incoming executor | Natural phone request, real OpenClaw result and receipt pass. Guided 45-second pending reply displays correctly and ends without retry. Fresh Embassys discovery is intermittent; a desktop bridge can time out at 60 seconds |
+| Claude Desktop Chat | Local stdio client; app owns enrollment and incoming executor | Natural request, real OpenClaw result and receipt pass. The default remains 600 seconds; the measured host ceiling was 240 seconds. An early disconnect needs a later user-driven check |
+| Claude Desktop Cowork | Local stdio client; app owns enrollment and incoming executor | Natural phone request, real OpenClaw result and receipt pass. The default remains 600 seconds. Fresh Embassys discovery is intermittent; a desktop bridge can time out at 60 seconds |
 
 ## Configure the foreground wait
 
 Ambassador's business deadline is 600 seconds and its wait transport budget is
 640 seconds. Configure the caller for 660 seconds or longer. Connection/startup
 timeouts are different from tool-call timeouts. If a client cannot hold the full
-wait, use a shorter explicit `wait_seconds` and retain the same request UUID.
+wait, retain the same request UUID for a later user-driven check. Use a shorter
+explicit `wait_seconds` only when the user asks.
 
 For Codex, add `tool_timeout_sec = 660` to its existing
 `[mcp_servers.ambassador]` configuration. For OpenClaw, set the Ambassador
@@ -109,6 +110,15 @@ The desktop showed a “×2” duplicate badge and obscured the earlier waiting 
 although gateway history contained one native answer and the original waiting
 reply. Ordinary navigation did not clear that display discrepancy. The result
 remained unread in Ambassador, with its receipt available.
+
+The final September 8 review identified a display workaround. Expand the
+"Worked for…" section above the result to read the earlier waiting reply. If the
+Mac view is blank, resizing the window restored it in the observed test. Neither
+action resubmits the request. The bundled UI also mutates cached duplicate counts
+during grouping: repeating the same two-row grouping pass produced counts 2, 3
+and 4. This is a provider counter defect, not evidence of repeated delivery.
+Its role in the original live badge is not fully established. See the
+[desktop PR review](desktop-pr-review-2026-09-08.md).
 
 Native return remains experimental because of this provider UI behavior. The
 activity check and injection are also separate calls; there is no atomic display

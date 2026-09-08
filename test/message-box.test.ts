@@ -331,7 +331,10 @@ test("the tool publishes visible message fields even when a provider simplifies 
   assert.ok(Array.isArray(MESSAGE_BOX_TOOL.inputSchema.oneOf));
   const wait = properties.wait_seconds as Record<string, unknown>;
   assert.match(String(wait.description), /Omit.*600 seconds/u);
-  assert.match(String(wait.description), /known.*client.*limit/u);
+  assert.match(String(wait.description), /host disconnects.*same.*request later/u);
+  assert.doesNotMatch(String(wait.description), /known.*client.*limit/u);
+  assert.match(MESSAGE_BOX_TOOL.description ?? "", /human.*email.*Embassys app/u);
+  assert.doesNotMatch(MESSAGE_BOX_TOOL.description ?? "", /no Ambassador UI/u);
   assert.match(
     MESSAGE_BOX_TOOL.description ?? "",
     /Do not schedule a background check unless the user asks/u,

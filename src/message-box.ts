@@ -26,7 +26,7 @@ const wait_seconds = z
   .max(600)
   .optional()
   .describe(
-    "Omit to wait up to 600 seconds. Use a shorter value only when the user requests it or a known client timeout limit requires it. Do not shorten the wait merely because the request is pending. Zero is for nonblocking observers.",
+    "Omit to wait up to 600 seconds. Use a shorter value only when the user requests it. If the host disconnects sooner, the user can ask to check the same saved request later. Do not shorten the wait merely because the request is pending. Zero is for nonblocking observers.",
   );
 const permissionFields = {
   action_type: name,
@@ -112,7 +112,7 @@ function publicSchema(): Record<string, unknown> {
 export const MESSAGE_BOX_TOOL: CentralToolDefinition = {
   name: "message_box",
   description:
-    "Send or check an Embassys business message. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. Permissions are decided by the human email flow; there is no Ambassador UI or local permission decision. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
+    "Send or check an Embassys business message. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. The target person's human decides permissions through email or the signed-in Embassys app; MCP cannot decide permissions. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
   inputSchema: publicSchema(),
 };
 
