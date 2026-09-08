@@ -62,6 +62,13 @@ test uses a directory junction on Windows. The bundled worker and stdio client
 also pass the packaged test with an isolated PATH. This does not claim a signed
 release or replace native Windows/Linux qualification.
 
+The first CI run passed Mac and Linux but exposed a Windows timing failure in
+the existing ACP approval-pause regression. That test now advances a controlled
+clock beyond both deadlines only after the real mock-agent approval arrives.
+It still fails when either deadline's pause is removed, without counting process
+startup and durable writes against a one-second wall-clock budget. Production
+timeouts are unchanged.
+
 Ten-minute waits and exact shorter user requests are preserved by the relay.
 Initialization and tool metadata explain that an early host disconnect leaves
 accepted work available through a later check. A closed connection cannot receive
