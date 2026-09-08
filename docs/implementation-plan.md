@@ -2,9 +2,23 @@
 
 PR 40 merged the desktop app. On September 8 the owner authorized a downloadable
 GitHub preview under [ADR 0076](adr/0076-desktop-github-preview.md).
-`desktop-v0.1.0-preview.1` is being prepared through the existing CI gates with
-unsigned Mac, Windows and Linux downloads. Signed production distribution and
-automatic updates remain separate. See the [installation guide](desktop-install.md).
+[Embassys 0.1.0 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.0-preview.1)
+was published on September 8 after [PR 41](https://github.com/embassys/ambassador/pull/41)
+merged. The release tag points to the exact tested commit, `2bb800b`.
+[Core, fixture and package CI](https://github.com/embassys/ambassador/actions/runs/34281880295)
+and both [desktop PR](https://github.com/embassys/ambassador/actions/runs/34281880323)
+and [desktop branch](https://github.com/embassys/ambassador/actions/runs/34281880690)
+runs passed. All three uploaded archives were downloaded and their hashes and
+build identities verified; the public links and checksums also passed without
+GitHub authentication. The CI-built Mac DMG passed local extraction, strict code
+signature, file inventory and real MCP worker checks. A local packaged Mac
+launch reached the native welcome screen and started its server in 1.9 seconds.
+
+Downloads are available for Mac Apple silicon, Windows x64 and Linux x64.
+Windows and Linux remain experimental; the Mac preview is ad hoc signed without
+Developer ID or notarization. Signed production distribution and automatic
+updates remain separate. The npm CLI remains at 0.2.19. See the
+[installation guide](desktop-install.md).
 
 The 0.2.19 development release is complete. [PR 39](https://github.com/embassys/ambassador/pull/39)
 is merged; publication and artifact verification are recorded in the
