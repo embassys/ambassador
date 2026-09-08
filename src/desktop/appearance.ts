@@ -47,7 +47,8 @@ export function controlPalette(rawAccent: string | undefined, dark: boolean) {
 
 export function windowAppearance(platform: string, dark: boolean, reducedTransparency: boolean) {
   return {
-    backgroundColor: dark ? "#1e1e20" : "#f5f5f7",
+    backgroundColor:
+      platform === "darwin" && !reducedTransparency ? "#00000000" : dark ? "#1e1e20" : "#f5f5f7",
     titleBarStyle: platform === "darwin" ? ("hiddenInset" as const) : ("default" as const),
     ...(platform === "darwin" && !reducedTransparency
       ? { vibrancy: "sidebar" as const, visualEffectState: "followWindow" as const }

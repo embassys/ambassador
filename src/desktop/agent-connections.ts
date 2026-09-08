@@ -60,7 +60,7 @@ export function connectionEntry(
     ? { type: "http", url, timeout: 660000 }
     : { url, transport: "streamable-http", requestTimeoutMs: 660000 };
 }
-async function readBounded(
+export async function readBoundedConfiguration(
   path: string,
   maximum = 4 * 1024 * 1024,
 ): Promise<{ bytes: Buffer; fingerprint: string }> {
@@ -126,7 +126,7 @@ export class AgentConnection {
       throw new Error("Invalid configuration location.");
   }
   async #read() {
-    const current = await readBounded(this.options.configurationPath);
+    const current = await readBoundedConfiguration(this.options.configurationPath);
     const text = current.fingerprint === "absent" ? "" : current.bytes.toString("utf8");
     if (this.options.document)
       return { fingerprint: current.fingerprint, text, entry: this.options.document.read(text) };
@@ -150,7 +150,7 @@ export class AgentConnection {
     };
   }
   async #ownership() {
-    const saved = await readBounded(this.options.ownershipPath, 8192);
+    const saved = await readBoundedConfiguration(this.options.ownershipPath, 8192);
     const value =
       saved.fingerprint === "absent"
         ? undefined
@@ -270,7 +270,7 @@ export class AgentConnection {
       } finally {
         await file.close();
       }
-      if ((await readBounded(path)).fingerprint !== fingerprint)
+      if ((await readBoundedConfiguration(path)).fingerprint !== fingerprint)
         throw new Error("Settings changed during setup.");
       if (fingerprint === "absent") await link(temporary, path);
       else await rename(temporary, path);

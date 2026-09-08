@@ -6,11 +6,51 @@ behavior.
 ## Current candidate checks
 
 The unpublished desktop branch was checked again on 2026-09-08 with the bundled
-Node 24.19.0. All 472 default-suite tests passed, with seven expected platform or
-opt-in skips. Lint, typechecking, the desktop build and 14 desktop rendering,
-parser and artifact tests also passed. This includes the new OpenClaw instance
-isolation and fixed-guidance tests in ADR 0070. The native observations below
+Node 24.19.0. All 480 default-suite tests passed, with seven expected platform or
+opt-in skips. Lint, typechecking and 16 desktop rendering,
+parser and artifact tests also passed. This includes OpenClaw instance
+isolation and fixed guidance in ADR 0070, and executor binding checks in ADR 0071.
+The native observations below
 qualify only the described client behavior, not the central fixture or a release.
+
+## Claude Mac onboarding screenshots, 2026-09-08
+
+Used Claude Code in the installed Claude Mac app with Sonnet 5 High and the
+existing Ambassador connection. The requesting agent was real; central and the
+recipient were fixtures. No provider settings or credentials were changed.
+This does not qualify standalone Chat/Cowork, production email delivery or a
+two-real-agent exchange.
+
+In a fresh conversation, the ordinary prompt "Register me with Embassys using
+claude-onboarding@fixture.test" called Ambassador immediately. Claude asked for
+the six-digit code and completed verification after the fixture code was entered.
+It did not ask for a website or need a tool hint. The next prompt was "Can you
+get the phone number of alex@fixture.test from their agent?" Claude requested
+permission, reported the grant, checked for the result and displayed the exact
+synthetic number `+44 7700 900728` in the same conversation.
+
+The final sentence attributed approval to Alex's agent, although the preceding
+progress text correctly said the human decides. The fixture supplied permission
+and the delayed action result as separate events. That wording is not evidence
+that an agent made the owner's permission decision.
+
+Conversation: `local_6c6c6f84-e52b-4c59-9354-9da7fddd5201`, titled
+"Embassy registration setup". Inspected screenshot sequence:
+`.build/claude-onboarding/01-registration-prompt.png`,
+`02-verification-request.png`, `03-registration-complete.png` and
+`04-first-request-result.png`. A local illustrated walkthrough is in
+`.build/claude-onboarding/walkthrough.md`. Screenshots remain local and are not
+part of the published package or repository history.
+
+The same day's rebuilt unsigned Mac package passed native account/device setup
+navigation, light/dark/system appearance changes and server Stop/Start. The
+sidebar exposes Electron's native material; the content area remains opaque.
+Reduce Transparency has deterministic fallback coverage, not a native OS-setting
+test in this run. App screenshots `05-embassys-mac-light.png` through
+`08-embassys-account.png` are in the same directory. These app previews do not
+represent submission of the app's email form. Both disposable servers stopped
+and their state directories were removed. The original Personal app profile was
+reopened with its server still stopped. Claude's original MCP entry was unchanged.
 
 ## OpenClaw instance and discovery retest, 2026-09-08
 
@@ -45,7 +85,7 @@ ordinary prompt "Register me with Embassys using openclaw-fresh@fixture.test".
 It called `register_agent` without a website question or tool hint. The model
 then refused to collect a verification code in chat under its host credential
 policy. Discovery and registration initiation passed; code verification did not
-complete in that run. The fixed guidance now directs such hosts to Registration
+complete in that run. The fixed guidance now directs such hosts to Account > Set up this device
 in the Embassys app for the same installation. Its regression test passes; that
 new fallback wording has not been observed in another live model turn. The
 existing app-owned verification path remains the preferred owner flow.

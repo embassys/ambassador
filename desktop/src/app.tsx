@@ -22,6 +22,7 @@ interface AppSnapshot {
   diagnosticsMode: "development" | "production";
   appearance: "system" | "light" | "dark";
   dark: boolean;
+  reducedTransparency: boolean;
   notifications: { enabled: boolean; supported: boolean };
   navigation?: {
     id: string;
@@ -255,6 +256,9 @@ function App() {
     if (!snapshot) return;
     document.documentElement.dataset.platform = snapshot.platform;
     document.documentElement.dataset.theme = snapshot.dark ? "dark" : "light";
+    document.documentElement.dataset.transparency = snapshot.reducedTransparency
+      ? "reduced"
+      : "full";
   }, [snapshot]);
   useEffect(() => {
     localStorage.setItem("ambassador.page", page);
@@ -560,6 +564,11 @@ function App() {
           </div>
         )}
         {selected?.runtime.error && <div className="error-banner">{selected.runtime.error}</div>}
+        {selected?.runtime.notice && (
+          <div className="error-banner" role="status">
+            {selected.runtime.notice}
+          </div>
+        )}
         {!snapshot ? (
           <div className="empty-state">Opening your workspace…</div>
         ) : (

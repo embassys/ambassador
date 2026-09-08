@@ -11,6 +11,95 @@ import { pathsForStateDirectory } from "../src/gateway-paths.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
+test("desktop pauses a mismatched executor before dispatch and resumes queued work after repair", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-desktop-guard-flow-"));
+  const central = await startFakeCentral();
+  let allowed = false;
+  let delivered = 0;
+  const instanceId = randomUUID();
+  const gateway = new DesktopGateway({
+    id: instanceId,
+    name: "Guarded",
+    port: 0,
+    stateDirectory: root,
+    workingDirectory: root,
+    environment: {},
+    beforeDirectDelivery: async (context) => {
+      assert.equal(context.agent, "claude");
+      if (!allowed) throw new Error("wrong endpoint");
+    },
+    testOverrides: {
+      centralOrigin: central.apiUrl,
+      nowSeconds: () => 1_788_220_800,
+      deliveryTargetFactory: () => ({
+        async deliver(message) {
+          assert.equal(message.payload.type, "action_call");
+          delivered++;
+          return { status: "completed" };
+        },
+        async close() {},
+      }),
+    },
+  });
+  t.after(async () => {
+    await gateway.stop();
+    await central.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await gateway.start();
+  await gateway.desktopCommand({
+    type: "enrollment_register",
+    instanceId,
+    email: "guarded@fixture.test",
+    executor: "claude",
+  });
+  await gateway.desktopCommand({
+    type: "enrollment_verify",
+    instanceId,
+    code: central.verificationCode("guarded@fixture.test"),
+  });
+  central.seedClient("peer@fixture.test");
+  central.queueMessage(
+    "guarded@fixture.test",
+    {
+      type: "action_call",
+      call_id: randomUUID(),
+      action_type: "get_phone_number",
+      payload: { reason: "fixture" },
+    },
+    "peer@fixture.test",
+    "get_phone_number",
+  );
+  for (let i = 0; i < 400 && !gateway.snapshot().notice; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(delivered, 0);
+  assert.equal(gateway.snapshot().state, "running");
+  assert.match(gateway.snapshot().notice ?? "", /connection.*Agents/);
+  assert.equal((await gateway.overview()).pendingCalls, 1);
+  central.queueMessage(
+    "guarded@fixture.test",
+    {
+      type: "action_response",
+      call_id: randomUUID(),
+      action_type: "get_phone_number",
+      status: "success",
+      result: { phone_number: "fixture" },
+    },
+    "peer@fixture.test",
+    "get_phone_number",
+  );
+  for (let i = 0; i < 400 && (await gateway.overview()).receivedResults === 0; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal((await gateway.overview()).receivedResults, 1);
+  await gateway.stop();
+  allowed = true;
+  await gateway.start();
+  for (let i = 0; i < 400 && delivered === 0; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(delivered, 1);
+  assert.equal(gateway.snapshot().notice, undefined);
+});
+
 test("app enrollment is shared with MCP; local activity pages and notifications do not consume work", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "embassys-app-flows-"));
   const central = await startFakeCentral();
@@ -59,7 +148,7 @@ test("app enrollment is shared with MCP; local activity pages and notifications 
   await mcp.initialize({ name: "claude-code", version: "qualification" });
   await assert.rejects(
     mcp.callTool("register_agent", { email: "foreign@fixture.test" }),
-    /Registration screen/,
+    /Account.*Set up this device/,
   );
   assert.equal(central.requests().length, 0);
   await desktop.registration.register({ email: "app@fixture.test", executor: "claude" });

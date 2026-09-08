@@ -70,7 +70,7 @@ visible conversation messages. OpenClaw requires the extension's
 not changed by the desktop connection helper. Without the hook, MCP initialization
 and the existing tool descriptions still provide the workflow guidance.
 If the host forbids verification codes in chat, the guidance directs the owner
-to Registration in the Embassys app for the same installation.
+to Account > Set up this device in the Embassys app for the same installation.
 
 A provider-owned, owner-only route database lives beneath OpenClaw's state
 directory at `ambassador-conversation-return/<endpoint-sha256>/routes.sqlite`. Its instance lock
@@ -84,6 +84,12 @@ Endpoint namespaces keep independent instances' routes separate. The old unscope
 route journal is left untouched and is not replayed; existing results remain
 available through foreground checks and the inbox. No provider configuration or
 credential is copied between instances. See [ADR 0070](adr/0070-instance-scoped-native-observers.md).
+
+Desktop direct delivery also checks the selected executor's configured Ambassador
+binding before dispatch. A mismatch, disabled connection or unsupported project
+override pauses delivery with the message still pending. The app shows a notice
+to repair the connection and restart. This does not pin cached provider connections
+or create independent provider profiles. See [ADR 0071](adr/0071-desktop-executor-checks-and-mac-vibrancy.md).
 
 Controlled tests on OpenClaw 2026.8.2 used the owner's approved current profile
 and Codex backend. Requests from two desktop conversations received exact

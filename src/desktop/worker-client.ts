@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { type ExecutorContext, executorCheckSchema } from "./executor-guard.js";
 import { desktopLaunchEnvironment } from "./launch-environment.js";
 import { type LocalNotification, localNotificationSchema } from "./notifications.js";
 import {
@@ -18,6 +19,7 @@ const snapshotSchema = z.strictObject({
   state: z.enum(["stopped", "starting", "running", "stopping", "error"]),
   endpoint: z.string().max(512).optional(),
   error: z.string().max(1000).optional(),
+  notice: z.string().max(1000).optional(),
   startedAt: z.iso.datetime().optional(),
   stopReason: z.literal("handoff").optional(),
 });
@@ -36,6 +38,7 @@ export class DesktopGatewayClient {
   #state: GatewaySnapshot;
   #closed = false;
   #closeResult: Promise<void> | undefined;
+  #checkingExecutor = false;
 
   constructor(
     readonly options: {
@@ -46,6 +49,7 @@ export class DesktopGatewayClient {
       readonly instance: DesktopInstance;
       readonly onChange?: (snapshot: GatewaySnapshot) => void;
       readonly onNotification?: (event: LocalNotification) => void;
+      readonly checkExecutor?: (context: ExecutorContext) => Promise<boolean>;
     },
   ) {
     this.#state = { id: options.instance.id, state: "stopped" };
@@ -77,7 +81,27 @@ export class DesktopGatewayClient {
           !("type" in message)
         )
           return;
-        if (message.type === "notification") {
+        if (message.type === "executor_check") {
+          const request = executorCheckSchema.safeParse(message);
+          if (!request.success || this.#checkingExecutor || this.#closed) return;
+          this.#checkingExecutor = true;
+          void Promise.resolve()
+            .then(() => options.checkExecutor?.(request.data.context) ?? false)
+            .catch(() => false)
+            .then((allowed) => {
+              this.#checkingExecutor = false;
+              if (this.#child.connected && !this.#closed)
+                this.#child.send(
+                  {
+                    protocol: DESKTOP_PROTOCOL,
+                    type: "executor_check_result",
+                    requestId: request.data.requestId,
+                    allowed: allowed === true,
+                  },
+                  () => {},
+                );
+            });
+        } else if (message.type === "notification") {
           const parsed = localNotificationSchema.safeParse(
             "event" in message ? message.event : undefined,
           );
@@ -108,6 +132,7 @@ export class DesktopGatewayClient {
             state: parsed.data.state,
             ...(parsed.data.endpoint === undefined ? {} : { endpoint: parsed.data.endpoint }),
             ...(parsed.data.error === undefined ? {} : { error: parsed.data.error }),
+            ...(parsed.data.notice === undefined ? {} : { notice: parsed.data.notice }),
             ...(parsed.data.startedAt === undefined ? {} : { startedAt: parsed.data.startedAt }),
             ...(parsed.data.stopReason ? { stopReason: parsed.data.stopReason } : {}),
           };

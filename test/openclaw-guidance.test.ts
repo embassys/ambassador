@@ -16,6 +16,7 @@ test("OpenClaw discovery guidance is fixed, uses configured tools, and does not 
   assert.match(text, /Embassys.*Ambassador/);
   assert.match(text, /register_agent.*verify_email/);
   assert.match(text, /host.*forbids.*codes.*Embassys app.*same installation/);
+  assert.match(text, /Account > Set up this device/);
   assert.match(text, /same request ID/);
   assert.match(text, /Do not create.*task/);
   assert.match(text, /experimental/);

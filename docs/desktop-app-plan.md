@@ -824,3 +824,36 @@ consenting recipient. Codex computer control is unavailable, standalone Claude
 Chat/Cowork has no configured Ambassador connector, and the installed Hermes
 API still lacks the required trusted origin and idle-only injection behavior.
 Native Windows/Linux qualification remains excluded from this request.
+
+## Executor checks and Mac sidebar, 2026-09-08
+
+ADR 0071 closes a desktop dispatch gap. The worker asks its host to verify the
+selected provider's public Ambassador connection before recording dispatch.
+Wrong ports, disabled or unsupported settings and unqualified project overrides
+pause delivery while the message remains pending. The app shows the reason and
+repair instructions. Receipt and processing continue independently. Tests prove
+repair plus restart delivers the original message once and does not replay an
+uncertain actual handoff. Host checks use the existing private process channel,
+bounded readers and desktop parsers. No provider configuration or credential is
+copied; live qualification of independent provider profiles remains open.
+
+The Mac window now exposes native sidebar vibrancy through clear window and
+sidebar backgrounds, with opaque content and an opaque Reduce Transparency
+fallback. The packaged Mac app passed native light/dark switching, account and
+device-setup navigation, and server stop/start. The user-facing setup guidance
+now names Account > Set up this device. No new toolkit or dependency was added.
+
+The real Claude Mac app completed fresh registration, code verification and a
+phone request without a website question or tool hint. Four inspected screenshots
+record the full conversation. Central and the contact were scripted fixtures;
+this is not a deployed-central or two-real-agent qualification. See
+[the Claude record](qualification.md#claude-mac-onboarding-screenshots-2026-09-08).
+
+Current checks pass 480 core tests with seven expected skips and 16 desktop
+tests, plus lint, typechecking and packaging. The packaged host passed startup,
+duplicate launch and CLI → app → CLI handoff. Mac screenshots and the illustrated
+walkthrough remain local in `.build/claude-onboarding/`. The preceding commit
+`0729712` passed all three desktop CI platforms in
+[run 34195202482](https://github.com/embassys/ambassador/actions/runs/34195202482).
+That run does not qualify these subsequent changes. No API code changed or
+release was published.

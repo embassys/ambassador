@@ -118,6 +118,23 @@ unqualified until their exact user-facing path passes. Central failure modes
 that cannot safely be induced live remain deterministic regression cases plus
 explicit API limitations. Do not publish while release blockers remain.
 
+## Desktop executor binding (ADR 0071)
+
+- Check each reviewed provider against the selected instance's port before
+  recording dispatch. A missing, disabled, authenticated or different binding
+  must not expose the incoming message to that provider.
+- Refuse malformed configuration, linked files and unqualified project overrides.
+  Exercise the actual desktop TOML/YAML parsers as well as the shared validator.
+- Correlate the private host reply. Cover wrong IDs, overlap, timeout, cancellation,
+  missing handlers, disconnect and late replies. No renderer command can permit
+  an executor check.
+- Prove a refused check leaves durable delivery pending while independent central
+  receipt and processing continue. Repair and restart must deliver once. Preserve
+  the existing prohibition on replay after an uncertain actual dispatch.
+- Native qualification must distinguish the checked file from a provider's cached
+  connection. Qualify independent provider profiles before claiming simultaneous
+  instance support for a real provider.
+
 ## Shared CLI and desktop installation (ADR 0069)
 
 The same-build handoff regressions cover fixed-path attachment without copying

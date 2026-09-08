@@ -820,6 +820,9 @@ input:not([type="checkbox"]):not([type="radio"]) {
   padding-top: 55px;
   -webkit-app-region: drag;
 }
+:root[data-platform="darwin"][data-transparency="full"] {
+  --sidebar: transparent;
+}
 [data-platform="darwin"] .page-header {
   min-height: 82px;
   padding-top: 22px;

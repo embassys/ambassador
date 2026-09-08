@@ -36,6 +36,7 @@ import {
 } from "../../src/desktop/diagnostics.js";
 import { verifyMacDistribution } from "../../src/desktop/distribution.js";
 import { BUNDLED_NODE_VERSION, verifyBundledEngine } from "../../src/desktop/engine.js";
+import { verifyExecutorConnection } from "../../src/desktop/executor-connection.js";
 import { DesktopInstances } from "../../src/desktop/instances.js";
 import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
@@ -179,6 +180,7 @@ async function snapshot() {
     platform: process.platform,
     appearance: appearance.value,
     dark: nativeTheme.shouldUseDarkColors,
+    reducedTransparency: nativeTheme.prefersReducedTransparency,
     palette: controlPalette(accent, nativeTheme.shouldUseDarkColors),
     notifications: { enabled: notifications.enabled, supported: Notification.isSupported() },
     navigation,
@@ -230,6 +232,21 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
           diagnostics: diagnosticsMode,
           instance,
           onChange,
+          checkExecutor: async (context) => {
+            const provider = context.agent === "claude" ? "claude_code" : context.agent;
+            const environment = desktopLaunchEnvironment(
+              process.env,
+              dirname(nodePath),
+              app.getPath("home"),
+            );
+            return verifyExecutorConnection({
+              provider,
+              configurationPath: await providerConfiguration(provider, environment),
+              workingDirectory: context.workingDirectory,
+              port: instance.port,
+              document: providerDocument(provider),
+            });
+          },
           onNotification: (event) => {
             if (!quitLifecycle.stopping)
               void notifications.receive(instance.id, event).catch(() => undefined);
@@ -829,7 +846,13 @@ else {
       if (process.platform === "win32") systemPreferences.on("color-changed", changed);
       nativeTheme.on("updated", () => {
         if (window) {
-          window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? "#1e1e20" : "#f5f5f7");
+          window.setBackgroundColor(
+            windowAppearance(
+              process.platform,
+              nativeTheme.shouldUseDarkColors,
+              nativeTheme.prefersReducedTransparency,
+            ).backgroundColor,
+          );
           if (process.platform === "darwin")
             window.setVibrancy(nativeTheme.prefersReducedTransparency ? null : "sidebar");
         }

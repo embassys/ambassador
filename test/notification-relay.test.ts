@@ -45,6 +45,63 @@ async function until(predicate: () => boolean) {
   }
 }
 
+test("a failed connection check preserves an undispatched message while receipt continues", async (t) => {
+  const store = fixture(t);
+  let received = false;
+  let failed = false;
+  let acknowledged = false;
+  let delivered = 0;
+  const relay = new NotificationRelay({
+    store,
+    receiveMessages: async (signal) => {
+      if (received) return pending(signal);
+      received = true;
+      return [MESSAGE];
+    },
+    acknowledgeMessage: async () => {
+      acknowledged = true;
+    },
+    onDeliveryError: () => {
+      failed = true;
+    },
+    deliveryTarget: {
+      async prepare() {
+        throw new Error("wrong instance");
+      },
+      async deliver() {
+        delivered++;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+  });
+  void relay.run(new AbortController().signal);
+  t.after(() => relay.shutdown());
+  await until(() => failed && acknowledged);
+  assert.equal(delivered, 0);
+  assert.equal(store.get("message-1")?.delivery, "pending");
+  await relay.shutdown();
+  const repaired = new NotificationRelay({
+    store,
+    receiveMessages: pending,
+    acknowledgeMessage: async () => {
+      throw new Error("already acknowledged");
+    },
+    deliveryTarget: {
+      async prepare() {},
+      async deliver() {
+        delivered++;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+  });
+  void repaired.run(new AbortController().signal);
+  t.after(() => repaired.shutdown());
+  await until(() => store.get("message-1")?.delivery === "completed");
+  assert.equal(delivered, 1);
+});
+
 test("a later central reply unblocks delivery while capture and acknowledgement continue", async (t) => {
   const store = fixture(t);
   const controller = new AbortController();
