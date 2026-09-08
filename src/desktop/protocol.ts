@@ -3,7 +3,7 @@ import { connectionOperation, connectionProvider } from "./agent-connections.js"
 import { appearanceSchema } from "./appearance.js";
 import { diagnosticQuerySchema } from "./diagnostic-query.js";
 import { ownerCommands } from "./owner-protocol.js";
-import { registrationInput } from "./registration.js";
+import { desktopExecutor, registrationInput } from "./registration.js";
 
 export const DESKTOP_PROTOCOL = 1;
 export const instanceId = z.uuid().toLowerCase();
@@ -50,6 +50,11 @@ const commandSchema = z.discriminatedUnion("type", [
     code: z.string().regex(/^\d{6}$/u),
   }),
   z.strictObject({ type: z.literal("enrollment_resend"), ...selected }),
+  z.strictObject({
+    type: z.literal("enrollment_executor"),
+    ...selected,
+    executor: desktopExecutor,
+  }),
   z.strictObject({ type: z.literal("permissions"), ...selected }),
   z.strictObject({
     type: z.literal("activity"),

@@ -69,6 +69,50 @@ async function setup(t: TestContext) {
   return { root, central, options, store, activations: () => activations };
 }
 
+test("email registration defers executor choice and activation until the owner finishes setup", async (t) => {
+  const f = await setup(t);
+  let registration = await DesktopRegistration.open(f.options);
+  await registration.register({ email: "first-account@fixture.test" });
+  assert.equal(await f.options.profileStore.load(), undefined);
+  await registration.verify(f.central.verificationCode("first-account@fixture.test"));
+  assert.equal(f.activations(), 0);
+  assert.equal(registration.needsExecutor, true);
+  registration = await DesktopRegistration.open(f.options);
+  assert.equal(registration.snapshot().needsExecutor, true);
+  await assert.rejects(registration.selectExecutor("shell"));
+  const calls = f.central.requests().length;
+  await registration.selectExecutor("codex");
+  assert.equal(f.activations(), 1);
+  assert.equal(f.central.requests().length, calls);
+  assert.equal((await f.options.profileStore.load())?.agent_kind, "codex");
+  assert.equal(registration.needsExecutor, false);
+  await registration.selectExecutor("codex");
+  await assert.rejects(registration.selectExecutor("claude"));
+  assert.equal(f.central.requests().length, calls);
+});
+
+test("retrying selected executor activation never registers or verifies again", async (t) => {
+  const f = await setup(t);
+  let fail = true;
+  let activated = false;
+  const registration = await DesktopRegistration.open({
+    ...f.options,
+    activate: async () => {
+      if (fail) throw new Error("temporarily unavailable");
+      activated = true;
+    },
+  });
+  await registration.register({ email: "deferred-retry@fixture.test" });
+  await registration.verify(f.central.verificationCode("deferred-retry@fixture.test"));
+  const count = f.central.requests().length;
+  await assert.rejects(registration.selectExecutor("claude"));
+  fail = false;
+  await registration.selectExecutor("claude");
+  assert.equal(activated, true);
+  assert.equal(registration.snapshot().executor, "claude");
+  assert.equal(f.central.requests().length, count);
+});
+
 test("desktop registration binds the executor and email, survives restart and keeps secrets out of UI state", async (t) => {
   const f = await setup(t);
   let registration = await DesktopRegistration.open(f.options);

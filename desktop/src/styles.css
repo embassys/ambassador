@@ -1363,3 +1363,133 @@ input:not([type="checkbox"]):not([type="radio"]) {
     border-color: ButtonText;
   }
 }
+
+.onboarding-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 46px 44px 24px;
+  font-size: 17px;
+  font-weight: 650;
+  -webkit-app-region: drag;
+}
+.onboarding-brand img {
+  width: 30px;
+  height: 30px;
+}
+.onboarding-content {
+  width: min(100%, 520px);
+  margin: auto;
+  padding: 40px 28px 64px;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+.onboarding-content h1 {
+  font-size: 30px;
+  letter-spacing: -0.8px;
+  margin: 0 0 16px;
+}
+.onboarding-intro {
+  color: var(--subtle);
+  font-size: 15px;
+  line-height: 1.6;
+  margin-bottom: 30px;
+}
+.onboarding-actions {
+  display: flex;
+  gap: 12px;
+}
+.onboarding-actions button {
+  min-width: 132px;
+}
+.onboarding-content .primary,
+.onboarding-content .secondary {
+  min-height: 38px;
+  padding: 8px 18px;
+}
+.onboarding-step {
+  color: var(--subtle);
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+.onboarding-back {
+  margin-bottom: 28px;
+}
+.onboarding-footer {
+  padding: 20px 44px;
+}
+.onboarding-content .settings-section {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 24px 0;
+}
+.onboarding-content .settings-row {
+  padding: 0 0 10px;
+}
+.onboarding-content .registration-form {
+  margin-bottom: 24px;
+}
+.onboarding-content .account-page {
+  max-width: none;
+}
+.onboarding-agents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 0;
+  border: 0;
+  gap: 10px;
+  margin: 24px 0;
+}
+.onboarding-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.onboarding-agent.selected {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+.agent-initial {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--hover);
+  font-weight: 600;
+}
+.onboarding-note {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 22px 0;
+  color: var(--subtle);
+}
+.onboarding-note h2 {
+  font-size: 18px;
+  color: var(--text);
+}
+.onboarding-manual {
+  margin-top: 22px;
+  color: var(--subtle);
+}
+.onboarding-manual pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.onboarding-later {
+  display: block;
+  margin-top: 24px;
+}

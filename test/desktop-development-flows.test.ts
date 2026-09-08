@@ -11,6 +11,90 @@ import { pathsForStateDirectory } from "../src/gateway-paths.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
+test("unfinished email-first setup survives gateway restart without polling or dispatch", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-onboarding-"));
+  const central = await startFakeCentral();
+  const instanceId = randomUUID();
+  const gateway = new DesktopGateway({
+    id: instanceId,
+    name: "Onboarding",
+    port: 0,
+    stateDirectory: root,
+    workingDirectory: root,
+    environment: {},
+    testOverrides: { centralOrigin: central.apiUrl, nowSeconds: () => 1_788_220_800 },
+  });
+  t.after(async () => {
+    await gateway.stop();
+    await central.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await gateway.start();
+  await gateway.desktopCommand({
+    type: "enrollment_register",
+    instanceId,
+    email: "account-first@fixture.test",
+  });
+  await gateway.desktopCommand({
+    type: "enrollment_verify",
+    instanceId,
+    code: central.verificationCode("account-first@fixture.test"),
+  });
+  await gateway.stop();
+  const before = central.requests().length;
+  await gateway.start();
+  assert.equal((await gateway.overview()).enrollment.verified, true);
+  assert.equal(
+    (
+      (await gateway.desktopCommand({ type: "enrollment_status", instanceId })) as {
+        needsExecutor: boolean;
+      }
+    ).needsExecutor,
+    true,
+  );
+  assert.equal(central.requests().length, before);
+  const endpoint = gateway.snapshot().endpoint;
+  assert.ok(endpoint);
+  const mcp = new TestMcpClient(endpoint);
+  await mcp.initialize({ name: "claude-code", version: "fixture" });
+  await assert.rejects(mcp.callTool("get_my_permissions", {}), /Set up this device/);
+  await gateway.desktopCommand({ type: "enrollment_executor", instanceId, executor: "claude" });
+  await assert.doesNotReject(mcp.callTool("get_my_permissions", {}));
+});
+
+test("CLI verification can finish an email-first app registration without selecting a provider", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-email-first-cli-"));
+  const central = await startFakeCentral();
+  const path = join(root, "registration.json");
+  const common = {
+    ...pathsForStateDirectory(root),
+    workingDirectory: root,
+    environment: {},
+    centralOrigin: central.apiUrl,
+    nowSeconds: () => 1_788_220_800,
+    localMcpPort: 0,
+  };
+  let application = await openGatewayApplication({ ...common, desktopRegistrationPath: path });
+  t.after(async () => {
+    await application.close();
+    await central.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await application.desktop?.registration.register({ email: "email-first-cli@fixture.test" });
+  await application.close();
+  application = await openGatewayApplication({ ...common, toolRegistrationPath: path });
+  const mcp = new TestMcpClient(application.endpoint);
+  await mcp.initialize({ name: "claude-code", version: "fixture" });
+  await mcp.callTool("verify_email", {
+    email: "email-first-cli@fixture.test",
+    code: central.verificationCode("email-first-cli@fixture.test"),
+  });
+  assert.equal(application.localOverview().enrollment.verified, true);
+  assert.equal(application.desktop?.registration.needsExecutor, true);
+  assert.equal(central.requests().length, 2);
+  await assert.rejects(mcp.callTool("get_my_permissions", {}), /Set up this device/);
+});
+
 test("desktop pauses a mismatched executor before dispatch and resumes queued work after repair", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "embassys-desktop-guard-flow-"));
   const central = await startFakeCentral();

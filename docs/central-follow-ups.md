@@ -179,6 +179,11 @@ The following issues define server work without changing the API here:
 - [Issue 7](https://github.com/embassys/agent2agent/issues/7) covers email sign-in,
   returning owners, owner sessions and device/executor binding. Identity recovery
   continues in issue 2; this does not replace existing agent identities.
+  A [2026-09-08 onboarding observation](https://github.com/embassys/agent2agent/issues/7#issuecomment-5581439259)
+  records the two-code first-time flow: agent enrollment verifies email, then
+  owner login sends another code. A supported first-time owner signup/session
+  contract should remove that duplicate step while keeping agent and owner
+  credentials separate and handling uncertain responses without new identities.
 - [Issue 8](https://github.com/embassys/agent2agent/issues/8) covers the owner inbox,
   exact decisions and answers, email/app races, and resumable owner observation.
   The owner feed must not consume execution messages. Issues 1, 3 and 4 remain

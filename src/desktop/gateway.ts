@@ -363,6 +363,8 @@ export class DesktopGateway {
           return services.registration.verify(command.code);
         case "enrollment_resend":
           return services.registration.resend();
+        case "enrollment_executor":
+          return services.registration.selectExecutor(command.executor);
         case "permissions":
           return services.permissions();
         case "activity":

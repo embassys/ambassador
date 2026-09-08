@@ -25,6 +25,14 @@ control route. CLI options remain unchanged; current development builds reuse
 the saved canonical executor directory when switching hosts. The published
 0.2.19 executable is not qualified to read newer development state.
 
+[ADR 0072](adr/0072-account-first-onboarding.md) makes desktop onboarding start
+with Log in or Register, followed by agent setup. Email-only desktop enrollment
+records an unfinished executor selection. Verification saves the credential but
+does not start polling or delivery until the owner selects a reviewed provider.
+That state survives app/CLI handoff; MCP-origin registration still resolves its
+fixed provider before enrollment. Owner login remains a separate credential realm
+and currently requires a second email code after first-time registration.
+
 ## Startup
 
 The public package and commands are:

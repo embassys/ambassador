@@ -315,6 +315,7 @@ async function execute(input: unknown): Promise<unknown> {
     "enrollment_register",
     "enrollment_verify",
     "enrollment_resend",
+    "enrollment_executor",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;

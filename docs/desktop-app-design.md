@@ -4,6 +4,23 @@ Status: accepted for implementation under [ADR 0064](adr/0064-desktop-applicatio
 
 Date: 2026-09-07. Companion: [implementation and test plan](desktop-app-plan.md).
 
+## First-run flow, updated 2026-09-08
+
+[ADR 0072](adr/0072-account-first-onboarding.md) replaces the initial dashboard
+with a welcome screen containing Log in and Register. Register asks for email
+and verification code before choosing an agent. Login then leads to guided
+agent setup with one selected provider and a primary connection button. Keep
+manual commands collapsed. Show the main navigation only after setup finishes
+or the owner explicitly chooses to do it later. Remember that choice per account
+and installation; sign-out and expired login return to onboarding. Server
+controls remain reachable without exposing the dashboard.
+
+The current server requires a separate owner login code after new registration.
+The UI explains the step and reuses the email. It does not exchange the agent
+credential for an owner session or repeat an uncertain verification. A returning
+owner with no local agent can continue to account views; restoring their agent
+still needs the server contract in issue 7.
+
 ## Recommendation
 
 Build a desktop app that lives in the macOS menu bar or Windows/Linux tray,
