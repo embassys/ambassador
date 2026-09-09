@@ -43,3 +43,17 @@ Tests precede implementation: four-provider paths, install/reinstall/repair/
 disconnect, manual edits, symlinks, interrupted writes, wrong/stale challenges,
 concurrent checks, provider approval cancellation, timeout, shutdown, wrong MCP
 instance, no duplicate enrollment and fresh-conversation skill discovery.
+
+## Preview release approval
+
+On September 9 the owner requested a new release after the installed-agent
+tests. Publish desktop 0.1.1 as `desktop-v0.1.1-preview.1` through ADR 0076's
+existing verified-download procedure. Require successful core, fixture, package
+and desktop checks, and download and verify the uploaded files. Keep the npm
+CLI at 0.2.19 and the approved development logging policy unchanged.
+
+The real-provider checks used a synthetic central fixture. The new Connect
+buttons and native approval dialogs still await visual inspection because the
+Mac was locked. Retain this qualification limit in the release notes together
+with the Codex model compatibility limit. Windows/Linux native setup remains
+unqualified and manual; this preview adds no production support claim.

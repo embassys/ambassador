@@ -1,16 +1,16 @@
 # Install the Embassys preview
 
 Download the application for your computer from the
-[Embassys 0.1.0 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.0-preview.1).
+[Embassys 0.1.1 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.1-preview.1).
 Choose an application file in Assets, not GitHub's source-code archives. You do
 not need to install Node or build Embassys yourself. You do need an installed,
 authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | `Embassys-0.1.0-darwin-arm64-development.dmg` | Native Mac app and real-agent tests |
-| Windows x64 | `Embassys-0.1.0-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
-| Linux x64 | `Embassys-0.1.0-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Mac with Apple silicon, M1 or newer | `Embassys-0.1.1-darwin-arm64-development.dmg` | Native Mac app baseline and installed-agent tests; new Connect dialogs await visual inspection |
+| Windows x64 | `Embassys-0.1.1-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
+| Linux x64 | `Embassys-0.1.1-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
 
 There is no Intel Mac or Windows/Linux ARM download in this preview. These are
 unsigned development packages. Managed computers may refuse to run them.
@@ -55,6 +55,12 @@ the agent connection steps. New device registration currently needs another
 code for owner login. Returning-owner login and local agent enrollment are
 separate, so a new computer cannot recover an old agent identity yet.
 
+On a qualified Mac, **Connect** configures Claude Code, Codex, OpenClaw or Hermes,
+installs an Embassys discovery skill and checks a real tool call. Provider
+approvals appear in the app. Reopen existing agent chats to load the skill.
+If the check fails, settings remain saved and **Test connection** can retry
+without repeating registration. See [Connect your agent](guided-agent-connection.md).
+
 Closing the window keeps the menu/tray app running. Quit Embassys stops its
 servers. Settings contains server controls, logs and Clean. Clean removes local
 enrollment and pending work; it is not sign-out or a server-side account reset.
@@ -75,6 +81,9 @@ CLI** guidance for the matching bundled command.
   redaction. They expire after seven days while the app runs or logs are next
   opened, with a 1 GiB limit per instance. Clear logs and export are in Settings.
 - There are no automatic updates or a general state-migration guarantee.
+- This release's four installed-agent tests used synthetic central data. Codex
+  required a model supported by its installed adapter; the test used `gpt-5.5`
+  with high reasoning. Embassys does not change the provider's model setting.
 
 Checksums and dependency inventories are attached beside the downloads. See the
 [work plan](implementation-plan.md) for the remaining reliability and platform
