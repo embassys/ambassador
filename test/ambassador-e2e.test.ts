@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   type GatewayApplicationOptions,
@@ -356,6 +357,12 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
   const gateway = value.trackGateway(
     await openGatewayApplication({
       ...value.options,
+      centralFetch: async (input, init) => {
+        // Receipt is independent of provider completion, even with a slow central ACK.
+        if (String(input).endsWith("/api/ack_message"))
+          await delay(1200, undefined, { signal: init?.signal ?? undefined });
+        return fetch(input, init);
+      },
       deliveryTargetFactory: (context) => ({
         async deliver(message, signal) {
           deliveredTypes.push(message.payload.type);
@@ -427,15 +434,15 @@ test("holds an ACP permission request for its owner's emailed answer", async (t)
     humanInput?.requestId as string,
   );
   assert.equal(typeof outcomeMessageId, "string");
-  for (
-    let attempt = 0;
-    attempt < 100 &&
-    (value.central.messageState(triggeringMessageId) !== "acked" ||
+  const acknowledgementDeadline = performance.now() + 30_000;
+  while (
+    performance.now() < acknowledgementDeadline &&
+    (deliveredTypes.length < 2 ||
+      value.central.messageState(triggeringMessageId) !== "acked" ||
       value.central.messageState(unrelatedMessageId) !== "acked" ||
-      value.central.messageState(outcomeMessageId as string) !== "acked");
-    attempt += 1
+      value.central.messageState(outcomeMessageId as string) !== "acked")
   ) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await delay(20);
   }
   assert.deepEqual(deliveredTypes, ["request_agent_tool", "unrelated"]);
   assert.equal(value.central.messageState(triggeringMessageId), "acked");

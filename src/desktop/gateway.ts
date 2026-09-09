@@ -3,7 +3,9 @@ import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { AcpSessionStore } from "../acp-session-store.js";
+import { capabilityForKind } from "../agent-capabilities.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
+import { AcpSessionController } from "../direct-delivery.js";
 import { GatewayError } from "../errors.js";
 import {
   type GatewayApplicationOptions,
@@ -17,13 +19,17 @@ import { GatewayIdentity } from "../identity.js";
 import { LocalControlClient } from "../local-control.js";
 import { clearLocalGatewayState } from "../local-state-cleaner.js";
 import { ProcessLock } from "../process-lock.js";
+import { redactVerboseValue } from "../verbose-log.js";
 import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.js";
+import type { ConnectionProvider } from "./agent-connections.js";
+import { CONNECTION_CHECK_MS, ConnectionCheck } from "./connection-check.js";
 import { desktopCredentialStores } from "./credential-stores.js";
 import { type DiagnosticMode, desktopDiagnosticOptions } from "./diagnostic-policy.js";
 import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
 import { readLocalSummary } from "./local-summary.js";
 import type { LocalNotification } from "./notifications.js";
 import type { DesktopCommand, GatewaySnapshot } from "./protocol.js";
+import type { SetupPermission } from "./setup-approval.js";
 
 export interface DesktopGatewayOptions {
   readonly id: string;
@@ -36,10 +42,18 @@ export interface DesktopGatewayOptions {
   readonly onChange?: (snapshot: GatewaySnapshot) => void;
   readonly onNotification?: (event: LocalNotification) => void;
   readonly beforeDirectDelivery?: GatewayApplicationOptions["beforeDirectDelivery"];
+  readonly approveSetup?: (
+    permission: SetupPermission,
+    signal: AbortSignal,
+  ) => Promise<string | undefined>;
   readonly testOverrides?: Pick<
     GatewayApplicationOptions,
     "centralOrigin" | "nowSeconds" | "deliveryTargetFactory"
-  >;
+  > & {
+    setupControllerFactory?: (
+      options: ConstructorParameters<typeof AcpSessionController>[0],
+    ) => Pick<AcpSessionController, "checkConnection">;
+  };
 }
 
 export class DesktopGateway {
@@ -51,6 +65,8 @@ export class DesktopGateway {
   #abort: AbortController | undefined;
   #tail: Promise<unknown> = Promise.resolve();
   #handedOff = false;
+  readonly #connectionCheck = new ConnectionCheck();
+  #setupTask: Promise<unknown> | undefined;
   #cleanPreview: { id: string; lock: ProcessLock; timer: NodeJS.Timeout } | undefined;
 
   constructor(readonly options: DesktopGatewayOptions) {
@@ -108,6 +124,8 @@ export class DesktopGateway {
           log: this.#diagnostics.log,
           visibleTranscriptPath: join(this.options.stateDirectory, "visible-transcripts.sqlite"),
           desktopRegistrationPath: join(this.options.stateDirectory, "registration.json"),
+          onSetupCheck: (challenge, enrollmentId) =>
+            this.#connectionCheck.receive(challenge, enrollmentId),
           ...(this.options.onNotification
             ? { onDesktopNotification: this.options.onNotification }
             : {}),
@@ -170,6 +188,7 @@ export class DesktopGateway {
   async #close(): Promise<void> {
     await this.#releaseClean();
     this.#abort?.abort();
+    await this.#setupTask?.catch(() => undefined);
     const application = this.#application;
     this.#application = undefined;
     try {
@@ -373,6 +392,91 @@ export class DesktopGateway {
           throw new Error("Unsupported desktop operation.");
       }
     });
+  }
+
+  async testAgent(
+    provider: ConnectionProvider,
+  ): Promise<{ state: "verified" | "configured"; message: string }> {
+    const application = this.#application;
+    const registration = application?.desktop?.registration.snapshot();
+    const agent = provider === "claude_code" ? "claude" : provider;
+    const capability = capabilityForKind(agent)?.direct;
+    if (
+      !application ||
+      !capability ||
+      !this.#abort ||
+      registration?.phase !== "registered" ||
+      registration.needsExecutor ||
+      registration.credentialStatus === "expired"
+    )
+      return {
+        state: "configured",
+        message:
+          "Settings saved. Complete this device's registration in Embassys before checking the agent.",
+      };
+    if (this.#setupTask)
+      return { state: "configured", message: "A connection check is already running." };
+    const enrollment = application.localOverview().enrollment;
+    const challenge = this.#connectionCheck.begin(String(enrollment.agent_id));
+    const signal = AbortSignal.any([this.#abort.signal, AbortSignal.timeout(CONNECTION_CHECK_MS)]);
+    const task = (async () => {
+      try {
+        await this.options.beforeDirectDelivery?.(
+          { agent, workingDirectory: this.options.workingDirectory },
+          signal,
+        );
+        const settings = {
+          capability,
+          environment: this.options.environment,
+          deadlineMs: CONNECTION_CHECK_MS,
+          ...(this.#diagnostics ? { log: this.#diagnostics.log } : {}),
+        };
+        const controller =
+          this.options.testOverrides?.setupControllerFactory?.(settings) ??
+          new AcpSessionController(settings);
+        await controller.checkConnection(
+          this.options.workingDirectory,
+          challenge,
+          async (request, approvalSignal) => {
+            const detail = JSON.stringify(redactVerboseValue(request.toolCall));
+            if (Buffer.byteLength(detail) > 8192) return undefined;
+            return this.options.approveSetup?.(
+              {
+                title: request.toolCall.title ?? "Agent connection check",
+                detail,
+                options: request.options,
+              },
+              approvalSignal,
+            );
+          },
+          signal,
+        );
+      } catch {
+        // A successful MCP observation remains evidence if the provider's final turn fails.
+      }
+      const verified =
+        !signal.aborted &&
+        this.#application === application &&
+        this.#connectionCheck.observed(challenge);
+      this.#diagnostics?.log("desktop.agent.check", { agent, verified });
+      return verified
+        ? {
+            state: "verified" as const,
+            message: `${capabilityForKind(agent)?.displayName ?? agent} connected to Embassys as ${String(enrollment.email)}. Reopen existing chats to load the new skill.`,
+          }
+        : {
+            state: "configured" as const,
+            message:
+              "Settings and skill saved, but the agent check did not finish. Open the agent, complete any provider login or approval, then choose Test connection. No registration was repeated.",
+          };
+    })();
+    this.#setupTask = task;
+    try {
+      return await task;
+    } finally {
+      this.#connectionCheck.end(challenge);
+      this.#setupTask = undefined;
+    }
   }
 
   async #offlineArchive<T>(operation: (archive: VisibleTranscripts | undefined) => T): Promise<T> {

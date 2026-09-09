@@ -390,12 +390,20 @@ function App() {
   }
   async function connectAgent(
     provider: "claude_code" | "openclaw" | "codex" | "hermes",
-    operation: "connect" | "check" | "repair" | "disconnect" = "connect",
+    operation: "connect" | "check" | "test" | "repair" | "disconnect" = "connect",
   ) {
     if (!id) return;
     const generation = ++viewGeneration.current;
     setBusy(true);
-    setConnectionMessages((previous) => ({ ...previous, [provider]: "Checking settings…" }));
+    setConnectionMessages((previous) => ({
+      ...previous,
+      [provider]:
+        operation === "check"
+          ? "Checking settings…"
+          : operation === "disconnect"
+            ? "Disconnecting…"
+            : "Connecting and checking the agent. This can take a few minutes…",
+    }));
     try {
       const result = (await call({
         type: "agent_connection",
@@ -833,6 +841,16 @@ function App() {
                         )}
                         {guide.connect && (
                           <div className="button-row">
+                            <button
+                              type="button"
+                              className="text-button"
+                              disabled={busy || !running}
+                              onClick={() => {
+                                if (guide.connect) void connectAgent(guide.connect, "test");
+                              }}
+                            >
+                              Test connection
+                            </button>
                             <button
                               type="button"
                               className="text-button"

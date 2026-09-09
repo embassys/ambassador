@@ -36,6 +36,15 @@ That state survives app/CLI handoff; MCP-origin registration still resolves its
 fixed provider before enrollment. Owner login remains a separate credential realm
 and currently requires a second email code after first-time registration.
 
+[ADR 0077](adr/0077-guided-agent-connection-and-discovery.md) adds an owner-started
+desktop connection check. Desktop instances advertise an optional UUID
+`setup_check` argument on `get_my_permissions`. It correlates a short-lived
+private setup attempt with a successful read of the exact enrolled identity.
+The value never enters a central request and authorizes no additional operation.
+CLI instances retain the empty argument schema. Setup approvals use the local
+owner dialog through private process IPC; incoming central-message approvals
+continue through `get_human_input`.
+
 ## Startup
 
 The public package and commands are:

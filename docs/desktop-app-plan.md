@@ -9,6 +9,12 @@ release remain separate.
 
 ## Progress on 2026-09-07
 
+The later September 9 [guided connection record](guided-agent-connection.md)
+adds the four-provider discovery skill and live setup check under ADR 0077.
+The current work plan records implemented behavior, installed-provider evidence
+and the remaining native inspection. Owner login and agent verification remain
+separate existing API operations.
+
 The approved design was pushed to main in `3a60187`. Initial implementation is
 on `codex/desktop-app`; this is not a release candidate.
 
