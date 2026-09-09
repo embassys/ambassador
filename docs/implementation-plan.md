@@ -6,6 +6,12 @@ Publication is pending successful release checks and uploaded-archive
 verification. The four installed-agent tests passed with synthetic central
 data; the new native button/dialog walkthrough remains pending as recorded below.
 
+Windows release CI exposed an older acknowledgement-test race. Its half-second
+poll could expire after provider completion but before the independent receipt
+worker finished. The test now deliberately slows acknowledgements and waits up
+to 30 seconds for both delivery and all three central receipts, retaining the
+exact result assertions. The injected delay reproduced the old failure locally.
+
 PR 40 merged the desktop app. On September 8 the owner authorized a downloadable
 GitHub preview under [ADR 0076](adr/0076-desktop-github-preview.md).
 [Embassys 0.1.0 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.0-preview.1)
