@@ -18,7 +18,7 @@ import type {
 } from "./agent-capabilities.js";
 import type { CentralMessage } from "./central-rest.js";
 import { buildDeliveryPrompt } from "./delivery-prompt.js";
-import { redactVerboseValue, type VerboseLogger } from "./verbose-log.js";
+import { describeVerboseError, redactVerboseValue, type VerboseLogger } from "./verbose-log.js";
 
 const DEFAULT_INITIALIZATION_DEADLINE_MS = 15_000;
 const DEFAULT_SESSION_DEADLINE_MS = 15_000;
@@ -1053,8 +1053,73 @@ export class AcpSessionController {
     return supported ? "deleted" : "unsupported";
   }
 
+  /** Owner-started setup is separate from remote peer sessions and never replays a prompt. */
+  async checkConnection(
+    workingDirectory: string,
+    challenge: string,
+    approve: (
+      request: acp.RequestPermissionRequest,
+      signal: AbortSignal,
+    ) => Promise<string | undefined>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!/^[a-f0-9-]{36}$/u.test(challenge)) throw new DirectDeliveryError("invalid_configuration");
+    await this.#run(
+      { working_directory: workingDirectory },
+      (client) =>
+        client
+          .onNotification(acp.methods.client.session.update, (context) => {
+            if (
+              context.params.update.sessionUpdate !== "agent_thought_chunk" &&
+              availableCommandCount(context.params.update) === undefined
+            )
+              this.#log("acp.setup.update", context.params);
+          })
+          .onRequest(acp.methods.client.session.requestPermission, async (context) => {
+            const selected = await approve(context.params, signal);
+            return !signal.aborted &&
+              context.params.options.some((option) => option.optionId === selected)
+              ? { outcome: { outcome: "selected" as const, optionId: selected as string } }
+              : { outcome: { outcome: "cancelled" as const } };
+          }),
+      async (connection, initialized, operationSignal) => {
+        const session = await connection.agent.request(
+          acp.methods.agent.session.new,
+          { cwd: workingDirectory, mcpServers: [] },
+          { cancellationSignal: operationSignal },
+        );
+        try {
+          await connection.agent.request(
+            acp.methods.agent.session.prompt,
+            {
+              sessionId: session.sessionId,
+              prompt: [
+                {
+                  type: "text",
+                  text: `The owner clicked Connect in the Embassys app. Check the existing Ambassador MCP connection by calling get_my_permissions with setup_check set to ${challenge}. Use the configured MCP tool, not HTTP or shell commands. Read the returned enrollment and briefly confirm the connected email. This is a connection check only: do not register, request permissions, contact another person, inspect unrelated files, or change settings. If a tool or login is unavailable, explain that and stop.`,
+                },
+              ],
+            },
+            { cancellationSignal: operationSignal },
+          );
+        } finally {
+          if (
+            !operationSignal.aborted &&
+            initialized.agentCapabilities?.sessionCapabilities?.close !== undefined
+          )
+            await connection.agent.request(
+              acp.methods.agent.session.close,
+              { sessionId: session.sessionId },
+              { cancellationSignal: operationSignal },
+            );
+        }
+      },
+      signal,
+    );
+  }
+
   async #run(
-    record: AcpSessionRecord,
+    record: Pick<AcpSessionRecord, "working_directory"> & { session_id?: string },
     configure: (client: ReturnType<typeof acp.client>) => ReturnType<typeof acp.client>,
     operation: (
       connection: acp.ClientConnection,
@@ -1144,6 +1209,7 @@ export class AcpSessionController {
         operationSignal,
       );
     } catch (error) {
+      this.#log("acp.session.command.failed", { error: describeVerboseError(error) });
       throw error instanceof DirectDeliveryError
         ? error
         : new DirectDeliveryError("startup_failed");

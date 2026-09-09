@@ -1,6 +1,7 @@
 import { ExecutorGuard, executorContextSchema } from "./executor-guard.js";
 import { DesktopGateway } from "./gateway.js";
 import { DESKTOP_PROTOCOL, workerInitSchema, workerRequestSchema } from "./protocol.js";
+import { SetupApprovalGuard } from "./setup-approval.js";
 
 let gateway: DesktopGateway | undefined;
 let closing = false;
@@ -10,6 +11,7 @@ const initializedBy = setTimeout(() => {
 }, 15_000);
 let pending = 0;
 const executorGuard = new ExecutorGuard(send);
+const setupApproval = new SetupApprovalGuard(send);
 
 function send(value: unknown): void {
   if (process.connected && Buffer.byteLength(JSON.stringify(value)) <= maximumBytes) {
@@ -21,6 +23,7 @@ async function shutdown(): Promise<void> {
   if (closing) return;
   closing = true;
   executorGuard.close();
+  setupApproval.close();
   clearTimeout(initializedBy);
   const deadline = setTimeout(() => process.exit(1), 35_000);
   try {
@@ -43,6 +46,10 @@ process.on("SIGINT", () => {
 
 process.on("message", (raw: unknown) => {
   if (closing) return;
+  if (raw && typeof raw === "object" && "type" in raw && raw.type === "setup_approval_result") {
+    if (!setupApproval.receive(raw)) void shutdown();
+    return;
+  }
   if (raw && typeof raw === "object" && "type" in raw && raw.type === "executor_check_result") {
     if (!executorGuard.receive(raw)) void shutdown();
     return;
@@ -61,6 +68,7 @@ process.on("message", (raw: unknown) => {
       environment: process.env,
       beforeDirectDelivery: (context, signal) =>
         executorGuard.check(executorContextSchema.parse(context), signal),
+      approveSetup: (permission, signal) => setupApproval.ask(permission, signal),
       onChange: (snapshot) => send({ protocol: DESKTOP_PROTOCOL, type: "state", snapshot }),
       onNotification: (event) => send({ protocol: DESKTOP_PROTOCOL, type: "notification", event }),
     });
@@ -94,6 +102,9 @@ process.on("message", (raw: unknown) => {
   void (async () => {
     let result: unknown;
     switch (command.type) {
+      case "agent_test":
+        result = await current.testAgent(command.provider);
+        break;
       case "enrollment_status":
       case "enrollment_register":
       case "enrollment_verify":

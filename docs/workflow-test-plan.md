@@ -23,6 +23,16 @@ real email or provider side effects; controlled live runs prove actual behavior.
 
 ## Executed regressions
 
+ADR 0077 adds `desktop-agent-skill`, `desktop-connection-check`,
+`desktop-setup-approval`, `desktop-setup-acp` and `desktop-setup-flow` tests.
+They cover four-provider skill paths, ownership and manual conflicts, linked
+files/directories, interrupted install and upgrade, exact enrollment/challenge
+correlation, wrong/stale challenges, an agent claiming success without MCP,
+concurrent checks, stop during setup, exact provider choices and cancellation.
+The flow check asserts one registration and no business action or permission
+request during connection testing. Fresh natural requests and native dialog
+behavior require separate installed-provider qualification.
+
 The full local check currently passes 346 tests with seven expected platform or
 opt-in skips. Both clean-installed Node and Docker REST lanes pass separately.
 The Docker fixture's six Python tests pass on its locked linux/amd64 platform.

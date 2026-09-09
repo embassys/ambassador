@@ -24,6 +24,7 @@ import {
   connectionAvailable,
   runConnectionCommand,
 } from "../../src/desktop/agent-connections.js";
+import { AgentSkill, agentSkillPath } from "../../src/desktop/agent-skill.js";
 import {
   controlPalette,
   DesktopAppearance,
@@ -232,6 +233,22 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
           diagnostics: diagnosticsMode,
           instance,
           onChange,
+          approveSetup: async (permission, signal) => {
+            if (quitLifecycle.stopping || signal.aborted) return undefined;
+            const choice = await dialog.showMessageBox({
+              type: "question",
+              message: `Allow this step in the agent connection check?`,
+              detail: `${permission.title}\n\n${permission.detail}`,
+              buttons: ["Cancel", ...permission.options.map((option) => option.name)],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true,
+              signal,
+            });
+            return quitLifecycle.stopping
+              ? undefined
+              : permission.options[choice.response - 1]?.optionId;
+          },
           checkExecutor: async (context) => {
             const provider = context.agent === "claude" ? "claude_code" : context.agent;
             const environment = desktopLaunchEnvironment(
@@ -433,7 +450,27 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         return task;
       },
     });
-    if (command.operation === "check") return setup.inspect(instance.port);
+    const skillPath = agentSkillPath(command.provider, configurationPath, app.getPath("home"));
+    const skill = new AgentSkill({
+      path: skillPath,
+      ownershipPath: join(
+        instances.directory,
+        "connections",
+        `skill-${createHash("sha256").update(skillPath).digest("hex")}.json`,
+      ),
+      content: await readFile(
+        join(ownDirectory, "assets", "skills", "embassys", "SKILL.md"),
+        "utf8",
+      ),
+    });
+    const skillState = await skill.inspect();
+    if (command.operation === "check") {
+      const connection = await setup.inspect(instance.port);
+      return {
+        ...connection,
+        message: `${connection.message} ${skillState.message} Use Test connection to check the agent itself.`,
+      };
+    }
     if (
       command.operation !== "disconnect" &&
       workers.get(instance.id)?.snapshot().state !== "running"
@@ -443,8 +480,24 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         owned: false,
         message: "Start this instance's server before connecting an agent.",
       };
+    if (command.operation === "test") {
+      const connection = await setup.inspect(instance.port);
+      if (connection.state !== "configured") return connection;
+      if (skillState.state !== "installed")
+        return {
+          state: "configured",
+          message: `${skillState.message} Choose Connect to finish setup.`,
+        };
+      return getWorker(instance).request({
+        type: "agent_test",
+        instanceId: instance.id,
+        provider: command.provider,
+      });
+    }
     const preview = await setup.prepare(command.operation, instance.port);
-    if (!preview.previewId) return preview;
+    if (preview.state === "conflict" || preview.state === "unavailable") return preview;
+    if (skillState.state === "conflict")
+      return { ...preview, state: "conflict", message: skillState.message };
     const remove = command.operation === "disconnect";
     const action = remove ? "Disconnect" : command.operation === "repair" ? "Repair" : "Connect";
     const choice = await dialog.showMessageBox({
@@ -453,7 +506,9 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         command.operation === "repair"
           ? `Repair the ${name} connection for ${instance.name}?`
           : `${action} ${name}${remove ? " from " : " to "}${instance.name}?`,
-      detail: `${remove ? "Remove this app's unchanged" : "Add the"} ambassador MCP entry ${remove ? "from" : "to"} ${configurationPath}. ${remove ? "Saved conversations and other settings remain." : `Address: http://127.0.0.1:${instance.port}/mcp. Tool calls may wait up to eleven minutes.`} Reload ${name} afterward.`,
+      detail: remove
+        ? `Remove only this app's unchanged Embassys connection and discovery skill. Saved conversations and other settings remain.\n\n${configurationPath}\n${skillPath}`
+        : `Connect Embassys tools, install its discovery skill, and run a short check using ${name}. Any provider approval will be shown here. Existing chats may need reopening.\n\n${configurationPath}\n${skillPath}\nhttp://127.0.0.1:${instance.port}/mcp`,
       buttons: ["Cancel", `${action} ${name}`],
       defaultId: 0,
       cancelId: 0,
@@ -474,7 +529,37 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
         owned: false,
         message: "The server stopped during setup. Review the connection again.",
       };
-    return setup.apply(preview.previewId);
+    const connected = preview.previewId ? await setup.apply(preview.previewId) : preview;
+    if (remove) {
+      if (connected.state === "conflict" || connected.state === "unavailable") return connected;
+      const removedSkill = await skill.remove();
+      if (removedSkill.state === "conflict")
+        return { ...connected, state: "conflict", message: removedSkill.message };
+      return {
+        ...connected,
+        message: `${connected.message} ${removedSkill.owned ? removedSkill.message : "Any unchanged app-owned skill was removed; manually installed files were kept."}`,
+      };
+    }
+    if (connected.state !== "configured") return connected;
+    const installed = await skill.install();
+    if (installed.state !== "installed")
+      return { ...connected, message: `Connection saved. ${installed.message}` };
+    const worker = getWorker(instance);
+    const registration = (await worker.request({
+      type: "enrollment_status",
+      instanceId: instance.id,
+    })) as { needsExecutor?: boolean; phase?: string };
+    if (registration.phase === "registered" && registration.needsExecutor)
+      await worker.request({
+        type: "enrollment_executor",
+        instanceId: instance.id,
+        executor: command.provider === "claude_code" ? "claude" : command.provider,
+      });
+    return worker.request({
+      type: "agent_test",
+      instanceId: instance.id,
+      provider: command.provider,
+    });
   }
   if (command.type === "history_delete") {
     const choice = await dialog.showMessageBox({
