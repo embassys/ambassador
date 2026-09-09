@@ -26,6 +26,9 @@ ADR 0058 adds confirmation before `start` or `clean` stops a running instance.
 
 ## Current decisions
 
+[ADR 0077](0077-guided-agent-connection-and-discovery.md) adds the approved
+four-provider discovery skill and owner-started live connection check.
+
 | ADR | Decision |
 | --- | --- |
 | [0076](0076-desktop-github-preview.md) | Explicit GitHub desktop prerelease with verified downloads and unsigned platform limits |

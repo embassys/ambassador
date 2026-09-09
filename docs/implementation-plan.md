@@ -29,6 +29,35 @@ the release on 2026-09-05 with the remaining limitations below.
 
 ## Open follow-ups
 
+The September 9 [guided connection change](guided-agent-connection.md), approved
+in [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md), implements
+Connect, a shared discovery skill and a correlated agent check for Claude Code,
+Codex, OpenClaw and Hermes. Native approval choices use private desktop IPC.
+Repair and Disconnect preserve owner-managed settings and edited files.
+The extra first-time verification code remains accepted for this flow.
+
+Installed-agent checks pass for all four with a synthetic central fixture.
+Fresh conversations using only "Get Alex's phone number from his agent:
+alex@fixture.test." returned the exact synthetic number through Embassys.
+The traces include skill discovery and result receipt; this does not prove
+discovery for every prompt or qualify standalone Chat/Cowork. Codex used a
+temporary `gpt-5.5`/high preference because the installed provider rejected its
+configured `gpt-6-astra`/max. The original preference and all temporary provider
+connections were restored. No central code, new dependency or release changed.
+
+Validation on September 9: core checks passed with 515 tests and seven expected
+skips; all 20 desktop artifact, configuration and rendering checks passed.
+Desktop typechecking, the skill validator, Mac arm64 packaging and Electron host
+startup checks passed. All four installed-agent connection checks also passed
+against the packaged app with its bundled Node 24.19.0 runtime. The tests used
+one synthetic enrollment and confirmed cleanup afterward. OpenClaw and Hermes
+discovery were repeated separately to confirm each loaded its own skill path.
+
+- [ ] Complete the native Connect/button and approval-dialog inspection after
+  the Mac is unlocked. The native automation tool reported a locked Mac during
+  this run. Programmatic Electron host, worker startup and duplicate-launch
+  checks pass separately; they do not prove the visible onboarding result.
+
 Captured together at the user's request on 2026-09-07. API work remains
 issue-only. These items do not authorize another release.
 

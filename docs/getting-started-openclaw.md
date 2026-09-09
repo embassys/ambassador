@@ -1,5 +1,9 @@
 # Get started with OpenClaw
 
+Using the Embassys app? Choose **Connect OpenClaw** during setup. The app installs
+the connection and discovery skill, then checks the agent. See
+[guided connection](guided-agent-connection.md). The terminal flow below remains available.
+
 ## 1. Start Ambassador
 
 - Install Node.js `>=24.19.0` and OpenClaw.
