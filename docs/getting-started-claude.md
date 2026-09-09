@@ -1,5 +1,9 @@
 # Get started with Claude Code
 
+Using the Embassys app? Choose **Connect Claude Code** during setup. The app
+installs the connection and discovery skill, then checks the agent. See
+[guided connection](guided-agent-connection.md). The terminal flow below remains available.
+
 For the unpublished desktop app's separate Chat/Cowork connection, see
 [Claude Desktop local client](claude-desktop-local-client.md). The steps below
 configure Claude Code and its incoming ACP executor.

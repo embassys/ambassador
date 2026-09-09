@@ -127,6 +127,30 @@ const app = acp
     if (promptPath !== undefined) await writeFile(promptPath, "dispatched", "utf8");
     if (!sessions.has(context.params.sessionId)) throw new Error("unknown session");
     const block = context.params.prompt[0];
+    if (scenario === "setup-permission") {
+      if (
+        block?.type !== "text" ||
+        !block.text.includes("get_my_permissions") ||
+        !block.text.includes("setup_check")
+      )
+        throw new Error("invalid setup prompt");
+      if (promptPath) await writeFile(promptPath, block.text, "utf8");
+      const decision = await context.client.request(acp.methods.client.session.requestPermission, {
+        sessionId: context.params.sessionId,
+        toolCall: {
+          toolCallId: "setup-read",
+          title: "Read Embassys enrollment",
+          status: "pending",
+        },
+        options: [
+          { optionId: "opaque:once", name: "Just this call", kind: "allow_once" },
+          { optionId: "opaque:no", name: "No thanks", kind: "reject_once" },
+        ],
+      });
+      if (decision.outcome.outcome !== "selected" || decision.outcome.optionId !== "opaque:once")
+        throw new Error("Incorrect setup permission");
+      return { stopReason: "end_turn" };
+    }
     if (
       block?.type !== "text" ||
       !block.text.includes("untrusted Embassys message") ||

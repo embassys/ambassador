@@ -13,6 +13,11 @@ import {
   type WorkerCommand,
   workerCommandSchema,
 } from "./protocol.js";
+import {
+  type SetupPermission,
+  setupApprovalCancelledSchema,
+  setupApprovalSchema,
+} from "./setup-approval.js";
 
 const snapshotSchema = z.strictObject({
   id: z.uuid(),
@@ -39,6 +44,7 @@ export class DesktopGatewayClient {
   #closed = false;
   #closeResult: Promise<void> | undefined;
   #checkingExecutor = false;
+  readonly #setupApprovals = new Map<string, AbortController>();
 
   constructor(
     readonly options: {
@@ -50,6 +56,10 @@ export class DesktopGatewayClient {
       readonly onChange?: (snapshot: GatewaySnapshot) => void;
       readonly onNotification?: (event: LocalNotification) => void;
       readonly checkExecutor?: (context: ExecutorContext) => Promise<boolean>;
+      readonly approveSetup?: (
+        permission: SetupPermission,
+        signal: AbortSignal,
+      ) => Promise<string | undefined>;
     },
   ) {
     this.#state = { id: options.instance.id, state: "stopped" };
@@ -97,6 +107,35 @@ export class DesktopGatewayClient {
                     type: "executor_check_result",
                     requestId: request.data.requestId,
                     allowed: allowed === true,
+                  },
+                  () => {},
+                );
+            });
+        } else if (message.type === "setup_approval_cancelled") {
+          const cancelled = setupApprovalCancelledSchema.safeParse(message);
+          if (cancelled.success) this.#setupApprovals.get(cancelled.data.requestId)?.abort();
+        } else if (message.type === "setup_approval") {
+          const request = setupApprovalSchema.safeParse(message);
+          if (!request.success || this.#closed) return;
+          const abort = new AbortController();
+          if (this.#setupApprovals.size) abort.abort();
+          this.#setupApprovals.set(request.data.requestId, abort);
+          void Promise.resolve()
+            .then(() =>
+              abort.signal.aborted
+                ? undefined
+                : options.approveSetup?.(request.data.permission, abort.signal),
+            )
+            .catch(() => undefined)
+            .then((optionId) => {
+              this.#setupApprovals.delete(request.data.requestId);
+              if (this.#child.connected && !this.#closed)
+                this.#child.send(
+                  {
+                    protocol: DESKTOP_PROTOCOL,
+                    type: "setup_approval_result",
+                    requestId: request.data.requestId,
+                    optionId: abort.signal.aborted ? null : (optionId ?? null),
                   },
                   () => {},
                 );
@@ -156,6 +195,7 @@ export class DesktopGatewayClient {
         }
       });
       const ended = () => {
+        for (const abort of this.#setupApprovals.values()) abort.abort();
         clearTimeout(timer);
         reject(new Error("The server process is unavailable."));
         for (const pending of this.#pending.values()) {
@@ -216,12 +256,15 @@ export class DesktopGatewayClient {
     if (this.#pending.size >= 16) throw new Error("The server is busy. Try again shortly.");
     const requestId = randomUUID();
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(requestId);
-        reject(
-          new Error("The operation is still unresolved. Refresh its state before trying again."),
-        );
-      }, 45_000);
+      const timer = setTimeout(
+        () => {
+          this.#pending.delete(requestId);
+          reject(
+            new Error("The operation is still unresolved. Refresh its state before trying again."),
+          );
+        },
+        command.type === "agent_test" ? 200_000 : 45_000,
+      );
       this.#pending.set(requestId, { resolve, reject, timer });
       this.#child.send({ protocol: DESKTOP_PROTOCOL, requestId, command }, (error) => {
         if (error) {
@@ -236,6 +279,7 @@ export class DesktopGatewayClient {
   close(): Promise<void> {
     if (this.#closeResult !== undefined) return this.#closeResult;
     this.#closed = true;
+    for (const abort of this.#setupApprovals.values()) abort.abort();
     this.#closeResult = (async () => {
       if (this.#child.connected) this.#child.disconnect();
       let timer: ReturnType<typeof setTimeout> | undefined;

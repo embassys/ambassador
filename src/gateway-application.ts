@@ -121,6 +121,7 @@ export interface GatewayApplicationOptions {
   readonly desktopRegistrationPath?: string;
   readonly toolRegistrationPath?: string;
   readonly onDesktopNotification?: (event: LocalNotification) => void;
+  readonly onSetupCheck?: (challenge: string, enrollmentId: string) => boolean;
 }
 
 export interface GatewayOverview {
@@ -798,7 +799,29 @@ export async function openGatewayApplication(
   const router: LocalMcpRouter = {
     enrollmentContext: () => identity.enrollment,
     async listTools() {
-      return [...REST_BOOTSTRAP_TOOLS, ...REST_AUTHENTICATED_TOOLS, MESSAGE_BOX_TOOL];
+      return [
+        ...REST_BOOTSTRAP_TOOLS,
+        ...REST_AUTHENTICATED_TOOLS.map((tool) =>
+          tool.name === "get_my_permissions" && options.onSetupCheck
+            ? {
+                ...tool,
+                inputSchema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    setup_check: {
+                      type: "string",
+                      format: "uuid",
+                      description:
+                        "Only for the Embassys app's active connection check. Copy its challenge unchanged; otherwise omit.",
+                    },
+                  },
+                },
+              }
+            : tool,
+        ),
+        MESSAGE_BOX_TOOL,
+      ];
     },
     async callTool(name, untrustedArguments, signal, clientInfo) {
       const request_id = randomUUID();
@@ -893,13 +916,25 @@ export async function openGatewayApplication(
             }
             break;
           case "get_my_permissions":
-            if (Object.keys(arguments_).length !== 0) throw new McpContractError();
+            if (
+              Object.keys(arguments_).length !== 0 &&
+              (!options.onSetupCheck ||
+                Object.keys(arguments_).length !== 1 ||
+                typeof arguments_.setup_check !== "string" ||
+                !/^[a-f0-9-]{36}$/u.test(arguments_.setup_check))
+            )
+              throw new McpContractError();
             result = {
               enrollment: identity.enrollment,
               permissions: await requireRest().getMyPermissions(signal),
               message:
                 "You are registered and verified. An empty permissions list means no permissions have been granted yet; you are still registered. Do not register again.",
             };
+            if (
+              typeof arguments_.setup_check === "string" &&
+              !options.onSetupCheck?.(arguments_.setup_check, String(identity.enrollment.agent_id))
+            )
+              throw new LocalMcpToolError("invalid_arguments");
             break;
           default:
             throw new LocalMcpToolError("tool_not_found");

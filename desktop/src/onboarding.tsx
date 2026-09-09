@@ -39,6 +39,7 @@ function AgentSetup({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [configured, setConfigured] = useState(false);
+  const [verified, setVerified] = useState(false);
   const running = instance?.runtime.state === "running";
   const instanceId = instance?.id;
   useEffect(() => {
@@ -83,14 +84,15 @@ function AgentSetup({
         operation: guide?.connect ? "connect" : "check",
       })) as { state: string; message: string };
       setMessage(result.message);
-      if (result.state === "configured") {
-        // Configure MCP before activating a newly selected incoming executor.
-        if (registration?.needsExecutor)
+      if (result.state === "configured" || result.state === "verified") {
+        // Manual setup still needs the owner-selected executor after checking its settings.
+        if (!guide?.connect && registration?.needsExecutor)
           await call({
             type: "enrollment_executor",
             instanceId: instance.id,
             executor: agent.executor,
           });
+        setVerified(result.state === "verified");
         setConfigured(true);
         await changed();
       }
@@ -109,11 +111,17 @@ function AgentSetup({
   return (
     <>
       <p className="onboarding-step">2 · Connect your agent</p>
-      <h1>{configured ? "Your connection is saved" : "Which agent do you use?"}</h1>
+      <h1>
+        {verified
+          ? `${agent.name} is connected`
+          : configured
+            ? "Your settings are saved"
+            : "Which agent do you use?"}
+      </h1>
       <p className="onboarding-intro">
         {configured
-          ? `Reopen ${agent.name} so it can load Embassys. You can add more agents later.`
-          : "Connect the agent you already use. We'll handle the settings where supported."}
+          ? `Reopen existing ${agent.name} chats to load the Embassys skill. You can connect more agents later.`
+          : "We'll connect Embassys, add a skill so your agent recognizes it, and check that the tools work."}
       </p>
       {!instance ? (
         <p role="status">No local installation is available. Open server settings to add one.</p>
@@ -155,7 +163,39 @@ function AgentSetup({
         </section>
       ) : configured ? (
         <>
-          <p className="onboarding-note">Try asking your agent: “What can I do with Embassys?”</p>
+          <p className="onboarding-note" role="status">
+            {message}
+          </p>
+          {!verified && (
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={async () => {
+                if (!instance) return;
+                setBusy(true);
+                try {
+                  const result = (await call({
+                    type: "agent_connection",
+                    instanceId: instance.id,
+                    provider: agent.provider,
+                    operation: "test",
+                  })) as { state: string; message: string };
+                  setVerified(result.state === "verified");
+                  setMessage(result.message);
+                } catch {
+                  setMessage(
+                    "The check did not finish. Your settings are saved; open the agent and try again.",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? "Checking agent…" : "Test connection"}
+            </button>
+          )}
+          <p className="onboarding-note">Try asking your agent: “Can you contact Alex's agent?”</p>
           <button type="button" className="primary" onClick={complete}>
             Open Embassys
           </button>
@@ -187,7 +227,11 @@ function AgentSetup({
             disabled={busy}
             onClick={() => void connect()}
           >
-            {busy ? "Connecting…" : guide?.connect ? `Connect ${agent.name}` : "Check connection"}
+            {busy
+              ? "Connecting and checking agent…"
+              : guide?.connect
+                ? `Connect ${agent.name}`
+                : "Check connection"}
           </button>
           {guide && (
             <details className="onboarding-manual">

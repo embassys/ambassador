@@ -107,12 +107,13 @@ const commandSchema = z.discriminatedUnion("type", [
     type: z.literal("agent_connection"),
     ...selected,
     provider: connectionProvider,
-    operation: z.union([connectionOperation, z.literal("check")]),
+    operation: z.union([connectionOperation, z.literal("check"), z.literal("test")]),
   }),
 ]);
 export type DesktopCommand = z.infer<typeof commandSchema>;
 export const workerCommandSchema = z.discriminatedUnion("type", [
   ...commandSchema.options,
+  z.strictObject({ type: z.literal("agent_test"), ...selected, provider: connectionProvider }),
   z.strictObject({ type: z.literal("external_process"), ...selected }),
   z.strictObject({ type: z.literal("external_stop"), ...selected, processInstanceId: instanceId }),
 ]);
