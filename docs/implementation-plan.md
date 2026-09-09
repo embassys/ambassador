@@ -2,9 +2,15 @@
 
 On September 9 the owner authorized desktop 0.1.1 preview 1 for the guided
 connection and discovery change under [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).
-Publication is pending successful release checks and uploaded-archive
-verification. The four installed-agent tests passed with synthetic central
-data; the new native button/dialog walkthrough remains pending as recorded below.
+[Embassys 0.1.1 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.1-preview.1)
+is published from `8c30c9f`, merged through [PR 42](https://github.com/embassys/ambassador/pull/42).
+[Main core, fixture and package checks](https://github.com/embassys/ambassador/actions/runs/34366551606)
+and [main desktop checks](https://github.com/embassys/ambassador/actions/runs/34366551593)
+passed, as did the corrected PR checks. All 12 uploaded assets were downloaded
+back and matched the final CI files. Public Mac, Windows and Linux downloads
+were checked without GitHub authentication. The npm CLI remains at 0.2.19.
+The four installed-agent tests passed with synthetic central data; the new
+native button/dialog walkthrough remains pending as recorded below.
 
 Windows release CI exposed an older acknowledgement-test race. Its half-second
 poll could expire after provider completion but before the independent receipt
@@ -107,6 +113,11 @@ issue-only. These items do not authorize another release.
   remains upstream work. See the [desktop PR review](desktop-pr-review-2026-09-08.md)
   and the
   [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
+  The 0.1.1 PR's Linux native-observer test also saw an intermittent closed socket
+  during an immediate local server restart. Main CI, 50 local restart repetitions
+  with the bundled runtime, and one targeted rerun of the failed Linux job passed.
+  Reproduce that edge case and add deterministic coverage before qualifying this
+  return path. The release notes disclose it; no observer behavior was changed.
 - [x] Calendar invitation delivery. On September 8 the owner authorized the
   connected Google Calendar for one disposable invitation. Native Claude Chat
   sent it to the test inbox; the delivered calendar attachment matched the
