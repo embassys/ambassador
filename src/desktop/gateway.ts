@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { AcpSessionStore } from "../acp-session-store.js";
+import { type AcpSessionRecord, AcpSessionStore } from "../acp-session-store.js";
 import { capabilityForKind } from "../agent-capabilities.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { AcpSessionController } from "../direct-delivery.js";
@@ -23,6 +23,7 @@ import { redactVerboseValue } from "../verbose-log.js";
 import { type TranscriptPage, VisibleTranscripts } from "../visible-transcripts.js";
 import type { ConnectionProvider } from "./agent-connections.js";
 import { CONNECTION_CHECK_MS, ConnectionCheck } from "./connection-check.js";
+import { decorateConversationSessions } from "./conversation-preview.js";
 import { desktopCredentialStores } from "./credential-stores.js";
 import { type DiagnosticMode, desktopDiagnosticOptions } from "./diagnostic-policy.js";
 import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
@@ -335,19 +336,43 @@ export class DesktopGateway {
 
   sessions(): Promise<unknown> {
     return this.#serial(async () => {
-      if (this.#state.state === "running") return await (await this.#control()).listSessions();
+      if (this.#state.state === "running") {
+        const sessions = await (await this.#control()).listSessions();
+        return decorateConversationSessions(sessions, (id) =>
+          this.#application?.visiblePreview(id),
+        );
+      }
       const lock = await ProcessLock.acquire(this.#paths.lockPath);
+      let sessions: AcpSessionRecord[];
       try {
         const store = new AcpSessionStore(this.#paths.acpSessionPath);
         try {
-          return store.list();
+          sessions = store.list();
         } finally {
           store.close();
         }
       } finally {
         await lock.release();
       }
+      try {
+        return await this.#offlineArchive((archive) =>
+          decorateConversationSessions(sessions, (id) => archive?.preview(id)),
+        );
+      } catch {
+        return sessions;
+      }
     });
+  }
+
+  requestLinks(after = 0): Promise<import("./conversations.js").RequestLinkPage> {
+    return this.#serial(
+      async () =>
+        this.#application?.desktop?.requestLinks(after) ?? {
+          links: [],
+          hasMore: false,
+          nextCursor: after,
+        },
+    );
   }
 
   overview(): Promise<GatewayOverview> {
@@ -502,6 +527,7 @@ export class DesktopGateway {
   history(
     sessionId: string,
     after = 0,
+    before?: number,
   ): Promise<
     | TranscriptPage
     | {
@@ -514,8 +540,12 @@ export class DesktopGateway {
   > {
     return this.#serial(async () => {
       const archived = this.#application
-        ? this.#application.visibleHistory(sessionId, after)
-        : await this.#offlineArchive((archive) => archive?.page(sessionId, after));
+        ? this.#application.visibleHistory(sessionId, after, before)
+        : await this.#offlineArchive((archive) =>
+            before === undefined
+              ? archive?.page(sessionId, after)
+              : archive?.latest(sessionId, before),
+          );
       if (archived?.items.length || archived?.hasMore || after > 0)
         return (
           archived ?? {

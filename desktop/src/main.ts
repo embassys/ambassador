@@ -50,10 +50,11 @@ import {
   parseDesktopCommand,
 } from "../../src/desktop/protocol.js";
 import { DesktopQuitLifecycle } from "../../src/desktop/quit-lifecycle.js";
+import { DesktopReviews } from "../../src/desktop/review.js";
 import { SupervisedGateway } from "../../src/desktop/supervisor.js";
 import { DesktopWindowLifecycle } from "../../src/desktop/window-lifecycle.js";
 import { DesktopGatewayClient } from "../../src/desktop/worker-client.js";
-
+import { applicationMenu } from "./application-menu.js";
 import { providerDocument } from "./provider-config.js";
 
 app.setName("Embassys");
@@ -72,6 +73,7 @@ let appearance: DesktopAppearance;
 let notifications: DesktopNotifications;
 let owner: OwnerWorkerClient | undefined;
 let notificationTimer: NodeJS.Timeout | undefined;
+let settingsRequest: string | undefined;
 let navigation:
   | {
       id: string;
@@ -84,8 +86,13 @@ const activeNotifications = new Set<Notification>();
 const workers = new Map<string, SupervisedGateway>();
 const setupTasks = new Map<Promise<void>, AbortController>();
 const windowLifecycle = new DesktopWindowLifecycle(openWindow);
+const reviews = new DesktopReviews(() => {
+  if (reviews.current()) showWindow();
+  changed();
+});
 const quitLifecycle = new DesktopQuitLifecycle({
   stop: async () => {
+    reviews.close();
     clearInterval(notificationTimer);
     for (const notification of activeNotifications) notification.close();
     activeNotifications.clear();
@@ -181,12 +188,15 @@ async function snapshot() {
     platform: process.platform,
     appearance: appearance.value,
     dark: nativeTheme.shouldUseDarkColors,
+    focused: window?.isFocused() ?? false,
     reducedTransparency: nativeTheme.prefersReducedTransparency,
     palette: controlPalette(accent, nativeTheme.shouldUseDarkColors),
     notifications: { enabled: notifications.enabled, supported: Notification.isSupported() },
     navigation,
+    settingsRequest,
     loginItem: await loginItem.read(),
     owner: getOwner().snapshot(),
+    review: reviews.current(),
     instances: instances.list().map((instance) => ({
       ...instance,
       runtime: workers.get(instance.id)?.snapshot() ?? { id: instance.id, state: "stopped" },
@@ -235,19 +245,10 @@ function getWorker(instance: DesktopInstance): SupervisedGateway {
           onChange,
           approveSetup: async (permission, signal) => {
             if (quitLifecycle.stopping || signal.aborted) return undefined;
-            const choice = await dialog.showMessageBox({
-              type: "question",
-              message: `Allow this step in the agent connection check?`,
-              detail: `${permission.title}\n\n${permission.detail}`,
-              buttons: ["Cancel", ...permission.options.map((option) => option.name)],
-              defaultId: 0,
-              cancelId: 0,
-              noLink: true,
+            return reviews.ask(
+              { kind: "permission", instanceName: instance.name, permission },
               signal,
-            });
-            return quitLifecycle.stopping
-              ? undefined
-              : permission.options[choice.response - 1]?.optionId;
+            );
           },
           checkExecutor: async (context) => {
             const provider = context.agent === "claude" ? "claude_code" : context.agent;
@@ -345,6 +346,8 @@ async function execute(input: unknown): Promise<unknown> {
 
 async function executeCommand(command: DesktopCommand): Promise<unknown> {
   if (command.type === "snapshot") return snapshot();
+  if (command.type === "review_answer")
+    return { accepted: reviews.answer(command.reviewId, command.choice) };
   if (command.type === "attach_cli") {
     const attached = await instances.attachCli();
     return { ...(await snapshot()), createdInstanceId: attached.id };
@@ -500,21 +503,16 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
       return { ...preview, state: "conflict", message: skillState.message };
     const remove = command.operation === "disconnect";
     const action = remove ? "Disconnect" : command.operation === "repair" ? "Repair" : "Connect";
-    const choice = await dialog.showMessageBox({
-      type: "question",
-      message:
-        command.operation === "repair"
-          ? `Repair the ${name} connection for ${instance.name}?`
-          : `${action} ${name}${remove ? " from " : " to "}${instance.name}?`,
-      detail: remove
-        ? `Remove only this app's unchanged Embassys connection and discovery skill. Saved conversations and other settings remain.\n\n${configurationPath}\n${skillPath}`
-        : `Connect Embassys tools, install its discovery skill, and run a short check using ${name}. Any provider approval will be shown here. Existing chats may need reopening.\n\n${configurationPath}\n${skillPath}\nhttp://127.0.0.1:${instance.port}/mcp`,
-      buttons: ["Cancel", `${action} ${name}`],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true,
+    const choice = await reviews.ask({
+      kind: "connection",
+      instanceName: instance.name,
+      providerName: name,
+      action,
+      endpoint: `http://127.0.0.1:${instance.port}/mcp`,
+      configurationPath,
+      skillPath,
     });
-    if (choice.response !== 1)
+    if (choice !== "confirm")
       return {
         state: "cancelled",
         owned: false,
@@ -756,6 +754,12 @@ function showWindow(): void {
   if (!quitLifecycle.stopping) windowLifecycle.requestOpen();
 }
 
+function openSettings(): void {
+  settingsRequest = randomUUID();
+  showWindow();
+  changed();
+}
+
 function openWindow(): void {
   if (quitLifecycle.stopping) return;
   if (window && !window.isDestroyed()) {
@@ -764,10 +768,10 @@ function openWindow(): void {
     return;
   }
   window = new BrowserWindow({
-    width: 1140,
-    height: 780,
-    minWidth: 800,
-    minHeight: 570,
+    width: 760,
+    height: 620,
+    minWidth: 680,
+    minHeight: 540,
     title: "Embassys",
     icon: join(ownDirectory, "assets", "app-icon.png"),
     ...windowAppearance(
@@ -788,11 +792,14 @@ function openWindow(): void {
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  window.webContents.on("render-process-gone", () => reviews.cancelAll());
   window.on("close", () => {
     window = undefined;
+    reviews.cancelAll();
   });
   window.once("ready-to-show", () => window?.show());
   window.on("focus", changed);
+  window.on("blur", changed);
   void window.loadURL(`${uiOrigin}/index.html`);
 }
 
@@ -801,6 +808,7 @@ function updateMenu(): void {
   const records = instances.list();
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: "Open Embassys", click: showWindow },
+    { label: "Settings…", click: openSettings },
     { type: "separator" },
     ...records.map((record) => ({
       label: `${record.name} · ${workers.get(record.id)?.snapshot().state ?? "stopped"}`,
@@ -928,6 +936,9 @@ else {
       }, 10_000);
       notificationTimer.unref();
       nativeTheme.themeSource = appearance.value;
+      Menu.setApplicationMenu(
+        Menu.buildFromTemplate(applicationMenu(process.platform, openSettings)),
+      );
       if (process.platform !== "darwin") systemPreferences.on("accent-color-changed", changed);
       if (process.platform === "win32") systemPreferences.on("color-changed", changed);
       nativeTheme.on("updated", () => {
@@ -940,7 +951,7 @@ else {
             ).backgroundColor,
           );
           if (process.platform === "darwin")
-            window.setVibrancy(nativeTheme.prefersReducedTransparency ? null : "sidebar");
+            window.setVibrancy(nativeTheme.prefersReducedTransparency ? null : "under-window");
         }
         changed();
       });

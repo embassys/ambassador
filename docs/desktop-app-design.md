@@ -89,24 +89,69 @@ items needing attention, **Open Embassys**, **Start/Stop server**, and **Quit**.
 Put Clean in Settings, away from everyday controls. With several instances,
 show each one's state in the menu and make the selected instance explicit.
 
-The main window uses a sidebar and a list/detail layout. Open Attention by
-default when something needs a decision; otherwise restore the last screen.
+Under [ADR 0080](adr/0080-conversation-sidebar.md), the compact main window uses
+Inbox and Conversations as matching sidebar headings. Inbox has no separate page;
+its individual unlinked requests open directly in the main pane. The first request
+is selected on launch when available. Otherwise the pane asks the owner to choose
+a request or conversation. A resolved selection stays on that request instead of
+moving to another decision. The sidebar lists
+compact, two-line Conversations showing the peer and saved topic below the requests, with
+threads needing an answer or approval first and the rest by recent activity.
+Unlinked requests stay in Inbox; linked requests open with the retained transcript.
+The conversation pane uses chat bubbles: incoming action requests and results on
+the left, the local agent's replies on the right. Owner answers and Embassys
+status messages have their own attribution. The header identifies the peer and
+email when an inbound account communication matches the exact archived message
+ID under the same enrollment. Otherwise show the recorded agent ID or an explicit
+unknown-identity label. Payload names and model prose cannot identify the peer.
+
+Messages appear chronologically. Pending linked reviews follow the messages,
+using fresh reviews and explicit choices. Open the latest 50 archive records,
+bounded to 512 KiB, and allow earlier pages to be prepended. Keep at most 500
+records in the displayed window. The recent view refreshes every 15 seconds while
+visible; reading earlier pages pauses that refresh until Return to latest.
+Initial selection follows the bottom. Subsequent content follows it while the
+owner is near the bottom, and otherwise preserves the visible message position
+with a Latest messages control. Technical envelopes and tool summaries stay in
+disclosures. This is a saved agent exchange, without a general chat composer.
+An open review keeps its own reading position, starting at its heading. Resizing
+a conversation at the bottom continues to show its latest content. Use system
+typography, neutral sidebar selection and consistent message and review surfaces;
+exact choices and keyboard focus remain visible at the minimum window size.
+The More menu opens People, Connect agents and Access. Settings has a labelled
+sidebar button after setup and a toolbar button before setup, a native
+application/tray menu entry and the usual Command-comma
+(Control-comma on Windows/Linux) shortcut. Secondary views
+have one Back to requests and conversations action that restores the selection.
+Settings holds account, notifications and
+appearance, plus visible local-service Pause/Resume controls; Advanced holds instance selection, server controls, local work,
+network events, registration and logs. A stopped server has a visible Resume
+action in the request pane. A persistent status strip reports the selected local service
+and installation before and after login. It distinguishes running, paused,
+transitional and attention states without claiming remote connectivity.
 
 | View | Contents and primary actions |
 | --- | --- |
-| Attention | Pending permissions, owner questions and provider-tool approvals. Review, choose an exact offered option, or submit an answer |
-| Conversations | People/requesters on the left; their sessions and request timeline on the right. Search, filter, open conversation, inspect a result |
-| Permissions | Access I granted / Access granted to me; active, denied, expired and revoked states; scope, expiry, use limit and audit history |
-| Agents | Installed/detected clients, setup guidance, Connect, Test connection, Repair and Disconnect; one selected incoming executor per instance |
-| Diagnostics | Runtime health, recent errors, logs, correlated request details and a reviewed support export |
-| Settings | Account/devices, notifications, launch at login, instances, storage, privacy, updates, stop and clean |
+| Inbox sidebar section | Individual owner permissions and questions without a reliable local conversation link. Selecting a row opens its details and fresh Review. Unconfirmed submissions remain visible |
+| Conversations | Peer and topic in the sidebar; chronological chat with separate agent sides, opening at the newest messages, and linked owner reviews at the bottom |
+| More → People | Encrypted local contacts; add, search, edit and import names and emails |
+| More → Connect agents | One Connect action per provider; Options holds test, repair, disconnect and manual instructions |
+| More → Access | Access shared by you / shared with you, within the deployed server snapshot |
+| Settings | Local service status and Pause/Resume, account, notifications and appearance; Advanced holds instance, registration, local inspection and diagnostic controls |
 
 Avoid a dashboard full of counts. A request detail should answer: who wants what,
 why, what data or tool is involved, what access would be granted, and what happens
 after the user responds. Show readable summaries first, with technical IDs and
 formatted JSON behind Details. Never hide the exact scope behind a summary.
 
-Example Attention card, using synthetic data:
+The September 10 visual refinement takes typography and desktop proportions
+from 1Password, with Linear's quieter navigation, neutral colours and separators.
+The September 11 sidebar supersedes the two-tab navigation. Settings uses aligned rows instead of separate
+cards. A permission review separates its heading, sender, exact action, expiry,
+scope and response choices. Use system fonts and the existing platform controls;
+no remote font or new component library is needed. ADR 0079 records the change.
+
+Example Inbox request, using synthetic data:
 
 ```text
 Alex's agent wants to check your availability

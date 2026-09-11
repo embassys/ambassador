@@ -34,6 +34,11 @@ const selected = { instanceId };
 const commandSchema = z.discriminatedUnion("type", [
   ...ownerCommands,
   z.strictObject({ type: z.literal("snapshot") }),
+  z.strictObject({
+    type: z.literal("review_answer"),
+    reviewId: instanceId,
+    choice: z.string().min(1).max(512).nullable(),
+  }),
   z.strictObject({ type: z.literal("attach_cli") }),
   z.strictObject({ type: z.literal("set_appearance"), appearance: appearanceSchema }),
   z.strictObject({ type: z.literal("set_launch_at_login"), enabled: z.boolean() }),
@@ -80,12 +85,18 @@ const commandSchema = z.discriminatedUnion("type", [
     chooseLocation: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal("sessions"), ...selected }),
+  z.strictObject({
+    type: z.literal("request_links"),
+    ...selected,
+    after: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  }),
   z.strictObject({ type: z.literal("overview"), ...selected }),
   z.strictObject({
     type: z.literal("history"),
     ...selected,
     sessionId: z.string().min(1).max(512),
     after: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    before: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   }),
   z.strictObject({
     type: z.literal("history_delete"),

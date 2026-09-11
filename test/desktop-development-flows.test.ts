@@ -228,6 +228,7 @@ test("app enrollment is shared with MCP; local activity pages and notifications 
   assert.ok(desktop);
   assert.equal((await desktop.permissions()).state, "not_registered");
   assert.equal(desktop.activity("incoming").state, "not_registered");
+  assert.deepEqual(desktop.requestLinks(), { links: [], hasMore: false, nextCursor: 0 });
   const mcp = new TestMcpClient(application.endpoint);
   await mcp.initialize({ name: "claude-code", version: "qualification" });
   await assert.rejects(
@@ -315,6 +316,8 @@ test("private desktop reads and registration commands never start a stopped serv
     workingDirectory: root,
     environment: {},
   });
+  assert.deepEqual(await gateway.requestLinks(10), { links: [], hasMore: false, nextCursor: 10 });
+  assert.equal(gateway.snapshot().state, "stopped");
   for (const command of [
     { type: "permissions" as const, instanceId },
     { type: "activity" as const, instanceId, kind: "incoming" as const },

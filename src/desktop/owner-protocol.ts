@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { contactEmail, contactSchema, contactsSchema } from "./people-schema.js";
 
 export const ownerEmail = z
   .string()
@@ -15,6 +16,14 @@ export const ownerCommands = [
   z.strictObject({ type: z.literal("owner_verify"), context, code: z.string().regex(/^\d{6}$/u) }),
   z.strictObject({ type: z.literal("owner_signout"), context }),
   z.strictObject({ type: z.literal("owner_profile"), context }),
+  z.strictObject({ type: z.literal("owner_people"), context }),
+  z.strictObject({
+    type: z.literal("owner_people_save"),
+    context,
+    contacts: z.array(contactSchema).min(1).max(25),
+    replace: z.boolean().optional(),
+  }),
+  z.strictObject({ type: z.literal("owner_people_remove"), context, email: contactEmail }),
   z.strictObject({ type: z.literal("owner_requests"), context }),
   z.strictObject({
     type: z.literal("owner_permissions"),
@@ -189,6 +198,7 @@ export const reviewSchema = z.object({
 });
 export type OwnerReview = z.infer<typeof reviewSchema>;
 export const ownerViewSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("people"), contacts: contactsSchema }),
   z.object({ kind: z.literal("profile"), profile: publicOwnerProfile }),
   z.object({
     kind: z.literal("requests"),

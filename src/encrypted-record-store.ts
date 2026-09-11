@@ -398,6 +398,21 @@ export class EncryptedRecordStore<T> {
     return this.#page((sequence) => next.get(key, sequence), after, limit, maximumBytes);
   }
 
+  pageGroupBefore(
+    group: string,
+    before = Number.MAX_SAFE_INTEGER,
+    limit = 50,
+    maximumBytes = 512 * 1024,
+  ): RecordPage<T> {
+    if (!this.#options.indexedGroups || group.length < 1 || group.length > 1024)
+      throw this.#options.error();
+    const key = this.#key(`group:${group}`);
+    const next = this.#database.prepare<[string, number], Row>(
+      "SELECT r.* FROM records r JOIN record_groups g ON r.sequence = g.sequence WHERE g.group_key = ? AND g.sequence < ? ORDER BY g.sequence DESC LIMIT 1",
+    );
+    return this.#page((sequence) => next.get(key, sequence), before, limit, maximumBytes);
+  }
+
   pageStates(
     states: readonly number[],
     after = 0,
