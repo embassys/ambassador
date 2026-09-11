@@ -50,6 +50,10 @@ test("review expiry, caller abort and window close cancel without applying queue
   assert.equal(reviews.answer(firstId, "provider:always"), false);
   reviews.cancelAll();
   assert.equal(await second, undefined);
+  const retry = reviews.ask(request);
+  const retryId = reviews.current()?.id ?? "";
+  assert.equal(reviews.answer(retryId, "provider:always"), true);
+  assert.equal(await retry, "provider:always");
   const third = reviews.ask(request);
   reviews.close();
   assert.equal(await third, undefined);
