@@ -27,6 +27,9 @@ test("persists, retires, lists, expires, and forgets bounded ACP session metadat
     last_used_at_ms: 1_000,
   });
   assert.equal(first.findActiveByMessage("message-1")?.session_id, "provider-session-1");
+  first.trackMessage("provider-session-1", "later-message");
+  assert.equal(first.sessionForMessage("later-message"), "provider-session-1");
+  assert.equal(first.sessionForMessage("unknown-message"), undefined);
   first.touch("provider-session-1", 2_000);
   assert.equal(first.completeAction("call-1", 3_000), true);
   assert.equal(first.completeAction("call-1", 4_000), false);
@@ -47,7 +50,10 @@ test("persists, retires, lists, expires, and forgets bounded ACP session metadat
     last_used_at_ms: 3_000,
     retired_at_ms: 3_000,
   });
+  assert.equal(reopened.sessionForMessage("later-message"), "provider-session-1");
+  assert.equal(reopened.findActiveByMessage("later-message"), undefined);
   assert.equal(reopened.forget("provider-session-1"), true);
+  assert.equal(reopened.sessionForMessage("later-message"), undefined);
   assert.equal(reopened.forget("provider-session-1"), false);
   reopened.close();
 });

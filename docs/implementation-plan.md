@@ -1,5 +1,27 @@
 # Current work
 
+On September 11 the owner authorized a PR and desktop 0.1.2 preview 1 for the
+completed conversation, approval and People refinements. Publication must follow
+successful core, fixture, package and desktop checks for the release commit,
+then verification of the uploaded assets. The release follows
+[ADR 0076](adr/0076-desktop-github-preview.md); the npm CLI stays at 0.2.19.
+The release review passed the full local check with 537 tests and seven expected
+skips, all 39 desktop artifact/render checks, desktop typecheck and the 0.1.2
+production build. Current populated native captures are recorded below. These
+checks do not replace CI or qualify additional live providers.
+Release CI found a Windows account-worker startup timeout while opening protected
+local stores. Both sides of its private handshake now use a shared 60-second
+startup deadline. A delayed-handshake regression reproduces the old 15-second
+failure; a stalled-worker check still requires a bounded failure and closure.
+The initial draft assets must be replaced with a fully checked build containing
+this fix before publication.
+The rerun also reproduced the previously recorded native-observer closed-socket
+failure immediately after a server restart. The observer now allows two bounded
+reconnects with short cancellable pauses, covering a lost check followed by a
+lost initialization response. It still accepts only checks and explicit receipts.
+Regression tests cover that failure sequence, the attempt limit and cancellation
+before and during the reconnect pause. This also requires replacement draft assets.
+
 On September 9 the owner authorized desktop 0.1.1 preview 1 for the guided
 connection and discovery change under [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).
 [Embassys 0.1.1 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.1-preview.1)
@@ -9,8 +31,9 @@ and [main desktop checks](https://github.com/embassys/ambassador/actions/runs/34
 passed, as did the corrected PR checks. All 12 uploaded assets were downloaded
 back and matched the final CI files. Public Mac, Windows and Linux downloads
 were checked without GitHub authentication. The npm CLI remains at 0.2.19.
-The four installed-agent tests passed with synthetic central data; the new
-native button/dialog walkthrough remains pending as recorded below.
+The four installed-agent tests passed with synthetic central data. The September
+10 native Claude Code walkthrough also passed against deployed central; the
+other native button/dialog walkthroughs remain pending as recorded below.
 
 Windows release CI exposed an older acknowledgement-test race. Its half-second
 poll could expire after provider completion but before the independent receipt
@@ -45,6 +68,87 @@ The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md),
 implementation, regression coverage and live end-to-end testing, then authorized
 the release on 2026-09-05 with the remaining limitations below.
 
+## Current desktop refinement
+
+The September 11 sidebar change in [ADR 0080](adr/0080-conversation-sidebar.md)
+is implemented. Inbox holds unlinked owner requests as individual sidebar rows.
+Selecting one opens that exact request. Conversation rows show saved topics and excerpts in two compact lines; the conversation
+list prioritizes exact linked requests and keeps its selected session when
+ordering changes. The core suite passed 529 tests with seven expected skips,
+and 33 desktop checks passed. Additional post-decision refresh and stopped-link
+regressions are recorded in the [qualification](desktop-conversation-sidebar-2026-09-11.md).
+The unlocked native Mac walkthrough passed with populated light/dark and compact
+screens, sample answer confirmation, stable selection, attention reordering and
+paused fallback. It also fixed a Review-control paint issue. Captures are in
+`.build/conversation-sidebar-review/screenshots.html`. The compact-row refinement
+and individual request selection pass all 34 desktop checks, typecheck and native
+light/dark/minimum-size inspection. Updated captures are in
+`.build/compact-sidebar-review/screenshots.html`. The later context/detail refinement
+passes 36 desktop and 19 targeted core checks, typecheck and the production build.
+Native light/dark, keyboard disclosures and minimum-size checks are recorded at
+`.build/conversation-detail-polish/screenshots.html`; this is offline UI evidence.
+The latest refinement removes the aggregate Inbox page: requests and conversations
+use matching sidebar rows, and requests open individually. All 37 desktop checks,
+typecheck and the production build pass. Native Mac checks cover initial selection,
+return from Settings, resolved-request stability, light/dark appearance and the
+minimum window. Populated captures are in
+`.build/sidebar-workspace-review/screenshots.html`, using fictional offline data.
+The following chat refinement replaces the transcript list with separate peer and
+local-agent bubbles. Peer labels use exact archived message correlation with the
+existing bounded account communication view. Owner input and system notices keep
+separate attribution. Latest archive reads, chronological display, earlier-page
+loading, stable reading position and bottom-aligned pending reviews are implemented.
+All 39 desktop checks and 24 targeted core checks pass, together with typecheck,
+the production build and native Mac light/dark/minimum-size inspection. Native
+pagination and an incoming sample update exposed and then verified fixes for
+reading-position jumps. Current captures are in
+`.build/chat-conversation-review/screenshots.html`; these are fictional offline UI
+tests, not a new central/provider qualification.
+
+The owner accepted that structure and requested an aesthetic finish. The current
+pass refines system typography, neutral sidebar selection, participant headings,
+blue outgoing bubbles, disclosure styling and approval controls. Native checks
+also fixed a compact review heading hidden by bottom-following, and keep the
+latest message visible when resizing. All 39 desktop checks, desktop typecheck,
+format checks and the production build pass. Light/dark, minimum 680 × 540,
+keyboard selection, review cancellation, long exact options and nested scope were
+checked in the isolated Mac host. Current populated screenshots and evidence are
+in `.build/chat-finish-review/`. This is local UI qualification with fictional
+data; no new release or central/provider qualification is claimed.
+
+Pending conversation requests use a compact translucent gray card with soft
+shadow and rounded corners. The repeated "Needs your response" heading is removed.
+Review uses the shared neutral platform-button treatment, with compact Mac sizing
+and light/dark depth. There is no colored leading border or icon tile.
+Reduced-transparency settings use an opaque background. All 39 desktop checks,
+typecheck and the production build pass. Native light/dark, minimum-size,
+keyboard and review/cancel checks pass; current captures are in
+`.build/rounded-request-review/`. Approval behavior and other pages are unchanged.
+
+[ADR 0078](adr/0078-desktop-polish-and-readable-reviews.md) implements the September
+10 request for visual polish, readable setup approvals and contact integration.
+The new layout, private review sheets and encrypted local People list are on
+`codex/desktop-polish-and-people`. Automated and native qualification are
+recorded in [Desktop refinement qualification](desktop-refinement-2026-09-10.md).
+The full automated checks and native Mac walkthrough passed, including the
+real Claude approval, contact import and restart. The subsequent simplification
+under [ADR 0079](adr/0079-simple-desktop-inbox.md) removes the sidebar and opens
+one Inbox with History beside it. Secondary screens use More; Settings now has
+a visible toolbar button, native menu entry and keyboard shortcut. A persistent
+local-service status strip opens Settings, with Pause/Resume near the top.
+The Mac toolbar and compact preferences use native window material and system
+typography. Exact reviews and separate local/account
+records are preserved. The owner's 1Password/Linear follow-up adds neutral
+surfaces, aligned settings rows, quieter request lists and clearer review
+typography. The subsequent page-detail pass refines populated Inbox rows and
+reviews, History selection and transcript hierarchy, and fixes stale content
+on failed history loads and review focus/scroll. Its 32 render/artifact checks
+and native Mac light/dark and compact-window checks use a visibly labelled,
+offline sample host for populated screenshots. They do not claim a new live
+central/provider exchange. Current native and regression evidence is in the
+[simplicity qualification](desktop-simplicity-2026-09-10.md). This branch has not
+been released. Remote invitations require [API issue 11](https://github.com/embassys/agent2agent/issues/11).
+
 ## Open follow-ups
 
 The September 9 [guided connection change](guided-agent-connection.md), approved
@@ -71,10 +175,17 @@ against the packaged app with its bundled Node 24.19.0 runtime. The tests used
 one synthetic enrollment and confirmed cleanup afterward. OpenClaw and Hermes
 discovery were repeated separately to confirm each loaded its own skill path.
 
-- [ ] Complete the native Connect/button and approval-dialog inspection after
-  the Mac is unlocked. The native automation tool reported a locked Mac during
-  this run. Programmatic Electron host, worker startup and duplicate-launch
-  checks pass separately; they do not prove the visible onboarding result.
+- [x] Complete a native Connect/button and approval-dialog walkthrough with
+  Claude Code. On September 10 the published Mac app passed registration and
+  owner login against deployed central, the actual correlated Claude tool check,
+  visible completion, restart, approval cancellation/retry and sign-out. Sixteen
+  screenshots are recorded in the [native onboarding qualification](onboarding-qualification-2026-09-10.md).
+- [ ] Repeat the native guided button/dialog walkthrough for Codex, OpenClaw
+  and Hermes. Their earlier installed-agent checks remain separate evidence.
+- [x] Simplify setup approval dialogs with formatted, collapsed request details
+  and exact provider choices above short action buttons. Remove repeated
+  reopen-chat guidance from the connected screen. The native Claude walkthrough
+  passed the review, cancellation and completion paths.
 
 Captured together at the user's request on 2026-09-07. API work remains
 issue-only. These items do not authorize another release.

@@ -35,7 +35,9 @@ test("system accents keep readable button labels and links in both themes", () =
 
 test("desktop appearance follows the platform and respects reduced transparency", () => {
   assert.equal(windowAppearance("darwin", false, false).titleBarStyle, "hiddenInset");
-  assert.equal(windowAppearance("darwin", false, false).vibrancy, "sidebar");
+  assert.equal(windowAppearance("darwin", false, false).vibrancy, "under-window");
+  assert.deepEqual(windowAppearance("darwin", false, false).trafficLightPosition, { x: 14, y: 19 });
+  assert.equal(windowAppearance("win32", false, false).trafficLightPosition, undefined);
   assert.equal(windowAppearance("darwin", false, true).vibrancy, undefined);
   assert.equal(windowAppearance("win32", true, false).backgroundMaterial, "mica");
   assert.equal(windowAppearance("win32", true, true).backgroundMaterial, undefined);
@@ -47,7 +49,7 @@ test("Mac vibrancy stays visible in both themes and becomes opaque when transpar
   for (const dark of [false, true]) {
     const vibrant = windowAppearance("darwin", dark, false);
     assert.equal(vibrant.backgroundColor, "#00000000");
-    assert.equal(vibrant.vibrancy, "sidebar");
+    assert.equal(vibrant.vibrancy, "under-window");
     assert.equal(vibrant.visualEffectState, "followWindow");
     const reduced = windowAppearance("darwin", dark, true);
     assert.equal(reduced.backgroundColor, dark ? "#1e1e20" : "#f5f5f7");

@@ -4,6 +4,7 @@ import { DiagnosticLog } from "../diagnostic-log.js";
 import { desktopDiagnosticOptions } from "./diagnostic-policy.js";
 import { OwnerAccount } from "./owner-account.js";
 import { ownerCommandSchema } from "./owner-protocol.js";
+import { OWNER_WORKER_STARTUP_MS } from "./owner-worker-startup.js";
 
 const initSchema = z.strictObject({
   protocol: z.literal(1),
@@ -21,7 +22,7 @@ let diagnostic: DiagnosticLog | undefined;
 let initializing = false;
 let closing = false;
 let pending = 0;
-const initializedBy = setTimeout(() => void shutdown(), 15000);
+const initializedBy = setTimeout(() => void shutdown(), OWNER_WORKER_STARTUP_MS);
 function send(value: unknown) {
   if (process.connected && Buffer.byteLength(JSON.stringify(value)) <= 4 * 1024 * 1024)
     process.send?.(value, () => undefined);

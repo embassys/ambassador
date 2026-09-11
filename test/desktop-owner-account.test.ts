@@ -124,6 +124,38 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   };
 }
 
+test("local people work offline, survive restart and reject signed-out or stale account contexts", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.request({ type: "owner_people" })).issue, "session_expired");
+  await s.login();
+  const oldContext = s.service.snapshot().context;
+  const callsBefore = s.f.calls.length;
+  s.f.override(() => {
+    throw new Error("Network unavailable");
+  });
+  const saved = await s.request({
+    type: "owner_people_save",
+    contacts: [{ name: "Alex", email: "alex@example.test" }],
+  });
+  assert.equal(saved.data?.kind, "people");
+  assert.equal(s.f.calls.length, callsBefore);
+  await s.restart();
+  const read = await s.request({ type: "owner_people" });
+  assert.equal(read.data?.kind, "people");
+  if (read.data?.kind === "people") assert.equal(read.data.contacts[0]?.name, "Alex");
+  await assert.rejects(
+    s.service.command({ type: "owner_people", context: oldContext }),
+    /Account changed/u,
+  );
+  const context = s.service.snapshot().context;
+  await s.request({ type: "owner_signout" });
+  await assert.rejects(
+    s.service.command({ type: "owner_people_remove", context, email: "alex@example.test" }),
+    /Account changed/u,
+  );
+  assert.equal((await s.request({ type: "owner_people" })).data, undefined);
+});
+
 test("owner snapshots accept JSON columns, preserve exact labels and redact nested credentials", async (t) => {
   const s = await setup(t);
   await s.login();

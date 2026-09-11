@@ -33,6 +33,9 @@ plan contains only work that is not complete.
 | Verify the existing live REST integration | [Live central qualification](live-qualification.md) |
 | Set up Codex | [Codex setup](getting-started-codex.md) |
 | Connect an agent from the app and enable natural request discovery | [Guided agent connection](guided-agent-connection.md) |
+| Review the desktop refinement and People scope | [Desktop refinement](desktop-refinement-2026-09-10.md) |
+| Review the simpler Inbox and History app | [Desktop simplicity](desktop-simplicity-2026-09-10.md) |
+| Review the released Mac app's live onboarding and screenshot evidence | [Native onboarding qualification](onboarding-qualification-2026-09-10.md) |
 | Set up Claude Code | [Claude Code setup](getting-started-claude.md) |
 | Connect standalone Claude Chat or Cowork locally | [Desktop local client](claude-desktop-local-client.md) |
 | Set up Hermes | [Hermes setup](getting-started-hermes.md) |

@@ -31,6 +31,9 @@ four-provider discovery skill and owner-started live connection check.
 
 | ADR | Decision |
 | --- | --- |
+| [0080](0080-conversation-sidebar.md) | Conversation sidebar with attention-first threads and an unlinked request inbox |
+| [0079](0079-simple-desktop-inbox.md) | Inbox-first desktop with History, secondary tools and one mixed request list |
+| [0078](0078-desktop-polish-and-readable-reviews.md) | Readable approval sheets, desktop refinement and encrypted local People with selective contact import |
 | [0076](0076-desktop-github-preview.md) | Explicit GitHub desktop prerelease with verified downloads and unsigned platform limits |
 | [0075](0075-owner-decisions-and-default-waits.md) | App approvals, answers and revocation through existing owner APIs; ten-minute waits with durable continuation |
 | [0074](0074-desktop-stdio-client.md) | Standalone Claude local stdio connection |
