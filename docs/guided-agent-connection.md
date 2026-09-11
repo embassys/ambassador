@@ -70,7 +70,10 @@ synthetic contact's phone number and returned the exact fixture result. The
 OpenClaw and Hermes checks confirmed their own skill locations independently.
 Test settings and the Codex model preference were restored afterward.
 
-Native button and approval-dialog inspection remains pending because the Mac
-was locked. Automated host startup is covered separately. The current work plan
-records that limit and the regression results.
+On September 10 the released Mac app passed native registration and owner login
+against deployed central, Connect Claude Code, one-time provider approval and
+visible connection confirmation. Restart, cancellation/retry and sign-out also
+passed. The [illustrated qualification record](onboarding-qualification-2026-09-10.md)
+describes the 16 captures and remaining dialog polish. Native walkthroughs for
+the other three agents remain separate follow-ups.
 The design and test boundaries are in [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).

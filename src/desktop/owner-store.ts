@@ -83,13 +83,17 @@ export class OwnerStore {
         // A missing key beside saved state is corruption, never a fresh account.
         if (
           (await readLocalSettings(join(canonical, "session.json"), envelope)) ||
-          (await lstat(join(canonical, "mutations.sqlite")).then(
-            () => true,
-            (error: NodeJS.ErrnoException) => {
-              if (error.code === "ENOENT") return false;
-              throw error;
-            },
-          ))
+          (await Promise.all(
+            ["mutations.sqlite", "people.sqlite"].map((file) =>
+              lstat(join(canonical, file)).then(
+                () => true,
+                (error: NodeJS.ErrnoException) => {
+                  if (error.code === "ENOENT") return false;
+                  throw error;
+                },
+              ),
+            ),
+          ).then((results) => results.some(Boolean)))
         )
           throw new Error("Account key is missing.");
         key = randomBytes(32).toString("hex");

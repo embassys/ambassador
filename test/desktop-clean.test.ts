@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { AcpSessionStore } from "../src/acp-session-store.js";
 import { parseCentralCredential } from "../src/central-credential.js";
 import { EncryptedFileCredentialStore } from "../src/credential-store.js";
 import { DesktopGateway } from "../src/desktop/gateway.js";
@@ -56,6 +57,17 @@ test("Clean summary identifies enrollment and counts pending calls without consu
   });
   archive.finish("offline-message", "complete");
   archive.close();
+  const sessions = new AcpSessionStore(paths.acpSessionPath);
+  sessions.create({
+    session_id: "offline-session",
+    agent_kind: "claude",
+    working_directory: root,
+    central_message_id: "offline-message",
+    status: "active",
+    created_at_ms: Date.now(),
+    last_used_at_ms: Date.now(),
+  });
+  sessions.close();
   const gateway = new DesktopGateway({
     id: randomUUID(),
     name: "Offline",
@@ -65,12 +77,18 @@ test("Clean summary identifies enrollment and counts pending calls without consu
     environment: {},
   });
   assert.match(JSON.stringify(await gateway.history("offline-session")), /Saved visible response/u);
+  assert.match(
+    JSON.stringify(await gateway.history("offline-session", 0, Number.MAX_SAFE_INTEGER)),
+    /Saved visible response/u,
+  );
   assert.equal(gateway.snapshot().state, "stopped");
+  assert.match(JSON.stringify(await gateway.sessions()), /Saved visible response/u);
   await gateway.deleteHistory("offline-session");
   assert.doesNotMatch(
     JSON.stringify(await gateway.history("offline-session")),
     /Saved visible response/u,
   );
+  assert.doesNotMatch(JSON.stringify(await gateway.sessions()), /Saved visible response/u);
   const lock = await ProcessLock.acquire(paths.lockPath);
   try {
     const summary = await readLocalSummary(paths);

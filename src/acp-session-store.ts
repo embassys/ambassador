@@ -295,6 +295,16 @@ export class AcpSessionStore {
     return row === undefined ? undefined : fromRow(row);
   }
 
+  /** Read-only desktop correlation, including retained retired conversations. */
+  sessionForMessage(messageId: string): string | undefined {
+    if (!CORRELATION_ID.test(messageId)) throw invalidStore();
+    return databaseFor(this)
+      .prepare<[string], { session_id: string }>(
+        "SELECT session_id FROM acp_dispatches WHERE message_id = ?",
+      )
+      .get(messageId)?.session_id;
+  }
+
   list(): AcpSessionRecord[] {
     const rows = databaseFor(this)
       .prepare<[], SessionRow>(

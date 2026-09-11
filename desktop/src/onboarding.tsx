@@ -7,6 +7,7 @@ import type {
 } from "../../src/desktop/protocol.js";
 import type { RegistrationSnapshot } from "../../src/desktop/registration.js";
 import { Account, notices } from "./account.js";
+import { SettingsButton } from "./navigation.js";
 import { Registration } from "./registration.js";
 
 type Instance = DesktopInstance & { runtime: GatewaySnapshot };
@@ -120,7 +121,9 @@ function AgentSetup({
       </h1>
       <p className="onboarding-intro">
         {configured
-          ? `Reopen existing ${agent.name} chats to load the Embassys skill. You can connect more agents later.`
+          ? verified
+            ? "Your agent is connected. You can add more agents later."
+            : "Your connection settings are saved. Test the connection when your agent is available."
           : "We'll connect Embassys, add a skill so your agent recognizes it, and check that the tools work."}
       </p>
       {!instance ? (
@@ -313,8 +316,8 @@ export function Onboarding({
   return (
     <div className="onboarding-shell">
       <header className="onboarding-brand">
-        <img src="/brand.svg" alt="" />
         <span>Embassys</span>
+        <SettingsButton open={settings} />
       </header>
       <main className="onboarding-content">
         {owner.status === "loading" ? (
@@ -330,8 +333,13 @@ export function Onboarding({
           />
         ) : view === "welcome" && !login ? (
           <>
+            <div className="onboarding-emblem" aria-hidden="true">
+              <img src="/brand.svg" alt="" />
+            </div>
             <h1>Welcome to Embassys</h1>
-            <p className="onboarding-intro">Log in or create an account to connect your agent.</p>
+            <p className="onboarding-intro">
+              Sign in, connect your agent, and choose what to share.
+            </p>
             {owner.issue && (
               <p role="status" className="account-notice">
                 {notices[owner.issue]}
@@ -345,6 +353,9 @@ export function Onboarding({
                 Register
               </button>
             </div>
+            <p className="onboarding-compatible">
+              Works with Claude Code, Codex, OpenClaw and Hermes
+            </p>
           </>
         ) : (
           <>
@@ -408,11 +419,6 @@ export function Onboarding({
           </>
         )}
       </main>
-      <footer className="onboarding-footer">
-        <button type="button" className="text-button" onClick={settings}>
-          Server settings
-        </button>
-      </footer>
     </div>
   );
 }

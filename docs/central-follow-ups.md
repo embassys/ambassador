@@ -15,6 +15,19 @@ API code changes.
 - [Issue 5: tell the caller when an action is waiting for its owner](https://github.com/embassys/agent2agent/issues/5).
 - [Issue 6: define and validate action result schemas](https://github.com/embassys/agent2agent/issues/6).
 
+
+## People and invitations
+
+[Issue 11](https://github.com/embassys/agent2agent/issues/11) tracks inviting
+people and viewing connections from the app. On September 10, central `a8c0e77`
+and deployed OpenAPI expose `/accept-invitation` and
+`/api/check_invitation_approval`, but no route to send an invitation or list an
+owner's connections. `SendInvitationRequest` and a mail helper exist in source;
+neither is an available REST operation. Web app `a9cb3d3` supplies no missing
+owner route. Require authenticated send/list/accept/decline contracts and safe
+lost-response behavior, with connection acceptance separate from action grants.
+The desktop's local People list does not imply a central connection.
+
 ## Security and operations
 
 - Reserve `ambassador_acp_tool_execution` as a reviewed internal human-input

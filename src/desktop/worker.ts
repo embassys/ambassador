@@ -147,8 +147,11 @@ process.on("message", (raw: unknown) => {
       case "sessions":
         result = await current.sessions();
         break;
+      case "request_links":
+        result = await current.requestLinks(command.after);
+        break;
       case "history":
-        result = await current.history(command.sessionId, command.after);
+        result = await current.history(command.sessionId, command.after, command.before);
         break;
       case "history_delete":
         await current.deleteHistory(command.sessionId);

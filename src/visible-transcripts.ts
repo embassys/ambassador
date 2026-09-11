@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { LoadedCentralCredential } from "./central-credential.js";
 import type { CentralMessage } from "./central-rest.js";
+import { type ConversationPreview, conversationPreview } from "./desktop/conversation-preview.js";
 import { EncryptedRecordStore } from "./encrypted-record-store.js";
 import { redactVerboseValue } from "./verbose-log.js";
 
@@ -331,8 +332,22 @@ export class VisibleTranscripts {
       }
     }
   }
-  page(sessionId: string, after = 0, limit = 50): TranscriptPage {
-    const page = this.#store.pageGroup(sessionGroup(sessionId), after, limit, 512 * 1024);
+  preview(sessionId: string): ConversationPreview | undefined {
+    return conversationPreview(this.page(sessionId, 0, 8, 64 * 1024).items);
+  }
+  latest(sessionId: string, before = Number.MAX_SAFE_INTEGER, limit = 50): TranscriptPage {
+    return this.page(sessionId, before, limit, 512 * 1024, true);
+  }
+  page(
+    sessionId: string,
+    after = 0,
+    limit = 50,
+    maximumBytes = 512 * 1024,
+    reverse = false,
+  ): TranscriptPage {
+    const page = reverse
+      ? this.#store.pageGroupBefore(sessionGroup(sessionId), after, limit, maximumBytes)
+      : this.#store.pageGroup(sessionGroup(sessionId), after, limit, maximumBytes);
     const health = this.#store.get("health");
     const turns = new Map<string, Turn | undefined>();
     const lookup = (messageId: string) => {
@@ -361,7 +376,7 @@ export class VisibleTranscripts {
     }
     return {
       source: "archive",
-      items,
+      items: reverse ? items.reverse() : items,
       nextCursor: page.items.at(-1)?.sequence ?? after,
       hasMore: page.hasMore,
       warnings:

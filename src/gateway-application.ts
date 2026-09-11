@@ -21,6 +21,7 @@ import {
   validateStoredDeliveryProfile,
 } from "./delivery-profile.js";
 import { type ActivityKind, type ActivityPage, activityPage } from "./desktop/activity.js";
+import { type RequestLinkPage, requestLinksPage } from "./desktop/conversations.js";
 import type { LocalNotification } from "./desktop/notifications.js";
 import { DesktopRegistration } from "./desktop/registration.js";
 import {
@@ -144,8 +145,12 @@ export interface RunningGatewayApplication {
       email?: string;
     }>;
     activity(kind: ActivityKind, after?: number): ActivityPage;
+    requestLinks(after?: number): RequestLinkPage;
   };
-  visibleHistory(sessionId: string, after?: number): TranscriptPage | undefined;
+  visibleHistory(sessionId: string, after?: number, before?: number): TranscriptPage | undefined;
+  visiblePreview(
+    sessionId: string,
+  ): import("./desktop/conversation-preview.js").ConversationPreview | undefined;
   deleteVisibleHistory(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
@@ -1014,6 +1019,15 @@ export async function openGatewayApplication(
       ? {
           desktop: {
             registration: desktopRegistration,
+            requestLinks: (after = 0) =>
+              ownerQuestions && acpSessionStore && identity.enrolled
+                ? requestLinksPage(
+                    ownerQuestions,
+                    (message) => acpSessionStore?.sessionForMessage(message),
+                    String(identity.enrollment.agent_id),
+                    after,
+                  )
+                : { links: [], hasMore: false, nextCursor: after },
             permissions: async () => {
               if (!identity.enrolled) return { state: "not_registered" as const, items: [] };
               if (identity.expired) return { state: "expired" as const, items: [] };
@@ -1050,8 +1064,11 @@ export async function openGatewayApplication(
       receivedResults: actionResultInbox?.count() ?? 0,
       sessionCount: acpSessionStore?.list().length ?? 0,
     }),
-    visibleHistory: (sessionId, after) =>
-      transcripts?.page(sessionId, after) ??
+    visiblePreview: (sessionId) => transcripts?.preview(sessionId),
+    visibleHistory: (sessionId, after, before) =>
+      (before === undefined
+        ? transcripts?.page(sessionId, after)
+        : transcripts?.latest(sessionId, before)) ??
       (transcriptWarning
         ? {
             source: "archive",
