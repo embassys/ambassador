@@ -71,3 +71,10 @@ with unsupported legacy encodings or no usable email. Ignore phone numbers,
 notes, photos and addresses. Never fetch embedded URLs. Case-normalized duplicate
 emails retain the existing saved name; only explicit Edit name replaces it.
 No native address-book entitlement, dependency or central upload is introduced.
+
+Release qualification found that Windows account storage initialization could
+exceed the existing 15-second worker deadline. Both ends of the private account
+handshake use a shared 60-second startup limit. The app stays in its existing
+loading state until the validated ready message arrives; a stalled worker still
+closes at the deadline. This changes no request, shutdown, permission or network
+timeout. Cover delayed success and bounded failure before publishing the fix.

@@ -9,6 +9,7 @@ import {
   ownerReplySchema,
   ownerSnapshotSchema,
 } from "./owner-protocol.js";
+import { OWNER_WORKER_STARTUP_MS } from "./owner-worker-startup.js";
 
 export class OwnerWorkerClient {
   readonly #child: ChildProcess;
@@ -58,7 +59,7 @@ export class OwnerWorkerClient {
       const timer = setTimeout(() => {
         reject(new Error("The account service did not initialize."));
         void this.close();
-      }, 15000);
+      }, OWNER_WORKER_STARTUP_MS);
       const ended = () => {
         clearTimeout(timer);
         this.#snapshot = {
