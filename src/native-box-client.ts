@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { localNativeEndpoint } from "./openclaw-return-endpoint.js";
 
@@ -38,7 +39,7 @@ export class NativeBoxClient {
     if (input.type !== "check" && input.type !== "acknowledge")
       throw new Error("Only checks and receipts can use the native observer");
     const signal = AbortSignal.any([callerSignal, this.#lifetime.signal]);
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       signal.throwIfAborted();
       const connection = this.#connect();
       let client: Client | undefined;
@@ -52,13 +53,15 @@ export class NativeBoxClient {
         );
       } catch (error) {
         signal.throwIfAborted();
-        // A restart invalidates MCP initialization. Reconnect once, sharing the
-        // replacement across concurrent observers. Neither operation submits work.
+        // A restart can invalidate the session and leave a pooled socket closed
+        // during the next handshake. Allow two bounded reconnects, sharing each
+        // replacement across observers. Neither operation submits work.
         if (this.#connection === connection) {
           this.#connection = undefined;
           await client?.close();
         }
-        if (attempt === 1) throw error;
+        if (attempt === 2) throw error;
+        await delay(100 * (attempt + 1), undefined, { signal });
         continue;
       }
       if (

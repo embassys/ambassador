@@ -15,6 +15,12 @@ startup deadline. A delayed-handshake regression reproduces the old 15-second
 failure; a stalled-worker check still requires a bounded failure and closure.
 The initial draft assets must be replaced with a fully checked build containing
 this fix before publication.
+The rerun also reproduced the previously recorded native-observer closed-socket
+failure immediately after a server restart. The observer now allows two bounded
+reconnects with short cancellable pauses, covering a lost check followed by a
+lost initialization response. It still accepts only checks and explicit receipts.
+Regression tests cover that failure sequence, the attempt limit and cancellation
+before and during the reconnect pause. This also requires replacement draft assets.
 
 On September 9 the owner authorized desktop 0.1.1 preview 1 for the guided
 connection and discovery change under [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).
