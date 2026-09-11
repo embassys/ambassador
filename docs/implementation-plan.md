@@ -1,26 +1,35 @@
 # Current work
 
 On September 11 the owner authorized a PR and desktop 0.1.2 preview 1 for the
-completed conversation, approval and People refinements. Publication must follow
-successful core, fixture, package and desktop checks for the release commit,
-then verification of the uploaded assets. The release follows
+completed conversation, approval and People refinements.
+[Embassys 0.1.2 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.2-preview.1)
+is published from `648da36`, merged through [PR 43](https://github.com/embassys/ambassador/pull/43).
+The tested source tree matches merge commit `7dfad6d` exactly. The release follows
 [ADR 0076](adr/0076-desktop-github-preview.md); the npm CLI stays at 0.2.19.
-The release review passed the full local check with 537 tests and seven expected
-skips, all 39 desktop artifact/render checks, desktop typecheck and the 0.1.2
-production build. Current populated native captures are recorded below. These
-checks do not replace CI or qualify additional live providers.
+[Core, central fixture and package CI](https://github.com/embassys/ambassador/actions/runs/34611678763),
+[PR desktop CI](https://github.com/embassys/ambassador/actions/runs/34611678593) and
+[branch desktop CI](https://github.com/embassys/ambassador/actions/runs/34611669532)
+passed on all three platforms. Downloads come from the branch desktop run.
+All 12 final assets were downloaded back and matched the CI files byte-for-byte.
+Public downloads and checksums passed without authentication. Each archive passed
+inventory and build-identity checks; the Mac download also passed strict signature
+integrity and an extracted MCP worker test. Local checks passed 543 tests with
+seven expected skips, all 39 desktop artifact/render checks, desktop typecheck
+and the production build. Current populated native captures are recorded below.
+These checks do not qualify additional live providers or signed distribution.
 Release CI found a Windows account-worker startup timeout while opening protected
 local stores. Both sides of its private handshake now use a shared 60-second
 startup deadline. A delayed-handshake regression reproduces the old 15-second
 failure; a stalled-worker check still requires a bounded failure and closure.
-The initial draft assets must be replaced with a fully checked build containing
-this fix before publication.
+The final release assets include this fix; the initial draft was never published.
 The rerun also reproduced the previously recorded native-observer closed-socket
 failure immediately after a server restart. The observer now allows two bounded
 reconnects with short cancellable pauses, covering a lost check followed by a
 lost initialization response. It still accepts only checks and explicit receipts.
 Regression tests cover that failure sequence, the attempt limit and cancellation
-before and during the reconnect pause. This also requires replacement draft assets.
+before and during the reconnect pause. Fifty actual local-server restart checks
+also passed using the bundled Node 24.19.0 runtime. Qualification records and
+download verification are retained locally in `.build/release-0.1.2/`.
 
 On September 9 the owner authorized desktop 0.1.1 preview 1 for the guided
 connection and discovery change under [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).
@@ -224,11 +233,11 @@ issue-only. These items do not authorize another release.
   remains upstream work. See the [desktop PR review](desktop-pr-review-2026-09-08.md)
   and the
   [September 8 qualification](qualification.md#openclaw-instance-and-discovery-retest-2026-09-08).
-  The 0.1.1 PR's Linux native-observer test also saw an intermittent closed socket
-  during an immediate local server restart. Main CI, 50 local restart repetitions
-  with the bundled runtime, and one targeted rerun of the failed Linux job passed.
-  Reproduce that edge case and add deterministic coverage before qualifying this
-  return path. The release notes disclose it; no observer behavior was changed.
+  The intermittent closed socket first observed during 0.1.1 qualification was
+  reproduced and fixed during 0.1.2 release checks. A deterministic test covers a
+  lost check followed by a lost replacement handshake. Bounded, cancellable
+  reconnects and 50 actual restart repetitions passed with the bundled runtime.
+  The separate OpenClaw display limitations above still apply.
 - [x] Calendar invitation delivery. On September 8 the owner authorized the
   connected Google Calendar for one disposable invitation. Native Claude Chat
   sent it to the test inbox; the delivered calendar attachment matched the
