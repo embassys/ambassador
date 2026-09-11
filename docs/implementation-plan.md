@@ -9,6 +9,12 @@ The release review passed the full local check with 537 tests and seven expected
 skips, all 39 desktop artifact/render checks, desktop typecheck and the 0.1.2
 production build. Current populated native captures are recorded below. These
 checks do not replace CI or qualify additional live providers.
+Release CI found a Windows account-worker startup timeout while opening protected
+local stores. Both sides of its private handshake now use a shared 60-second
+startup deadline. A delayed-handshake regression reproduces the old 15-second
+failure; a stalled-worker check still requires a bounded failure and closure.
+The initial draft assets must be replaced with a fully checked build containing
+this fix before publication.
 
 On September 9 the owner authorized desktop 0.1.1 preview 1 for the guided
 connection and discovery change under [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).
