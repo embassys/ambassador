@@ -3,6 +3,7 @@ import { z } from "zod";
 import { redactVerboseValue, type VerboseLogger } from "../verbose-log.js";
 import { permissionChoices } from "./owner-choices.js";
 import { OwnerDecisions, reviewable } from "./owner-decisions.js";
+import { OwnerPeople } from "./owner-people.js";
 import {
   communicationsSchema,
   type OwnerCommand,
@@ -95,6 +96,7 @@ function checkDepth(value: unknown): void {
 export class OwnerAccount {
   #state: OwnerState;
   readonly decisions: OwnerDecisions;
+  readonly people: OwnerPeople;
   #context = randomUUID();
   #tail: Promise<unknown> = Promise.resolve();
   #pending = 0;
@@ -115,6 +117,12 @@ export class OwnerAccount {
   ) {
     this.#state = state;
     this.decisions = new OwnerDecisions(store);
+    try {
+      this.people = new OwnerPeople(store);
+    } catch (error) {
+      this.decisions.close();
+      throw error;
+    }
   }
 
   static async open(options: OwnerAccount["options"]): Promise<OwnerAccount> {
@@ -302,6 +310,14 @@ export class OwnerAccount {
         }
       } else if (session) this.#assign(state);
       return this.#reply();
+    }
+    if (["owner_people", "owner_people_save", "owner_people_remove"].includes(command.type)) {
+      if (this.#state.status !== "signed_in") return this.#reply(undefined, "session_expired");
+      const agentId = this.#state.credential.agentId;
+      if (command.type === "owner_people_save")
+        this.people.save(agentId, command.contacts, command.replace);
+      if (command.type === "owner_people_remove") this.people.remove(agentId, command.email);
+      return this.#reply({ kind: "people", contacts: this.people.list(agentId) });
     }
     if (!(await this.#ensureSession()))
       return this.#reply(undefined, this.snapshot().issue ?? "session_expired");
@@ -686,6 +702,7 @@ export class OwnerAccount {
     await this.#tail;
     this.#assign({ status: "signed_out" });
     this.decisions.close();
+    this.people.close();
     await this.store.close();
   }
 }

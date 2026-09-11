@@ -1,16 +1,16 @@
 # Install the Embassys preview
 
 Download the application for your computer from the
-[Embassys 0.1.1 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.1-preview.1).
+[Embassys 0.1.2 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.2-preview.1).
 Choose an application file in Assets, not GitHub's source-code archives. You do
 not need to install Node or build Embassys yourself. You do need an installed,
 authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | `Embassys-0.1.1-darwin-arm64-development.dmg` | Native Mac app baseline and installed-agent tests; new Connect dialogs await visual inspection |
-| Windows x64 | `Embassys-0.1.1-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
-| Linux x64 | `Embassys-0.1.1-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Mac with Apple silicon, M1 or newer | `Embassys-0.1.2-darwin-arm64-development.dmg` | Native populated UI checks; earlier live Claude Code onboarding and installed-agent tests |
+| Windows x64 | `Embassys-0.1.2-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
+| Linux x64 | `Embassys-0.1.2-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
 
 There is no Intel Mac or Windows/Linux ARM download in this preview. These are
 unsigned development packages. Managed computers may refuse to run them.
@@ -65,6 +65,12 @@ Closing the window keeps the menu/tray app running. Quit Embassys stops its
 servers. Settings contains server controls, logs and Clean. Clean removes local
 enrollment and pending work; it is not sign-out or a server-side account reset.
 
+The sidebar lists conversations and requests that need your attention. Open a
+conversation to see both agents' saved messages and review linked requests at the
+bottom. Requests without an exact conversation link appear under Inbox. People
+can save names and emails locally or import selected vCard contacts; it does not
+send invitations or sync contacts with the server.
+
 The app and its bundled CLI can hand off the same installation. Older npm CLI
 builds are not qualified to open the app's newer state. Use the app's **Use the
 CLI** guidance for the matching bundled command.
@@ -81,9 +87,13 @@ CLI** guidance for the matching bundled command.
   redaction. They expire after seven days while the app runs or logs are next
   opened, with a 1 GiB limit per instance. Clear logs and export are in Settings.
 - There are no automatic updates or a general state-migration guarantee.
-- This release's four installed-agent tests used synthetic central data. Codex
+- The earlier four installed-agent tests used synthetic central data. Codex
   required a model supported by its installed adapter; the test used `gpt-5.5`
   with high reasoning. Embassys does not change the provider's model setting.
+- Native Claude Code onboarding passed against deployed central on September 10
+  using 0.1.1. This preview's new conversation and approval presentation passed
+  native Mac checks with fictional offline data. It does not claim another live
+  onboarding run or native Codex, OpenClaw and Hermes button qualification.
 
 Checksums and dependency inventories are attached beside the downloads. See the
 [work plan](implementation-plan.md) for the remaining reliability and platform

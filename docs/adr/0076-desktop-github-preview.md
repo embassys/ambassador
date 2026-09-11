@@ -57,3 +57,12 @@ authenticated agent to execute incoming work.
 
 Signed production distribution, updates, native Linux/Windows qualification and
 future preview releases require their own work and authorization.
+
+## September 11 preview approval
+
+The owner approved a PR and release of the completed desktop refinement under
+ADRs 0078 through 0080. Publish `desktop-v0.1.2-preview.1` with app version 0.1.2
+after all checks pass. Keep the same three platform targets, development logging,
+unsigned-preview limits and exact-commit artifact verification described above.
+The npm CLI remains at 0.2.19. This approval does not include central changes,
+signing infrastructure or automatic updates.

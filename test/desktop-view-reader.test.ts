@@ -67,3 +67,39 @@ test("a failure from a closed instance cannot affect the next view", async () =>
   reject(new Error("Old instance stopped"));
   await pending;
 });
+
+test("a post-decision refresh replaces an in-flight snapshot without concurrent reads", async () => {
+  let finish: ((value: number) => void) | undefined;
+  let reads = 0;
+  const seen: number[] = [];
+  const reader = createViewReader({
+    queueRefresh: true,
+    read: () => {
+      reads++;
+      return new Promise<number>((done) => {
+        finish = done;
+      });
+    },
+    publish: (value) => seen.push(value),
+    failed: () => assert.fail("Unexpected failure"),
+  });
+  const work = reader.refresh();
+  await reader.refresh();
+  await reader.refresh();
+  assert.equal(reads, 1);
+  assert.ok(finish);
+  finish(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(reads, 2);
+  assert.deepEqual(seen, []);
+  finish(2);
+  await work;
+  assert.deepEqual(seen, [2]);
+  const last = reader.refresh();
+  await reader.refresh();
+  reader.close();
+  finish(3);
+  await last;
+  assert.equal(reads, 3);
+  assert.deepEqual(seen, [2]);
+});

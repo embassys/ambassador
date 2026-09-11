@@ -23,6 +23,52 @@ const text = (value: string) => ({
   content: { type: "text", text: value },
 });
 
+test("latest conversation pages walk backward within one session without gaps or replay", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "ambassador-chat-pages-"));
+  let now = Date.parse("2026-09-11T10:00:00Z");
+  const archive = new VisibleTranscripts(
+    join(root, "visible.sqlite"),
+    parseCentralCredential(currentCredential(), () => FIXTURE_NOW_SECONDS),
+    { now: () => now },
+  );
+  t.after(async () => {
+    archive.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  for (let n = 0; n < 12; n++) {
+    const msg = { ...message, id: `message-${n}` };
+    archive.begin("session", msg);
+    now++;
+    archive.update(msg.id, 1, text(`Reply ${n}`));
+    archive.finish(msg.id, "complete");
+    now++;
+  }
+  archive.begin("another-session", { ...message, id: "other" });
+  const first = archive.latest("session", undefined, 5);
+  assert.match(JSON.stringify(first), /Reply 11/);
+  assert.doesNotMatch(JSON.stringify(first), /Reply 0"|"id":"other"/);
+  assert.equal(first.hasMore, true);
+  const collected = [...first.items];
+  let page = first;
+  while (page.hasMore) {
+    const previous = page.nextCursor;
+    page = archive.latest("session", previous, 5);
+    assert.ok(page.nextCursor < previous);
+    collected.unshift(...page.items);
+  }
+  assert.deepEqual(
+    collected.map((i) => i.id),
+    archive.page("session").items.map((i) => i.id),
+  );
+  assert.equal(new Set(collected.map((i) => i.id)).size, collected.length);
+  assert.throws(() => archive.latest("session", -1));
+  assert.deepEqual(archive.latest("missing").items, []);
+  now += 31 * 86_400_000;
+  assert.ok(
+    archive.latest("session").items.every((i) => i.kind === "turn" && i.status === "expired"),
+  );
+});
+
 test("visible transcripts normalize chunks, exclude reasoning and replay, and survive restart encrypted", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-visible-"));
   const path = join(root, "visible.sqlite");
@@ -47,6 +93,10 @@ test("visible transcripts normalize chunks, exclude reasoning and replay, and su
   archive.finish(message.id, "complete");
   archive.close();
   archive = new VisibleTranscripts(path, credential);
+  const preview = archive.preview("session-1");
+  assert.equal(preview?.title, "Phone number");
+  assert.match(preview?.excerpt ?? "", /The number is/);
+  assert.equal(archive.preview("other-session"), undefined);
   const page = archive.page("session-1");
   const serialized = JSON.stringify(page);
   assert.match(serialized, /The number is \+44 7700 900627/u);
@@ -109,6 +159,9 @@ test("retention removes settled bodies, keeps a gap, and does not evict an activ
   assert.doesNotMatch(page, /settled old body/u);
   assert.match(page, /retention/u);
   assert.match(page, /active body/u);
+  assert.doesNotMatch(JSON.stringify(archive.preview("session")), /settled old body/u);
+  while (archive.deleteSession("session")) {}
+  assert.equal(archive.preview("session"), undefined);
 });
 
 test("quota failure records a durable gap without altering workflow or hiding a failure", async (t) => {

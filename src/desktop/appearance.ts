@@ -50,8 +50,9 @@ export function windowAppearance(platform: string, dark: boolean, reducedTranspa
     backgroundColor:
       platform === "darwin" && !reducedTransparency ? "#00000000" : dark ? "#1e1e20" : "#f5f5f7",
     titleBarStyle: platform === "darwin" ? ("hiddenInset" as const) : ("default" as const),
+    ...(platform === "darwin" ? { trafficLightPosition: { x: 14, y: 19 } } : {}),
     ...(platform === "darwin" && !reducedTransparency
-      ? { vibrancy: "sidebar" as const, visualEffectState: "followWindow" as const }
+      ? { vibrancy: "under-window" as const, visualEffectState: "followWindow" as const }
       : {}),
     ...(platform === "win32" && !reducedTransparency
       ? { backgroundMaterial: "mica" as const }
