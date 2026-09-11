@@ -92,21 +92,34 @@ const reviews = new DesktopReviews(() => {
 });
 const quitLifecycle = new DesktopQuitLifecycle({
   stop: async () => {
-    reviews.close();
-    clearInterval(notificationTimer);
+    reviews.cancelAll();
+    if (notificationTimer) {
+      clearInterval(notificationTimer);
+      notificationTimer = undefined;
+    }
     for (const notification of activeNotifications) notification.close();
     activeNotifications.clear();
     const activeSetup = [...setupTasks];
     for (const [, abort] of activeSetup) abort.abort();
-    await Promise.all([
-      ...[...workers.values()].map((worker) => worker.close()),
-      owner?.close(),
-      Promise.allSettled(activeSetup.map(([task]) => task)),
-    ]);
+    const activeWorkers = [...workers.values()];
+    const activeOwner = owner;
     workers.clear();
+    owner = undefined;
+    const setupSettlement = Promise.allSettled(activeSetup.map(([task]) => task));
+    const settled = await Promise.allSettled([
+      ...activeWorkers.map((worker) => worker.close()),
+      ...(activeOwner ? [activeOwner.close()] : []),
+    ]);
+    await setupSettlement;
+    if (settled.some((result) => result.status === "rejected"))
+      throw new Error("Desktop services did not finish shutting down.");
   },
   quit: () => app.quit(),
-  failed: showError,
+  failed: () => {
+    startNotificationTimer();
+    changed();
+    showError();
+  },
 });
 let pendingChanges = false;
 let busy = false;
@@ -228,6 +241,14 @@ function changed(): void {
       updateMenu();
     }
   }, 50);
+}
+
+function startNotificationTimer(): void {
+  if (notificationTimer) return;
+  notificationTimer = setInterval(() => {
+    void notifications.flush().catch(() => undefined);
+  }, 10_000);
+  notificationTimer.unref();
 }
 
 function getWorker(instance: DesktopInstance): SupervisedGateway {
@@ -931,10 +952,7 @@ else {
           }, 60_000).unref();
         },
       });
-      notificationTimer = setInterval(() => {
-        void notifications.flush().catch(() => undefined);
-      }, 10_000);
-      notificationTimer.unref();
+      startNotificationTimer();
       nativeTheme.themeSource = appearance.value;
       Menu.setApplicationMenu(
         Menu.buildFromTemplate(applicationMenu(process.platform, openSettings)),
