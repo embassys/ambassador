@@ -268,7 +268,7 @@ export class VisibleTranscripts {
         }
       } else return true;
       const turn = this.#turn(messageId);
-      if (!turn || turn.status !== "recording" || !Number.isSafeInteger(sequence) || sequence < 1)
+      if (turn?.status !== "recording" || !Number.isSafeInteger(sequence) || sequence < 1)
         return false;
       const fingerprint = digest({ role, text, toolId });
       if (sequence < turn.sourceSequence) return true;
@@ -288,7 +288,7 @@ export class VisibleTranscripts {
   finish(messageId: string, status: "complete" | "partial"): boolean {
     try {
       const turn = this.#turn(messageId);
-      if (!turn || turn.status !== "recording") return false;
+      if (turn?.status !== "recording") return false;
       turn.status = turn.reason ? "partial" : status;
       if (status === "partial")
         turn.reason = "The provider turn ended without a confirmed complete transcript.";

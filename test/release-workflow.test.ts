@@ -42,7 +42,9 @@ test("the Windows test runner serializes files that exercise native ACLs", async
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(runner, /process\.platform === "win32" \? \["--test-concurrency=1"\] : \[\]/u);
-  assert.ok(workflow.includes("timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 25 }}"));
+  assert.ok(
+    workflow.includes(`timeout-minutes: \${{ matrix.os == 'windows-latest' && 45 || 25 }}`),
+  );
   assert.doesNotMatch(workflow, /continue-on-error:/u);
 });
 
