@@ -23,7 +23,6 @@ import {
   DeliveryProfileStore,
   validateStoredDeliveryProfile,
 } from "../src/delivery-profile.js";
-import { assertNativeWindowsAcl } from "./support/windows-acl.js";
 
 test("atomically stores only the registry-derived nonsecret webhook profile", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-profile-"));
@@ -174,23 +173,6 @@ test("profile readers wait for atomic link cleanup but reject a persistent extra
   await cleanup;
   await link(path, temporary);
   await assert.rejects(store.load(), { code: "profile_store_failed" });
-});
-
-test("enforces native Windows DACLs on the profile and state directory", {
-  skip: process.platform !== "win32",
-}, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "ambassador-profile-native-windows-;[]$()-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const path = join(root, "state", "delivery-profile.json");
-  const capability = PRODUCTION_AGENT_CAPABILITIES[0];
-  assert.ok(capability);
-  const profile = await createDeliveryProfile(capability, { mode: "direct" }, root);
-  const store = new DeliveryProfileStore(path);
-
-  await store.save(profile);
-  assert.deepEqual(await store.load(), profile);
-  await assertNativeWindowsAcl(join(root, "state"), "directory");
-  await assertNativeWindowsAcl(path, "file");
 });
 
 test("fails closed when Windows profile DACL enforcement fails", async (t) => {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readdir } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
+import { selectTests, testOptions } from "./test-suites.mjs";
 
 const root = join(process.cwd(), ".test-dist", "test");
 const entries = await readdir(root, { recursive: true, withFileTypes: true });
@@ -8,13 +9,22 @@ const compiledTests = entries
   .filter((entry) => entry.isFile() && entry.name.endsWith(".test.js"))
   .map((entry) => join(entry.parentPath, entry.name))
   .sort();
-const files = compiledTests.filter((file) => !basename(file).startsWith("t03-")).sort();
-
-if (files.length === 0) {
-  throw new Error(`No compiled tests found under ${root}`);
+const options = testOptions(process.argv.slice(2));
+const files = selectTests(root, compiledTests, options.suite);
+if (options.suite !== "platform") {
+  const scripts = await readdir(join(process.cwd(), "scripts"));
+  files.push(
+    ...scripts
+      .filter((file) => file.endsWith(".test.mjs"))
+      .sort()
+      .map((file) => join(process.cwd(), "scripts", file)),
+  );
 }
-
-const flags = process.argv.includes("--coverage") ? ["--experimental-test-coverage"] : [];
+if (options.list) {
+  process.stdout.write(`${files.join("\n")}\n`);
+  process.exit(0);
+}
+const flags = options.coverage ? ["--experimental-test-coverage"] : [];
 const concurrencyFlags = process.platform === "win32" ? ["--test-concurrency=1"] : [];
 // TAP prints failure details immediately, even if a later test leaves work running.
 const reporterFlags = process.env.CI ? ["--test-reporter=tap"] : [];

@@ -1,5 +1,11 @@
 # Delivery qualification
 
+Current CI runs the shared core once and isolates native platform checks under
+[ADR 0084](adr/0084-shared-core-and-platform-ci.md). See
+[CI and local testing](ci-and-local-testing.md) for suite selection and complete
+local macOS, Windows and Linux flow commands. Historical matrices below describe
+their recorded runs, not today's CI topology.
+
 The [September 8 client completion](client-completion-2026-09-08.md) records the
 combined native Embassys onboarding and deployed-central two-real-agent flow,
 opposite-direction instance check, fresh Codex discovery and current client

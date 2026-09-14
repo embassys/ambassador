@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 
-import { resolveWindowsNodePackageEntrypoint } from "../src/direct-delivery.js";
+import { resolveWindowsNodePackageEntrypoint } from "../../src/direct-delivery.js";
 
 async function fixture(
   t: TestContext,
