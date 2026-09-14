@@ -6,6 +6,7 @@ export interface NativePushState {
 export class NativePushRegistration {
   #generation = 0;
   #selection = "";
+  #mutations: Promise<void> = Promise.resolve();
   #state: NativePushState = { state: "disabled" };
   constructor(
     readonly options: {
@@ -26,6 +27,11 @@ export class NativePushRegistration {
     this.#state = state;
     this.options.changed?.();
   }
+  #mutate(operation: () => Promise<void>): Promise<void> {
+    const pending = this.#mutations.then(operation);
+    this.#mutations = pending.catch(() => undefined);
+    return pending;
+  }
   async configure(context: string | undefined, enabled: boolean, retry = false): Promise<void> {
     const selection = `${context ?? ""}:${enabled}`;
     if (!retry && selection === this.#selection) return;
@@ -33,7 +39,8 @@ export class NativePushRegistration {
     const generation = ++this.#generation;
     if (!context || !enabled) {
       this.#set({ state: "disabled" });
-      if (context) await this.options.unregister(context).catch(() => undefined);
+      if (context)
+        await this.#mutate(() => this.options.unregister(context)).catch(() => undefined);
       return;
     }
     this.#set({ state: "checking" });
@@ -58,12 +65,15 @@ export class NativePushRegistration {
       const token = await this.options.osToken();
       if (generation !== this.#generation) return;
       if (!/^[a-f0-9]{16,512}$/iu.test(token)) throw new Error("Invalid native token");
-      await this.options.register(token, context);
-      if (generation !== this.#generation) {
-        await this.options.unregister(context).catch(() => undefined);
-        return;
-      }
-      this.#set({ state: "registered" });
+      await this.#mutate(async () => {
+        if (generation !== this.#generation) return;
+        await this.options.register(token, context);
+        if (generation !== this.#generation) {
+          await this.options.unregister(context).catch(() => undefined);
+          return;
+        }
+        this.#set({ state: "registered" });
+      });
     } catch {
       if (generation === this.#generation)
         this.#set({

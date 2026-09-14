@@ -150,6 +150,7 @@ fixed in issues 16, 19 and 20 and passed the follow-up checks above.
 The separate DPoP contract decision remains
 [14](https://github.com/embassys/agent2agent/issues/14).
 
-Review/merge, release approval, release CI, signed distribution and the previously
+Integration is tracked in [PR 45](https://github.com/embassys/ambassador/pull/45).
+Release approval, release CI, signed distribution and the previously
 recorded platform/provider qualification remain in the
 [work plan](implementation-plan.md). This candidate is not a production release.
