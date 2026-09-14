@@ -7,6 +7,8 @@ import type {
   OwnerView,
 } from "../../src/desktop/owner-protocol.js";
 
+import { DetailSheet } from "./details.js";
+
 type Devices = Extract<OwnerView, { kind: "devices" }>;
 export function OwnerDevices({
   owner,
@@ -21,7 +23,6 @@ export function OwnerDevices({
   call(command: OwnerCommand): Promise<unknown>;
   changed(): Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
   const [data, setData] = useState<Devices>();
   const [review, setReview] = useState<DeviceReview>();
   const [agent, setAgent] = useState(owner.account?.agents[0]?.id ?? "");
@@ -91,113 +92,103 @@ export function OwnerDevices({
   }
   return (
     <section className="settings-section">
-      <button
-        type="button"
-        className="text-button"
-        disabled={busy}
-        onClick={() => {
-          setOpen(!open);
-          if (!open) void run({ type: "owner_devices", context: owner.context });
-        }}
+      <DetailSheet
+        title="Devices & agents"
+        onOpen={() => void run({ type: "owner_devices", context: owner.context })}
       >
-        Devices &amp; agents
-      </button>
-      {notice && (
-        <p role="status" className="body-note">
-          {notice}
-        </p>
-      )}
-      {open && (
-        <>
-          <p className="body-note">
-            Choose where each agent runs. Revoking a device signs it out and stops its agents from
-            receiving new work.
+        {notice && (
+          <p role="status" className="body-note">
+            {notice}
           </p>
-          {owner.account?.agents.length ? (
-            <label className="settings-row">
-              <strong>Agent</strong>
-              <select
-                value={agent}
-                onChange={(event) => setAgent(event.target.value)}
-                disabled={busy}
-              >
-                {owner.account.agents.map((value) => (
-                  <option key={value.id} value={value.id} disabled={!value.email_verified}>
-                    {value.display_name ? `${value.display_name} · ` : ""}
-                    {value.email}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <p className="body-note">
-              No agents are linked yet. Register an agent, then refresh this list.
-            </p>
-          )}
-          {data?.devices.map((device) => (
-            <div className="settings-row" key={device.id}>
-              <div>
-                <strong>
-                  {device.device_name || "Unnamed device"}
-                  {device.is_current ? " · This device" : ""}
-                </strong>
-                <p>
-                  {device.revoked_at
-                    ? "Access revoked"
-                    : device.executes_agent_ids.length
-                      ? `Runs ${device.executes_agent_ids.length} agent${device.executes_agent_ids.length === 1 ? "" : "s"}`
-                      : "No agents assigned"}
-                </p>
-              </div>
-              {!device.revoked_at && (
-                <div className="button-row">
-                  {agent && (
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy || (device.is_current && !instanceId)}
-                      onClick={() =>
-                        void run({
-                          type: "owner_device_review",
-                          context: owner.context,
-                          operation: "execute",
-                          device_id: device.id,
-                          agent_id: agent,
-                        })
-                      }
-                    >
-                      {device.executes_agent_ids.includes(agent) ? "Review setup" : "Use device"}
-                    </button>
-                  )}
+        )}
+        <p className="body-note">
+          Choose where each agent runs. Revoking a device signs it out and stops its agents from
+          receiving new work.
+        </p>
+        {owner.account?.agents.length ? (
+          <label className="settings-row">
+            <strong>Agent</strong>
+            <select
+              value={agent}
+              onChange={(event) => setAgent(event.target.value)}
+              disabled={busy}
+            >
+              {owner.account.agents.map((value) => (
+                <option key={value.id} value={value.id} disabled={!value.email_verified}>
+                  {value.display_name ? `${value.display_name} · ` : ""}
+                  {value.email}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <p className="body-note">
+            No agents are linked yet. Register an agent, then refresh this list.
+          </p>
+        )}
+        {data?.devices.map((device) => (
+          <div className="settings-row" key={device.id}>
+            <div>
+              <strong>
+                {device.device_name || "Unnamed device"}
+                {device.is_current ? " · This device" : ""}
+              </strong>
+              <p>
+                {device.revoked_at
+                  ? "Access revoked"
+                  : device.executes_agent_ids.length
+                    ? `Runs ${device.executes_agent_ids.length} agent${device.executes_agent_ids.length === 1 ? "" : "s"}`
+                    : "No agents assigned"}
+              </p>
+            </div>
+            {!device.revoked_at && (
+              <div className="button-row">
+                {agent && (
                   <button
                     type="button"
-                    className="text-button"
-                    disabled={busy}
+                    className="secondary"
+                    disabled={busy || (device.is_current && !instanceId)}
                     onClick={() =>
                       void run({
                         type: "owner_device_review",
                         context: owner.context,
-                        operation: "revoke",
+                        operation: "execute",
                         device_id: device.id,
+                        agent_id: agent,
                       })
                     }
                   >
-                    Revoke…
+                    {device.executes_agent_ids.includes(agent) ? "Review setup" : "Use device"}
                   </button>
-                </div>
-              )}
-            </div>
-          ))}
-          <button
-            type="button"
-            className="text-button"
-            disabled={busy}
-            onClick={() => void run({ type: "owner_devices", context: owner.context })}
-          >
-            Refresh devices &amp; agents
-          </button>
-        </>
-      )}
+                )}
+                <button
+                  type="button"
+                  className="quiet-button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run({
+                      type: "owner_device_review",
+                      context: owner.context,
+                      operation: "revoke",
+                      device_id: device.id,
+                    })
+                  }
+                >
+                  Revoke…
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="quiet-button"
+          disabled={busy}
+          onClick={() => void run({ type: "owner_devices", context: owner.context })}
+        >
+          Refresh devices &amp; agents
+        </button>
+      </DetailSheet>
       {review && (
         <dialog
           ref={dialog}

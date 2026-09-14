@@ -1,5 +1,15 @@
 # Current work
 
+## Desktop controls, September 14
+
+Implemented the requested replacement for accordion panels and hyperlink-style
+actions. Details, advanced options and device settings open in separate sheets;
+Back and Settings use compact neutral buttons. All 46 desktop view/artifact checks,
+typecheck, lint and the isolated Electron interaction walkthrough passed.
+See [the design and test record](desktop-controls-2026-09-14.md). These UI changes
+are being prepared for the owner-authorized public 0.1.4 release. The 0.1.3
+draft is also being checked so its previously shared download URLs can be restored.
+
 ## Central contract adoption, September 14
 
 Implemented under [ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md).
@@ -17,7 +27,8 @@ Completed:
   All new CI gates passed; the longest core job fell from 42m44s to 2m56s and
   desktop from 28m44s to 5m01s. The full Mac local script also passed.
   See [commands and evidence](ci-and-local-testing.md) and
-  [PR 47](https://github.com/embassys/ambassador/pull/47). Merge remains pending.
+  [PR 47](https://github.com/embassys/ambassador/pull/47), merged to main as
+  `03cba12479ebd8c85ab012105eae7fb447353e56`.
 
 - One-code desktop setup under [ADR 0083](adr/0083-one-code-desktop-setup.md):
   owner sign-in, verified first-agent creation/adoption and guarded device setup.

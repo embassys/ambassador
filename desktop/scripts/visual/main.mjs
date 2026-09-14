@@ -21,6 +21,7 @@ import {
 } from "../../../src/desktop/conversation-preview.ts";
 import { parseDesktopCommand } from "../../../src/desktop/protocol.ts";
 import { applicationMenu } from "../../src/application-menu.ts";
+import { checkControls } from "./controls-check.mjs";
 import {
   communications,
   edgeRequests,
@@ -119,6 +120,8 @@ const sampleInvitations = [
   },
 ];
 let win;
+let controlReview;
+const controlAnswers = [];
 function changed() {
   win?.webContents.send("ambassador:changed");
 }
@@ -139,6 +142,7 @@ function snapshot() {
     cliCommand: "ambassador",
     loginItem: { supported: false, enabled: false, reason: "Visual review" },
     owner,
+    review: controlReview,
     instances: [
       { ...instance, runtime: { id: instanceId, state, endpoint: "http://127.0.0.1:8787/mcp" } },
     ],
@@ -181,8 +185,32 @@ async function start() {
       const cmd = parseDesktopCommand(input);
       let result;
       switch (cmd.type) {
+        case "review_answer":
+          if (!controlReview || cmd.reviewId !== controlReview.id)
+            throw new Error("Sample review expired");
+          controlAnswers.push(cmd.choice);
+          controlReview = undefined;
+          changed();
+          result = { accepted: true };
+          break;
         case "snapshot":
           result = snapshot();
+          break;
+        case "setup":
+          result = {
+            endpoint: "http://127.0.0.1:8787/mcp",
+            guides: [
+              ["Codex", "codex"],
+              ["Claude Code", "claude_code"],
+              ["OpenClaw", "openclaw"],
+              ["Hermes", "hermes"],
+            ].map(([name, connect]) => ({
+              name,
+              connect,
+              instruction: `Sample instructions for ${name}.\nhttp://127.0.0.1:8787/mcp`,
+              note: "Fictional setup for checking controls. No provider configuration is changed.",
+            })),
+          };
           break;
         case "overview":
           result = {
@@ -440,5 +468,37 @@ async function start() {
   );
   await win.loadURL("ambassador://app/index.html");
   app.on("window-all-closed", () => app.quit());
+  if (process.argv.includes("--controls-check")) {
+    try {
+      await checkControls(win, join(root, "../native-controls-review"), {
+        answers: controlAnswers,
+        open() {
+          controlReview = {
+            id: randomUUID(),
+            kind: "permission",
+            instanceName: "Sample data · this Mac",
+            permission: {
+              title: "mcp__ambassador__get_my_permissions",
+              detail: JSON.stringify({
+                request: "Check registration",
+                path: `/Users/example/Agent settings/${"Long project name/".repeat(12)}settings.json`,
+                options: ["<script>untrusted data</script>"],
+              }),
+              options: [
+                { optionId: "exact:allow-once", name: "Allow once", kind: "allow_once" },
+                { optionId: "exact:reject", name: "Don't allow", kind: "reject_once" },
+              ],
+            },
+          };
+          changed();
+        },
+      });
+      console.log("Native control checks passed. Screenshots: .build/native-controls-review");
+      app.exit(0);
+    } catch (error) {
+      console.error(error);
+      app.exit(1);
+    }
+  }
 }
 void start();

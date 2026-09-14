@@ -10,7 +10,7 @@ import { edgeRequests, requests } from "./visual/data.mjs";
 const root = await mkdtemp(join(tmpdir(), "embassys-history-ui-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ConversationList,ConversationContent} from './src/history.tsx'; import {requestsSchema} from "../src/desktop/owner-protocol.ts"; import {Disclosure, StructuredData} from './src/details.tsx'; export const detail = value => renderToStaticMarkup(createElement(Disclosure,{title:'Request details'},createElement(StructuredData,{value}))); export const validateRequests = value => requestsSchema.parse(value); export const list = (sessions,selected='',attention) => renderToStaticMarkup(createElement(ConversationList,{sessions,selected,attention,select:()=>{}})); export const content = (history,busy=false) => renderToStaticMarkup(createElement(ConversationContent,{history,busy,sessionId:'exact-session',reload:()=>{},next:()=>{},remove:()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ConversationList,ConversationContent} from './src/history.tsx'; import {requestsSchema} from "../src/desktop/owner-protocol.ts"; import {DetailSheet, StructuredData} from './src/details.tsx'; export const detail = value => renderToStaticMarkup(createElement(DetailSheet,{title:'Request details'},createElement(StructuredData,{value}))); export const validateRequests = value => requestsSchema.parse(value); export const list = (sessions,selected='',attention) => renderToStaticMarkup(createElement(ConversationList,{sessions,selected,attention,select:()=>{}})); export const content = (history,busy=false) => renderToStaticMarkup(createElement(ConversationContent,{history,busy,sessionId:'exact-session',reload:()=>{},next:()=>{},remove:()=>{}}));`,
     resolveDir: fileURLToPath(new URL("../", import.meta.url)),
     sourcefile: "history-test.tsx",
   },
@@ -195,14 +195,15 @@ test("conversation rows show saved topics and excerpts with accessible metadata"
   assert.doesNotMatch(html, /<script>/);
 });
 
-test("styled disclosures keep native keyboard semantics and readable exact values", () => {
+test("detail sheets have a labelled dialog trigger and preserve readable exact values", () => {
   const html = detail({
     scope: { path: "/Users/example/Project files", count: 0, enabled: false, empty: null },
     options: ["<script>plain text</script>", "Allow once"],
   });
-  assert.match(html, /<details[^>]*class="[^"]*detail-disclosure/);
-  assert.match(html, /<summary/);
-  assert.match(html, /disclosure-chevron/);
+  assert.match(html, /<button[^>]*aria-haspopup="dialog"/);
+  assert.match(html, /<dialog[^>]*aria-labelledby=/);
+  assert.doesNotMatch(html, /<details|<summary|<dialog[^>]*open/);
+  assert.match(html, /detail-trigger/);
   assert.match(html, /<dl/);
   assert.match(html, /Project files/);
   assert.match(html, />0</);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { CentralPermission } from "../../src/central-rest.js";
 import type { ActivityKind, ActivityPage } from "../../src/desktop/activity.js";
 import type { DesktopCommand } from "../../src/desktop/protocol.js";
+import { DetailSheet } from "./details.js";
 
 type Command = (input: DesktopCommand) => Promise<unknown>;
 const unavailable: Record<string, string> = {
@@ -132,10 +133,9 @@ export function Permissions({ instanceId, command }: { instanceId: string; comma
                 {item.expires_at ? ` · Expires ${date(item.expires_at)}` : ""}
               </p>
               {item.scope && (
-                <details>
-                  <summary>Requested scope</summary>
+                <DetailSheet title="Requested scope">
                   <pre className="status-json">{JSON.stringify(item.scope, null, 2)}</pre>
-                </details>
+                </DetailSheet>
               )}
             </section>
           ))}
@@ -247,16 +247,15 @@ export function Activity({
                 {item.createdAt ? ` · ${date(item.createdAt)}` : ""}
               </p>
               {item.question && <p className="break">{item.question}</p>}
-              <details>
-                <summary>Request reference</summary>
+              <DetailSheet title="Request reference">
                 <code className="break">{item.id}</code>
-              </details>
+              </DetailSheet>
             </article>
           ))}
           <div className="button-row">
             <button
               type="button"
-              className="text-button"
+              className="quiet-button"
               disabled={!after}
               onClick={() => setAfter(0)}
             >

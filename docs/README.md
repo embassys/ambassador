@@ -29,6 +29,7 @@ plan contains only work that is not complete.
 | Check workflow regression and live acceptance requirements | [Workflow test plan](workflow-test-plan.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Run shared tests, native checks or full local platform flows | [CI and local testing](ci-and-local-testing.md) |
+| Review desktop buttons, Back and separate detail sheets | [Desktop controls](desktop-controls-2026-09-14.md) |
 | Review the desktop PR, Cowork discovery, OpenClaw display and real calendar invitation | [Desktop PR review](desktop-pr-review-2026-09-08.md) |
 | Review native owner approvals, answers, revocation and default waits | [Owner decision qualification](owner-decisions-qualification-2026-09-08.md) |
 | Review combined app onboarding, real-agent delivery and remaining client limits | [September 8 client completion](client-completion-2026-09-08.md) |

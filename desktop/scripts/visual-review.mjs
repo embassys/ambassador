@@ -62,6 +62,7 @@ if (!process.argv.includes("--build-only")) {
       ...(process.argv.includes("--edge-cases") ? ["--edge-cases"] : []),
       ...(process.argv.includes("--chat-pages") ? ["--chat-pages"] : []),
       ...(process.argv.includes("--people-start") ? ["--people-start"] : []),
+      ...(process.argv.includes("--controls-check") ? ["--controls-check"] : []),
     ],
     { env, stdio: "inherit" },
   );

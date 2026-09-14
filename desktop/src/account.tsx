@@ -9,8 +9,9 @@ import type {
   OwnerSnapshot,
   OwnerView,
 } from "../../src/desktop/owner-protocol.js";
+import { BackButton } from "./controls.js";
 import type { RequestSource } from "./conversation-workspace.js";
-import { Disclosure, StructuredData } from "./details.js";
+import { DetailSheet, StructuredData } from "./details.js";
 import { OwnerDevices } from "./owner-devices.js";
 
 export const notices: Record<OwnerIssue, string> = {
@@ -58,9 +59,9 @@ function RequestMark({ question = false }: { question?: boolean }) {
 }
 function Details({ value, label = "Details" }: { value: unknown; label?: string }) {
   return value == null ? null : (
-    <Disclosure className="account-details" title={label}>
+    <DetailSheet className="account-details" title={label}>
       <StructuredData value={value} />
-    </Disclosure>
+    </DetailSheet>
   );
 }
 
@@ -76,10 +77,10 @@ export function requestItems(data: Requests): RequestItem[] {
 }
 function SnapshotNote({ updated }: { updated: string | undefined }) {
   return (
-    <Disclosure className="snapshot-note" title="About this inbox">
+    <DetailSheet className="snapshot-note" title="About this inbox">
       {updated && <p>Updated {when(updated)}</p>}
       <p>Requests refresh while the app is open. Large inboxes have additional pages.</p>
-    </Disclosure>
+    </DetailSheet>
   );
 }
 
@@ -171,7 +172,7 @@ export function AccountData({
             {review && (
               <button
                 type="button"
-                className="text-button"
+                className="quiet-button"
                 disabled={busy}
                 onClick={() => review(item.kind, item.id)}
               >
@@ -205,7 +206,7 @@ export function AccountData({
                     ? entry.item.action_description || action(entry.item.action_type)
                     : entry.item.prompt}
                 </h3>
-                <Disclosure className="inbox-preview-details" title="Details">
+                <DetailSheet className="inbox-preview-details" title="Details">
                   <p>{action(entry.item.action_type)}</p>
                   {entry.kind === "permission" ? (
                     <>
@@ -225,7 +226,7 @@ export function AccountData({
                       </p>
                     )
                   )}
-                </Disclosure>
+                </DetailSheet>
                 {entry.kind === "permission" &&
                   !permissionChoices(entry.item.decision_options, entry.item.offered_options)
                     .length && (
@@ -831,7 +832,7 @@ export function Account({
                       {wait > 0 ? `Resend in ${wait}s` : "Resend code"}
                     </button>
                     <button
-                      className="text-button"
+                      className="quiet-button"
                       type="button"
                       disabled={busy}
                       onClick={() => void run({ type: "owner_signout", context: owner.context })}
@@ -888,7 +889,7 @@ export function Account({
           {section === "profile" && (
             <div className="account-actions">
               <button
-                className="text-button"
+                className="quiet-button"
                 type="button"
                 onClick={() => void run({ type: "owner_open_web" })}
                 disabled={busy}
@@ -897,7 +898,7 @@ export function Account({
               </button>
               {section === "profile" && (
                 <button
-                  className="text-button"
+                  className="quiet-button"
                   type="button"
                   onClick={() => void run({ type: "owner_reveal_logs" })}
                   disabled={busy}
@@ -909,7 +910,7 @@ export function Account({
           )}
           {owner.status === "signed_in" && (
             <button
-              className="text-button account-refresh"
+              className="quiet-button account-refresh"
               type="button"
               disabled={busy || loading}
               onClick={() => {
@@ -1001,7 +1002,7 @@ export function Account({
           </div>
           {data?.kind === "permissions" && (
             <button
-              className="text-button"
+              className="quiet-button"
               type="button"
               disabled={busy}
               onClick={() => void run({ type: "owner_history", context: owner.context })}
@@ -1010,23 +1011,20 @@ export function Account({
             </button>
           )}
           {data?.kind === "history" && (
-            <button
-              className="text-button"
-              type="button"
+            <BackButton
+              label="Back to permissions"
               disabled={busy}
               onClick={() =>
                 void run({ type: "owner_permissions", context: owner.context, direction })
               }
-            >
-              Back to permissions
-            </button>
+            />
           )}
           {data &&
             "next_cursor" in data &&
             data.next_cursor &&
             ["requests", "permissions", "history"].includes(data.kind) && (
               <button
-                className="text-button"
+                className="quiet-button"
                 type="button"
                 disabled={busy}
                 onClick={() => {

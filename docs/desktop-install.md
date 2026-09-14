@@ -1,19 +1,19 @@
-# Install the Embassys preview
+# Install Embassys
 
 Download the application for your computer from the
-[Embassys 0.1.3 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.3-preview.1).
+[Embassys 0.1.4 release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4).
 Choose an application file in Assets, not GitHub's source-code archives. You do
 not need to install Node or build Embassys yourself. You do need an installed,
 authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | `Embassys-0.1.3-darwin-arm64-development.dmg` | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
-| Windows x64 | `Embassys-0.1.3-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
-| Linux x64 | `Embassys-0.1.3-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
-| Linux ARM64, including the Raspberry Pi target below | `Embassys-0.1.3-linux-arm64-development.tar.gz` | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
+| Mac with Apple silicon, M1 or newer | `Embassys-0.1.4-darwin-arm64-development.dmg` | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
+| Windows x64 | `Embassys-0.1.4-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
+| Linux x64 | `Embassys-0.1.4-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Linux ARM64, including the Raspberry Pi target below | `Embassys-0.1.4-linux-arm64-development.tar.gz` | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
 
-There is no Intel Mac or Windows ARM download in this preview. These are
+There is no Intel Mac or Windows ARM download in this release. These are
 unsigned development packages. Managed computers may refuse to run them.
 
 ## Mac
@@ -88,12 +88,12 @@ or decline incoming invitations. Importing a contact does not invite them
 automatically. A connection does not grant access to actions or private data.
 Review permission requests, answer questions and manage grants in the app.
 
-The app and its bundled CLI can hand off the same installation. This preview
+The app and its bundled CLI can hand off the same installation. This release
 bundles Ambassador 0.2.20, also available from npm. Use the app's **Use the CLI**
 guidance for the matching command; older builds are not qualified to open this
 release's state.
 
-## Preview limits
+## Current limits
 
 - Disconnect recovery now uses durable submission keys, message leases and
   retryable receipts. It cannot recover expired operations or replay a provider

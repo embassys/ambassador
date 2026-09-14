@@ -155,7 +155,11 @@ test("account requests escape agent text, preserve choice labels and offer no de
     ],
   });
   assert.match(html, /&lt;img/);
-  assert.doesNotMatch(html, /<img|<button|onClick|onclick/);
+  assert.doesNotMatch(html, /<img|onClick|onclick|type="submit"/);
+  const buttonLabels = [...html.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].map((match) =>
+    match[1].replace(/<[^>]+>/g, ""),
+  );
+  assert.deepEqual(buttonLabels, ["Details", "Done", "About this inbox", "Done"]);
   assert.match(html, /Allow this one only/);
   assert.match(html, /Large inboxes have additional pages/);
 });

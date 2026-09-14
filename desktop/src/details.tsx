@@ -1,21 +1,38 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId, useRef } from "react";
 
-export function Disclosure({
+export function DetailSheet({
   title,
   meta,
   children,
   className = "",
+  onOpen,
 }: {
-  title: string;
+  title: ReactNode;
   meta?: ReactNode;
   children: ReactNode;
   className?: string;
+  onOpen?(): void;
 }) {
+  const id = useId();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <details className={`detail-disclosure ${className}`}>
-      <summary>
+    <div className={`detail-access ${className}`}>
+      <button
+        type="button"
+        ref={trigger}
+        className="detail-trigger"
+        aria-haspopup="dialog"
+        aria-controls={id}
+        onClick={() => {
+          dialog.current?.showModal();
+          onOpen?.();
+        }}
+      >
+        <span className="detail-title">{title}</span>
+        {meta && <span className="detail-meta">{meta}</span>}
         <svg
-          className="disclosure-chevron"
+          className="detail-chevron"
           width="12"
           height="12"
           viewBox="0 0 12 12"
@@ -26,11 +43,31 @@ export function Disclosure({
         >
           <path d="m4.5 2.5 3.5 3.5-3.5 3.5" />
         </svg>
-        <span className="disclosure-title">{title}</span>
-        {meta && <span className="disclosure-meta">{meta}</span>}
-      </summary>
-      <div className="disclosure-body">{children}</div>
-    </details>
+      </button>
+      <dialog
+        id={id}
+        ref={dialog}
+        className="detail-sheet"
+        aria-labelledby={`${id}-title`}
+        onCancel={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dialog.current?.close();
+        }}
+        onClose={(event) => {
+          event.stopPropagation();
+          if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true });
+        }}
+      >
+        <header className="detail-sheet-header">
+          <h2 id={`${id}-title`}>{title}</h2>
+          <button type="button" className="quiet-button" onClick={() => dialog.current?.close()}>
+            Done
+          </button>
+        </header>
+        <div className="detail-sheet-body">{children}</div>
+      </dialog>
+    </div>
   );
 }
 

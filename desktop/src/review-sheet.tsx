@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DesktopReview } from "../../src/desktop/review.js";
+import { DetailSheet } from "./details.js";
 
 function formatted(value: string): string {
   try {
@@ -82,8 +83,7 @@ export function ReviewContent({
                 </li>
               ))}
             </ul>
-            <details className="review-details">
-              <summary>Connection details</summary>
+            <DetailSheet className="review-details" title="Connection details">
               <dl className="review-locations">
                 <div>
                   <dt>Local address</dt>
@@ -104,7 +104,7 @@ export function ReviewContent({
                   </dd>
                 </div>
               </dl>
-            </details>
+            </DetailSheet>
           </>
         ) : (
           <>
@@ -126,14 +126,13 @@ export function ReviewContent({
                 </label>
               ))}
             </fieldset>
-            <details className="review-details">
-              <summary>Technical details</summary>
+            <DetailSheet className="review-details" title="Technical details">
               <p className="review-tool">
                 <span>Requested tool</span>
                 <code>{review.permission.title || "Not provided"}</code>
               </p>
               <pre>{formatted(review.permission.detail)}</pre>
-            </details>
+            </DetailSheet>
           </>
         )}
       </div>

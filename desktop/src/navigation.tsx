@@ -56,7 +56,7 @@ export function Navigation({
         {Boolean(inboxCount) && <span className="sidebar-count">{inboxCount}</span>}
         <button
           type="button"
-          className="text-button"
+          className="quiet-button"
           aria-label="Refresh conversations and requests"
           onClick={refresh}
         >
