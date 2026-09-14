@@ -265,3 +265,19 @@ The user also approved changing public installation guidance from a pinned
 Ambassador version to the npm `latest` tag on 2026-09-03. This changes only the
 user-facing selection command; every publication still follows the release
 approval and qualification gates above.
+
+## September 14 paired release approval
+
+The user explicitly requested both desktop and npm CLI publication after the
+central integration and one-code onboarding work was merged and live-qualified.
+Prepare Ambassador 0.2.20 together with Embassys 0.1.3 preview 1 so the two
+artifacts ship the same gateway source. Preserve public CLI arguments and the
+frozen dependency choices. API code remains issue-only.
+
+Run versioned candidate, PR and main release gates, publish through the existing
+OIDC job, then independently verify the registry download and clean installation.
+The recorded real-provider and current central evidence remains part of the
+qualification record; do not relabel fixture checks as native tests. Retain the
+approved development logging policy and disclose remaining native provider,
+remote-push and distribution limits. Account-wide communication history is a
+separate follow-up and is not part of this release.

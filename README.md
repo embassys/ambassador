@@ -1,6 +1,6 @@
 # Embassys
 
-Embassys is a menu/tray app for macOS, Windows and Linux. The first downloadable
+Embassys is a menu/tray app for macOS, Windows and Linux. The downloadable
 development preview is described in the [installation guide](docs/desktop-install.md).
 It includes the local server and runtime. Windows and Linux downloads remain
 experimental; all preview packages are unsigned. See the
@@ -71,7 +71,7 @@ Each encrypted store allows 1 GiB; reads remain bounded.
 
 ## Wait for a response
 
-The 0.2.19 development release uses `message_box` for requests, checks,
+The 0.2.20 development release uses `message_box` for requests, checks,
 owner questions, replies and receipts. An initial request waits up to ten
 minutes for a related update. If it times out, ask the agent to check the same
 saved request again. The next check starts another wait without resubmitting
@@ -84,7 +84,7 @@ experimental. The foreground wait and inbox remain available. See the
 
 ## Development logs
 
-The candidate writes request and response bodies even without `--verbose`.
+The CLI writes request and response bodies even without `--verbose`.
 Credentials are redacted. Startup prints the exact directory: `diagnostics`
 inside the platform state directory listed below. Copy `events.jsonl` and its
 rotated files from that directory to export the log. Retention is bounded to
@@ -133,10 +133,10 @@ or to an owner-only backup after stopping Ambassador:
 
 Remove the directory as one unit. Deleting only `delivery-profile.json`, an
 encrypted value, or its key leaves an intentionally invalid partial state. The
-next `ambassador start` enables registration again. Neither reset
-method deletes the central registration, so use a new disposable email when
-rerunning without server-side cleanup. Neither changes the agent's normal
-provider configuration or credentials.
+next `ambassador start` enables registration or explicit emailed recovery again.
+Neither reset method deletes the central registration or changes the agent's
+normal provider configuration or credentials. The desktop also offers signed-in
+owner device setup and execution transfer; see its installation guide.
 
 ## Implementation status
 
@@ -144,15 +144,23 @@ The current source includes the approved durable workflow redesign in
 [ADR 0061](docs/adr/0061-durable-workflows-and-client-delivery.md): independent
 receive, processing, provider and acknowledgement workers; exact action schemas;
 long waits; owner input; explicit result receipts; and development logs.
-Version 0.2.19 is a development release with the client limits below.
+Version 0.2.20 also integrates the current central recovery and owner APIs under
+[ADR 0082](docs/adr/0082-current-central-recovery-and-owner-integration.md): durable
+submission keys, leased message redelivery, retryable receipts, credential renewal,
+exact result schemas and remote progress. The paired desktop preview adds one-code
+setup, device controls, in-app decisions and People invitations. This remains a
+development release with the client limits below.
 The `@latest` commands install the latest published npm release.
 
 The current runtime passed real Codex, Claude Code, Hermes and OpenClaw ACP
 qualification, plus real OpenClaw and Hermes webhook checks. OpenClaw native
 return remains experimental because its desktop can show a duplicate badge
-despite one saved answer. Codex first-turn discovery and actual calendar
-invitation delivery still need follow-up observations. Hermes native return and
-standalone Claude Chat/Cowork are unsupported. See
+despite one saved answer. Fresh Codex discovery and actual calendar invitation
+delivery passed native tests on September 8. Hermes native return remains
+unqualified. The separately configured Claude Chat/Cowork client passed natural
+requests; fresh Cowork discovery remains intermittent. Account-wide communication
+history is not yet integrated, and remote push needs server credentials and signed
+device qualification. See
 [client delivery](docs/client-delivery.md), [qualification](docs/qualification.md)
 and [the implementation plan](docs/implementation-plan.md). Gemini CLI and
 Antigravity remain inactive under
@@ -199,7 +207,7 @@ MIT
 
 ## Development workflow
 
-The 0.2.19 development release uses one typed message_box for business
+The 0.2.20 development release uses one typed message_box for business
 operations, ten-minute foreground waits and explicit result receipts. It also
 adds durable owner questions and development body logs.
 See [client delivery](docs/client-delivery.md) for timeout settings, optional

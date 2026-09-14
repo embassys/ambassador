@@ -66,3 +66,18 @@ after all checks pass. Keep the same three platform targets, development logging
 unsigned-preview limits and exact-commit artifact verification described above.
 The npm CLI remains at 0.2.19. This approval does not include central changes,
 signing infrastructure or automatic updates.
+
+## September 14 paired release approval
+
+The owner explicitly approved desktop and npm CLI publication. Publish
+`desktop-v0.1.3-preview.1` with app version 0.1.3 and bundled Ambassador 0.2.20
+after the versioned release gates pass. ADR 0081 adds a fourth download for Linux
+ARM64. Its CI runtime evidence does not qualify a physical Raspberry Pi desktop
+or provider. Retain the existing Mac, Windows x64 and Linux x64 targets.
+
+The installation guide now reflects live-qualified one-code setup, credential
+recovery, owner decisions and People invitations. Earlier two-code and missing
+central-recovery limitations no longer describe this release. General account
+communication history remains client work. Keep unsigned-preview, native push,
+provider qualification and development logging limits explicit. Verify all four
+archives and their companion files after upload; do not amend earlier releases.

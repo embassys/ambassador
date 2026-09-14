@@ -1,18 +1,19 @@
 # Install the Embassys preview
 
 Download the application for your computer from the
-[Embassys 0.1.2 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.2-preview.1).
+[Embassys 0.1.3 preview release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.3-preview.1).
 Choose an application file in Assets, not GitHub's source-code archives. You do
 not need to install Node or build Embassys yourself. You do need an installed,
 authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | `Embassys-0.1.2-darwin-arm64-development.dmg` | Native populated UI checks; earlier live Claude Code onboarding and installed-agent tests |
-| Windows x64 | `Embassys-0.1.2-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
-| Linux x64 | `Embassys-0.1.2-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Mac with Apple silicon, M1 or newer | `Embassys-0.1.3-darwin-arm64-development.dmg` | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
+| Windows x64 | `Embassys-0.1.3-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
+| Linux x64 | `Embassys-0.1.3-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Linux ARM64, including the Raspberry Pi target below | `Embassys-0.1.3-linux-arm64-development.tar.gz` | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
 
-There is no Intel Mac or Windows/Linux ARM download in this published preview. These are
+There is no Intel Mac or Windows ARM download in this preview. These are
 unsigned development packages. Managed computers may refuse to run them.
 
 ## Mac
@@ -50,8 +51,7 @@ the application as root. See
 
 ## Raspberry Pi build
 
-Raspberry Pi builds use a separate `linux-arm64` archive. It is
-not part of the published 0.1.2 preview linked above. Use 64-bit Raspberry Pi OS
+Use the separate `linux-arm64` archive linked above with 64-bit Raspberry Pi OS
 with a desktop, initially on Pi 4 or Pi 5. A 64-bit processor running a 32-bit
 operating system cannot run this build. Pi OS Lite has no desktop to show the app.
 Check `dpkg --print-architecture`: this build requires `arm64`, not `armhf`.
@@ -65,10 +65,10 @@ from automated ARM64 Linux package checks.
 
 ## First launch
 
-Choose Log in or Register, enter your email and verification code, then follow
-the agent connection steps. New device registration currently needs another
-code for owner login. Returning-owner login and local agent enrollment are
-separate, so a new computer cannot recover an old agent identity yet.
+Choose Log in or Register and enter your email and one verification code.
+The app creates or resumes your first agent and sets up this device, then guides
+you through connecting your installed agent. Returning owners can review their
+agents and devices and explicitly move execution to this computer.
 
 On a qualified Mac, **Connect** configures Claude Code, Codex, OpenClaw or Hermes,
 installs an Embassys discovery skill and checks a real tool call. Provider
@@ -83,17 +83,24 @@ enrollment and pending work; it is not sign-out or a server-side account reset.
 The sidebar lists conversations and requests that need your attention. Open a
 conversation to see both agents' saved messages and review linked requests at the
 bottom. Requests without an exact conversation link appear under Inbox. People
-can save names and emails locally or import selected vCard contacts; it does not
-send invitations or sync contacts with the server.
+lets you save people, import selected vCard contacts, send invitations and accept
+or decline incoming invitations. Importing a contact does not invite them
+automatically. A connection does not grant access to actions or private data.
+Review permission requests, answer questions and manage grants in the app.
 
-The app and its bundled CLI can hand off the same installation. Older npm CLI
-builds are not qualified to open the app's newer state. Use the app's **Use the
-CLI** guidance for the matching bundled command.
+The app and its bundled CLI can hand off the same installation. This preview
+bundles Ambassador 0.2.20, also available from npm. Use the app's **Use the CLI**
+guidance for the matching command; older builds are not qualified to open this
+release's state.
 
 ## Preview limits
 
-- Central disconnects can still lose messages or leave submissions uncertain.
-  Complete remote history, identity recovery and native remote push remain open.
+- Disconnect recovery now uses durable submission keys, message leases and
+  retryable receipts. It cannot recover expired operations or replay a provider
+  prompt whose outcome is uncertain. Account-wide communication history is not
+  integrated yet; the app retains its local conversations.
+- Native remote push needs configured server credentials and signed-device
+  qualification. Running-app notifications remain available.
 - Fresh Cowork chats sometimes need "Use the Embassys connector." OpenClaw
   native return remains experimental because of display defects. Hermes uses
   foreground waits. A client may end a wait early; ask it to check the same
@@ -105,10 +112,10 @@ CLI** guidance for the matching bundled command.
 - The earlier four installed-agent tests used synthetic central data. Codex
   required a model supported by its installed adapter; the test used `gpt-5.5`
   with high reasoning. Embassys does not change the provider's model setting.
-- Native Claude Code onboarding passed against deployed central on September 10
-  using 0.1.1. This preview's new conversation and approval presentation passed
-  native Mac checks with fictional offline data. It does not claim another live
-  onboarding run or native Codex, OpenClaw and Hermes button qualification.
+- Native Claude Code one-code onboarding passed against deployed central on
+  September 14, including setup approvals, restart and disconnect cleanup.
+  Interrupted first-agent creation and stale registration recovery also passed
+  live. Native Codex, OpenClaw and Hermes button walkthroughs remain outstanding.
 
 Checksums and dependency inventories are attached beside the downloads. See the
 [work plan](implementation-plan.md) for the remaining reliability and platform

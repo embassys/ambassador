@@ -436,7 +436,10 @@ test("owner login rejects bad codes, bounds resend and exposes no session creden
   assert.equal(s.service.snapshot().issue, "invalid_code");
   const reply = await s.request({ type: "owner_verify", code: "314159" });
   assert.equal(s.service.snapshot().status, "signed_in");
-  assert.doesNotMatch(JSON.stringify(reply), /access_token|refresh_token|314159|fixture-refresh/u);
+  assert.doesNotMatch(
+    JSON.stringify(reply),
+    /access_token|refresh_token|"314159"|fixture-refresh/u,
+  );
   assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/start_sign_in").length, 1);
 });
 
@@ -459,7 +462,8 @@ test("owner encrypted session survives restart and refreshes only once for concu
     const bytes = await readFile(join(s.options.directory, name));
     assert.ok(!bytes.includes(Buffer.from("fixture-refresh")), name);
     assert.ok(!bytes.includes(Buffer.from(email)), name);
-    assert.ok(!bytes.includes(Buffer.from("314159")), name);
+    // Codes serialize as JSON strings; their digits can occur by chance in encrypted hex.
+    assert.ok(!bytes.includes(Buffer.from('"314159"')), name);
   }
 });
 

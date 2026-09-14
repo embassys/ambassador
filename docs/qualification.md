@@ -9,7 +9,16 @@ limits. Screenshots and exact operation evidence remain local in
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## Current candidate checks
+## September 14 release candidate
+
+The paired release targets Embassys 0.1.3 preview 1 and Ambassador 0.2.20.
+[Current central integration](central-adoption-2026-09-14.md) and
+[one-code Claude onboarding](one-code-onboarding-2026-09-14.md) record the latest
+deployed-service and native evidence. Versioned release checks and independent
+artifact verification are tracked in the current implementation plan and release
+notes. Earlier records below qualify their named behavior and dates.
+
+## September 8 candidate checks
 
 The unpublished desktop branch was checked again on 2026-09-08 with the bundled
 Node 24.19.0. All 484 default-suite tests passed, with seven expected platform or
