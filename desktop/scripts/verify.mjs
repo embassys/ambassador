@@ -35,6 +35,8 @@ const manifest = JSON.parse(
   ),
 );
 assert.equal(manifest.node, "24.19.0");
+assert.equal(manifest.platform, process.platform, "Package platform must match the test host.");
+assert.equal(manifest.arch, process.arch, "Package architecture must match the test host.");
 const probe = spawnSync(
   node,
   [
@@ -46,6 +48,7 @@ const database = new Database(':memory:');
 if (database.prepare('select 42 as answer').get().answer !== 42) process.exit(1);
 database.close();
 if (process.version !== 'v24.19.0') process.exit(2);
+if (process.platform !== ${JSON.stringify(process.platform)} || process.arch !== ${JSON.stringify(process.arch)}) process.exit(3);
 `,
   ],
   {

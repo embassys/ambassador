@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { conversationPeer } from "../../src/desktop/chat.js";
+import { conversationPeerFromRequests } from "../../src/desktop/chat.js";
 import {
   groupConversationRequests,
   type RequestLinkPage,
 } from "../../src/desktop/conversations.js";
+import { collectOwnerRequests } from "../../src/desktop/owner-pages.js";
 import type { OwnerReply, OwnerSnapshot, OwnerView } from "../../src/desktop/owner-protocol.js";
 import type { DesktopCommand } from "../../src/desktop/protocol.js";
 import { createViewReader } from "../../src/desktop/view-reader.js";
@@ -36,7 +37,6 @@ export function useConversationWorkspace(
   const [state, setState] = useState<{
     scope: string;
     sessions: ConversationSession[];
-    communications?: Extract<OwnerView, { kind: "communications" }>["communications"];
     requests?: RequestSnapshot | undefined;
     links: RequestLinkPage;
     updated: string;
@@ -47,6 +47,7 @@ export function useConversationWorkspace(
   const refresh = useCallback(async () => {
     await Promise.all(readers.current.map((reader) => reader.refresh()));
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new durable owner cursor refreshes the account view even when its identity is unchanged.
   useEffect(() => {
     if (!active || !instanceId || owner?.status !== "signed_in") return;
     const initial = {
@@ -57,18 +58,25 @@ export function useConversationWorkspace(
       requestError: "",
       sessionError: "",
     };
-    setState(initial);
+    setState((previous) => (previous?.scope === scope ? previous : initial));
     const update = (patch: Partial<NonNullable<typeof state>>) =>
       setState((previous) => (previous?.scope === scope ? { ...previous, ...patch } : previous));
     const requests = createViewReader({
       queueRefresh: true,
-      read: () => call({ type: "owner_requests", context: owner.context }) as Promise<OwnerReply>,
+      read: () =>
+        collectOwnerRequests(owner.context, (command) => call(command) as Promise<OwnerReply>),
       publish: (reply) => {
         if (reply.snapshot.context !== owner.context || reply.snapshot.status !== "signed_in") {
           update({ requests: undefined, requestError: "Sign in again to load requests." });
           void accountChanged();
         } else if (reply.state === "ready" && reply.data?.kind === "requests")
-          update({ requests: reply.data, updated: reply.fetchedAt ?? "", requestError: "" });
+          update({
+            requests: reply.data,
+            updated: reply.fetchedAt ?? "",
+            requestError: reply.data.has_more
+              ? "Large inbox: use the web app to view the remaining requests."
+              : "",
+          });
         else
           update({
             requestError: "Requests couldn't refresh. The last saved view may be out of date.",
@@ -107,22 +115,7 @@ export function useConversationWorkspace(
       publish: (links) => update({ links }),
       failed: () => update({ links: { links: [], hasMore: false, nextCursor: 0 } }),
     });
-    const identities = createViewReader({
-      read: () =>
-        call({ type: "owner_communications", context: owner.context }) as Promise<OwnerReply>,
-      publish: (reply) =>
-        update({
-          communications:
-            reply.snapshot.context === owner.context &&
-            reply.snapshot.status === "signed_in" &&
-            reply.state === "ready" &&
-            reply.data?.kind === "communications"
-              ? reply.data.communications
-              : [],
-        }),
-      failed: () => update({ communications: [] }),
-    });
-    readers.current = [requests, sessions, links, identities];
+    readers.current = [requests, sessions, links];
     void refresh();
     const visible = () => {
       if (!document.hidden) void refresh();
@@ -130,25 +123,36 @@ export function useConversationWorkspace(
     const timer = setInterval(visible, 15000);
     document.addEventListener("visibilitychange", visible);
     return () => {
-      for (const reader of [requests, sessions, links, identities]) reader.close();
+      for (const reader of [requests, sessions, links]) reader.close();
       readers.current = [];
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [scope, active, instanceId, owner?.context, owner?.status, call, accountChanged, refresh]);
+  }, [
+    scope,
+    active,
+    instanceId,
+    owner?.context,
+    owner?.status,
+    owner?.eventCursor,
+    call,
+    accountChanged,
+    refresh,
+  ]);
   const current = active && state?.scope === scope ? state : undefined;
   const grouped = groupConversationRequests(
     (current?.sessions ?? []).map((session) => ({
       ...session,
-      peer: conversationPeer(
+      peer: conversationPeerFromRequests(
         session.preview?.peer,
-        current?.communications ?? [],
-        Boolean(owner?.account?.agent_id && owner.account.agent_id === current?.links.agentId),
+        current?.requests?.permission_requests ?? [],
+        current?.links.agentId,
+        Boolean(owner?.account?.agents.some((agent) => agent.id === current?.links.agentId)),
       ),
     })),
     current?.requests ?? empty,
     current?.links.links ?? [],
-    Boolean(owner?.account?.agent_id && owner.account.agent_id === current?.links.agentId),
+    Boolean(owner?.account?.agents.some((agent) => agent.id === current?.links.agentId)),
   );
   return {
     ...grouped,
@@ -158,6 +162,7 @@ export function useConversationWorkspace(
       ...(grouped.inbox.unconfirmed?.map((r) => `${r.kind}:${r.id}`) ?? []),
     ]).size,
     loaded: Boolean(current?.requests),
+    sessionsLoaded: Boolean(current?.sessions),
     sessionError: current?.sessionError ?? "",
     incompleteLinks: current?.links.hasMore ?? false,
     source: {

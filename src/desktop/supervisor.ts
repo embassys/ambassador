@@ -1,3 +1,4 @@
+import type { CentralCredentialRecord } from "../central-credential.js";
 import type { GatewaySnapshot, WorkerCommand } from "./protocol.js";
 
 interface GatewayProcess {
@@ -5,6 +6,9 @@ interface GatewayProcess {
   snapshot(): GatewaySnapshot;
   request(command: WorkerCommand): Promise<unknown>;
   close(): Promise<void>;
+  prepareExecution?(agentId: string): Promise<unknown>;
+  installExecution?(previewId: string, credential: CentralCredentialRecord): Promise<unknown>;
+  cancelExecution?(previewId: string): Promise<unknown>;
 }
 
 export class SupervisedGateway {
@@ -159,6 +163,35 @@ export class SupervisedGateway {
     });
   }
 
+  prepareExecution(agentId: string): Promise<string> {
+    return this.#serial(async () => {
+      if (this.#wanted || this.#reviewId)
+        throw new Error("Stop this instance before execution setup");
+      const client = await this.#process();
+      if (!client.prepareExecution) throw new Error("Execution setup unavailable");
+      const id = await client.prepareExecution(agentId);
+      if (typeof id !== "string") throw new Error("Invalid execution preview");
+      this.#reviewId = id;
+      return id;
+    });
+  }
+  installExecution(id: string, credential: CentralCredentialRecord): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#reviewId !== id || !this.#client?.installExecution)
+        throw new Error("Execution preview expired");
+      await this.#client.installExecution(id, credential);
+      this.#reviewId = undefined;
+      await this.#releaseIdle();
+    });
+  }
+  cancelExecution(id: string): Promise<void> {
+    return this.#serial(async () => {
+      if (this.#reviewId !== id) return;
+      await this.#client?.cancelExecution?.(id);
+      this.#reviewId = undefined;
+      await this.#releaseIdle();
+    });
+  }
   close(): Promise<void> {
     this.#closed = true;
     this.#wanted = false;

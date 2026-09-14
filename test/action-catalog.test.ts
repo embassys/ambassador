@@ -25,6 +25,28 @@ const types = [
   },
 ];
 
+test("success results follow the current output schema without confusing approval with data", async () => {
+  const base = types[1];
+  assert.ok(base);
+  const action = {
+    ...base,
+    result_schema: {
+      type: "object",
+      required: ["events"],
+      properties: { events: { type: "array" } },
+    },
+  };
+  const catalog = new ActionCatalog({ listActionTypes: async () => [action] });
+  await assert.rejects(catalog.validateResult(action.name, { decision: "allow_once" }), {
+    code: "invalid_action_result",
+  });
+  await catalog.validateResult(action.name, { events: [] });
+  const unspecified = new ActionCatalog({
+    listActionTypes: async () => [{ ...action, result_schema: null }],
+  });
+  await unspecified.validateResult(action.name, { arbitrary: "answer" });
+});
+
 test("selects the exact catalog action and checks its payload before requesting permission", async () => {
   const catalog = new ActionCatalog({ listActionTypes: async () => types });
   assert.equal(

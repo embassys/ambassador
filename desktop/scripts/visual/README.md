@@ -64,3 +64,20 @@ request with no choice selected.
 `pnpm --dir desktop test:artifacts` includes request-schema and conversation
 rendering regressions. Native focus, scrolling and visual appearance still need
 the walkthrough; a static-render test does not prove those interactions.
+
+Use `--people-start` for the first workspace after setup, with no requests,
+conversations or saved people. Follow Add people, manually save a fictional
+contact, then use Import contacts and a fictional .vcf file. Check the instructions,
+native picker, zero initial selections, disabled duplicates, explicit save and
+cancel. The test host keeps contacts in memory only. People uses one list with direct
+Copy email actions. Selecting a person opens a sheet; Escape/Done returns focus
+to the same row. Add/edit uses the same sheet, and removal needs confirmation.
+Check those sheets at 680 x 540. The normal populated host includes five sample
+contacts. Capture light/dark screens and
+confirm People stays available while an Inbox request or conversation is selected.
+
+People toolbar refinement: the People page has one compact search/action toolbar,
+with no duplicate page title, back button, toolbar rule or contact-row dividers.
+Check search, Add person, Import contacts, keyboard focus and window dragging in
+the populated light/dark and 680 x 540 views. Controls must stay on one line and
+retain accessible names; empty-state guidance and local-only status stay visible.

@@ -145,6 +145,25 @@ export class CentralProtectedTransport {
     init: RequestInit = {},
     deadlineMs: number = this.#deadlineMs,
   ): Promise<Response> {
+    return this.#fetch(url, init, deadlineMs, false);
+  }
+  async fetchRenewal(url: string | URL, signal?: AbortSignal): Promise<Response> {
+    const target = requestTarget(url);
+    if (target.pathname !== "/api/renew_token" || target.search !== "")
+      throw failure("central_protected_request_invalid");
+    return this.#fetch(
+      target,
+      { method: "POST", ...(signal ? { signal } : {}) },
+      this.#deadlineMs,
+      true,
+    );
+  }
+  async #fetch(
+    url: string | URL,
+    init: RequestInit,
+    deadlineMs: number,
+    renewal: boolean,
+  ): Promise<Response> {
     const target = requestTarget(url);
     const method = requestMethod(init.method);
     if (
@@ -170,7 +189,7 @@ export class CentralProtectedTransport {
       if (!Number.isSafeInteger(now) || now < 0) {
         throw failure("central_protected_request_invalid");
       }
-      if (credential.token.expiresAt <= now) {
+      if (credential.token.expiresAt + (renewal ? 14 * 86400 : 0) <= now) {
         throw failure("central_protected_credential_expired");
       }
       const nonce = this.#nonceCache.get(origin);

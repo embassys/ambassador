@@ -19,6 +19,15 @@ export class OwnerPeople {
       },
     );
   }
+  adopt(ownerId: string, agentIds: readonly string[]): void {
+    if (this.records.get(ownerId)) return;
+    const contacts = new Map<string, Contact>();
+    for (const id of agentIds)
+      for (const contact of this.list(id))
+        if (!contacts.has(contact.email)) contacts.set(contact.email, contact);
+    if (contacts.size > 500) throw new Error("The saved contacts exceed the account limit.");
+    this.records.put({ agentId: ownerId, contacts: [...contacts.values()] });
+  }
   list(agentId: string): Contact[] {
     return this.records.get(z.uuid().parse(agentId))?.contacts ?? [];
   }
@@ -37,8 +46,7 @@ export class OwnerPeople {
   remove(agentId: string, email: string): void {
     const normalized = contactEmail.parse(email);
     const contacts = this.list(agentId).filter((contact) => contact.email !== normalized);
-    if (!contacts.length) this.records.remove([agentId]);
-    else this.records.put({ agentId, contacts }, { replace: true });
+    this.records.put({ agentId, contacts }, { replace: true });
   }
   close(): void {
     this.records.close();

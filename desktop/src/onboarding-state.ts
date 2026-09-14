@@ -5,7 +5,7 @@ export function onboardingKey(
   owner: OwnerSnapshot,
   instanceId: string | undefined,
 ): string | undefined {
-  const identity = owner.account?.agent_id ?? owner.email;
+  const identity = owner.account?.owner_id ?? owner.email;
   if (owner.status !== "signed_in" || !identity || !instanceId) return undefined;
   return `embassys.onboarding.v1:${identity}:${instanceId}`;
 }

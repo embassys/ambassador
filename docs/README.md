@@ -18,6 +18,7 @@ plan contains only work that is not complete.
 | Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
 | Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
 | Review the new web app and owner API availability | [Web app and server review](desktop-web-app-review-2026-09-07.md) |
+| Check closed API issues, new contracts and client adoption work | [September 14 central API review](central-api-review-2026-09-14.md) |
 | Review the approved desktop product and central API requirements | [Desktop app design](desktop-app-design.md) |
 | Plan desktop implementation and platform acceptance testing | [Desktop app plan](desktop-app-plan.md) |
 | Switch between CLI and app using the same installation | [Shared installation](adr/0069-shared-cli-and-desktop-installation.md) |
@@ -35,6 +36,7 @@ plan contains only work that is not complete.
 | Connect an agent from the app and enable natural request discovery | [Guided agent connection](guided-agent-connection.md) |
 | Review the desktop refinement and People scope | [Desktop refinement](desktop-refinement-2026-09-10.md) |
 | Review the simpler Inbox and History app | [Desktop simplicity](desktop-simplicity-2026-09-10.md) |
+| Review current one-code setup and native test evidence | [One-code onboarding](one-code-onboarding-2026-09-14.md) |
 | Review the released Mac app's live onboarding and screenshot evidence | [Native onboarding qualification](onboarding-qualification-2026-09-10.md) |
 | Set up Claude Code | [Claude Code setup](getting-started-claude.md) |
 | Connect standalone Claude Chat or Cowork locally | [Desktop local client](claude-desktop-local-client.md) |
@@ -61,3 +63,6 @@ the ADR ledger.
 | `test/` | Unit, integration, security, artifact, and qualification tests |
 | `test/fixtures/` | Independent central fixture, mock webhook receiver, and mock ACP agent |
 | `docs/adr/` | Accepted decisions and the historical ledger |
+
+The [September 14 central adoption record](central-adoption-2026-09-14.md) lists
+the newly implemented API integrations, live evidence and remaining blockers.

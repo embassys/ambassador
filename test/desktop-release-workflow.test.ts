@@ -28,7 +28,9 @@ test("desktop downloads are retained only after archive, host and handoff checks
   assert.match(downloadStep, /retention-days: 7/u);
   for (const extension of ["dmg", "zip", "tar.gz", "manifest.json", "cdx.json", "sha256"])
     assert.ok(downloadStep.includes(`.build/desktop/distribution/*.${extension}`), extension);
-  assert.match(workflow, /os: \[macos-latest, windows-latest, ubuntu-latest\]/u);
+  assert.match(workflow, /os: \[macos-latest, windows-latest, ubuntu-latest, ubuntu-24\.04-arm\]/u);
+  assert.ok(workflow.includes('architecture="$(node -p process.arch)"'));
+  assert.ok(workflow.includes("Embassys-linux-$architecture/chrome-sandbox"));
   assert.match(workflow, /permissions:\n {2}contents: read/u);
   assert.doesNotMatch(workflow, /continue-on-error:|if: always\(\)|gh release|contents: write/u);
 });

@@ -143,6 +143,13 @@ export class NotificationStore {
   next(queue: Queue): StoredNotification | undefined {
     return this.#records.nextInStates(queues[queue]);
   }
+  retryableAcknowledgements(after = 0) {
+    return this.#records.pageStates(
+      statesFor((r) => r.acknowledgement === "uncertain"),
+      after,
+      1,
+    );
+  }
   #save(record: StoredNotification): void {
     if (
       record.processed &&
@@ -185,7 +192,7 @@ export class NotificationStore {
   }
   beginAcknowledgement(id: string): void {
     this.#update(id, (r) => {
-      if (r.acknowledgement !== "pending") throw new NotificationStoreError();
+      if (!["pending", "uncertain"].includes(r.acknowledgement)) throw new NotificationStoreError();
       r.acknowledgement = "sending";
     });
   }

@@ -7,7 +7,7 @@ import {
 import type { TranscriptItem } from "../src/visible-transcripts.js";
 
 const items = [
-  { kind: "turn", actionType: "get_free_busy_permission", status: "complete" },
+  { kind: "turn", actionType: "get_free_busy", status: "complete" },
   {
     kind: "entry",
     role: "user",
@@ -25,6 +25,12 @@ test("conversation previews use saved fields and verbatim agent text without inf
   assert.equal(
     conversationPreview(items.filter((i) => i.kind !== "entry" || i.role !== "user"))?.title,
     "Calendar availability",
+  );
+  assert.equal(
+    conversationPreview([
+      { ...items[0], actionType: "get_free_busy_permission" },
+    ] as TranscriptItem[])?.title,
+    "Calendar permission",
   );
   assert.equal(conversationPreview([]), undefined);
   assert.equal(

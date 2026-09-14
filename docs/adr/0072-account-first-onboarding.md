@@ -1,5 +1,10 @@
 # 0072. Account-first desktop onboarding
 
+[ADR 0083](0083-one-code-desktop-setup.md) replaces this record's separate
+owner/agent email-code steps for current desktop onboarding. The historical
+contract and original qualification below describe the earlier server.
+
+
 Status: accepted, 2026-09-08, following the owner's request for Log in or Register,
 then the easiest agent setup, then the rest of the app.
 

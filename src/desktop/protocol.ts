@@ -56,6 +56,15 @@ const commandSchema = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.literal("enrollment_resend"), ...selected }),
   z.strictObject({
+    type: z.literal("enrollment_recover"),
+    ...selected,
+    confirmation: z.literal("recover-this-agent"),
+    code: z
+      .string()
+      .regex(/^\d{6}$/u)
+      .optional(),
+  }),
+  z.strictObject({
     type: z.literal("enrollment_executor"),
     ...selected,
     executor: desktopExecutor,

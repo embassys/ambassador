@@ -40,9 +40,14 @@ const host = spawn(
   [...applicationArguments, `--user-data-dir=${root}`, "--background"],
   {
     env: environment,
-    stdio: ["ignore", "ignore", "inherit"],
+    stdio: ["ignore", "ignore", "pipe"],
   },
 );
+let hostDiagnostics = "";
+host.stderr.on("data", (chunk) => {
+  process.stderr.write(chunk);
+  hostDiagnostics = (hostDiagnostics + chunk.toString("utf8")).slice(-65_536);
+});
 const exited = once(host, "exit");
 const endpoint = `http://127.0.0.1:${port}/mcp`;
 let started = false;
@@ -161,6 +166,11 @@ try {
   });
   assert.equal((await once(second, "exit"))[0], 0);
   await initialize();
+  assert.doesNotMatch(
+    hostDiagnostics,
+    /Cannot send request of length/u,
+    "The window icon must fit within the Linux display request limit.",
+  );
   console.log(
     "Actual Electron host started its isolated server; duplicate launch left it available.",
   );

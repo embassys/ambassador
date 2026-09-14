@@ -18,6 +18,7 @@ export function Navigation({
   requestError,
   requestsLoading,
   refresh,
+  openPeople,
 }: {
   page: string;
   sessions: ConversationSession[];
@@ -34,12 +35,22 @@ export function Navigation({
   requestError?: string;
   requestsLoading?: boolean;
   refresh?(): void;
+  openPeople?(): void;
 }) {
   return (
     <nav className="conversation-nav" aria-label="Main navigation">
+      <button
+        type="button"
+        className="sidebar-people"
+        aria-current={page === "people" ? "page" : undefined}
+        onClick={openPeople}
+      >
+        <PeopleIcon />
+        <span>People</span>
+      </button>
       <div
         className="conversation-nav-heading inbox-nav-heading"
-        title="Account snapshot: up to 200 permissions and 200 questions. Older requests may be missing."
+        title="Pending requests from your account. Refresh to check for updates."
       >
         <h2>Inbox</h2>
         {Boolean(inboxCount) && <span className="sidebar-count">{inboxCount}</span>}
@@ -94,7 +105,7 @@ export function Navigation({
         ))}
       </section>
       {!requestsLoading && !requestError && inboxCount === 0 && (
-        <p className="sidebar-note">No requests</p>
+        <p className="sidebar-empty">No requests yet</p>
       )}
       {requests?.unconfirmedMore && (
         <p className="sidebar-note">Showing the first 100 unconfirmed submissions.</p>
@@ -113,15 +124,12 @@ export function Navigation({
         select={selectSession}
         attention={attention}
       />
-      {!sessions.length && !error && (
-        <p className="sidebar-note">Conversations appear here when your agent handles a request.</p>
-      )}
+      {!sessions.length && !error && <p className="sidebar-empty">No conversations yet</p>}
     </nav>
   );
 }
 
 const menuPages = [
-  { id: "people", label: "People" },
   { id: "agents", label: "Connect agents" },
   { id: "permissions", label: "Access" },
 ] as const;
@@ -134,7 +142,7 @@ export function AppMenu({ select }: { select(page: (typeof menuPages)[number]["i
         type="button"
         popoverTarget="app-menu-options"
         aria-label="More"
-        title="People, agents and access"
+        title="Agents and access"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <circle cx="5" cy="12" r="1.6" />
@@ -157,6 +165,48 @@ export function AppMenu({ select }: { select(page: (typeof menuPages)[number]["i
         ))}
       </div>
     </div>
+  );
+}
+
+function PeopleIcon() {
+  return (
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v2" />
+    </svg>
+  );
+}
+
+export function WorkspaceWelcome({ people, agents }: { people(): void; agents(): void }) {
+  return (
+    <section className="workspace-placeholder workspace-welcome">
+      <div className="welcome-people-icon">
+        <PeopleIcon />
+      </div>
+      <h2>Start with someone you know</h2>
+      <p>
+        Save a friend's email or import selected contacts. Then ask your agent to arrange a meeting
+        or request information through Embassys.
+      </p>
+      <div className="welcome-actions">
+        <button type="button" className="primary" onClick={people}>
+          Add people
+        </button>
+        <button type="button" className="secondary" onClick={agents}>
+          Connect agents
+        </button>
+      </div>
+      <p className="welcome-note">Requests and conversations will appear here.</p>
+    </section>
   );
 }
 

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   ACP_TOOL_HUMAN_INPUT_TYPE,
   type CentralHumanInputRequest,
@@ -13,7 +15,13 @@ export interface CentralAgentPermissionTransport {
   requestHumanInput(
     arguments_: CentralHumanInputRequest,
     signal?: AbortSignal,
+    requestKey?: string,
   ): Promise<CentralHumanInputRequestResult>;
+  resumeMutation?(
+    operation: "get_human_input",
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown> | undefined>;
 }
 
 export interface CentralAgentPermissionCoordinatorOptions {
@@ -128,7 +136,29 @@ export class CentralAgentPermissionCoordinator {
   async #approve(request: AcpPermissionRequest, signal: AbortSignal): Promise<string> {
     if (signal.aborted) throw new CentralAgentPermissionError("cancelled");
     const args = humanInputArguments(request);
-    const result = await this.#options.transport.requestHumanInput(args, signal);
+    const key = randomUUID();
+    let result: CentralHumanInputRequestResult;
+    try {
+      result = await this.#options.transport.requestHumanInput(args, signal, key);
+    } catch (error) {
+      if (!this.#options.transport.resumeMutation || signal.aborted) throw error;
+      // Resume only this live ACP invocation. A restarted provider prompt is never replayed.
+      let recovered: Record<string, unknown> | undefined;
+      for (let attempt = 0; attempt < 3 && !recovered; attempt++) {
+        await delay(1000 * (attempt + 1), undefined, { signal });
+        recovered = await this.#options.transport
+          .resumeMutation("get_human_input", key, signal)
+          .catch(() => undefined);
+      }
+      if (
+        !recovered ||
+        typeof recovered.request_id !== "string" ||
+        recovered.status !== "pending" ||
+        recovered.input_type !== "buttons"
+      )
+        throw error;
+      result = recovered as unknown as CentralHumanInputRequestResult;
+    }
     try {
       this.#options.onQuestion?.(result.request_id);
     } catch {

@@ -4,6 +4,7 @@ import { chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from "node:fs/pro
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { assertDesktopTarget } from "./platform-targets.mjs";
 
 const repository = fileURLToPath(new URL("../../", import.meta.url));
 const destination = join(repository, ".build/desktop/app");
@@ -12,13 +13,7 @@ const downloadRoot = join(repository, ".build/desktop/downloads");
 const runtimeVersion = "24.19.0";
 const platform = process.platform;
 const arch = process.arch;
-if (
-  !(
-    (platform === "darwin" && ["arm64", "x64"].includes(arch)) ||
-    (["linux", "win32"].includes(platform) && arch === "x64")
-  )
-)
-  throw new Error("This desktop target has not been approved.");
+assertDesktopTarget(platform, arch);
 const packageManager = process.env.npm_execpath;
 if (!packageManager || !/\.(?:[cm]?js)$/u.test(packageManager))
   throw new Error("Run this build through the approved pnpm run command.");

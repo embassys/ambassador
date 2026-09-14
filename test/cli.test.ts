@@ -74,9 +74,10 @@ function captureTerminal() {
 async function waitForOutput(
   output: () => string,
   pattern: RegExp,
-  attempts = 300,
+  timeoutMs = 30_000,
 ): Promise<string> {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     const match = pattern.exec(output());
     if (match !== null) return match[1] ?? match[0];
     await delay(10);
@@ -355,12 +356,19 @@ test("creates and prints one stable webhook secret without taking the gateway lo
 
 test("starts and serves MCP with no options or environment variables", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-zero-config-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
   const controller = new AbortController();
-  t.after(() => controller.abort());
+  let running: Promise<number> | undefined;
+  t.after(async () => {
+    controller.abort();
+    try {
+      await running;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   let stdout = "";
   let stderr = "";
-  const running = runCli(["start"], {
+  running = runCli(["start"], {
     io: {
       stdout: {
         write(chunk) {
@@ -382,17 +390,21 @@ test("starts and serves MCP with no options or environment variables", async (t)
       centralOrigin: "http://127.0.0.1:1",
       stateRoot: root,
       localMcpPort: 0,
-      localControlSecretStore: TEST_LOCAL_CONTROL_SECRET_STORE,
+      localControlSecretStore: {
+        ...TEST_LOCAL_CONTROL_SECRET_STORE,
+        async createOrLoad() {
+          // Model slow private-state initialization without skipping native ACL checks.
+          await delay(750);
+          return TEST_LOCAL_CONTROL_SECRET_STORE.createOrLoad();
+        },
+      },
     },
   });
 
-  let endpoint: string | undefined;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(stdout)?.[1];
-    if (endpoint !== undefined) break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.ok(endpoint !== undefined);
+  const endpoint = await waitForOutput(
+    () => stdout,
+    /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+  );
   assert.match(stdout, /Connect an agent in another terminal:/u);
   assert.match(stdout, /codex mcp add ambassador --url http:\/\/127\.0\.0\.1:\d+\/mcp/u);
   assert.match(
@@ -430,12 +442,19 @@ test("starts and serves MCP with no options or environment variables", async (t)
 for (const verbose of [false, true])
   test(`starts with persistent redacted diagnostics, verbose=${verbose}`, async (t) => {
     const root = await mkdtemp(join(tmpdir(), "ambassador-verbose-"));
-    t.after(() => rm(root, { recursive: true, force: true }));
-    const central = await startFakeCentral(t);
     const controller = new AbortController();
-    t.after(() => controller.abort());
+    let running: Promise<number> | undefined;
+    t.after(async () => {
+      controller.abort();
+      try {
+        await running;
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+    const central = await startFakeCentral(t);
     const output = captureIo();
-    const running = runCli(verbose ? ["start", "--verbose"] : ["start"], {
+    running = runCli(verbose ? ["start", "--verbose"] : ["start"], {
       io: output.io,
       env: {},
       cwd: root,
@@ -448,13 +467,10 @@ for (const verbose of [false, true])
       },
     });
 
-    let endpoint: string | undefined;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(output.stdout())?.[1];
-      if (endpoint !== undefined) break;
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    assert.ok(endpoint !== undefined);
+    const endpoint = await waitForOutput(
+      output.stdout,
+      /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+    );
     const client = new TestMcpClient(endpoint);
     await client.initialize({ name: "codex-mcp-client", version: "qualification" });
     await assert.rejects(
@@ -611,13 +627,10 @@ test("lists and shows sessions through the running Ambassador process", async (t
     },
   });
 
-  let endpoint: string | undefined;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    endpoint = /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u.exec(startOutput.stdout())?.[1];
-    if (endpoint !== undefined) break;
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.ok(endpoint !== undefined);
+  const endpoint = await waitForOutput(
+    startOutput.stdout,
+    /MCP endpoint: (http:\/\/127\.0\.0\.1:\d+\/mcp)/u,
+  );
   assert.equal(startOutput.stdout().includes(secret), false);
 
   const commandOutput = captureIo();
@@ -796,7 +809,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
   }).finally(() => {
     settled = true;
   });
-  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u, 1_500);
+  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u);
   assert.equal(deliveryAttempts, 1);
   assert.equal(settled, false);
   assert.match(
@@ -874,7 +887,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
   }).finally(() => {
     settled = true;
   });
-  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u, 1_500);
+  await waitForOutput(output.stderr, /Ambassador paused incoming delivery/u);
   assert.equal(deliveryAttempts, 1);
   assert.equal(settled, false);
   assert.equal(

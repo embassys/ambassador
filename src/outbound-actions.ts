@@ -188,7 +188,8 @@ export class OutboundActions {
   constructor(
     path: string,
     credential: LoadedCentralCredential,
-    readonly transport: Pick<CentralRestClient, "requestPermission" | "callAction">,
+    readonly transport: Pick<CentralRestClient, "requestPermission" | "callAction"> &
+      Partial<Pick<CentralRestClient, "resumeMutation">>,
   ) {
     this.#store = new EncryptedRecordStore(path, credential, {
       scope: "ambassador-outbound-action",
@@ -239,7 +240,7 @@ export class OutboundActions {
       const { action_payload: payload, ...permissionArguments } = arguments_;
       const normalized = normalizePermissionRequest(permissionArguments);
       if (!Object.hasOwn(arguments_, "action_payload"))
-        return await this.transport.requestPermission(normalized, signal);
+        return await this.transport.requestPermission(normalized, signal, operationId);
       // An explicit address is required: an inferred message target cannot identify saved intent.
       if (
         !isCentralRecord(payload) ||
@@ -278,7 +279,7 @@ export class OutboundActions {
       }
       // A crash or lost response leaves a visible uncertainty marker, never an automatic retry.
       const response = await this.transport
-        .requestPermission(normalized, signal)
+        .requestPermission(normalized, signal, value.operation_id)
         .catch((error: unknown) => {
           const rejection = confirmedRejection(error);
           if (rejection !== undefined)
@@ -313,6 +314,7 @@ export class OutboundActions {
           payload: value.payload,
         },
         signal,
+        value.operation_id,
       );
       const submitted: OutboundAction = {
         ...value,
@@ -390,9 +392,44 @@ export class OutboundActions {
     signal: AbortSignal,
   ): Promise<void> {
     return this.#run(async () => {
-      const value = this.get(target, action);
-      if (value?.operation_id === operationId && value.status === "ready")
-        await this.#dispatch(value, signal);
+      let value = this.get(target, action);
+      if (value?.operation_id !== operationId) return;
+      if (["request_uncertain", "dispatch_uncertain"].includes(value.status)) {
+        const requesting = value.status === "request_uncertain";
+        try {
+          const response = await this.transport.resumeMutation?.(
+            requesting ? "request_permission" : "call_action",
+            operationId,
+            signal,
+          );
+          // Old unkeyed work must remain uncertain; never reconstruct and resend it.
+          if (response === undefined) return;
+          value = requesting
+            ? {
+                ...value,
+                permission_id: String(response.permission_id),
+                status:
+                  response.status === "granted" || response.already_granted === true
+                    ? "ready"
+                    : response.status === "denied"
+                      ? "denied"
+                      : "awaiting_permission",
+              }
+            : { ...value, call_id: String(response.call_id), status: "submitted" };
+          this.#save(value);
+        } catch (error) {
+          const rejection = confirmedRejection(error);
+          if (rejection)
+            this.#save({
+              ...value,
+              status: requesting ? "request_rejected" : "dispatch_rejected",
+              rejection,
+            });
+          if (signal.aborted) throw error;
+          return;
+        }
+      }
+      if (value.status === "ready") await this.#dispatch(value, signal);
     });
   }
 

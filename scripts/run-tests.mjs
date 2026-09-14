@@ -16,6 +16,8 @@ if (files.length === 0) {
 
 const flags = process.argv.includes("--coverage") ? ["--experimental-test-coverage"] : [];
 const concurrencyFlags = process.platform === "win32" ? ["--test-concurrency=1"] : [];
+// TAP prints failure details immediately, even if a later test leaves work running.
+const reporterFlags = process.env.CI ? ["--test-reporter=tap"] : [];
 
 function run(arguments_) {
   return new Promise((resolveRun, reject) => {
@@ -33,7 +35,7 @@ function run(arguments_) {
 }
 
 try {
-  await run(["--test", ...flags, ...concurrencyFlags, ...files]);
+  await run(["--test", ...flags, ...concurrencyFlags, ...reporterFlags, ...files]);
 } catch {
   process.exitCode = 1;
 }

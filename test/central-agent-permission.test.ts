@@ -219,3 +219,25 @@ test("cancellation while waiting never approves and already-cancelled requests s
   await assert.rejects(coordinator.approve(request, controller.signal));
   assert.equal(emails, 1);
 });
+
+test("a lost provider question response resumes one exact mutation while its ACP request stays open", async () => {
+  let savedKey: string | undefined;
+  let submissions = 0;
+  const coordinator = new CentralAgentPermissionCoordinator({
+    transport: {
+      async requestHumanInput(_args, _signal, key) {
+        savedKey = key;
+        submissions++;
+        throw new Error("lost");
+      },
+      async resumeMutation(operation, key) {
+        assert.equal(operation, "get_human_input");
+        assert.equal(key, savedKey);
+        return response("request-recovered");
+      },
+    },
+    waitForResponse: async (id) => message(OUTCOME_ID, outcome(id, "provider-once")),
+  });
+  assert.equal(await coordinator.approve(request, new AbortController().signal), "provider-once");
+  assert.equal(submissions, 1);
+});
