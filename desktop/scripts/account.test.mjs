@@ -460,6 +460,7 @@ test("onboarding installs a first agent with no second email or premature provid
               {
                 id: "agent",
                 email: owner.email,
+                email_verified: true,
                 executor_device_id: review.agent.executor_device_id,
                 executor_epoch: 2,
               },
@@ -475,6 +476,7 @@ test("onboarding installs a first agent with no second email or premature provid
     if (command.type === "enrollment_status")
       return {
         phase: "registered",
+        agentId: "agent",
         email: owner.email,
         credentialStatus: "active",
         needsExecutor: true,
@@ -518,6 +520,17 @@ test("onboarding installs a first agent with no second email or premature provid
   assert.deepEqual(
     calls.map((c) => c.type),
     ["owner_profile"],
+  );
+  calls.length = 0;
+  await prepareOnboardingAgent(
+    owner,
+    { ...result.registration, agentId: "previous-agent" },
+    "instance",
+    call,
+  );
+  assert.equal(
+    calls.some((c) => c.type === "owner_device_submit"),
+    true,
   );
   calls.length = 0;
   review.agent.executor_device_id = "elsewhere";
@@ -569,5 +582,12 @@ test("onboarding installs a first agent with no second email or premature provid
       move.review,
     ),
     /Review.*again/,
+  );
+  await assert.rejects(
+    prepareOnboardingAgent(owner, { phase: "new" }, "instance", async (command) => {
+      const reply = await call(command);
+      return command.type === "enrollment_status" ? { ...reply, agentId: "previous-agent" } : reply;
+    }),
+    /could not confirm/,
   );
 });

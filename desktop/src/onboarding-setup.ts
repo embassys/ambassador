@@ -26,7 +26,8 @@ export async function prepareOnboardingAgent(
       throw new Error("Your agent assignment could not be checked. Try connecting again.");
     const agent = fresh.data.profile.agents.find((agent) => agent.email === owner.email);
     if (
-      agent &&
+      agent?.email_verified &&
+      agent.id === registration.agentId &&
       ((!agent.executor_device_id && !registration.executionDeviceId) ||
         (agent.executor_device_id === owner.account.device_id &&
           registration.executionDeviceId === agent.executor_device_id &&
@@ -70,6 +71,7 @@ export async function prepareOnboardingAgent(
   const current = (await call({ type: "enrollment_status", instanceId })) as RegistrationSnapshot;
   if (
     current.phase !== "registered" ||
+    current.agentId !== review.agent?.id ||
     current.email?.toLowerCase() !== owner.email.toLowerCase() ||
     current.credentialStatus !== "active"
   )

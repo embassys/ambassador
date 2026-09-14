@@ -38,6 +38,7 @@ const recordSchema = registrationInput.extend({
 type RegistrationRecord = z.infer<typeof recordSchema>;
 export interface RegistrationSnapshot {
   phase: "new" | "registered" | RegistrationRecord["phase"];
+  agentId?: string | undefined;
   email?: string;
   executor?: z.infer<typeof desktopExecutor> | undefined;
   message?: string | undefined;
@@ -108,6 +109,7 @@ export class DesktopRegistration {
     )
       return {
         phase: "registered",
+        agentId: String(this.options.identity.enrollment.agent_id),
         email: String(this.options.identity.enrollment.email),
         credentialStatus: this.options.identity.expired ? "expired" : "active",
         ...(this.options.identity.localCredential().token.executionDeviceId

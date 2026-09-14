@@ -13,7 +13,9 @@ provider setup, People invitation semantics and platform build selection.
 Two additional regressions were fixed during review:
 
 - Onboarding now reads the current owner roster before reusing a saved execution
-  credential. A transfer or changed execution epoch requires setup again, even
+  credential. The verified central agent ID must match, including after local
+  installation; matching email alone cannot reuse a replaced identity.
+  A transfer or changed execution epoch requires setup again, even
   while the old token remains unexpired. Moving another device remains explicit.
 - Notification registration and removal run in order. A delayed registration's
   cleanup cannot remove a newer enabled registration. The regression reproduced
