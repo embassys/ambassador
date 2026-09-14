@@ -1,6 +1,47 @@
 # Central service follow-ups
 
-These are server changes tracked for
+## Current status, September 14
+
+Issues 1–13 are closed, and reviewed server main plus deployed OpenAPI now expose
+their new contracts. They are no longer all missing server features. See the
+[current review and client adoption plan](central-api-review-2026-09-14.md) for
+each issue's status, remaining client work and qualification evidence.
+
+The client integrations are implemented under
+[ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md); the
+[adoption record](central-adoption-2026-09-14.md) separates automated, live API
+and native sample-data evidence.
+
+Issue 15 is fixed and deployed. Protected live tests now pass action/results,
+leased redelivery, release/repeated acknowledgement, submission recovery, progress,
+owner input, renewal and device fencing. Replay protection still rejects a reused
+proof. The client's missed `queued` action status was corrected during the retest.
+Issues 16, 17, 19 and 20 are also closed and checked live: exact calendar grants,
+owner roster refresh without another code, timezone-aware invitation dates and
+execution-token cache headers. See the adoption record for test boundaries.
+
+Current API follow-ups:
+
+- [14](https://github.com/embassys/agent2agent/issues/14): DPoP wire/nonce decision.
+  Keep the current wire contract until a coordinated change is accepted.
+
+Issue [21](https://github.com/embassys/agent2agent/issues/21) is closed. Desktop
+one-code setup is implemented under [ADR 0083](adr/0083-one-code-desktop-setup.md).
+Issue [18](https://github.com/embassys/agent2agent/issues/18) has also shipped;
+communication history needs client adoption and live qualification.
+
+The native push routes are adopted, but the live server reports no push
+credentials configured. Signed app identity, Windows native integration and
+real device delivery remain separate.
+No API code was changed.
+
+## Historical findings through September 12
+
+The notes below retain the original evidence and requested fixes. Statements
+about unavailable routes, open issues and missing contracts describe the old
+server revision; they are superseded by the September 14 review above.
+
+These were server changes tracked for
 [`embassys/agent2agent`](https://github.com/embassys/agent2agent). The production
 review treats message custody, credential renewal, and listener
 lifecycle as release limitations. Ambassador must not emulate missing server
@@ -27,6 +68,9 @@ neither is an available REST operation. Web app `a9cb3d3` supplies no missing
 owner route. Require authenticated send/list/accept/decline contracts and safe
 lost-response behavior, with connection acceptance separate from action grants.
 The desktop's local People list does not imply a central connection.
+Rechecked September 12: server and web main remain at those commits, and the
+deployed OpenAPI still exposes only the two invitation routes above. The desktop
+now shows this limit before adding or importing people.
 
 ## Security and operations
 

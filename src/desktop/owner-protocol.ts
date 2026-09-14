@@ -1,14 +1,23 @@
 import { z } from "zod";
+import {
+  connectionsPage,
+  devicesResponse,
+  eventsPage,
+  historyPage,
+  invitationSchema,
+  invitationsPage,
+  ownedAgent,
+  pushStatus,
+} from "./owner-contract.js";
+import { deviceResult, deviceReview } from "./owner-devices.js";
 import { contactEmail, contactSchema, contactsSchema } from "./people-schema.js";
 
-export const ownerEmail = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .min(3)
-  .max(320)
-  .regex(/^[^@\s]+@[^@\s]+\.[^@\s]+$/u);
+export { ownerEmail } from "./owner-email.js";
+
+import { ownerEmail } from "./owner-email.js";
+
 const context = z.uuid();
+const pageCursor = z.string().min(1).max(2048).optional();
 export const mutationKind = z.enum(["permission", "input", "revoke"]);
 export const ownerCommands = [
   z.strictObject({ type: z.literal("owner_status") }),
@@ -16,6 +25,42 @@ export const ownerCommands = [
   z.strictObject({ type: z.literal("owner_verify"), context, code: z.string().regex(/^\d{6}$/u) }),
   z.strictObject({ type: z.literal("owner_signout"), context }),
   z.strictObject({ type: z.literal("owner_profile"), context }),
+  z.strictObject({ type: z.literal("owner_create_agent"), context }),
+  z.strictObject({ type: z.literal("owner_invitations"), context, cursor: pageCursor }),
+  z.strictObject({ type: z.literal("owner_connections"), context, cursor: pageCursor }),
+  z.strictObject({ type: z.literal("owner_invite"), context, email: ownerEmail }),
+  z.strictObject({
+    type: z.literal("owner_invitation_answer"),
+    context,
+    invitation_id: z.uuid(),
+    answer: z.enum(["accept", "decline"]),
+  }),
+  z.strictObject({
+    type: z.literal("owner_history"),
+    context,
+    cursor: pageCursor,
+    permission_id: z.uuid().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("owner_events"),
+    context,
+    cursor: z.number().int().nonnegative(),
+  }),
+  z.strictObject({ type: z.literal("owner_devices"), context }),
+  z.strictObject({
+    type: z.literal("owner_device_review"),
+    context,
+    operation: z.enum(["revoke", "execute"]),
+    device_id: z.uuid(),
+    agent_id: z.uuid().optional(),
+  }),
+  z.strictObject({
+    type: z.literal("owner_device_submit"),
+    context,
+    review_id: z.uuid(),
+    instanceId: z.uuid().optional(),
+  }),
+  z.strictObject({ type: z.literal("owner_push_status"), context }),
   z.strictObject({ type: z.literal("owner_people"), context }),
   z.strictObject({
     type: z.literal("owner_people_save"),
@@ -24,11 +69,12 @@ export const ownerCommands = [
     replace: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal("owner_people_remove"), context, email: contactEmail }),
-  z.strictObject({ type: z.literal("owner_requests"), context }),
+  z.strictObject({ type: z.literal("owner_requests"), context, cursor: pageCursor }),
   z.strictObject({
     type: z.literal("owner_permissions"),
     context,
     direction: z.enum(["granted", "received"]),
+    cursor: pageCursor,
   }),
   z.strictObject({ type: z.literal("owner_communications"), context }),
   z.strictObject({ type: z.literal("owner_review"), context, kind: mutationKind, id: z.uuid() }),
@@ -47,6 +93,8 @@ export const ownerCommandSchema = z.discriminatedUnion("type", ownerCommands);
 export type OwnerCommand = z.infer<typeof ownerCommandSchema>;
 
 export const ownerIssue = z.enum([
+  "history_unavailable",
+  "cursor_expired",
   "invalid_code",
   "code_unconfirmed",
   "code_expired",
@@ -63,8 +111,19 @@ export const ownerIssue = z.enum([
   "request_unavailable",
 ]);
 export type OwnerIssue = z.infer<typeof ownerIssue>;
+export const ownedAgentSchema = z.object({
+  id: z.uuid(),
+  email: ownerEmail,
+  display_name: z.string().max(8192).nullable(),
+  email_verified: z.boolean(),
+  executor_device_id: z.uuid().nullable(),
+  is_executed_here: z.boolean(),
+  executor_epoch: z.number().int().nonnegative(),
+});
 export const ownerProfile = z.object({
-  agent_id: z.uuid(),
+  owner_id: z.uuid(),
+  device_id: z.uuid(),
+  agents: z.array(ownedAgentSchema).max(200),
   email: ownerEmail,
   display_name: z.string().max(512).nullable(),
   username: z.string().max(512).nullable(),
@@ -84,6 +143,7 @@ export const ownerSnapshotSchema = z.strictObject({
   email: ownerEmail.optional(),
   account: publicOwnerProfile.optional(),
   resendAt: z.number().int().nonnegative().optional(),
+  eventCursor: z.number().int().nonnegative().optional(),
   issue: ownerIssue.optional(),
 });
 export type OwnerSnapshot = z.infer<typeof ownerSnapshotSchema>;
@@ -115,7 +175,24 @@ const options = z.preprocess((value) => {
     return undefined;
   }
 }, z.array(option).max(32).nullable());
+const requestContext = {
+  revision: z.number().int().positive().optional(),
+  agent_id: z.uuid().optional(),
+  owner_id: z.uuid().nullable().optional(),
+  state: z.string().max(64).optional(),
+  reason: nullableText.optional(),
+  action_verified: z.boolean().optional(),
+  message_id: z.uuid().nullable().optional(),
+};
 export const permissionRequestSchema = z.object({
+  ...requestContext,
+  requester_verified: z.boolean().optional(),
+  requester_agent_id: z.uuid().optional(),
+  offered_options: z
+    .array(z.enum(["accept", "deny", "allow_once", "allow_always"]))
+    .min(1)
+    .max(4)
+    .optional(),
   id: z.uuid(),
   decision_options: nullableText,
   scope: json,
@@ -127,6 +204,10 @@ export const permissionRequestSchema = z.object({
   requester_name: nullableText,
 });
 export const inputRequestSchema = z.object({
+  ...requestContext,
+  expires_at: timestamp.nullable().optional(),
+  request_kind: z.enum(["text_answer", "provider_option", "resource_grant"]).optional(),
+  provider: z.record(z.string(), z.unknown()).nullable().optional(),
   id: z.uuid(),
   prompt: text,
   input_type: z.string().max(64),
@@ -135,6 +216,11 @@ export const inputRequestSchema = z.object({
   action_type: text,
 });
 export const permissionSchema = z.object({
+  revision: z.number().int().positive().optional(),
+  reason: nullableText.optional(),
+  revocable: z.boolean().optional(),
+  internal: z.boolean().optional(),
+  action_verified: z.boolean().optional(),
   id: z.uuid(),
   status: z.string().max(64),
   decision: nullableText,
@@ -166,12 +252,19 @@ export const communicationSchema = z.object({
   recipient_name: nullableText,
   outbound: z.boolean(),
 });
+const pagination = {
+  next_cursor: z.string().max(2048).nullable().optional(),
+  has_more: z.boolean().optional(),
+  watermark: z.number().int().nonnegative().optional(),
+};
 export const requestsSchema = z.object({
+  ...pagination,
   permission_requests: z.array(permissionRequestSchema).max(200),
   input_requests: z.array(inputRequestSchema).max(200),
   total: z.number().int().min(0).max(400),
 });
 export const permissionsSchema = z.object({
+  ...pagination,
   direction: z.enum(["granted", "received"]),
   permissions: z.array(permissionSchema).max(200),
 });
@@ -198,6 +291,16 @@ export const reviewSchema = z.object({
 });
 export type OwnerReview = z.infer<typeof reviewSchema>;
 export const ownerViewSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("agent_setup"), agent: ownedAgent, created: z.boolean() }),
+  deviceReview,
+  deviceResult,
+  invitationsPage.safeExtend({ kind: z.literal("invitations") }),
+  connectionsPage.safeExtend({ kind: z.literal("connections") }),
+  z.object({ kind: z.literal("invitation"), invitation: invitationSchema }),
+  historyPage.safeExtend({ kind: z.literal("history") }),
+  devicesResponse.extend({ kind: z.literal("devices") }),
+  pushStatus.extend({ kind: z.literal("push") }),
+  eventsPage.extend({ kind: z.literal("events") }),
   z.object({ kind: z.literal("people"), contacts: contactsSchema }),
   z.object({ kind: z.literal("profile"), profile: publicOwnerProfile }),
   z.object({

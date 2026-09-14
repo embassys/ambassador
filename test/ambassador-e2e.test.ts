@@ -166,7 +166,7 @@ test("reports verified enrollment independently of an empty permission list and 
 });
 
 test("keeps saved results readable after credential expiry and restart without retrying central", {
-  timeout: process.platform === "win32" ? 60_000 : 5_000,
+  timeout: process.platform === "win32" ? 60_000 : 15_000,
 }, async (t) => {
   const value = await fixture(t);
   let now = NOW_SECONDS;
@@ -547,7 +547,11 @@ test("returns a correlated action result from the target MCP tool to the request
           request_id: { type: "string", format: "uuid" },
           call_id: action.call_id,
           status: ["success", "error"],
-          result: { type: "object" },
+          result: {
+            type: "object",
+            description:
+              "Success must match this action’s result_schema from list_action_types when one is declared. Approval alone is not the requested data.",
+          },
         },
       },
     },

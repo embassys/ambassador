@@ -59,6 +59,8 @@ function toolErrorMessage(code: string): string {
       return "Ambassador rejected the tool arguments. Check the tool schema and try again.";
     case "action_type_unknown":
       return "This exact action name is absent from list_action_types. Select a returned name; do not invent a permission mapping or create a new type.";
+    case "invalid_action_result":
+      return "The result does not match this action’s result schema. Inspect list_action_types and submit the requested data, or a definitive error.";
     case "invalid_action_payload":
       return "The payload does not match this action's catalog input schema. Correct the payload before making a new request.";
     case "action_schema_unsupported":
@@ -81,6 +83,8 @@ function toolErrorMessage(code: string): string {
       return "Ambassador already has a different local delivery profile. Stop Ambassador and run the documented clean command before registering another agent.";
     case "not_enrolled":
       return "Ambassador is not enrolled yet. Register and verify an email first.";
+    case "executor_inactive":
+      return "This device is no longer authorized to execute the agent. Open Embassys to review its execution device. Do not retry execution or register again.";
     case "credential_expired":
       return "Ambassador's central credential has expired. Saved inbox and session reads remain available. Keep local state; Embassys does not yet offer credential renewal.";
     case "permission_missing":

@@ -13,6 +13,21 @@ export const permissionMenus = {
 } as const;
 export function permissionChoices(
   menu: string | null,
+  offered?: readonly string[],
 ): readonly { value: string; label: string }[] {
+  if (offered) {
+    const labels: Record<string, string> = {
+      deny: "Deny",
+      accept: "Accept",
+      allow_once: "Allow once",
+      allow_always: "Allow always",
+    };
+    if (
+      new Set(offered).size !== offered.length ||
+      offered.some((value) => !Object.hasOwn(labels, value))
+    )
+      return [];
+    return offered.map((value) => ({ value, label: labels[value] as string }));
+  }
   return menu === "accept_deny" || menu === "once_always" ? permissionMenus[menu] : [];
 }

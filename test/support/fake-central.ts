@@ -38,6 +38,7 @@ export interface FixtureActionType {
   readonly name: string;
   readonly description: string;
   readonly input_schema: Record<string, unknown>;
+  readonly result_schema?: Record<string, unknown> | null;
 }
 
 export interface FixtureMessage {
@@ -209,82 +210,346 @@ export interface FakeCentral {
   close(): Promise<void>;
 }
 
+// Catalog sampled from deployed central after migrations 008 and 016, September 14.
 const ACTIONS: readonly FixtureActionType[] = [
   {
     id: "action.create_calendar_event",
     name: "create_calendar_event",
-    description: "Create a calendar event",
+    description:
+      'Create an event on the target\'s calendar. Requires an active grant for create_calendar_event itself -- permission is checked against the exact action being called. Ask for this action by name through request_permission. Returns CALENDAR DATA, not a decision: a successful result must identify the event that now exists and its times, and must report invitation delivery separately from creation -- an event can be created without anyone being invited, and "invited" is not evidence of "created". Report the invitees actually notified; an empty sent list means none were.',
     input_schema: {
       type: "object",
-      properties: {
-        title: { type: "string" },
-        start_time: { type: "string" },
-        end_time: { type: "string" },
-        attendees: { type: "array", items: { type: "string" } },
-        description: { type: "string" },
-      },
       required: ["title", "start_time", "end_time"],
+      properties: {
+        title: {
+          type: "string",
+        },
+        end_time: {
+          type: "string",
+        },
+        attendees: {
+          type: "array",
+          items: {
+            type: "string",
+          },
+        },
+        start_time: {
+          type: "string",
+        },
+        description: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: {
+      type: "object",
+      required: ["event_id", "created", "start", "end", "timezone", "invitations"],
+      properties: {
+        end: {
+          type: "string",
+          pattern:
+            "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+        },
+        start: {
+          type: "string",
+          pattern:
+            "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+        },
+        title: {
+          type: "string",
+        },
+        created: {
+          type: "boolean",
+        },
+        event_id: {
+          type: "string",
+          minLength: 1,
+        },
+        timezone: {
+          type: "string",
+          minLength: 1,
+        },
+        invitations: {
+          type: "object",
+          required: ["sent"],
+          properties: {
+            sent: {
+              type: "array",
+              items: {
+                type: "string",
+              },
+            },
+            failed: {
+              type: "array",
+              items: {
+                type: "string",
+              },
+            },
+          },
+        },
+      },
     },
   },
   {
     id: "action.get_email",
     name: "get_email",
-    description: "Request an email address",
+    description: "Get another user's email address",
     input_schema: {
       type: "object",
-      properties: {
-        reason: { type: "string", description: "Reason for requesting email address" },
-      },
       required: ["reason"],
+      properties: {
+        reason: {
+          type: "string",
+          description: "Reason for requesting email address",
+        },
+      },
+    },
+    result_schema: null,
+  },
+  {
+    id: "action.get_free_busy",
+    name: "get_free_busy",
+    description:
+      "Read the busy intervals on the target's calendar over a time window. Requires an active grant for get_free_busy itself -- permission is checked against the exact action being called, so a get_free_busy_permission decision does not authorise this call. Ask for this action by name through request_permission. Returns CALENDAR DATA, not a decision: a successful result must state the window actually checked, its timezone, and the busy intervals found. An empty busy list means the calendar was checked and nothing conflicts; omitting the list is not an answer, and neither is a permission decision. If the calendar could not be read, submit an error rather than a success.",
+    input_schema: {
+      type: "object",
+      required: ["time_min", "time_max"],
+      properties: {
+        time_max: {
+          type: "string",
+        },
+        time_min: {
+          type: "string",
+        },
+        timezone: {
+          type: "string",
+        },
+        calendar_id: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: {
+      type: "object",
+      required: ["time_min", "time_max", "timezone", "busy"],
+      properties: {
+        busy: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["start", "end"],
+            properties: {
+              end: {
+                type: "string",
+                pattern:
+                  "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+              },
+              start: {
+                type: "string",
+                pattern:
+                  "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+              },
+            },
+          },
+        },
+        time_max: {
+          type: "string",
+          pattern:
+            "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+        },
+        time_min: {
+          type: "string",
+          pattern:
+            "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+        },
+        timezone: {
+          type: "string",
+          minLength: 1,
+        },
+        calendar_id: {
+          type: "string",
+        },
+      },
     },
   },
   {
     id: "action.get_free_busy_permission",
     name: "get_free_busy_permission",
-    description: "Request free-busy information",
+    description:
+      "Ask the owner to GRANT access to free/busy data on their calendar. Returns A DECISION ONLY and never returns availability. The decision is the answer to this call and nothing more: it does not itself record a grant, and it does not authorise get_free_busy. Obtaining busy intervals requires its own grant, requested through request_permission under the name get_free_busy.",
     input_schema: {
       type: "object",
       properties: {
-        date_from: { type: "string" },
-        date_to: { type: "string" },
-        calendar_id: { type: "string" },
+        date_to: {
+          type: "string",
+        },
+        date_from: {
+          type: "string",
+        },
+        calendar_id: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: {
+      type: "object",
+      required: ["decision"],
+      properties: {
+        scope: {
+          type: "object",
+        },
+        decision: {
+          enum: ["allow_once", "allow_always", "deny"],
+          type: "string",
+        },
+        expires_at: {
+          type: "string",
+        },
       },
     },
   },
   {
     id: "action.get_phone_number",
     name: "get_phone_number",
-    description: "Request a phone number",
+    description: "Get another user's phone number",
     input_schema: {
       type: "object",
-      properties: {
-        reason: { type: "string", description: "Reason for requesting phone number" },
-      },
       required: ["reason"],
+      properties: {
+        reason: {
+          type: "string",
+          description: "Reason for requesting phone number",
+        },
+      },
     },
+    result_schema: null,
   },
   {
     id: "action.read_calendar_event_by_title",
     name: "read_calendar_event_by_title",
-    description: "Read a calendar event",
+    description:
+      "Read calendar events matching a specific title/subject. Requires an active grant for read_calendar_event_by_title itself -- permission is checked against the exact action being called, so a read_calendar_permission decision does not authorise this call. Ask for this action by name through request_permission. Payload should include the search title and optional date range. Returns CALENDAR DATA, not a decision: a successful result must carry the matching events, and an empty list means the calendar was searched and nothing matched.",
     input_schema: {
       type: "object",
-      properties: {
-        title: { type: "string" },
-        date_from: { type: "string" },
-        date_to: { type: "string" },
-      },
       required: ["title"],
+      properties: {
+        title: {
+          type: "string",
+        },
+        date_to: {
+          type: "string",
+        },
+        date_from: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: {
+      type: "object",
+      required: ["events"],
+      properties: {
+        events: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["event_id", "title", "start", "end"],
+            properties: {
+              end: {
+                type: "string",
+                pattern:
+                  "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+              },
+              start: {
+                type: "string",
+                pattern:
+                  "^\\d{4}-\\d{2}-\\d{2}[Tt ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d+)?)?([Zz]|[+-]\\d{2}:\\d{2})$",
+              },
+              title: {
+                type: "string",
+              },
+              event_id: {
+                type: "string",
+                minLength: 1,
+              },
+            },
+          },
+        },
+      },
     },
   },
   {
     id: "action.read_calendar_permission",
     name: "read_calendar_permission",
-    description: "Request calendar read access",
+    description:
+      "Ask the owner to GRANT read access to their calendar, subject to any scope limits they set (e.g. a specific calendar id or date range). Returns A DECISION ONLY and never returns calendar data. The decision is the answer to this call and nothing more: it does not itself record a grant, and it does not authorise read_calendar_event_by_title. Reading events requires its own grant, requested through request_permission under the name read_calendar_event_by_title.",
     input_schema: {
       type: "object",
-      properties: { calendar_id: { type: "string" } },
+      properties: {
+        calendar_id: {
+          type: "string",
+        },
+      },
     },
+    result_schema: {
+      type: "object",
+      required: ["decision"],
+      properties: {
+        scope: {
+          type: "object",
+        },
+        decision: {
+          enum: ["allow_once", "allow_always", "deny"],
+          type: "string",
+        },
+        expires_at: {
+          type: "string",
+        },
+      },
+    },
+  },
+  {
+    id: "action.read_email_by_keyword",
+    name: "read_email_by_keyword",
+    description:
+      "Read emails whose subject or body contains a specific keyword. Payload must include the keyword, and may narrow the search to a date range.",
+    input_schema: {
+      type: "object",
+      required: ["keyword"],
+      properties: {
+        date_to: {
+          type: "string",
+        },
+        keyword: {
+          type: "string",
+        },
+        date_from: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: null,
+  },
+  {
+    id: "action.read_email_by_sender",
+    name: "read_email_by_sender",
+    description:
+      "Read emails received from a specific sender address. Payload must include the sender address, and may narrow the search to a date range.",
+    input_schema: {
+      type: "object",
+      required: ["sender"],
+      properties: {
+        sender: {
+          type: "string",
+        },
+        date_to: {
+          type: "string",
+        },
+        date_from: {
+          type: "string",
+        },
+      },
+    },
+    result_schema: null,
   },
 ];
 
@@ -770,6 +1035,7 @@ async function route(
       email: identity.email,
       token,
       jkt: identity.thumbprint,
+      replayed: false,
       message:
         "Email verified successfully. Store this token securely - it will not be shown again.",
     });
@@ -928,7 +1194,14 @@ async function route(
   if (identity === undefined) return;
 
   if (request.method === "GET" && target.pathname === "/api/list_action_types") {
-    safeJson(response, 200, [...ACTIONS, ...state.humanInputActionTypes.values()]);
+    safeJson(
+      response,
+      200,
+      [...ACTIONS, ...state.humanInputActionTypes.values()].map((action) => ({
+        ...action,
+        result_schema: action.result_schema ?? null,
+      })),
+    );
     return;
   }
 
@@ -1187,7 +1460,7 @@ async function route(
       { type: "action_call", call_id: callId, action_type: action.name, payload: body.payload },
       action.name,
     );
-    safeJson(response, 200, { call_id: callId, message_id: messageId, status: "delivered" });
+    safeJson(response, 200, { call_id: callId, message_id: messageId, status: "queued" });
     return;
   }
 
@@ -1241,7 +1514,17 @@ async function route(
       record.state = "delivered";
       messages.push(record.message);
     }
-    safeJson(response, 200, { messages });
+    safeJson(response, 200, {
+      messages: messages.map((message) => ({
+        ...message,
+        message_type: message.payload.type ?? null,
+        delivery_attempts: 1,
+        redelivered: false,
+        lease_expires_at: new Date((state.nowSeconds + 120) * 1_000).toISOString(),
+      })),
+      has_more: false,
+      lease_seconds: 120,
+    });
     return;
   }
 
@@ -1275,13 +1558,20 @@ async function route(
     if (
       message === undefined ||
       message.recipientEmail !== identity.email ||
-      message.state !== "delivered"
+      (message.state !== "delivered" && message.state !== "acked")
     ) {
       detail(response, 404, "Message not found");
       return;
     }
+    const alreadyAcked = message.state === "acked";
     message.state = "acked";
-    safeJson(response, 200, { message_id: body.message_id, status: "acked" });
+    safeJson(response, 200, {
+      message_id: body.message_id,
+      status: "acked",
+      acknowledged: [body.message_id],
+      already_acked: alreadyAcked ? [body.message_id] : [],
+      unknown: [],
+    });
     return;
   }
 

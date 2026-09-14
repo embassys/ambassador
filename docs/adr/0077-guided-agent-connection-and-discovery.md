@@ -1,5 +1,10 @@
 # 0077. Connect agents with a discovery skill and a live check
 
+[ADR 0083](0083-one-code-desktop-setup.md) replaces this record's separate
+owner/agent email-code steps for current desktop onboarding. The historical
+contract and original qualification below describe the earlier server.
+
+
 Status: accepted, 2026-09-09. The owner approved implementation for Codex,
 Claude Code, OpenClaw and Hermes and retained the extra email verification
 step required by the existing API.

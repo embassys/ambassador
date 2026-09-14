@@ -52,7 +52,7 @@ export async function readLocalSummary(paths: GatewayPaths): Promise<LocalSummar
         throw new Error("The local identity is missing, so saved work cannot be counted safely.");
       return summary;
     }
-    const credential = identity.localCredential();
+    const credential = identity.storageCredential();
     const pending = new PendingActionInbox(paths.pendingActionPath, credential);
     stores.push(pending);
     const results = new ActionResultInbox(paths.actionResultPath, credential);

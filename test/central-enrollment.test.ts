@@ -183,3 +183,41 @@ test("I02-E04 redirects and uncertain verification outcomes are never retried", 
       error.code === "central_enrollment_contract_failed",
   );
 });
+
+test("explicit recovery uses only the fixed email endpoints and keeps its credential out of the result", async () => {
+  const { centralJwkThumbprint } = await import("../src/central-credential.js");
+  const calls: string[] = [];
+  const client = new CentralEnrollmentClient({
+    centralOrigin: "https://central.fixture.test",
+    nowSeconds: () => NOW_SECONDS,
+    fetch: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      calls.push(path);
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.email, "recovery@fixture.test");
+      if (path === "/api/start_recovery")
+        return Response.json({ message: "A code was sent if this email is registered." });
+      assert.equal(path, "/api/complete_recovery");
+      assert.equal(body.code, "314159");
+      const jkt = centralJwkThumbprint(body.jwk);
+      const token = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ sub: "agent.recovered", email: body.email, iat: NOW_SECONDS, exp: NOW_SECONDS + 86400, cnf: { jkt } })).toString("base64url")}.fixture`;
+      return Response.json(
+        {
+          agent_id: "agent.recovered",
+          email: body.email,
+          token,
+          jkt,
+          expires_at: new Date((NOW_SECONDS + 86400) * 1000).toISOString(),
+          revoked_keys: 1,
+          message: "Recovered",
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
+    },
+  });
+  await client.startRecovery({ email: "recovery@fixture.test" });
+  const result = await client.completeRecovery({ email: "recovery@fixture.test", code: "314159" });
+  assert.equal(result.localResult.agent_id, "agent.recovered");
+  assert.doesNotMatch(JSON.stringify(result.localResult), /token|private|jwk/);
+  assert.deepEqual(calls, ["/api/start_recovery", "/api/complete_recovery"]);
+});

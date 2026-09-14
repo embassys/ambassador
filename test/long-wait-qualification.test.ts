@@ -40,7 +40,7 @@ test("wall-clock qualification: initial MCP request waits ten minutes and a late
     },
     async callAction() {
       calls++;
-      return { call_id: callId, message_id: randomUUID(), status: "delivered" };
+      return { call_id: callId, message_id: randomUUID(), status: "queued" };
     },
     async submitActionResult() {
       throw new Error("No result submission expected");

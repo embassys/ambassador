@@ -35,14 +35,18 @@ Use `request_permission` instead of `request_action` for permission alone,
 without `payload`. A grant alone never creates an action. Always use the
 same exact catalog name for permission and action. A grant for
 `read_calendar_permission` does not authorize `read_calendar_event_by_title`.
-An action named `get_free_busy_permission` may itself be a callable catalog
-action; the suffix does not define its meaning.
+The current catalog separates `get_free_busy` (availability data) from
+`get_free_busy_permission` (a decision only). Read the current catalog schema and
+request the exact action needed; never infer authorization from a similar name.
 
 ## Answer incoming work
 
 The configured incoming agent receives the call. It uses `message_box` with
 `type: "submit_action_result"`, a new request UUID, the original `call_id`,
-`status: "success"` or `"error"`, and a structured `result`.
+`status: "success"` or `"error"`, and a structured `result`. Successful results
+must match the catalog's non-null `result_schema`. When reporting progress, use
+`report_progress` with the same call ID and a short non-sensitive note; progress
+does not replace the final result.
 
 When information is missing, it calls `ask_owner` with the pending call ID,
 a new question request UUID, the question and `input_type: "text"` or

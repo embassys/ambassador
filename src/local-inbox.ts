@@ -88,7 +88,11 @@ export class LocalInbox {
                   request_id: { type: "string", format: "uuid" },
                   call_id: (entry.value as { call_id: string }).call_id,
                   status: ["success", "error"],
-                  result: { type: "object" },
+                  result: {
+                    type: "object",
+                    description:
+                      "Success must match this action’s result_schema from list_action_types when one is declared. Approval alone is not the requested data.",
+                  },
                 },
               },
             }

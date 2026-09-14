@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { CentralCredentialRecord } from "../central-credential.js";
 import { type ExecutorContext, executorCheckSchema } from "./executor-guard.js";
 import { desktopLaunchEnvironment } from "./launch-environment.js";
 import { type LocalNotification, localNotificationSchema } from "./notifications.js";
@@ -250,23 +251,45 @@ export class DesktopGatewayClient {
     const command = workerCommandSchema.parse(input);
     if (!("instanceId" in command) || command.instanceId !== this.options.instance.id)
       throw new Error("Wrong instance.");
+    return this.#requestPacket({ command }, command.type === "agent_test" ? 200000 : 45000);
+  }
+  prepareExecution(agentId: string): Promise<unknown> {
+    return this.#requestPacket({
+      type: "execution_prepare",
+      instanceId: this.options.instance.id,
+      agentId,
+    });
+  }
+  installExecution(previewId: string, credential: CentralCredentialRecord): Promise<unknown> {
+    return this.#requestPacket({
+      type: "execution_install",
+      instanceId: this.options.instance.id,
+      previewId,
+      credential,
+    });
+  }
+  cancelExecution(previewId: string): Promise<unknown> {
+    return this.#requestPacket({
+      type: "execution_cancel",
+      instanceId: this.options.instance.id,
+      previewId,
+    });
+  }
+  async #requestPacket(payload: object, timeout = 45000): Promise<unknown> {
     await this.#ready;
     if (this.#closed || !this.#child.connected)
       throw new Error("This server process is disconnected.");
     if (this.#pending.size >= 16) throw new Error("The server is busy. Try again shortly.");
     const requestId = randomUUID();
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => {
-          this.#pending.delete(requestId);
-          reject(
-            new Error("The operation is still unresolved. Refresh its state before trying again."),
-          );
-        },
-        command.type === "agent_test" ? 200_000 : 45_000,
-      );
+      const timer = setTimeout(() => {
+        this.#pending.delete(requestId);
+        reject(
+          new Error("The operation is still unresolved. Refresh its state before trying again."),
+        );
+      }, timeout);
       this.#pending.set(requestId, { resolve, reject, timer });
-      this.#child.send({ protocol: DESKTOP_PROTOCOL, requestId, command }, (error) => {
+      this.#child.send({ protocol: DESKTOP_PROTOCOL, requestId, ...payload }, (error) => {
         if (error) {
           clearTimeout(timer);
           this.#pending.delete(requestId);

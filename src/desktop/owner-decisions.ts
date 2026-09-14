@@ -8,7 +8,7 @@ import type { OwnerStore } from "./owner-store.js";
 export function reviewable(target: OwnerReview["target"], now: number): boolean {
   if (target.kind === "permission")
     return (
-      permissionChoices(target.item.decision_options).length > 0 &&
+      permissionChoices(target.item.decision_options, target.item.offered_options).length > 0 &&
       (!target.item.expires_at || Date.parse(target.item.expires_at) > now)
     );
   if (target.kind === "revoke")
@@ -18,6 +18,7 @@ export function reviewable(target: OwnerReview["target"], now: number): boolean 
       target.item.uses_remaining !== 0 &&
       (!target.item.expires_at || Date.parse(target.item.expires_at) > now)
     );
+  if (target.item.expires_at && Date.parse(target.item.expires_at) <= now) return false;
   if (target.item.input_type === "text") return true;
   if (target.item.input_type !== "buttons" || !target.item.options?.length) return false;
   const values = new Set<string>();
@@ -27,9 +28,18 @@ export function reviewable(target: OwnerReview["target"], now: number): boolean 
   }
   return true;
 }
+export const ownerSubmissionSchema = z.strictObject({
+  key: z.uuid(),
+  createdAt: z.number().int().nonnegative(),
+  body: z.record(z.string(), z.unknown()),
+  expectedAnswer: z.string().max(4000),
+  expectedState: z.enum(["granted", "denied", "answered", "revoked"]),
+});
+export type OwnerSubmission = z.infer<typeof ownerSubmissionSchema>;
 const recordSchema = mutationSchema.extend({
   agentId: z.uuid(),
   submissionHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  submission: ownerSubmissionSchema.optional(),
 });
 type Record = z.infer<typeof recordSchema>;
 const identifier = (value: Pick<Record, "agentId" | "kind" | "id">) =>
@@ -63,11 +73,26 @@ export class OwnerDecisions {
   ): boolean {
     return this.records.get(identifier({ agentId, kind, id }))?.submissionHash === submissionHash;
   }
-  save(agentId: string, mutation: OwnerMutation, submissionHash?: string): void {
+  submission(
+    agentId: string,
+    kind: OwnerMutation["kind"],
+    id: string,
+  ): OwnerSubmission | undefined {
+    return this.records.get(identifier({ agentId, kind, id }))?.submission;
+  }
+  save(
+    agentId: string,
+    mutation: OwnerMutation,
+    submissionHash?: string,
+    submission?: OwnerSubmission,
+  ): void {
     this.records.put(
       {
         agentId,
         ...mutation,
+        ...((submission ?? this.submission(agentId, mutation.kind, mutation.id))
+          ? { submission: submission ?? this.submission(agentId, mutation.kind, mutation.id) }
+          : {}),
         submissionHash:
           submissionHash ??
           this.records.get(identifier({ agentId, ...mutation }))?.submissionHash ??
