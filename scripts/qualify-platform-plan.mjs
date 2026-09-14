@@ -1,9 +1,13 @@
+import { assertDesktopTarget } from "../desktop/scripts/platform-targets.mjs";
+
 export function qualificationPlan(args, { platform, arch, env }) {
   if (env.CI)
     throw new Error(
       "Full platform qualification is local only; CI uses core and native component suites.",
     );
-  if (!["darwin", "win32", "linux"].includes(platform) || !["arm64", "x64"].includes(arch)) {
+  try {
+    assertDesktopTarget(platform, arch);
+  } catch {
     throw new Error(`Unsupported host: ${platform}/${arch}`);
   }
   if (args.length > 1 || args.some((arg) => !/^--platform=(darwin|win32|linux)$/.test(arg))) {

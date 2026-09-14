@@ -31,6 +31,7 @@ test("desktop downloads are retained only after archive and native host checks p
     /run verify:shared|verify-tests\.mjs|run test:artifacts|run typecheck|--measure-memory/u,
   );
   assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /timeout-minutes: 15/u);
   assert.doesNotMatch(workflow, /branches:.*codex/u);
   assert.match(workflow, /permissions:\n {2}contents: read/u);
   assert.doesNotMatch(workflow, /continue-on-error:|if: always\(\)|gh release|contents: write/u);

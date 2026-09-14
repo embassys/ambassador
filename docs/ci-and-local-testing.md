@@ -8,7 +8,7 @@ It does not reduce the scenarios covered by the shared tests.
 | --- | --- | --- |
 | Shared core | Ubuntu x64, once | Registration, permission and action flows, recovery, cancellation, long waits, owner controls, provider fixtures, UI state, lint and types |
 | Desktop rendering | Same core job | All desktop artifact and view tests, plus desktop types |
-| Native components | macOS, Windows, Ubuntu x64 and ARM64 | Real P-256 keys, encrypted key reload, private file modes/DACLs, symlinks/junctions, SQLite recovery files, singleton contention and crash recovery |
+| Native components | macOS, Windows, Ubuntu x64 and ARM64 | Real P-256 keys, encrypted key reload, private file modes/DACLs, symlinks/junctions, SQLite recovery files, singleton contention, crash recovery and Windows provider entrypoint resolution |
 | Installed npm package | All four targets | Native SQLite ABI and installed command; full fixture flow only on Ubuntu x64 |
 | Independent central fixture | Ubuntu x64 | Python REST fixture and installed Ambassador interoperability |
 | Desktop package | All four targets | Bundled runtime, archives and checksums, portable dependency loading, native host startup, duplicate launch and shutdown |
@@ -18,6 +18,7 @@ PR updates cancel obsolete runs of that PR. Main runs keep their publication
 gates. Desktop no longer runs a second copy for every `codex/` branch push when
 the same commit already has a PR. Neither native failures nor audit failures are
 optional. CI does not qualify real third-party providers or native remote push.
+Test and desktop package jobs have 15-minute limits.
 
 ## Development commands
 
@@ -84,4 +85,30 @@ took 42m44s on Windows, with 40m56s in `pnpm check`.
 [Desktop run 34879335515](https://github.com/embassys/ambassador/actions/runs/34879335515)
 took 28m44s on Windows, including 23m18s repeating desktop and business tests.
 The comparable shared Linux check took 2m24s. These are completed run timings,
-not timeout estimates. New run timings will be recorded after CI qualification.
+not timeout estimates.
+
+The first complete passing runs of this split were
+[CI 34892127074](https://github.com/embassys/ambassador/actions/runs/34892127074) and
+[desktop 34892127128](https://github.com/embassys/ambassador/actions/runs/34892127128),
+at `6887a4c`. All targets passed; npm publication was correctly skipped for the PR.
+
+| Job | Before | After |
+| --- | --- | --- |
+| Windows core/native package checks | 42m44s core, plus 2m45s separate package job | 2m50s combined native/package job |
+| Shared Linux core | 2m53s | 2m56s, now also including desktop rendering/types |
+| Windows desktop | 28m44s | 5m01s |
+| macOS desktop | 6m20s | 3m16s |
+| Linux x64 desktop | 4m23s | 2m22s |
+| Linux ARM64 desktop | 3m43s | 2m02s |
+
+The core workflow's longest required job fell from 42m44s to 2m56s; desktop's
+fell from 28m44s to 5m01s. Durations are per job, excluding queue time; separate
+jobs run concurrently. The Windows native test step itself took 42 seconds.
+
+The complete Mac local script passed all 14 stages in about 3m35s, including
+600 tests, 46 desktop view/artifact checks, the installed fixture flow, archive
+extraction, native app startup and CLI/app handoff. Its report is
+`.build/platform-qualification/darwin-arm64.json`. The Mac resource check measured
+182.7 MiB and 0.10% idle CPU; this is fixture qualification, not an enrolled
+real-provider resource measurement. Windows/Linux full local flows have not been
+run here; their isolated native and package CI checks passed.

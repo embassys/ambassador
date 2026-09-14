@@ -4,7 +4,11 @@ import { qualificationPlan } from "./qualify-platform-plan.mjs";
 
 test("full local qualification includes both suites, installed flows, packaged host and CLI handoff on every OS", () => {
   for (const platform of ["darwin", "linux", "win32"]) {
-    const plan = qualificationPlan([], { platform, arch: "arm64", env: { DISPLAY: ":99" } });
+    const plan = qualificationPlan([], {
+      platform,
+      arch: platform === "win32" ? "x64" : "arm64",
+      env: { DISPLAY: ":99" },
+    });
     assert.ok(plan.some((step) => step.args.includes("check")));
     assert.ok(plan.some((step) => step.args.includes("test:artifacts")));
     assert.ok(plan.some((step) => step.name === "installed-flows"));
@@ -23,6 +27,10 @@ test("local qualifier refuses CI, wrong host, unsupported host and unknown optio
   assert.throws(() => qualificationPlan(["--platform=win32"], host), /host/);
   assert.throws(() => qualificationPlan(["--no-check"], host), /Unknown/);
   assert.throws(() => qualificationPlan([], { ...host, platform: "freebsd" }), /Unsupported/);
+  assert.throws(
+    () => qualificationPlan([], { ...host, platform: "win32", arch: "arm64" }),
+    /Unsupported/,
+  );
   assert.throws(
     () => qualificationPlan([], { platform: "linux", arch: "x64", env: {} }),
     /display/,
