@@ -20,6 +20,14 @@ Two additional regressions were fixed during review:
   the backend registration disappearing while the UI still said registered.
 
 Both regressions failed against the previous code and passed after the fixes.
+Windows core CI then exposed four CLI startup checks with a half-second wait.
+They failed before startup completed, and cleanup could delete state before
+stopping the test gateway, leaving the suite running until its job timeout.
+The tests now wait up to 30 seconds, abort and await the gateway before deleting
+state, and print immediate failure details in CI. A deliberately delayed startup
+reproduced the old wait failure locally. Production startup and CLI arguments are
+unchanged.
+
 The live one-code onboarding and interrupted creation tests are recorded in
 [the onboarding qualification](one-code-onboarding-2026-09-14.md). Earlier
 protected central tests and independent fixtures remain in the
