@@ -38,7 +38,7 @@ export function PeopleList({
             </span>
           </button>
           <button
-            className="text-button person-copy"
+            className="quiet-button person-copy"
             type="button"
             disabled={busy}
             aria-label={`Copy email for ${contact.name}`}
@@ -341,7 +341,7 @@ export function People({
         {(["saved", "connections", "invitations"] as const).map((value) => (
           <button
             type="button"
-            className="text-button"
+            className="quiet-button"
             aria-pressed={tab === value}
             key={value}
             onClick={() => setTab(value)}
@@ -400,7 +400,7 @@ export function People({
               copy={(contact) => void copyEmail(contact)}
             />
             {visible.length > limit && (
-              <button className="text-button" type="button" onClick={() => setLimit(limit + 50)}>
+              <button className="quiet-button" type="button" onClick={() => setLimit(limit + 50)}>
                 Show more
               </button>
             )}
@@ -514,14 +514,14 @@ export function People({
                       </p>
                       <div className="person-sheet-actions">
                         <button
-                          className="text-button"
+                          className="quiet-button"
                           type="button"
                           onClick={() => void copyEmail(selected)}
                         >
                           Copy email
                         </button>
                         <button
-                          className="text-button"
+                          className="quiet-button"
                           type="button"
                           onClick={() => {
                             setName(selected.name);
@@ -531,7 +531,7 @@ export function People({
                         >
                           Edit name
                         </button>
-                        <button className="text-button" type="button" onClick={() => remove(true)}>
+                        <button className="quiet-button" type="button" onClick={() => remove(true)}>
                           Remove person…
                         </button>
                       </div>

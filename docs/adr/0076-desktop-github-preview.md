@@ -81,3 +81,29 @@ central-recovery limitations no longer describe this release. General account
 communication history remains client work. Keep unsigned-preview, native push,
 provider qualification and development logging limits explicit. Verify all four
 archives and their companion files after upload; do not amend earlier releases.
+
+## September 15 public release approval
+
+The owner requested publication of the desktop controls update as a final public
+release, not a draft, and repair of the broken 0.1.3 links. Publish Embassys 0.1.4
+as `desktop-v0.1.4` with both draft and prerelease flags false after the source
+passes core and all four desktop package gates. Keep Ambassador at the already
+published 0.2.20. No new dependency, signing setup or central change is involved.
+
+The 0.1.3 release remained a draft after the previous finalization stopped during
+npm verification. Its advertised public page and asset URLs return 404. Restore
+that release's existing tag and files after verifying them against the qualified
+CI artifacts, preserving shared URLs. Do not replace its assets with the new UI.
+The previous author-only preview tag remains for link continuity; the release
+name and GitHub flags identify its public status. Make 0.1.4 the latest release.
+
+For both releases, verify the public release metadata and fetch every uploaded
+asset without GitHub credentials, following redirects and matching SHA-256
+hashes against the verified build. An authenticated download or uploaded draft
+is not proof that users can download the app. Record failures and retry bounded
+registry propagation checks before marking finalization complete.
+
+A regular GitHub release does not change signing or platform qualification.
+Retain the unsigned development package names and disclose publisher-signing,
+updates, remote push and native platform limits. Detailed body logs remain the
+approved development policy with credential redaction and visible retention.

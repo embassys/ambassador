@@ -174,7 +174,7 @@ export function PeopleNetwork({
       <div className="button-row">
         <button
           type="button"
-          className="text-button"
+          className="quiet-button"
           disabled={busy}
           onClick={() => refresh((value) => value + 1)}
         >
@@ -183,7 +183,7 @@ export function PeopleNetwork({
         {cursor && (
           <button
             type="button"
-            className="text-button"
+            className="quiet-button"
             disabled={busy}
             onClick={() => setCursor(undefined)}
           >
@@ -193,7 +193,7 @@ export function PeopleNetwork({
         {page?.next_cursor && (
           <button
             type="button"
-            className="text-button"
+            className="quiet-button"
             disabled={busy}
             onClick={() => setCursor(page.next_cursor ?? undefined)}
           >

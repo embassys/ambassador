@@ -16,7 +16,9 @@ import { createViewReader } from "../../src/desktop/view-reader.js";
 import type { GatewayOverview } from "../../src/gateway-application.js";
 import { Account } from "./account.js";
 import { Activity, Permissions } from "./agent-status.js";
+import { BackButton } from "./controls.js";
 import { useConversationWorkspace } from "./conversation-workspace.js";
+import { DetailSheet } from "./details.js";
 import {
   ChatScroll,
   ConversationContent,
@@ -805,40 +807,23 @@ function App() {
               {onboarded &&
               !(page === "attention" && dataSource === "account") &&
               !(page === "conversations" && dataSource === "local") ? (
-                <button
-                  type="button"
-                  className="toolbar-back"
-                  aria-label="Back to requests and conversations"
+                <BackButton
+                  label="Back to requests and conversations"
                   onClick={() => {
                     if (!inboxRequest && historySession) {
                       navigate("conversations");
                       void loadHistory(historySession);
                     } else navigate("attention");
                   }}
-                >
-                  <svg
-                    viewBox="0 0 20 20"
-                    width="18"
-                    height="18"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    aria-hidden="true"
-                  >
-                    <path d="m12 4-6 6 6 6" />
-                  </svg>
-                </button>
+                />
               ) : !onboarded ? (
-                <button
-                  type="button"
-                  className="text-button"
+                <BackButton
+                  label="Back to setup"
                   onClick={() => {
                     setSetupSettings(false);
                     navigate("attention");
                   }}
-                >
-                  Back to setup
-                </button>
+                />
               ) : null}
               {page === "conversations" && dataSource === "local" ? (
                 <ConversationHeading
@@ -868,7 +853,7 @@ function App() {
           {onboarded && dataSource === "local" && ["attention", "permissions"].includes(page) && (
             <p className="local-view-label">
               {page === "permissions" ? "Permissions for" : "Activity for"} {selected?.name}.{" "}
-              <button type="button" className="text-button" onClick={() => navigate("account")}>
+              <button type="button" className="quiet-button" onClick={() => navigate("account")}>
                 Manage
               </button>
             </p>
@@ -1050,7 +1035,7 @@ function App() {
                       </p>
                       <button
                         type="button"
-                        className="text-button"
+                        className="quiet-button"
                         onClick={() => navigate("settings")}
                       >
                         Service details…
@@ -1067,8 +1052,7 @@ function App() {
                   />
                   {preferenceControls}
                   <section className="device-links simple-settings-links">
-                    <details className="advanced-settings">
-                      <summary>Advanced</summary>
+                    <DetailSheet className="advanced-settings" title="Advanced">
                       <div className="instance-choice">
                         <label htmlFor="instance-select">Local installation</label>
                         <select
@@ -1131,7 +1115,7 @@ function App() {
                         <span>Account logs</span>
                         <Icon name="arrow" size={16} />
                       </button>
-                    </details>
+                    </DetailSheet>
                   </section>
                 </div>
               )}
@@ -1183,13 +1167,12 @@ function App() {
                               Connect
                             </button>
                           )}
-                          <details className="agent-options">
-                            <summary>Options</summary>
+                          <DetailSheet className="agent-options" title="Options">
                             {guide.connect && (
                               <div className="button-row">
                                 <button
                                   type="button"
-                                  className="text-button"
+                                  className="quiet-button"
                                   disabled={busy || !running}
                                   onClick={() => {
                                     if (guide.connect) void connectAgent(guide.connect, "test");
@@ -1200,7 +1183,7 @@ function App() {
                                 <div className="button-row">
                                   <button
                                     type="button"
-                                    className="text-button"
+                                    className="quiet-button"
                                     disabled={busy}
                                     onClick={() => {
                                       if (guide.connect) void connectAgent(guide.connect, "check");
@@ -1238,8 +1221,7 @@ function App() {
                                 Start this instance from Settings to connect.
                               </p>
                             )}
-                            <details>
-                              <summary>Setup instructions</summary>
+                            <DetailSheet title="Setup instructions">
                               <p>{guide.note}</p>
                               <pre>{guide.instruction}</pre>
                               <button
@@ -1249,14 +1231,13 @@ function App() {
                               >
                                 {copied === guide.name ? "Copied" : "Copy instructions"}
                               </button>
-                            </details>
-                          </details>
+                            </DetailSheet>
+                          </DetailSheet>
                         </section>
                       ))}
                     </div>
                   )}
-                  <details className="setup-address">
-                    <summary>Manual connection address</summary>
+                  <DetailSheet className="setup-address" title="Manual connection address">
                     <div className="endpoint-card">
                       <div>
                         <span className="eyebrow">THIS INSTANCE'S MCP ADDRESS</span>
@@ -1273,7 +1254,7 @@ function App() {
                     <p className="body-note">
                       Use separate provider profiles for different instances.
                     </p>
-                  </details>
+                  </DetailSheet>
                 </>
               )}
               {page === "conversations" && dataSource === "local" && (
@@ -1295,7 +1276,7 @@ function App() {
                       Reading earlier messages.{" "}
                       <button
                         type="button"
-                        className="text-button"
+                        className="quiet-button"
                         onClick={() => void loadHistory(historySession)}
                       >
                         Return to latest
@@ -1352,7 +1333,7 @@ function App() {
                     <div className="button-row">
                       <button
                         type="button"
-                        className="text-button"
+                        className="quiet-button"
                         disabled={busy}
                         onClick={() => {
                           if (!id) return;
@@ -1380,7 +1361,7 @@ function App() {
                       </button>
                       <button
                         type="button"
-                        className="text-button"
+                        className="quiet-button"
                         disabled={busy}
                         onClick={() => {
                           if (id) void mutate({ type: "reveal_logs", instanceId: id });
@@ -1443,13 +1424,13 @@ function App() {
                     <div className="log-list">
                       {logs?.records.length ? (
                         logs.records.map((record) => (
-                          <details key={record.id}>
-                            <summary>
-                              <time>{new Date(record.timestamp).toLocaleString()}</time>
-                              <span>{record.event}</span>
-                            </summary>
+                          <DetailSheet
+                            key={record.id}
+                            title={record.event}
+                            meta={new Date(record.timestamp).toLocaleString()}
+                          >
                             <pre>{JSON.stringify(record.data ?? {}, null, 2)}</pre>
-                          </details>
+                          </DetailSheet>
                         ))
                       ) : (
                         <Empty
@@ -1467,7 +1448,7 @@ function App() {
                     <div className="button-row">
                       <button
                         type="button"
-                        className="text-button"
+                        className="quiet-button"
                         disabled={loading}
                         onClick={() => void loadLogs()}
                       >
@@ -1590,8 +1571,7 @@ function App() {
                               : "Start server"}
                         </button>
                       </div>
-                      <details className="server-details">
-                        <summary>Connection and storage</summary>
+                      <DetailSheet className="server-details" title="Connection and storage">
                         <div className="settings-row">
                           <div>
                             <strong>MCP address</strong>
@@ -1599,7 +1579,7 @@ function App() {
                           </div>
                           <button
                             type="button"
-                            className="text-button"
+                            className="quiet-button"
                             onClick={() => void copy(endpoint, "settings-endpoint")}
                           >
                             {copied === "settings-endpoint" ? "Copied" : "Copy"}
@@ -1636,7 +1616,7 @@ function App() {
                             Clean…
                           </button>
                         </div>
-                      </details>
+                      </DetailSheet>
                     </section>
                   )}
                   <section className="settings-section">
@@ -1673,7 +1653,7 @@ function App() {
                     </div>
                     <button
                       type="button"
-                      className="text-button"
+                      className="quiet-button"
                       disabled={busy}
                       onClick={() => void refresh()}
                     >
@@ -1714,7 +1694,7 @@ function App() {
                     </p>
                     <button
                       type="button"
-                      className="text-button"
+                      className="quiet-button"
                       onClick={() => void copy(snapshot.cliCommand, "bundled-cli")}
                     >
                       {copied === "bundled-cli"
@@ -1722,8 +1702,7 @@ function App() {
                         : `Copy ${snapshot.platform === "win32" ? "PowerShell" : "terminal"} start command`}
                     </button>
                   </section>
-                  <details className="settings-section">
-                    <summary>Additional instances</summary>
+                  <DetailSheet className="settings-section" title="Additional instances">
                     <p className="body-note">
                       Create an isolated server with its own port and storage. This build uses the
                       bundled engine version for each instance.
@@ -1787,7 +1766,7 @@ function App() {
                       />{" "}
                       Choose where to store this instance
                     </label>
-                  </details>
+                  </DetailSheet>
                   <p className="body-note">
                     Closing the window keeps Embassys in the menu bar. Quit Embassys stops its
                     servers. Updates and account recovery will follow in later development stages.

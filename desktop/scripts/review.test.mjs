@@ -41,14 +41,14 @@ test("provider options stay exact and wrapped in labels, with no default approva
   assert.match(html, /value="opaque:keep-me"/);
   assert.doesNotMatch(html, /checked=""/);
   assert.match(html, /<button[^>]*disabled=""[^>]*>Continue<\/button>/);
-  assert.match(html, /<details[^>]*><summary>Technical details/);
-  assert.doesNotMatch(html, /<details[^>]*open/);
+  assert.match(html, /<button[^>]*aria-haspopup="dialog"[^>]*>[\s\S]*Technical details/);
+  assert.doesNotMatch(html, /<details|<summary|<dialog[^>]*open/);
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(html, /<img|onerror="/);
-  assert.equal((html.match(/<button/g) || []).length, 2);
+  assert.match(html, /<dialog[^>]*aria-labelledby=/);
   assert.doesNotMatch(view(review, "opaque:keep-me"), /<button[^>]*disabled=""[^>]*>Continue/);
 });
-test("connection locations are labelled code fields in collapsed details", () => {
+test("connection locations remain labelled code fields in a separate detail sheet", () => {
   const html = view({
     id: "two",
     kind: "connection",
@@ -59,8 +59,8 @@ test("connection locations are labelled code fields in collapsed details", () =>
     configurationPath: "/Users/test/Agent settings/.claude.json",
     skillPath: "/Users/test/skills/<untrusted>/SKILL.md",
   });
-  assert.match(html, /<details[^>]*><summary>Connection details/);
-  assert.doesNotMatch(html, /<details[^>]*open/);
+  assert.match(html, /<button[^>]*aria-haspopup="dialog"[^>]*>[\s\S]*Connection details/);
+  assert.doesNotMatch(html, /<details|<summary|<dialog[^>]*open/);
   assert.match(html, /<dt>Agent settings<\/dt><dd><code>/);
   assert.match(html, /&lt;untrusted&gt;/);
   assert.match(html, />Connect<\/button>/);

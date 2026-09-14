@@ -65,6 +65,15 @@ request with no choice selected.
 rendering regressions. Native focus, scrolling and visual appearance still need
 the walkthrough; a static-render test does not prove those interactions.
 
+Use `node desktop/scripts/visual-review.mjs --controls-check` for the automated
+sheet walkthrough. It checks Back, Settings, devices, nested approval details,
+Tab containment, Escape/Done, focus return and nested agent instructions. It
+captures populated light/dark and compact views under `.build/native-controls-review`,
+writes `checks.json`, and exits with a failure if an assertion fails. Buttons use
+Electron mouse events; Tab and Escape use keyboard events. Provider instructions
+are fictional and approvals affect only the visual host. This does not exercise
+the OS menu bar or qualify a live provider.
+
 Use `--people-start` for the first workspace after setup, with no requests,
 conversations or saved people. Follow Add people, manually save a fictional
 contact, then use Import contacts and a fictional .vcf file. Check the instructions,

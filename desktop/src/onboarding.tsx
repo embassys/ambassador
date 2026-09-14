@@ -8,6 +8,8 @@ import type {
 } from "../../src/desktop/protocol.js";
 import type { RegistrationSnapshot } from "../../src/desktop/registration.js";
 import { Account, notices } from "./account.js";
+import { BackButton } from "./controls.js";
+import { DetailSheet } from "./details.js";
 import { SettingsButton } from "./navigation.js";
 import { prepareOnboardingAgent } from "./onboarding-setup.js";
 
@@ -241,8 +243,7 @@ function AgentSetup({
                 : "Check connection"}
           </button>
           {guide && (
-            <details className="onboarding-manual">
-              <summary>Manual setup</summary>
+            <DetailSheet className="onboarding-manual" title="Manual setup">
               <p>{guide.note}</p>
               <pre>{guide.instruction}</pre>
               <button
@@ -257,7 +258,7 @@ function AgentSetup({
               >
                 Copy instructions
               </button>
-            </details>
+            </DetailSheet>
           )}
         </>
       )}
@@ -306,7 +307,7 @@ function AgentSetup({
       {!configured && (
         <button
           type="button"
-          className="text-button onboarding-later"
+          className="quiet-button onboarding-later"
           disabled={busy}
           onClick={complete}
         >
@@ -383,19 +384,17 @@ export function Onboarding({
         ) : (
           <>
             {owner.status !== "code_sent" && (
-              <button
-                type="button"
-                className="text-button onboarding-back"
+              <BackButton
+                className="onboarding-back"
+                label="Back to welcome"
                 onClick={() => setView("welcome")}
-              >
-                ‹ Back
-              </button>
+              />
             )}
             <p className="onboarding-step">1 · Your account</p>
             <h1>{login ? "Welcome back" : "Join Embassys"}</h1>
             <Account snapshot={owner} call={call} changed={changed} compact />
             {login && owner.status !== "code_sent" && (
-              <button type="button" className="text-button" onClick={() => setView("register")}>
+              <button type="button" className="quiet-button" onClick={() => setView("register")}>
                 New here? Register
               </button>
             )}

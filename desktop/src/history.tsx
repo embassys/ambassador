@@ -6,7 +6,7 @@ import {
 } from "../../src/desktop/chat.js";
 import type { ConversationPreview } from "../../src/desktop/conversation-preview.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
-import { Disclosure, SavedContent, StructuredData } from "./details.js";
+import { DetailSheet, SavedContent, StructuredData } from "./details.js";
 
 export interface ConversationSession {
   session_id: string;
@@ -257,13 +257,13 @@ export function ConversationContent({
       <div className="chat-history-tools">
         <button
           type="button"
-          className="text-button"
+          className="quiet-button"
           disabled={!history.hasMore || busy}
           onClick={next}
         >
           Earlier messages
         </button>
-        <Disclosure className="conversation-info" title="Conversation details">
+        <DetailSheet className="conversation-info" title="Conversation details">
           <p>{session?.preview?.title ?? "Saved conversation"}</p>
           <code>{sessionId}</code>
           <p>
@@ -273,13 +273,13 @@ export function ConversationContent({
           {items.some((item) => item.kind === "turn" && item.status === "recording") && (
             <p>In progress or interrupted: the saved agent turn has no finish record.</p>
           )}
-          <button type="button" className="text-button" onClick={reload}>
+          <button type="button" className="quiet-button" onClick={reload}>
             Reload latest messages
           </button>
-          <button type="button" className="text-button destructive-text" onClick={remove}>
+          <button type="button" className="quiet-button destructive-text" onClick={remove}>
             Delete local history…
           </button>
-        </Disclosure>
+        </DetailSheet>
       </div>
       {history.warnings.map((warning) => (
         <p className="quiet-note" role="status" key={warning}>
@@ -329,9 +329,9 @@ export function ConversationContent({
                 {showDate && <div className="chat-date">{day}</div>}
                 {item.role === "tool" ? (
                   <div className="chat-tool" data-chat-entry={item.id}>
-                    <Disclosure title="Tool activity" meta={time(item.createdAt)}>
+                    <DetailSheet title="Tool activity" meta={time(item.createdAt)}>
                       <SavedContent text={item.text} />
-                    </Disclosure>
+                    </DetailSheet>
                   </div>
                 ) : (
                   <article
@@ -352,9 +352,9 @@ export function ConversationContent({
                               incoming.fields !== null &&
                               Object.keys(incoming.fields).length === 0
                             ) && <StructuredData value={incoming.fields} />}
-                          <Disclosure className="chat-message-details" title="Message details">
+                          <DetailSheet className="chat-message-details" title="Message details">
                             <SavedContent text={item.text} />
-                          </Disclosure>
+                          </DetailSheet>
                         </>
                       ) : (
                         <ChatText text={item.text} />
