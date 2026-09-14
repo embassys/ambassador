@@ -40,6 +40,42 @@ export function conversationPeer(
 export function chronologicalItems(items: readonly TranscriptItem[]) {
   return [...items].sort((a, b) => a.createdAt - b.createdAt);
 }
+/** Identity comes from authenticated owner requests, never text written by an agent. */
+export function conversationPeerFromRequests(
+  peer: { agentId: string; messageId: string } | undefined,
+  requests: readonly {
+    agent_id?: string | undefined;
+    requester_agent_id?: string | undefined;
+    requester_verified?: boolean | undefined;
+    requester_email: string | null;
+    requester_name: string | null;
+  }[],
+  localAgentId: string | undefined,
+  sameOwner: boolean,
+): ConversationPeer {
+  const fallback = conversationPeer(peer, [], false);
+  if (!peer || !sameOwner || !localAgentId) return fallback;
+  const matches = requests.filter(
+    (item) =>
+      item.agent_id === localAgentId &&
+      item.requester_agent_id === peer.agentId &&
+      item.requester_verified,
+  );
+  const first = matches[0];
+  if (
+    !first?.requester_email ||
+    matches.some((item) => item.requester_email !== first.requester_email)
+  )
+    return fallback;
+  const name = matches.every((item) => item.requester_name === first.requester_name)
+    ? first.requester_name?.trim()
+    : undefined;
+  return {
+    agentId: peer.agentId,
+    name: name || first.requester_email,
+    email: first.requester_email,
+  };
+}
 
 export function mergeChatPages(
   previous: TranscriptPage,

@@ -18,11 +18,17 @@ private owner controls and isolated instances in the Embassys app.
 the CLI's fixed installation, confirmed process handoffs, shared registration
 progress and visible history. No credential copying or state migration is used. Its
 [design](desktop-app-design.md) records the new boundaries and required central
-contracts. [ADR 0068](adr/0068-desktop-owner-account-views.md) now qualifies the
-deployed `/api/app` login/session and read-only account routes through a separate
-desktop owner worker. ADR 0075 adds fresh owner reviews and confirmed decisions, answers and revocation
-through those existing app routes. Encrypted no-replay markers retain uncertain
-submissions independently of owner login and gateway Clean.
+contracts. [ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md)
+replaces the older `/api/app` integration with `/api/owner` in a separate account
+worker. Owner sign-in creates a device-bound owner session; no agent token is used
+for owner decisions. Reviews use current request revisions and exact offered
+options. An encrypted submission journal permits recovery under the same key and
+body inside central's retention window. Historical unkeyed submissions are not
+replayed. Account state and pending decisions survive local gateway Clean.
+The owner profile refreshes `/api/owner/agents` without another email code and
+persists the bounded authoritative roster. Devices & agents refreshes it too.
+Review and submission re-read the agent's executor epoch; a changed epoch
+requires another review. Roster refresh does not select an execution device.
 Owner commands never enter MCP or the gateway's private
 control route. CLI options remain unchanged; current development builds reuse
 the saved canonical executor directory when switching hosts. The published
@@ -33,8 +39,13 @@ with Log in or Register, followed by agent setup. Email-only desktop enrollment
 records an unfinished executor selection. Verification saves the credential but
 does not start polling or delivery until the owner selects a reviewed provider.
 That state survives app/CLI handoff; MCP-origin registration still resolves its
-fixed provider before enrollment. Owner login remains a separate credential realm
-and currently requires a second email code after first-time registration.
+fixed provider before enrollment. Under [ADR 0083](adr/0083-one-code-desktop-setup.md), desktop welcome uses owner
+sign-in for both new and returning accounts. After one verification, Connect
+creates or adopts the same-email agent through `POST /api/owner/agents`, then
+uses reviewed device selection and private execution-token installation. Moving
+an existing executor requires confirmation. Owner and execution credentials
+remain separate; no code or token crosses realms. Legacy CLI enrollment stays
+unchanged.
 
 [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md) adds an owner-started
 desktop connection check. Desktop instances advertise an optional UUID
@@ -152,6 +163,10 @@ ACP available-command catalogs and their descriptions are omitted; the log
 records only the session ID and command count for that update.
 
 ## Local MCP
+
+Central action acceptance returns `status: "queued"`, including recovered
+submission receipts. It confirms durable enqueueing, not delivery to the target
+or completion of its action. Local result completion remains separate.
 
 Every local MCP request uses Streamable HTTP at `/mcp` without bearer
 authentication. Ambassador requires `Host: 127.0.0.1:8787`. A present
@@ -441,8 +456,8 @@ The successful response contains `agent_id`, `email`, and `message`.
 }
 ```
 
-Ambassador serializes verification attempts, generates one P-256 key pair, and
-sends the email, code, and public JWK to `POST /api/verify_email`. It
+Ambassador serializes verification attempts and persists a P-256 key before dispatch.
+It reuses that key for an explicit same-email retry within its 30-minute window and sends the email, code, and public JWK to `POST /api/verify_email`. It
 intercepts the returned token before generic result serialization and checks:
 
 - bounded compact-JWT structure;
@@ -451,6 +466,11 @@ intercepts the returned token before generic result serialization and checks:
 - token `cnf.jkt`, response `jkt`, and generated-key thumbprint agreement;
   and
 - response identity agreement with the requested email.
+
+The reviewed verification response also includes a boolean `replayed` indicator.
+Validate it when present and keep it out of agent results. A lost response may
+be retried explicitly with the retained key and the code supplied again by the
+owner. The code is never persisted. Clear the saved key after credential custody.
 
 The server uses an HS256 signature that the client cannot verify. Ambassador
 does not invent issuer, audience, token type, token ID, or lifetime requirements
@@ -510,7 +530,7 @@ first request does not include a nonce proactively. Any other authentication
 failure does not trigger registration, token replacement, or a bearer-only
 retry.
 
-The current protected routes are:
+The currently implemented protected routes are:
 
 | Operation | Method and path | Input |
 | --- | --- | --- |
@@ -522,6 +542,21 @@ The current protected routes are:
 | List permissions | `GET /api/get_my_permissions` | none |
 | Receive messages | `GET /api/poll_messages?timeout=<0..60>` | internal only |
 | Acknowledge message | `POST /api/ack_message` | internal only; `message_id` |
+| Release unclaimed batch | `POST /api/release_messages` | internal only; `message_ids` |
+| Recover mutation outcome | `GET /api/idempotency_status?operation=…&idempotency_key=…` | internal only; original operation/key |
+| Renew credential | `POST /api/renew_token` | internal only; same retained key, no body |
+| Report progress | `POST /api/report_action_progress` | original `call_id`, state and bounded note |
+
+The September 14 catalog adds nullable `result_schema` alongside `input_schema`.
+Ambassador validates its shape, exposes it unchanged and validates successful
+results against a non-null schema before submission. Errors are not checked
+against a success schema. The message-box `report_progress` variant records
+`working`, `waiting_for_owner_input` or `failed` advisory updates. Incoming
+progress must match the saved call, catalog action and sender; sequence/event
+IDs suppress duplicates and older events. Even `failed` progress is not a result.
+Recording an owner question reports a generic waiting status without disclosing
+the question or answer. The [adoption record](central-adoption-2026-09-14.md)
+distinguishes fixture coverage from blocked protected live qualification.
 
 Permission-list records recognize `pending`, `granted`, `denied`, `revoked` and
 `expired`; unknown statuses fail validation. A `permission_revoked` notification
@@ -562,9 +597,9 @@ expiry and remaining uses.
 
 Persisted outbound states distinguish awaiting permission, ready, submitted,
 denied, confirmed rejection and uncertainty. A fresh explicit request may replace
-a denied or confirmed-rejected intent. Uncertain work cannot be replaced or
-automatically retried. A saved call or permission ID can repair a partially saved
-operation after restart without another external submission. A received action
+a denied or confirmed-rejected intent. Uncertain work cannot be replaced by a new intent. A saved idempotency journal
+may reconcile it under its original operation-scoped key and exact body. A saved
+call or permission ID can repair a partially saved operation after restart. A received action
 result clears submitted outbound intent after durable capture.
 
 `call_action` delivers a request after central confirms permission. It does
@@ -577,18 +612,48 @@ queues an `action_response` for the original caller with the same `call_id`,
 action type, submitted status, and result. A later submission for a finished
 call returns `409`. This is an action result, not a general chat reply.
 
-Ambassador does not retry a result submission after an uncertain response.
-The endpoint has no idempotency key or outcome lookup, and a repeated accepted
-submission returns `409` without recovering the first response's message ID.
+Before supported mutations, save the exact body and stable UUID in encrypted
+custody. Send `Idempotency-Key` on permission requests, action calls, result
+submissions and human-input questions. Persist successful receipts before exposing
+them. Reconcile response loss using `idempotency_status`, or resubmit that exact
+key/body within 23 hours of its original local timestamp (inside central's 24-hour
+retention). A backward clock or expired retention leaves an unresolved tombstone.
+Never manufacture a new key for work already sent without one.
+
+Renewal starts within one day of token expiry and is serialized with a 30-second
+failure backoff. Only the fixed renewal route may use the reviewed 14-day expiry
+grace; ordinary calls remain subject to token expiry. Atomically replace the
+credential while retaining its key, agent ID, email and execution device/epoch.
+Explicit recovery uses `/api/start_recovery` and `/api/complete_recovery`, without
+adding MCP tools or CLI flags. A lost recovery response requires a new email code.
+The app refuses legacy recovery for a known execution token and directs its owner
+to Devices & agents. Verification retries retain their encrypted pre-request key;
+the owner must supply the email code again.
 
 ## Incoming queue
 
 One receiver calls `poll_messages?timeout=30` under a 40-second HTTP deadline.
 It validates and atomically captures the entire bounded batch in encrypted
-notification custody before processing or acknowledgement. Maximum batch size
-is 256 messages and 512 KiB. Duplicate IDs with identical canonical contents are
+notification custody before processing or acknowledgement. The local safety ceiling is 256 messages and 512 KiB; deployed central bounds
+leased batches more tightly at 128 messages and 384 KiB. Duplicate IDs with identical canonical contents are
 ignored; conflicting contents fail the batch. A quota or disk failure admits no
 partial batch and stops reception.
+
+The current poll envelope includes `has_more` and `lease_seconds`. Message
+delivery metadata includes `message_type`, `delivery_attempts`, `redelivered`
+and `lease_expires_at`. Validate these known fields and remove the transport
+metadata before canonical-body comparison; lease changes must not create a
+payload conflict or cause a second provider dispatch. The receiver already
+polls again immediately after a nonempty batch. Peer routing still requires a
+real sender; no identity is invented for anonymous system messages.
+
+Single-message acknowledgements validate `acknowledged`, `already_acked` and
+`unknown` as well as `message_id` and `status`: exactly the requested ID must be
+acknowledged, no ID may be unknown, and an already-acknowledged ID is success.
+Central retains unacknowledged messages under a bounded delivery lease. Uncertain
+acknowledgements retry with fair cursor traversal and a 30-second backoff. A batch
+that cannot enter local custody is released through the reviewed release route;
+failed release relies on lease expiry, never a false acknowledgement.
 
 Independent bounded workers process events, deliver provider prompts, and
 acknowledge central. Shared encrypted human-input custody replaces the competing
@@ -608,10 +673,11 @@ incoming delivery profile. A matching owner answer resumes that call's original
 peer session once. Duplicate or stale answers cannot start another continuation.
 Unowned valid notifications use the configured incoming profile.
 
-The server currently marks rows delivered before returning the poll response.
-Local custody cannot repair a response lost before capture. Server recovery and
-listener fixes remain API issues; this protocol does not promise exactly-once
-delivery.
+Central leases a batch and may redeliver it after expiry. A poll response lost
+before local capture can therefore be recovered by central. Local custody handles
+duplicate IDs without repeating provider dispatch. This is not an exactly-once
+model-execution guarantee. Deployed protected-flow qualification remains blocked
+by the replay-protection failure recorded in API issue 15.
 
 ## Webhook delivery
 
@@ -816,7 +882,8 @@ Acknowledge a central message only after durable local custody. This confirms
 that Ambassador owns the captured record; it does not certify model execution,
 action completion, client acceptance or human display. A missing central ID is
 not acknowledged. A failed or interrupted acknowledgement is recorded uncertain
-and is not retried against the current non-idempotent API.
+and retried against the current idempotent receipt contract. An already-acked
+receipt is success; an unknown message ID is not.
 
 Webhook `2xx` confirms receiver acceptance. Direct completion confirms a provider
 turn finished. Neither consumes a returned business result. Only an explicit
@@ -864,7 +931,7 @@ credentials remain with providers.
 Encrypted workflow stores hold notifications, pending calls, received results,
 outbound intent, operation events, owner questions and human-input responses.
 Each allows 1 GiB of live ciphertext and 512 KiB per record; operation events
-have an additional 32 KiB/32-event bound. Domain-separated keys bind stores to
+have an additional 32 KiB/128-event bound. Domain-separated keys bind stores to
 enrollment. Indexed reads and transactional counters avoid full body scans.
 SQLite indexes, free pages and WAL files add disk overhead. Calls and unread
 results have no automatic expiry. Native route journals contain identifiers and
@@ -874,7 +941,10 @@ This development cutover uses new schemas directly. Migration is out of scope.
 Unknown schemas and changed identity bindings fail closed. `clean` clears local
 enrollment and workflow state after proving Ambassador stopped, preserving
 diagnostics and provider configuration. It never deletes or resets central
-identity. Central identity/credential recovery remains server work.
+identity. Same-key renewal, explicit email recovery and owner-selected execution
+credentials use the current central contracts. Device-key installation preserves
+the original encrypted storage key separately, so local conversations survive
+credential replacement. Only the active credential is sent to central.
 
 ## Acceptance cases
 

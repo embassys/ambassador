@@ -45,6 +45,29 @@ and private protocol before starting workers. The private handshake requires
 the expected Node version. These checks catch corrupt or mismatched builds;
 unsigned local checksums do not authenticate a publisher.
 
+## Linux ARM64 and Raspberry Pi
+
+[ADR 0081](adr/0081-linux-arm64-desktop.md) adds the Linux ARM64 build. Use a
+native ARM64 Linux builder. The same commands above fetch the official ARM64
+Node archive, rebuild SQLite with that runtime, package ARM64 Electron and
+produce `Embassys-<version>-linux-arm64-development.tar.gz` with separate
+checksums and inventories. Do not cross-package Mac or x64 native modules.
+The runtime checks verify both the package manifest and the executed runtime's
+architecture. CI includes `ubuntu-24.04-arm` and uses the matching sandbox path.
+
+The initial Pi target is Raspberry Pi 4 or 5 with 64-bit Raspberry Pi OS Desktop
+based on Debian Bookworm or Trixie. The app needs a graphical session, Electron
+system libraries and working sandbox support. Pi OS Lite and 32-bit Pi OS are
+not this desktop target. Other 64-bit Pi boards are not yet qualified. Installed
+agent availability and their configuration remain separate qualification work;
+manual agent setup is still offered on Linux.
+
+ARM64 Linux packaging and worker tests do not prove Pi graphics, tray behavior,
+notifications, keyring integration or live providers. Record those separately
+before claiming a fully qualified Raspberry Pi release. The already published
+0.1.2 preview has no ARM64 Linux asset; new builds do not amend that release.
+See the [September 12 ARM64 evidence](desktop-linux-arm64-2026-09-12.md).
+
 ## Signing
 
 Default output is explicitly unsigned development output. Request signing only

@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, requestItems} from './src/account.tsx'; import {Navigation, AppMenu, SettingsButton, ServiceStatus, serviceStatus} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; export {onboardingKey} from './src/onboarding-state.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,requests,selectedRequest,selectRequest:()=>{},select:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, requestItems} from './src/account.tsx'; import {Navigation, AppMenu, SettingsButton, ServiceStatus, serviceStatus, WorkspaceWelcome} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const welcome = () => renderToStaticMarkup(createElement(WorkspaceWelcome,{people:()=>{},agents:()=>{}})); export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; import {PeopleIntroduction, ContactImportGuide, PeopleList} from './src/people.tsx'; export const peopleList = contacts => renderToStaticMarkup(createElement(PeopleList,{contacts,busy:false,open:()=>{},copy:()=>{}})); export const peopleIntro = () => renderToStaticMarkup(createElement(PeopleIntroduction)); export const importGuide = () => renderToStaticMarkup(createElement(ContactImportGuide,{chooseFile:()=>{}})); export {onboardingKey} from './src/onboarding-state.ts'; export {prepareOnboardingAgent} from './src/onboarding-setup.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,requests,selectedRequest,selectRequest:()=>{},select:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -23,6 +23,10 @@ await build({
   jsx: "automatic",
 });
 const {
+  peopleList,
+  peopleIntro,
+  importGuide,
+  welcome,
   view,
   decision,
   account,
@@ -31,6 +35,7 @@ const {
   requestItems,
   onboarding,
   onboardingKey,
+  prepareOnboardingAgent,
   settingsButton,
   status,
   serviceStatus,
@@ -87,12 +92,12 @@ test("Inbox and Conversations are sidebar headings, without an aggregate Inbox p
   assert.match(html, /<h2>Conversations<\/h2>/);
   assert.doesNotMatch(html, /inbox-nav-row|aria-current="page"/);
   assert.doesNotMatch(html, />History</);
-  assert.doesNotMatch(nav("people"), /aria-current/);
+  assert.match(nav("people"), /aria-current="page"[^>]*>[\s\S]*People/);
+  assert.ok(html.indexOf(">People<") < html.indexOf(">Inbox<"));
   const tools = menu();
-  for (const label of ["People", "Connect agents", "Access"])
-    assert.match(tools, new RegExp(label));
+  for (const label of ["Connect agents", "Access"]) assert.match(tools, new RegExp(label));
   assert.match(tools, /popover="auto"/);
-  assert.doesNotMatch(tools, />Settings</);
+  assert.doesNotMatch(tools, />Settings<|>People</);
   assert.match(settingsButton(), />Settings</);
   assert.doesNotMatch(tools, /Clean|port|MCP|instance/i);
 });
@@ -130,7 +135,7 @@ test("a quiet inbox does not hide uncertain submissions", () => {
     unconfirmed: [{ id: "unconfirmed", kind: "permission", action_type: "get_phone_number" }],
   });
   assert.doesNotMatch(uncertain, /No requests to review/);
-  assert.match(uncertain, /may have been accepted; it will not be sent again/);
+  assert.match(uncertain, /may have been accepted/);
 });
 
 test("account requests escape agent text, preserve choice labels and offer no decision buttons", () => {
@@ -152,7 +157,7 @@ test("account requests escape agent text, preserve choice labels and offer no de
   assert.match(html, /&lt;img/);
   assert.doesNotMatch(html, /<img|<button|onClick|onclick/);
   assert.match(html, /Allow this one only/);
-  assert.match(html, /may not include every pending request/);
+  assert.match(html, /Large inboxes have additional pages/);
 });
 test("permission direction and central message limitations stay explicit", () => {
   const html = view({
@@ -199,7 +204,7 @@ test("owner sign-in form is separate from local agent registration and sign-out"
   });
   assert.match(waiting, /autocomplete="one-time-code"/iu);
   assert.match(waiting, /Resend in 60s/);
-  assert.match(waiting, /If .*owner@fixture.test.* has an Embassys agent/);
+  assert.match(waiting, /only code you need for setup/);
 });
 
 test("primary account views have one purpose and redirect sign-in to Account", () => {
@@ -273,7 +278,7 @@ test("a permission review separates the request, identity and scope without hidi
   assert.match(html, /Alex Morgan/);
   assert.match(html, /alex@fixture.test/);
   assert.match(html, /read_calendar_permission/);
-  assert.match(html, /Request reason isn&#x27;t included by the server/);
+  assert.match(html, /No reason supplied/);
   assert.match(html, /No expiry provided/);
   assert.match(html, /Permission scope/);
   assert.match(html, /&lt;script&gt;untrusted/);
@@ -387,4 +392,182 @@ test("focused requests keep uncertainty and settled-state messages without an In
   );
   assert.match(uncertain, /may have been accepted/);
   assert.doesNotMatch(uncertain, /About this inbox|no longer pending/);
+});
+
+test("the empty workspace explains the next step after setup", () => {
+  const html = welcome();
+  assert.match(html, /Start with someone you know/);
+  assert.match(html, />Add people</);
+  assert.match(html, />Connect agents</);
+  assert.match(html, /email|contacts/);
+  assert.doesNotMatch(html, /invitation sent|automatically|already connected/i);
+});
+
+test("People distinguishes local saving from invitations and explains contact-file import", () => {
+  const html = peopleIntro();
+  assert.match(html, /Saving a person doesn’t invite them or grant access/);
+  assert.doesNotMatch(html, /Invitations aren.*available yet/);
+  const guide = importGuide();
+  assert.match(guide, /vCard/);
+  assert.match(guide, /\.vcf/);
+  assert.match(guide, />Choose file/);
+  assert.match(guide, /choose who to save/);
+  assert.match(guide, /Nothing is sent/);
+  assert.doesNotMatch(guide, /mailto:|href=|checked=/);
+});
+
+test("People uses one list with direct copy actions and escaped contact names", () => {
+  const html = peopleList([
+    { name: "Alex <script>", email: "alex@fixture.test" },
+    { name: "Sam Rivera", email: "sam@fixture.test" },
+  ]);
+  assert.match(html, /aria-label="Saved people"/);
+  assert.match(html, /Alex &lt;script&gt;/);
+  assert.match(html, /alex@fixture.test/);
+  assert.equal((html.match(/>Copy email</g) || []).length, 2);
+  assert.doesNotMatch(html, /<script>|<aside|with-detail|aria-pressed/);
+});
+
+test("empty sidebar hints are short and distinct from navigation headings", () => {
+  const html = nav("attention");
+  assert.match(html, /class="sidebar-empty"[^>]*>No conversations yet</);
+  assert.doesNotMatch(html, /Conversations appear here when/);
+});
+
+test("onboarding installs a first agent with no second email or premature provider connection", async () => {
+  const calls = [];
+  const owner = {
+    status: "signed_in",
+    context: "ctx",
+    email: "me@fixture.test",
+    account: { device_id: "here" },
+  };
+  const review = {
+    kind: "device_review",
+    review_id: "review",
+    device: { id: "here", is_current: true },
+    agent: { id: "agent", executor_device_id: null },
+  };
+  const call = async (command) => {
+    calls.push(command);
+    if (command.type === "owner_profile")
+      return {
+        snapshot: owner,
+        data: {
+          kind: "profile",
+          profile: {
+            agents: [
+              {
+                id: "agent",
+                email: owner.email,
+                executor_device_id: review.agent.executor_device_id,
+                executor_epoch: 2,
+              },
+            ],
+          },
+        },
+      };
+    if (command.type === "owner_create_agent")
+      return { snapshot: owner, data: { kind: "agent_setup", agent: { id: "agent" } } };
+    if (command.type === "owner_device_review") return { snapshot: owner, data: review };
+    if (command.type === "owner_device_submit")
+      return { data: { kind: "device_result", confirmed: true, local_ready: true } };
+    if (command.type === "enrollment_status")
+      return {
+        phase: "registered",
+        email: owner.email,
+        credentialStatus: "active",
+        needsExecutor: true,
+      };
+    throw new Error("Unexpected command");
+  };
+  const result = await prepareOnboardingAgent(owner, { phase: "new" }, "instance", call);
+  assert.equal(result.registration.needsExecutor, true);
+  assert.deepEqual(
+    calls.map((c) => c.type),
+    ["owner_create_agent", "owner_device_review", "owner_device_submit", "enrollment_status"],
+  );
+  assert.equal(calls[2].instanceId, "instance");
+  calls.length = 0;
+  review.agent.executor_device_id = "elsewhere";
+  const move = await prepareOnboardingAgent(owner, { phase: "new" }, "instance", call);
+  assert.equal(move.review.review_id, "review");
+  assert.equal(
+    calls.some((c) => c.type === "owner_device_submit"),
+    false,
+  );
+  calls.length = 0;
+  await prepareOnboardingAgent(owner, { phase: "new" }, "instance", call, move.review);
+  assert.deepEqual(
+    calls.map((c) => c.type),
+    ["owner_device_submit", "enrollment_status"],
+  );
+  calls.length = 0;
+  await assert.rejects(
+    prepareOnboardingAgent(
+      owner,
+      { phase: "registered", email: "other@fixture.test" },
+      "instance",
+      call,
+    ),
+    /different account/,
+  );
+  assert.equal(calls.length, 0);
+  review.agent.executor_device_id = null;
+  await prepareOnboardingAgent(owner, result.registration, "instance", call);
+  assert.deepEqual(
+    calls.map((c) => c.type),
+    ["owner_profile"],
+  );
+  calls.length = 0;
+  review.agent.executor_device_id = "elsewhere";
+  const moved = await prepareOnboardingAgent(owner, result.registration, "instance", call);
+  assert.equal(moved.review.review_id, "review");
+  assert.equal(
+    calls.some((c) => c.type === "owner_device_submit"),
+    false,
+  );
+  calls.length = 0;
+  review.agent.executor_device_id = "here";
+  await prepareOnboardingAgent(
+    owner,
+    { ...result.registration, executionDeviceId: "here", executorEpoch: 1 },
+    "instance",
+    call,
+  );
+  assert.equal(
+    calls.some((c) => c.type === "owner_device_submit"),
+    true,
+  );
+  calls.length = 0;
+  await prepareOnboardingAgent(
+    owner,
+    { ...result.registration, executionDeviceId: "here", executorEpoch: 2 },
+    "instance",
+    call,
+  );
+  assert.deepEqual(
+    calls.map((c) => c.type),
+    ["owner_profile"],
+  );
+  await assert.rejects(
+    prepareOnboardingAgent(
+      owner,
+      { phase: "new" },
+      "instance",
+      async () => ({ data: { kind: "device_result", confirmed: true, local_ready: false } }),
+      move.review,
+    ),
+    /setup did not finish/,
+  );
+  await assert.rejects(
+    prepareOnboardingAgent(
+      owner,
+      { phase: "new" },
+      "instance",
+      async () => ({ issue: "review_expired" }),
+      move.review,
+    ),
+    /Review.*again/,
+  );
 });

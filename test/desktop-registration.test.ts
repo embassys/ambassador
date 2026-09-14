@@ -159,7 +159,7 @@ test("lost registration responses are not repeated and an emailed code can finis
   );
 });
 
-test("lost verification never triggers a second key-binding request", async (t) => {
+test("lost verification permits an explicit same-code retry after restart", async (t) => {
   const f = await setup(t);
   let verifications = 0;
   const client = {
@@ -176,7 +176,7 @@ test("lost verification never triggers a second key-binding request", async (t) 
   assert.equal((await registration.verify("123456")).phase, "verification_uncertain");
   registration = await DesktopRegistration.open(options);
   await registration.verify("123456");
-  assert.equal(verifications, 1);
+  assert.equal(verifications, 2);
   assert.equal(f.options.identity.enrolled, false);
 });
 
@@ -194,7 +194,7 @@ test("a failed credential write leaves verification uncertain across restart", a
   const calls = f.central.requests().length;
   registration = await DesktopRegistration.open(f.options);
   await registration.verify("123456");
-  assert.equal(f.central.requests().length, calls);
+  assert.equal(f.central.requests().length, calls + 1);
   assert.equal(f.options.identity.enrolled, false);
 });
 
@@ -323,4 +323,52 @@ test("desktop IPC rejects credentials, arbitrary executors, foreign email verifi
     { type: "permission_decision", instanceId, decision: "allow_always" },
   ])
     assert.throws(() => parseDesktopCommand(command));
+});
+
+test("explicit recovery survives restart and requires a fresh code after an uncertain response", async (t) => {
+  const f = await setup(t);
+  const email = "recover-existing@fixture.test";
+  await f.options.client.register({ email });
+  const result = await f.options.client.verify({ email, code: f.central.verificationCode(email) });
+  let now = Date.now(),
+    attempts = 0,
+    sends = 0;
+  const options = {
+    ...f.options,
+    now: () => now,
+    client: {
+      register: f.options.client.register.bind(f.options.client),
+      verify: f.options.client.verify.bind(f.options.client),
+      resend: f.options.client.resend.bind(f.options.client),
+      startRecovery: async () => {
+        sends++;
+        return { message: "Code sent" };
+      },
+      completeRecovery: async () => {
+        if (++attempts === 1)
+          throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
+        return result;
+      },
+    },
+  };
+  let registration = await DesktopRegistration.open(options);
+  await registration.register({ email, executor: "claude" });
+  assert.equal(registration.snapshot().phase, "conflict");
+  await registration.recover();
+  assert.equal(registration.snapshot().phase, "recovery_code");
+  registration = await DesktopRegistration.open(options);
+  assert.equal((await registration.recover("123456")).phase, "recovery_uncertain");
+  await assert.rejects(registration.recover("123456"));
+  await assert.rejects(registration.recover());
+  now += 60001;
+  await registration.recover();
+  assert.equal((await registration.recover("654321")).phase, "registered");
+  assert.equal(attempts, 2);
+  assert.equal(sends, 2);
+  assert.equal(f.activations(), 1);
+  assert.equal(f.options.identity.enrollment.agent_id, result.localResult.agent_id);
+  assert.doesNotMatch(
+    await readFile(f.options.path, "utf8"),
+    /123456|654321|private_key|access_token/,
+  );
 });

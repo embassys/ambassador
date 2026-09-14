@@ -39,6 +39,15 @@ export function conversationUpdateText(update: Record<string, unknown>): string 
           .join("\n")}`;
       return `${title}\n\n${JSON.stringify(result ?? data, null, 2)}`;
     }
+    if (event.type === "action_progress") {
+      const status =
+        data?.state === "waiting_for_owner_input"
+          ? "The other agent is waiting for its owner to respond."
+          : data?.state === "failed"
+            ? "The other agent reported a problem. Its final result is still pending."
+            : "The other agent is working on your request.";
+      return typeof data?.note === "string" && data.note ? `${status} ${data.note}` : status;
+    }
     if (event.type === "permission_status")
       return `Embassys permission ${String(data?.status ?? "updated")} for ${String(data?.action_type ?? "your request")}.`;
     return `Embassys request ${String(update.status ?? "updated")}. Check this request for details.`;

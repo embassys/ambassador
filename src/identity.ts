@@ -4,7 +4,7 @@ import {
   parseCentralCredential,
   serializeCentralCredential,
 } from "./central-credential.js";
-import type { CredentialStore } from "./credential-store.js";
+import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 
 export type { CredentialStore } from "./credential-store.js";
 
@@ -20,6 +20,8 @@ export class IdentityError extends Error {
 export class GatewayIdentity {
   #credential: LoadedCentralCredential | undefined;
   #commitBusy = false;
+  #archive: LoadedCentralCredential | undefined;
+  #archiveStore: CredentialStore | undefined;
 
   private constructor(
     private readonly store: CredentialStore,
@@ -34,13 +36,27 @@ export class GatewayIdentity {
     nowSeconds: () => number = () => Date.now() / 1_000,
   ): Promise<GatewayIdentity> {
     const stored = await store.load();
-    return new GatewayIdentity(
+    const identity = new GatewayIdentity(
       store,
       nowSeconds,
       stored === undefined
         ? undefined
         : parseCentralCredential(stored, nowSeconds, { allowExpired: true }),
     );
+    identity.#archiveStore =
+      store instanceof EncryptedFileCredentialStore ? store.archiveStore() : undefined;
+    const archive = await identity.#archiveStore?.load();
+    if (archive) {
+      const parsed = parseCentralCredential(archive, nowSeconds, { allowExpired: true });
+      if (
+        !identity.#credential ||
+        parsed.token.subject !== identity.#credential.token.subject ||
+        parsed.token.email !== identity.#credential.token.email
+      )
+        throw new Error("Stored conversation identity differs from enrollment");
+      identity.#archive = parsed;
+    }
+    return identity;
   }
 
   get enrolled(): boolean {
@@ -74,6 +90,62 @@ export class GatewayIdentity {
   localCredential(): LoadedCentralCredential {
     if (this.#credential === undefined) throw new IdentityError("not_enrolled");
     return this.#credential;
+  }
+
+  storageCredential(): LoadedCentralCredential {
+    return this.#archive ?? this.localCredential();
+  }
+  async replaceExecution(record: CentralCredentialRecord): Promise<void> {
+    if (!this.enrolled) {
+      await this.enroll(async () => ({ credential: record, localResult: undefined }));
+      return;
+    }
+    if (this.#commitBusy) throw new IdentityError("verification_busy");
+    this.#commitBusy = true;
+    try {
+      const old = this.localCredential();
+      const serialized = serializeCentralCredential(record);
+      const replacement = parseCentralCredential(serialized, this.nowSeconds);
+      if (
+        replacement.token.subject !== old.token.subject ||
+        replacement.token.email !== old.token.email
+      )
+        throw new Error("Execution credential belongs to another agent");
+      if (replacement.keyThumbprint !== old.keyThumbprint && !this.#archive) {
+        if (!this.#archiveStore) throw new Error("Archive key custody unavailable");
+        await this.#archiveStore.save(old.serialized);
+        this.#archive = old;
+      }
+      if (this.store.replace) await this.store.replace(old.serialized, serialized);
+      else await this.store.save(serialized);
+      this.#credential = replacement;
+    } finally {
+      this.#commitBusy = false;
+    }
+  }
+  async renew(record: CentralCredentialRecord): Promise<void> {
+    if (this.#commitBusy) throw new IdentityError("verification_busy");
+    this.#commitBusy = true;
+    try {
+      const old = this.localCredential();
+      const serialized = serializeCentralCredential(record);
+      const loaded = parseCentralCredential(serialized, this.nowSeconds);
+      if (
+        loaded.token.subject !== old.token.subject ||
+        loaded.token.email !== old.token.email ||
+        loaded.keyThumbprint !== old.keyThumbprint ||
+        loaded.record.dpop_private_key_pkcs8 !== old.record.dpop_private_key_pkcs8 ||
+        loaded.token.expiresAt <= old.token.expiresAt ||
+        loaded.token.executionDeviceId !== old.token.executionDeviceId ||
+        loaded.token.executorEpoch !== old.token.executorEpoch
+      )
+        throw new Error("The renewed credential changed identity or key");
+      if (this.store.replace) await this.store.replace(old.serialized, serialized);
+      else await this.store.save(serialized);
+      this.#credential = loaded;
+    } finally {
+      this.#commitBusy = false;
+    }
   }
 
   async enroll<T>(

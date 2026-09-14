@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { CentralMessage } from "./central-rest.js";
-import type { NotificationStore } from "./notification-store.js";
+import type { NotificationStore, StoredNotification } from "./notification-store.js";
 
 export type DeliveryResult = { readonly status: "accepted" | "completed" };
 export interface DeliveryTarget {
@@ -39,6 +39,7 @@ export interface NotificationRelayOptions {
     message: CentralMessage,
   ) => boolean | undefined | Promise<boolean | undefined>;
   readonly acknowledgeMessage: (messageId: string, signal: AbortSignal) => Promise<void>;
+  readonly releaseMessages?: (messageIds: readonly string[], signal: AbortSignal) => Promise<void>;
   readonly onDeliveryError?: (error: unknown) => void;
   readonly onAcknowledgementError?: (error: unknown, messageId: string) => void;
   readonly retryDelayMs?: number;
@@ -88,15 +89,18 @@ export class NotificationRelay {
   #wake(): void {
     for (const resume of [...this.#waiting]) resume();
   }
-  #wait(signal: AbortSignal): Promise<void> {
+  #wait(signal: AbortSignal, timeoutMs?: number): Promise<void> {
     return new Promise((resolve) => {
+      let timer: NodeJS.Timeout | undefined;
       const done = () => {
+        clearTimeout(timer);
         this.#waiting.delete(done);
         signal.removeEventListener("abort", done);
         resolve();
       };
       this.#waiting.add(done);
       signal.addEventListener("abort", done, { once: true });
+      if (timeoutMs !== undefined) timer = setTimeout(done, Math.max(1, timeoutMs));
       if (signal.aborted) done();
     });
   }
@@ -142,10 +146,14 @@ export class NotificationRelay {
         await delay(timeout, undefined, { signal }).catch(() => undefined);
         continue;
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        await this.#release(messages);
+        return;
+      }
       try {
         this.#options.store.ingest(messages);
       } catch (error) {
+        await this.#release(messages);
         throw new NotificationRelayError("invalid_notification_response", error);
       }
       this.#wake();
@@ -153,6 +161,15 @@ export class NotificationRelay {
       if (messages.length === 0)
         await delay(this.#retryDelayMs, undefined, { signal }).catch(() => undefined);
     }
+  }
+  async #release(messages: readonly CentralMessage[]): Promise<void> {
+    const ids = [
+      ...new Set(messages.flatMap((message) => (message.id === undefined ? [] : [message.id]))),
+    ];
+    if (ids.length === 0 || ids.length > 256) return;
+    // Shutdown must not leave an unbounded cleanup call. A lost release is safe:
+    // central's lease will expire, and no receipt has transferred custody.
+    await this.#options.releaseMessages?.(ids, AbortSignal.timeout(5_000)).catch(() => undefined);
   }
   async #process(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
@@ -197,10 +214,24 @@ export class NotificationRelay {
     }
   }
   async #acknowledge(signal: AbortSignal): Promise<void> {
+    let retryCursor = 0;
+    let backoff = this.#retryDelayMs;
+    let retryAt = Date.now() + backoff;
     while (!signal.aborted) {
-      const record = this.#options.store.next("ack");
+      let record: StoredNotification | undefined;
+      if (Date.now() >= retryAt) {
+        const page = this.#options.store.retryableAcknowledgements(retryCursor);
+        const item = page.items[0];
+        record = item?.value;
+        retryCursor = page.hasMore && item ? item.sequence : 0;
+        if (!page.hasMore) {
+          retryAt = Date.now() + backoff;
+          backoff = Math.min(30_000, backoff * 2);
+        }
+      }
+      record ??= this.#options.store.next("ack");
       if (record === undefined) {
-        await this.#wait(signal);
+        await this.#wait(signal, Math.max(1, retryAt - Date.now()));
         continue;
       }
       this.#options.store.beginAcknowledgement(record.id);
@@ -213,6 +244,7 @@ export class NotificationRelay {
         continue;
       }
       this.#options.store.acknowledged(record.id);
+      backoff = this.#retryDelayMs;
       this.#wake();
     }
   }

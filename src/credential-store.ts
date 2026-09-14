@@ -59,6 +59,7 @@ interface CredentialEnvelope {
 export interface CredentialStore {
   load(): Promise<string | undefined>;
   save(credential: string): Promise<void>;
+  replace?(expected: string, credential: string): Promise<void>;
 }
 
 export type CredentialArtifactKind = WindowsArtifactKind;
@@ -188,6 +189,18 @@ export class EncryptedFileCredentialStore implements CredentialStore {
     }
   }
 
+  archiveStore(): EncryptedFileCredentialStore {
+    return new EncryptedFileCredentialStore(
+      `${this.#path}.archive`,
+      `${this.#keyPath}.archive`,
+      `${this.#credentialScope}:local-archive`,
+      {
+        platform: this.#platform,
+        deriveKey: this.#deriveKey,
+        ...(this.#windowsAccessControl ? { windowsAccessControl: this.#windowsAccessControl } : {}),
+      },
+    );
+  }
   async load(): Promise<string | undefined> {
     const directory = await this.#openDirectory(false);
     if (directory === undefined) return undefined;
@@ -209,6 +222,13 @@ export class EncryptedFileCredentialStore implements CredentialStore {
   }
 
   async save(plaintext: string): Promise<void> {
+    return this.#write(plaintext);
+  }
+  async replace(expected: string, plaintext: string): Promise<void> {
+    this.#validatePlaintext(expected);
+    return this.#write(plaintext, expected);
+  }
+  async #write(plaintext: string, expected?: string): Promise<void> {
     if (
       typeof plaintext !== "string" ||
       plaintext.length < 1 ||
@@ -228,7 +248,8 @@ export class EncryptedFileCredentialStore implements CredentialStore {
     try {
       directory = await this.#openDirectory(true);
       if (directory === undefined) throw invalidCredential();
-      await this.#assertCredentialAbsent();
+      if (expected === undefined) await this.#assertCredentialAbsent();
+      else if ((await this.#readCredentialPath(this.#path)) !== expected) throw invalidCredential();
       const stateKey = await this.#loadOrCreateStateKey(directory);
       const salt = randomBytes(SALT_BYTES);
       const iv = randomBytes(IV_BYTES);
@@ -280,8 +301,9 @@ export class EncryptedFileCredentialStore implements CredentialStore {
       temporaryFile = undefined;
       if ((await this.#readCredentialPath(temporaryPath)) !== plaintext) throw invalidCredential();
       await this.#verifyDirectory(directory);
-      await this.#assertCredentialAbsent();
-      if (this.#platform === "win32") {
+      if (expected === undefined) await this.#assertCredentialAbsent();
+      else if ((await this.#readCredentialPath(this.#path)) !== expected) throw invalidCredential();
+      if (expected !== undefined || this.#platform === "win32") {
         await rename(temporaryPath, this.#path);
         temporaryCreated = false;
         finalCreated = true;
@@ -304,7 +326,8 @@ export class EncryptedFileCredentialStore implements CredentialStore {
     } finally {
       savingPaths.delete(this.#path);
       await temporaryFile?.close().catch(() => undefined);
-      if (!committed && finalCreated) await unlink(this.#path).catch(() => undefined);
+      if (!committed && finalCreated && expected === undefined)
+        await unlink(this.#path).catch(() => undefined);
       if (!committed && temporaryCreated && temporaryPath !== undefined) {
         await unlink(temporaryPath).catch(() => undefined);
       }

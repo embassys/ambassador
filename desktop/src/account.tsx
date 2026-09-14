@@ -11,15 +11,20 @@ import type {
 } from "../../src/desktop/owner-protocol.js";
 import type { RequestSource } from "./conversation-workspace.js";
 import { Disclosure, StructuredData } from "./details.js";
+import { OwnerDevices } from "./owner-devices.js";
 
 export const notices: Record<OwnerIssue, string> = {
+  cursor_expired: "Saved updates expired. Refresh the inbox to load its current state.",
+  history_unavailable:
+    "Account-wide messages aren’t available from the current owner API. Open a conversation on this device to see its saved history.",
   review_expired: "This request changed or the review expired. Refresh and review it again.",
   request_unavailable:
     "This request or choice is no longer available. Refresh or use the email or web app.",
   invalid_code: "That code is invalid or expired. Check it or request a new code.",
   code_unconfirmed: "We couldn't confirm the code email. If it arrives, you can still use it.",
   code_expired: "That code expired. Request a new one to sign in.",
-  verification_uncertain: "Sign-in wasn't confirmed. Request a new code to continue.",
+  verification_uncertain:
+    "Sign-in wasn’t confirmed. Enter the same code to try again on this device.",
   refresh_uncertain: "Your session couldn't be renewed. Sign in again with a new code.",
   session_expired: "Your session ended. Sign in again to view your account.",
   signout_unconfirmed: "Signed out on this app. We couldn't confirm sign-out on the server.",
@@ -73,10 +78,7 @@ function SnapshotNote({ updated }: { updated: string | undefined }) {
   return (
     <Disclosure className="snapshot-note" title="About this inbox">
       {updated && <p>Updated {when(updated)}</p>}
-      <p>
-        Showing up to 200 permissions and 200 questions. This snapshot may not include every pending
-        request.
-      </p>
+      <p>Requests refresh while the app is open. Large inboxes have additional pages.</p>
     </Disclosure>
   );
 }
@@ -94,6 +96,32 @@ export function AccountData({
   busy?: boolean;
   focusedRequest?: boolean;
 }) {
+  if (data.kind === "history")
+    return (
+      <section className="settings-section" aria-label="Permission history">
+        {data.items.length === 0 && (
+          <p className="body-note">No permission history on this page.</p>
+        )}
+        {data.items.map((item) => (
+          <article className="account-row" key={item.id}>
+            <div className="account-row-heading">
+              <strong>{action(item.event)}</strong>
+              <span className="subtle-tag">{action(item.to_state ?? "Unknown state")}</span>
+            </div>
+            <p>
+              {item.channel === "app"
+                ? "From the app"
+                : item.channel === "email"
+                  ? "From email"
+                  : "Source not recorded"}
+            </p>
+            <time>{when(item.at)}</time>
+            {item.reason && <p>{item.reason}</p>}
+          </article>
+        ))}
+      </section>
+    );
+  if (!["requests", "permissions", "communications"].includes(data.kind)) return null;
   if (
     data.kind === "people" ||
     data.kind === "profile" ||
@@ -139,7 +167,17 @@ export function AccountData({
         {data.unconfirmed?.map((item) => (
           <p className="account-notice" role="status" key={`${item.kind}:${item.id}`}>
             Confirmation unavailable for {action(item.action_type)}. Your submission may have been
-            accepted; it will not be sent again. <small className="break">Request {item.id}</small>
+            accepted. <small className="break">Request {item.id}</small>
+            {review && (
+              <button
+                type="button"
+                className="text-button"
+                disabled={busy}
+                onClick={() => review(item.kind, item.id)}
+              >
+                Check confirmation
+              </button>
+            )}
           </p>
         ))}
         {data.unconfirmedMore && (
@@ -174,7 +212,8 @@ export function AccountData({
                       {entry.item.requester_name && entry.item.requester_email && (
                         <p>{entry.item.requester_email}</p>
                       )}
-                      <p>Request reason isn't included by the server.</p>
+                      <p>{entry.item.reason || "No reason supplied."}</p>
+                      {entry.item.requester_verified === false && <p>Email not verified</p>}
                       {entry.item.expires_at && <p>Expires {when(entry.item.expires_at)}</p>}
                       <Details label="Permission scope" value={entry.item.scope} />
                     </>
@@ -188,7 +227,8 @@ export function AccountData({
                   )}
                 </Disclosure>
                 {entry.kind === "permission" &&
-                  !permissionChoices(entry.item.decision_options).length && (
+                  !permissionChoices(entry.item.decision_options, entry.item.offered_options)
+                    .length && (
                     <p className="body-note">
                       This app does not recognize these choices. Use the email or web app.
                     </p>
@@ -201,7 +241,8 @@ export function AccountData({
                   disabled={
                     busy ||
                     (entry.kind === "permission" &&
-                      !permissionChoices(entry.item.decision_options).length)
+                      !permissionChoices(entry.item.decision_options, entry.item.offered_options)
+                        .length)
                   }
                   onClick={() => review(entry.kind, entry.item.id)}
                   aria-label={entry.kind === "permission" ? "Review request" : "Review question"}
@@ -270,6 +311,7 @@ export function AccountData({
         </section>
       </>
     );
+  if (data.kind !== "communications") return null;
   return (
     <>
       <p className="account-limit">
@@ -322,7 +364,7 @@ export function OwnerDecisionForm({
   const target = review.target;
   const options =
     target.kind === "permission"
-      ? permissionChoices(target.item.decision_options)
+      ? permissionChoices(target.item.decision_options, target.item.offered_options)
       : target.kind === "input" && target.item.input_type === "buttons"
         ? (target.item.options ?? [])
         : [];
@@ -377,7 +419,9 @@ export function OwnerDecisionForm({
         )}
       </dl>
       {target.kind === "permission" && (
-        <p className="request-context-note">Request reason isn't included by the server.</p>
+        <p className="request-context-note">
+          {target.kind === "permission" ? target.item.reason || "No reason supplied." : ""}
+        </p>
       )}
       {target.kind === "input" ? (
         <>
@@ -489,7 +533,11 @@ export function Account({
   hideEmptyRequests = false,
   focusedRequest = false,
   linkedConversation = false,
+  instanceId,
+  instanceName,
 }: {
+  instanceId?: string | undefined;
+  instanceName?: string | undefined;
   linkedConversation?: boolean;
   snapshot: OwnerSnapshot;
   call(command: OwnerCommand): Promise<unknown>;
@@ -574,6 +622,14 @@ export function Account({
         const reply = raw as OwnerReply;
         if (reply.snapshot.context !== context) {
           setOwner(reply.snapshot);
+          if (
+            reply.state === "ready" &&
+            reply.data &&
+            ["requests", "permissions", "history", "devices"].includes(reply.data.kind)
+          ) {
+            setData(reply.data);
+            setFetchedAt(reply.fetchedAt ?? "");
+          }
           return;
         }
         if (reply.state === "unavailable") setError(notices[reply.issue ?? "offline"]);
@@ -616,6 +672,14 @@ export function Account({
         )
           return;
         setOwner(reply.snapshot);
+        if (
+          reply.state === "ready" &&
+          reply.data &&
+          ["requests", "permissions", "history", "devices"].includes(reply.data.kind)
+        ) {
+          setData(reply.data);
+          setFetchedAt(reply.fetchedAt ?? "");
+        }
         if (reply.data?.kind === "review") {
           setDecisionReview(reply.data);
           setConfirmation("");
@@ -627,7 +691,7 @@ export function Account({
               ? "Confirmed by Embassys."
               : reply.data.status === "settled"
                 ? "This request is no longer available to answer. It may have been handled elsewhere or expired."
-                : "Confirmation unavailable. Your submission may have been accepted; it will not be sent again. Check the email or web app for its status.",
+                : "Confirmation unavailable. Your submission may have been accepted. Check confirmation to recover the saved result.",
           );
           setRefresh((value) => value + 1);
           void requestSource?.refresh();
@@ -677,28 +741,30 @@ export function Account({
         </section>
       ) : section === "profile" ? (
         <section className="settings-section">
-          <div className="settings-row">
-            <div>
-              <strong>
-                {owner.status === "signed_in"
-                  ? owner.account?.display_name || "Your account"
-                  : "Sign in"}
-              </strong>
-              <p className="break">
-                {owner.status === "signed_in" ? owner.email : "Use your Embassys email."}
-              </p>
+          {(!compact || owner.status === "signed_in") && (
+            <div className="settings-row">
+              <div>
+                <strong>
+                  {owner.status === "signed_in"
+                    ? owner.account?.display_name || "Your account"
+                    : "Sign in"}
+                </strong>
+                <p className="break">
+                  {owner.status === "signed_in" ? owner.email : "Use your Embassys email."}
+                </p>
+              </div>
+              {owner.status === "signed_in" && (
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void run({ type: "owner_signout", context: owner.context })}
+                >
+                  Sign out
+                </button>
+              )}
             </div>
-            {owner.status === "signed_in" && (
-              <button
-                className="secondary"
-                type="button"
-                disabled={busy}
-                onClick={() => void run({ type: "owner_signout", context: owner.context })}
-              >
-                Sign out
-              </button>
-            )}
-          </div>
+          )}
           {owner.status === "signed_in" && (
             <p className="body-note">Signing out keeps local servers running.</p>
           )}
@@ -727,8 +793,8 @@ export function Account({
               {owner.status === "code_sent" ? (
                 <>
                   <p>
-                    If <strong className="break">{owner.email}</strong> has an Embassys agent, a
-                    sign-in code is on its way. It expires after ten minutes.
+                    A sign-in code is on its way to <strong className="break">{owner.email}</strong>
+                    . It expires after ten minutes. This is the only code you need for setup.
                   </p>
                   <label htmlFor="owner-code">Verification code</label>
                   <input
@@ -862,6 +928,16 @@ export function Account({
           {error || requestSource?.error}
         </p>
       )}
+      {owner.status === "signed_in" && section === "profile" && (
+        <OwnerDevices
+          key={owner.context}
+          owner={owner}
+          instanceId={instanceId}
+          instanceName={instanceName}
+          call={call}
+          changed={changed}
+        />
+      )}
       {owner.status === "signed_in" && confirmation && (
         <p className="account-notice" role="status">
           {confirmation}
@@ -923,6 +999,50 @@ export function Account({
               )
             )}
           </div>
+          {data?.kind === "permissions" && (
+            <button
+              className="text-button"
+              type="button"
+              disabled={busy}
+              onClick={() => void run({ type: "owner_history", context: owner.context })}
+            >
+              Permission history
+            </button>
+          )}
+          {data?.kind === "history" && (
+            <button
+              className="text-button"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void run({ type: "owner_permissions", context: owner.context, direction })
+              }
+            >
+              Back to permissions
+            </button>
+          )}
+          {data &&
+            "next_cursor" in data &&
+            data.next_cursor &&
+            ["requests", "permissions", "history"].includes(data.kind) && (
+              <button
+                className="text-button"
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  const cursor = data.next_cursor as string;
+                  void run(
+                    data.kind === "permissions"
+                      ? { type: "owner_permissions", context: owner.context, direction, cursor }
+                      : data.kind === "history"
+                        ? { type: "owner_history", context: owner.context, cursor }
+                        : { type: "owner_requests", context: owner.context, cursor },
+                  );
+                }}
+              >
+                Next page
+              </button>
+            )}
           {fetchedAt && section !== "requests" && (
             <p className="account-limit">Updated {when(fetchedAt)}</p>
           )}

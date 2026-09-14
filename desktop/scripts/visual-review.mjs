@@ -61,6 +61,7 @@ if (!process.argv.includes("--build-only")) {
       `--user-data-dir=${profile}`,
       ...(process.argv.includes("--edge-cases") ? ["--edge-cases"] : []),
       ...(process.argv.includes("--chat-pages") ? ["--chat-pages"] : []),
+      ...(process.argv.includes("--people-start") ? ["--people-start"] : []),
     ],
     { env, stdio: "inherit" },
   );

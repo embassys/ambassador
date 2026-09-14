@@ -8,7 +8,8 @@ export interface ConversationPreview {
 
 const topics: Record<string, string> = {
   get_phone_number: "Phone number",
-  get_free_busy_permission: "Calendar availability",
+  get_free_busy: "Calendar availability",
+  get_free_busy_permission: "Calendar permission",
   read_calendar_event_by_title: "Find a calendar event",
   read_calendar_permission: "Calendar access",
   create_calendar_event: "Create a calendar event",

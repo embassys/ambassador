@@ -1,6 +1,9 @@
 import { type ChildProcess, fork } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
+import { z } from "zod";
+import { type CentralCredentialRecord, parseCentralCredential } from "../central-credential.js";
+import { type OwnerNotice, ownerNoticeSchema } from "./owner-feed.js";
 import {
   type OwnerCommand,
   type OwnerReply,
@@ -23,6 +26,7 @@ export class OwnerWorkerClient {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  readonly #secrets = new Map<string, { agentId: string; finish(value?: unknown): void }>();
   #snapshot: OwnerSnapshot = {
     context: randomUUID(),
     status: "loading",
@@ -37,6 +41,7 @@ export class OwnerWorkerClient {
       expectedRuntime: string;
       diagnostics?: "development" | "production";
       onChange?: () => void;
+      onNotifications?: (ownerId: string, events: OwnerNotice[]) => Promise<void>;
     },
   ) {
     const env: NodeJS.ProcessEnv = { PATH: dirname(options.nodePath) };
@@ -76,6 +81,7 @@ export class OwnerWorkerClient {
           );
         }
         this.#pending.clear();
+        for (const value of this.#secrets.values()) value.finish();
       };
       this.#child.once("error", ended);
       this.#child.once("exit", ended);
@@ -91,6 +97,47 @@ export class OwnerWorkerClient {
           return;
         if (Buffer.byteLength(JSON.stringify(raw)) > 4 * 1024 * 1024) {
           void this.close();
+          return;
+        }
+        if (raw.type === "execution_credential") {
+          if ("requestId" in raw && typeof raw.requestId === "string")
+            this.#secrets
+              .get(raw.requestId)
+              ?.finish("credential" in raw ? raw.credential : undefined);
+          return;
+        }
+        if (raw.type === "notifications") {
+          const notice = z
+            .object({
+              deliveryId: z.uuid(),
+              ownerId: z.uuid(),
+              events: z.array(ownerNoticeSchema).max(200),
+            })
+            .safeParse(raw);
+          if (!notice.success) {
+            void this.close();
+            return;
+          }
+          const value = notice.data;
+          const matches =
+            this.#snapshot.status === "signed_in" &&
+            this.#snapshot.account?.owner_id === value.ownerId;
+          void (
+            matches && options.onNotifications
+              ? options.onNotifications(value.ownerId, value.events)
+              : Promise.reject(new Error("Account changed"))
+          )
+            .then(
+              () => true,
+              () => false,
+            )
+            .then((ok) => {
+              if (!this.#closed && this.#child.connected)
+                this.#child.send(
+                  { protocol: 1, type: "notification_receipt", deliveryId: value.deliveryId, ok },
+                  () => undefined,
+                );
+            });
           return;
         }
         if (raw.type === "ready" || raw.type === "state") {
@@ -164,7 +211,56 @@ export class OwnerWorkerClient {
     );
   }
   async request(input: OwnerCommand): Promise<OwnerReply> {
-    const command = ownerCommandSchema.parse(input);
+    return this.#request({ command: ownerCommandSchema.parse(input) });
+  }
+  async executionCredential(context: string, agentId: string): Promise<CentralCredentialRecord> {
+    z.uuid().parse(context);
+    z.uuid().parse(agentId);
+    await this.#ready;
+    if (!this.available() || this.#snapshot.context !== context || this.#secrets.size >= 4)
+      throw new Error("Account changed");
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => this.#secrets.get(requestId)?.finish(), 40000);
+      this.#secrets.set(requestId, {
+        agentId,
+        finish: (value) => {
+          clearTimeout(timer);
+          this.#secrets.delete(requestId);
+          try {
+            const credential = parseCentralCredential(value);
+            if (
+              this.#snapshot.context !== context ||
+              credential.token.subject !== agentId ||
+              credential.token.executionDeviceId !== this.#snapshot.account?.device_id
+            )
+              throw new Error();
+            resolve(credential.record);
+          } catch {
+            reject(new Error("Execution credential unavailable"));
+          }
+        },
+      });
+      this.#child.send(
+        { protocol: 1, type: "execution_credential", requestId, context, agentId },
+        (error) => {
+          if (error) this.#secrets.get(requestId)?.finish();
+        },
+      );
+    });
+  }
+  nativePush(context: string, token: string | null): Promise<OwnerReply> {
+    z.uuid().parse(context);
+    if (token !== null)
+      z.string()
+        .regex(/^[a-f0-9]{16,512}$/iu)
+        .parse(token);
+    return this.#request({ type: "native_push", context, token });
+  }
+  wake(): void {
+    if (this.available()) this.#child.send({ protocol: 1, type: "wake" }, () => undefined);
+  }
+  async #request(payload: object): Promise<OwnerReply> {
     if (this.#closed) throw new Error("The account service is closed.");
     await this.#ready;
     if (!this.available() || this.#pending.size >= 8)
@@ -178,7 +274,7 @@ export class OwnerWorkerClient {
         void this.close();
       }, 40000);
       this.#pending.set(requestId, { resolve, reject, timer });
-      this.#child.send({ protocol: 1, requestId, command }, (error) => {
+      this.#child.send({ protocol: 1, requestId, ...payload }, (error) => {
         if (error) {
           clearTimeout(timer);
           this.#pending.delete(requestId);
@@ -190,6 +286,7 @@ export class OwnerWorkerClient {
   close(): Promise<void> {
     if (this.#closeResult) return this.#closeResult;
     this.#closed = true;
+    for (const value of this.#secrets.values()) value.finish();
     this.#snapshot = { context: randomUUID(), status: "unavailable", issue: "worker_unavailable" };
     this.options.onChange?.();
     for (const item of this.#pending.values()) {

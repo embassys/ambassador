@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { DeviceReview } from "../../src/desktop/owner-devices.js";
 import type { OwnerSnapshot } from "../../src/desktop/owner-protocol.js";
 import type {
   DesktopCommand,
@@ -8,7 +9,7 @@ import type {
 import type { RegistrationSnapshot } from "../../src/desktop/registration.js";
 import { Account, notices } from "./account.js";
 import { SettingsButton } from "./navigation.js";
-import { Registration } from "./registration.js";
+import { prepareOnboardingAgent } from "./onboarding-setup.js";
 
 type Instance = DesktopInstance & { runtime: GatewaySnapshot };
 type Call = (command: DesktopCommand) => Promise<unknown>;
@@ -33,6 +34,12 @@ function AgentSetup({
   changed(): Promise<void>;
   complete(): void;
 }) {
+  const [review, setReview] = useState<DeviceReview>();
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (review) dialog.current?.showModal();
+    return () => dialog.current?.close();
+  }, [review]);
   const [registration, setRegistration] = useState<RegistrationSnapshot>();
   const [guides, setGuides] = useState<Guide[]>([]);
   const [choice, setChoice] = useState(0);
@@ -72,12 +79,25 @@ function AgentSetup({
   }, [instanceId, running, call]);
   const agent = agents[choice] ?? agents[0];
   const guide = guides.find((item) => item.name === agent.name);
-  async function connect() {
-    if (!instance || busy) return;
+  async function connect(approvedReview?: DeviceReview) {
+    if (!instance || !registration || busy) return;
     setBusy(true);
     setError("");
     setMessage("");
     try {
+      setReview(undefined);
+      const prepared = await prepareOnboardingAgent(
+        owner,
+        registration,
+        instance.id,
+        call,
+        approvedReview,
+      );
+      if (prepared.review) {
+        setReview(prepared.review);
+        return;
+      }
+      if (prepared.registration) setRegistration(prepared.registration);
       const result = (await call({
         type: "agent_connection",
         instanceId: instance.id,
@@ -87,7 +107,7 @@ function AgentSetup({
       setMessage(result.message);
       if (result.state === "configured" || result.state === "verified") {
         // Manual setup still needs the owner-selected executor after checking its settings.
-        if (!guide?.connect && registration?.needsExecutor)
+        if (!guide?.connect && prepared.registration?.needsExecutor)
           await call({
             type: "enrollment_executor",
             instanceId: instance.id,
@@ -97,18 +117,16 @@ function AgentSetup({
         setConfigured(true);
         await changed();
       }
-    } catch {
+    } catch (error) {
       setError(
-        "Setup didn't finish. Check the connection and try again; your registration is saved.",
+        error instanceof Error
+          ? error.message
+          : "Setup did not finish. Your account is saved; try again.",
       );
     } finally {
       setBusy(false);
     }
   }
-  const localReady =
-    registration?.phase === "registered" &&
-    registration.email?.toLowerCase() === owner.email?.toLowerCase() &&
-    registration.credentialStatus !== "expired";
   return (
     <>
       <p className="onboarding-step">2 · Connect your agent</p>
@@ -150,20 +168,6 @@ function AgentSetup({
         </button>
       ) : !registration ? (
         <p role="status">Checking this device…</p>
-      ) : !localReady ? (
-        <section className="onboarding-note">
-          <h2>Your account is available</h2>
-          <p>
-            {registration.credentialStatus === "expired"
-              ? "This device's agent credential has expired."
-              : "This device doesn't have a saved agent for this account."}{" "}
-            Restoring an existing agent needs server support. You can use your account here and keep
-            using your agent on its original device.
-          </p>
-          <button type="button" className="primary" onClick={complete}>
-            Continue to my account
-          </button>
-        </section>
       ) : configured ? (
         <>
           <p className="onboarding-note" role="status">
@@ -257,6 +261,38 @@ function AgentSetup({
           )}
         </>
       )}
+      {review && (
+        <dialog
+          ref={dialog}
+          className="review-sheet person-sheet"
+          aria-labelledby="setup-move-title"
+          onCancel={() => setReview(undefined)}
+        >
+          <h2 id="setup-move-title">Run your agent on this device?</h2>
+          <p>
+            Your agent for {owner.email} is assigned to another device. Moving it here stops new
+            requests from running there. Your permissions stay with the same agent.
+          </p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => setReview(undefined)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => void connect(review)}
+            >
+              Move here &amp; connect
+            </button>
+          </div>
+        </dialog>
+      )}
       {message && !configured && (
         <p role="status" className="body-note">
           {message}
@@ -267,7 +303,7 @@ function AgentSetup({
           {error}
         </p>
       )}
-      {!configured && (localReady || !running || !registration) && (
+      {!configured && (
         <button
           type="button"
           className="text-button onboarding-later"
@@ -299,20 +335,7 @@ export function Onboarding({
   const [view, setView] = useState<"welcome" | "login" | "register">(() =>
     ["code_sent", "reauth_required", "unavailable"].includes(owner.status) ? "login" : "welcome",
   );
-  const [email, setEmail] = useState("");
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
-  const login = view === "login" || owner.status === "code_sent";
-  function beginRegistration() {
-    setView("register");
-    if (!instance || instance.runtime.state === "running" || starting) return;
-    setStarting(true);
-    setError("");
-    void call({ type: "start", instanceId: instance.id })
-      .then(changed)
-      .catch(() => setError("The server couldn't start. Open server settings to check it."))
-      .finally(() => setStarting(false));
-  }
+  const login = view === "login";
   return (
     <div className="onboarding-shell">
       <header className="onboarding-brand">
@@ -324,7 +347,7 @@ export function Onboarding({
           <p role="status">Opening Embassys…</p>
         ) : owner.status === "signed_in" ? (
           <AgentSetup
-            key={`${owner.account?.agent_id ?? owner.email}:${instance?.id}`}
+            key={`${owner.account?.owner_id ?? owner.email}:${instance?.id}`}
             owner={owner}
             instance={instance}
             call={call}
@@ -349,7 +372,7 @@ export function Onboarding({
               <button type="button" className="primary" onClick={() => setView("login")}>
                 Log in
               </button>
-              <button type="button" className="secondary" onClick={beginRegistration}>
+              <button type="button" className="secondary" onClick={() => setView("register")}>
                 Register
               </button>
             </div>
@@ -370,49 +393,9 @@ export function Onboarding({
             )}
             <p className="onboarding-step">1 · Your account</p>
             <h1>{login ? "Welcome back" : "Join Embassys"}</h1>
-            {login ? (
-              <Account
-                key={email || "login"}
-                snapshot={owner}
-                call={call}
-                changed={changed}
-                compact
-                initialEmail={email}
-              />
-            ) : starting ? (
-              <p role="status">Getting ready…</p>
-            ) : instance ? (
-              <Registration
-                key={`${instance.id}-${instance.runtime.state}`}
-                instanceId={instance.id}
-                running={instance.runtime.state === "running"}
-                command={call}
-                connected={() => {
-                  setView("login");
-                }}
-                accountFirst
-                registered={(value) => {
-                  setEmail(value);
-                  setView("login");
-                }}
-                start={() => {
-                  if (starting) return;
-                  setStarting(true);
-                  setError("");
-                  void call({ type: "start", instanceId: instance.id })
-                    .then(changed)
-                    .catch(() =>
-                      setError("The server couldn't start. Open server settings to check it."),
-                    )
-                    .finally(() => setStarting(false));
-                }}
-              />
-            ) : (
-              <p>Open server settings to add this device.</p>
-            )}
-            {error && <p role="alert">{error}</p>}
+            <Account snapshot={owner} call={call} changed={changed} compact />
             {login && owner.status !== "code_sent" && (
-              <button type="button" className="text-button" onClick={beginRegistration}>
+              <button type="button" className="text-button" onClick={() => setView("register")}>
                 New here? Register
               </button>
             )}

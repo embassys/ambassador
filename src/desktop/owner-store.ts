@@ -1,9 +1,21 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createPrivateKey,
+  createPublicKey,
+  randomBytes,
+} from "node:crypto";
 import type { Stats } from "node:fs";
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import {
+  type CentralKeyMaterial,
+  centralJwkThumbprint,
+  exactCentralPublicJwk,
+} from "../central-credential.js";
 import { EncryptedFileCredentialStore } from "../credential-store.js";
+import { generateDpopKeyMaterial } from "../dpop.js";
 import { ProcessLock } from "../process-lock.js";
 import { secureWindowsArtifact } from "../windows-access-control.js";
 import { deriveCredentialKeyIsolated } from "./credential-kdf.js";
@@ -14,7 +26,10 @@ const credential = z.strictObject({
   access: z.string().min(20).max(16384),
   refresh: z.string().min(10).max(512),
   expiresAt: z.number().int().positive(),
-  agentId: z.uuid(),
+  ownerId: z.uuid(),
+  deviceId: z.uuid(),
+  jkt: z.string().max(128),
+  sessionExpiresAt: z.number().int().positive(),
   sessionId: z.uuid(),
   email: ownerEmail,
 });
@@ -33,7 +48,12 @@ export const ownerStateSchema = z.discriminatedUnion("status", [
     expiresAt: z.number().int(),
     issue: ownerIssue.optional(),
   }),
-  z.strictObject({ status: z.literal("signed_in"), credential, account: publicOwnerProfile }),
+  z.strictObject({
+    status: z.literal("signed_in"),
+    credential,
+    account: publicOwnerProfile,
+    refreshStartedAt: z.number().int().nonnegative().optional(),
+  }),
 ]);
 export type OwnerState = z.infer<typeof ownerStateSchema>;
 const aad = Buffer.from("embassys-owner-session:v1:https://mcp.embassys.ai");
@@ -50,6 +70,7 @@ const envelope = z.strictObject({
 
 export class OwnerStore {
   #closed = false;
+  #device: CentralKeyMaterial | undefined;
   private constructor(
     readonly directory: string,
     readonly key: Buffer,
@@ -84,14 +105,15 @@ export class OwnerStore {
         if (
           (await readLocalSettings(join(canonical, "session.json"), envelope)) ||
           (await Promise.all(
-            ["mutations.sqlite", "people.sqlite"].map((file) =>
-              lstat(join(canonical, file)).then(
-                () => true,
-                (error: NodeJS.ErrnoException) => {
-                  if (error.code === "ENOENT") return false;
-                  throw error;
-                },
-              ),
+            ["mutations.sqlite", "people.sqlite", "events.sqlite", "device.enc", "device.wrap"].map(
+              (file) =>
+                lstat(join(canonical, file)).then(
+                  () => true,
+                  (error: NodeJS.ErrnoException) => {
+                    if (error.code === "ENOENT") return false;
+                    throw error;
+                  },
+                ),
             ),
           ).then((results) => results.some(Boolean)))
         )
@@ -104,6 +126,41 @@ export class OwnerStore {
       await lock.release();
       throw error;
     }
+  }
+
+  async deviceKey(): Promise<CentralKeyMaterial> {
+    if (this.#device) return this.#device;
+    const keys = new EncryptedFileCredentialStore(
+      join(this.directory, "device.enc"),
+      join(this.directory, "device.wrap"),
+      "embassys-owner-device-v1",
+      {
+        deriveKey: deriveCredentialKeyIsolated,
+        validatePlaintext: (value) => {
+          if (!/^[A-Za-z0-9_-]{1,1024}$/u.test(value)) throw new Error("Invalid device key");
+        },
+      },
+    );
+    let privateKeyPkcs8 = await keys.load();
+    if (!privateKeyPkcs8) {
+      if ((await this.load()).status === "signed_in")
+        throw new Error("The signed-in device key is missing.");
+      privateKeyPkcs8 = generateDpopKeyMaterial().privateKeyPkcs8;
+      await keys.save(privateKeyPkcs8);
+    }
+    const privateKey = createPrivateKey({
+      key: Buffer.from(privateKeyPkcs8, "base64url"),
+      format: "der",
+      type: "pkcs8",
+    });
+    const publicJwk = exactCentralPublicJwk(createPublicKey(privateKey).export({ format: "jwk" }));
+    this.#device = {
+      privateKey,
+      privateKeyPkcs8,
+      publicJwk,
+      thumbprint: centralJwkThumbprint(publicJwk),
+    };
+    return this.#device;
   }
 
   async load(): Promise<OwnerState> {
@@ -120,9 +177,15 @@ export class OwnerStore {
       decipher.final(),
     ]);
     try {
-      return ownerStateSchema.parse(
-        JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext)),
-      );
+      const raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+      // Old app-audience credentials cannot authorize the new owner realm.
+      if (raw?.status === "signed_in" && raw.credential?.agentId && !raw.credential.ownerId)
+        return {
+          status: "reauth_required",
+          email: ownerEmail.parse(raw.credential.email),
+          issue: "session_expired",
+        };
+      return ownerStateSchema.parse(raw);
     } finally {
       plaintext.fill(0);
     }

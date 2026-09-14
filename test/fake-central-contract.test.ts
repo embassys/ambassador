@@ -145,7 +145,7 @@ test("I02-F03 fixture challenges once with a server-provided nonce", async (t) =
   assert.equal(accepted.status, 200);
 });
 
-test("I02-F04 fixture models permission, action, result, consuming poll, and ack", async (t) => {
+test("I02-F04 fixture models permission, action, result, poll metadata, and idempotent ack", async (t) => {
   const central = await startFakeCentral(t);
   const requester = central.seedClient("requester@fixture.test");
   const target = central.seedClient("target@fixture.test");
@@ -189,7 +189,7 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
   assert.equal(requestedBody.decision, null);
 
   const targetPoll = await target.protectedFetch("/api/poll_messages?timeout=0");
-  assert.deepEqual(await targetPoll.json(), { messages: [] });
+  assert.deepEqual(await targetPoll.json(), { messages: [], has_more: false, lease_seconds: 120 });
 
   const decisionToken = central.permissionDecisionToken(String(permissionId));
   const confirmation = await fetch(
@@ -223,6 +223,26 @@ test("I02-F04 fixture models permission, action, result, consuming poll, and ack
     body: JSON.stringify({ message_id: permissionResponseId }),
   });
   assert.equal(acknowledgedResponse.status, 200);
+  assert.deepEqual(await acknowledgedResponse.json(), {
+    message_id: permissionResponseId,
+    status: "acked",
+    acknowledged: [permissionResponseId],
+    already_acked: [],
+    unknown: [],
+  });
+  const repeatedAck = await requester.protectedFetch("/api/ack_message", {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ message_id: permissionResponseId }),
+  });
+  assert.equal(repeatedAck.status, 200);
+  assert.deepEqual(await repeatedAck.json(), {
+    message_id: permissionResponseId,
+    status: "acked",
+    acknowledged: [permissionResponseId],
+    already_acked: [permissionResponseId],
+    unknown: [],
+  });
 
   const action = await requester.protectedFetch("/api/call_action", {
     method: "POST",

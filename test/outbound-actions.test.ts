@@ -101,7 +101,7 @@ async function fixture(t: TestContext, fail = false, granted = false) {
       return {
         call_id: "10000000-0000-4000-8000-000000000001",
         message_id: "message-1",
-        status: "delivered",
+        status: "queued",
       };
     },
   };

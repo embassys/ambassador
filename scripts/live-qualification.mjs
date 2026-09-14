@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import { observeAgentVersion } from "./agent-version-probes.mjs";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
-const SOURCE_REVISION = "708f205bfaee5010eb86fcfae55967fb5d02071c";
+const SOURCE_REVISION = "2e96e4bafa2a9fc9603e57c493e87d3939312bc9";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
@@ -1757,7 +1757,7 @@ async function main() {
             isRecord(result) &&
             typeof result.call_id === "string" &&
             typeof result.message_id === "string" &&
-            result.status === "delivered"
+            result.status === "queued"
           ) {
             requesterActionCall = result;
           }
@@ -2393,7 +2393,7 @@ async function main() {
           .map((action) => [action.name, action.input_schema]),
       ),
     };
-    assert(actionNames.length === 6, "action_catalog");
+    assert(actionNames.includes("get_free_busy"), "action_catalog");
     for (const [name, description] of [
       ["get_email", "Reason for requesting email address"],
       ["get_phone_number", "Reason for requesting phone number"],
@@ -2502,7 +2502,7 @@ async function main() {
       isRecord(called) &&
         typeof called.call_id === "string" &&
         typeof called.message_id === "string" &&
-        called.status === "delivered",
+        called.status === "queued",
       "action",
     );
     phase = `action_${realWebhook ? "webhook" : "direct"}`;
@@ -2930,9 +2930,9 @@ async function main() {
       dpop_nonce_observed: dpop.nonceObserved,
       observed_rest_routes: [...centralRoutes].sort(),
       restart_limitation:
-        "A message consumed by central polling can be lost before Ambassador captures it locally; no lease or redelivery exists.",
+        "Central leases unacknowledged messages for redelivery. Ambassador never repeats an uncertain provider prompt. Lease-expiry fault injection is qualified separately from this packaged round trip.",
       result_submission_limitation:
-        "A result submission has no idempotency key or outcome lookup and is not retried after an uncertain response.",
+        "Saved idempotency keys permit recovery inside the local 23-hour retry window. Historical unkeyed or expired attempts stay uncertain. Dropped-response recovery is qualified separately from this packaged round trip.",
     };
     process.stdout.write(`${JSON.stringify(report)}\n`);
     return 0;

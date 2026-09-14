@@ -27,6 +27,8 @@ const recordSchema = registrationInput.extend({
     "verification_uncertain",
     "rejected",
     "conflict",
+    "recovery_code",
+    "recovery_uncertain",
   ]),
   agentId: z.string().max(256).optional(),
   displayName: z.string().min(1).max(128).optional(),
@@ -41,6 +43,8 @@ export interface RegistrationSnapshot {
   message?: string | undefined;
   resendAfter?: number;
   credentialStatus?: string;
+  executionDeviceId?: string;
+  executorEpoch?: number;
   needsExecutor?: boolean;
 }
 interface Options {
@@ -48,7 +52,13 @@ interface Options {
   profileStore: DeliveryProfileStore;
   workingDirectory: string;
   identity: GatewayIdentity;
-  client: Pick<CentralEnrollmentClient, "register" | "verify" | "resend">;
+  client: Pick<CentralEnrollmentClient, "register" | "verify" | "resend"> &
+    Partial<
+      Pick<
+        CentralEnrollmentClient,
+        "verificationCommitted" | "startRecovery" | "completeRecovery" | "recoveryCommitted"
+      >
+    >;
   activate(): Promise<void>;
   signal?: AbortSignal;
   now?: () => number;
@@ -66,6 +76,22 @@ export class DesktopRegistration {
   ) {
     this.#record = record;
   }
+  static async prepareImported(
+    path: string,
+    email: string,
+    executor?: z.infer<typeof desktopExecutor>,
+  ): Promise<void> {
+    const previous = await readLocalSettings(path, recordSchema);
+    if (previous && previous.email !== email)
+      throw new Error("This instance is registering a different email.");
+    if (!previous)
+      await writeLocalSettings(path, {
+        email,
+        ...(executor ? { executor } : {}),
+        phase: "awaiting_code",
+        resendAfter: 0,
+      });
+  }
   static async open(options: Options): Promise<DesktopRegistration> {
     return new DesktopRegistration(options, await readLocalSettings(options.path, recordSchema));
   }
@@ -76,11 +102,20 @@ export class DesktopRegistration {
     return this.#record !== undefined && !this.#record.executor;
   }
   snapshot(): RegistrationSnapshot {
-    if (this.options.identity.enrolled)
+    if (
+      this.options.identity.enrolled &&
+      !(this.options.identity.expired && this.#record?.phase.startsWith("recovery_"))
+    )
       return {
         phase: "registered",
         email: String(this.options.identity.enrollment.email),
         credentialStatus: this.options.identity.expired ? "expired" : "active",
+        ...(this.options.identity.localCredential().token.executionDeviceId
+          ? {
+              executionDeviceId: this.options.identity.localCredential().token.executionDeviceId,
+              executorEpoch: this.options.identity.localCredential().token.executorEpoch,
+            }
+          : {}),
         needsExecutor: this.needsExecutor,
         ...(this.#record ? { executor: this.#record.executor } : {}),
       };
@@ -228,12 +263,11 @@ export class DesktopRegistration {
       const record = this.#record;
       if (!record || record.phase === "rejected" || record.phase === "conflict")
         throw new Error("Register this instance first.");
-      if (record.phase === "verification_uncertain") return;
       await this.#save({
         ...record,
         phase: "verification_uncertain",
         message:
-          "Verification may have completed centrally, but no local credential was confirmed. Do not register again or use Clean. Central identity recovery is required.",
+          "Verification may have completed. Enter the same code again to recover its result using the saved local key.",
       });
       try {
         this.#verifiedResult = await this.options.identity.enroll(async () => {
@@ -261,9 +295,82 @@ export class DesktopRegistration {
           });
         return;
       }
+      await this.options.client.verificationCommitted?.();
       // Credential custody is authoritative even if delivery activation fails afterward.
       if (!this.needsExecutor) await this.options.activate();
     });
+  }
+  async recover(code?: string): Promise<RegistrationSnapshot> {
+    if (this.#busy) throw new Error("Setup is already in progress.");
+    const previous = this.#record;
+    const identity = this.options.identity;
+    if (!previous || !this.options.client.startRecovery || !this.options.client.completeRecovery)
+      throw new Error("Recovery is unavailable.");
+    if (identity.enrolled && !identity.expired) return this.snapshot();
+    if (identity.enrolled && identity.localCredential().token.executionDeviceId)
+      throw new Error("Open Devices & agents to restore this execution credential.");
+    if (code !== undefined && previous.phase !== "recovery_code")
+      throw new Error("Request a recovery code first.");
+    this.#busy = true;
+    try {
+      if (code === undefined) {
+        if (
+          previous.phase.startsWith("recovery_") &&
+          previous.resendAfter > (this.options.now?.() ?? Date.now())
+        )
+          throw new Error("Wait before requesting another recovery code.");
+        await this.#save({
+          ...previous,
+          phase: "recovery_code",
+          resendAfter: (this.options.now?.() ?? Date.now()) + 60000,
+          message:
+            "If this email has an agent, a recovery code has been sent. Completing recovery signs out its earlier installations.",
+        });
+        await this.options.client.startRecovery({ email: previous.email }, this.options.signal);
+      } else {
+        z.string()
+          .regex(/^\d{6}$/u)
+          .parse(code);
+        await this.#save({
+          ...previous,
+          phase: "recovery_uncertain",
+          message:
+            "Recovery was not confirmed. Request a new recovery code to retry. Saved local conversations remain here.",
+        });
+        try {
+          const result = await this.options.client.completeRecovery(
+            { email: previous.email, code },
+            this.options.signal,
+            identity.enrolled ? identity.localCredential() : undefined,
+          );
+          if (previous.agentId && result.localResult.agent_id !== previous.agentId)
+            throw new Error("Recovery identity mismatch");
+          if (identity.enrolled) await identity.renew(result.credential);
+          else await identity.enroll(async () => result);
+          await this.#save({
+            ...previous,
+            phase: "awaiting_code",
+            agentId: result.localResult.agent_id,
+            message: "Agent identity recovered.",
+          });
+          await this.options.client.recoveryCommitted?.();
+          if (!this.needsExecutor) await this.options.activate();
+        } catch (error) {
+          if (
+            error instanceof CentralEnrollmentError &&
+            ["verification_failed", "central_rate_limited"].includes(error.code)
+          )
+            await this.#save({
+              ...previous,
+              phase: "recovery_code",
+              message: "The code was rejected or rate-limited. Check the latest recovery email.",
+            });
+        }
+      }
+      return this.snapshot();
+    } finally {
+      this.#busy = false;
+    }
   }
   async selectExecutor(raw: unknown): Promise<RegistrationSnapshot> {
     const executor = desktopExecutor.parse(raw);

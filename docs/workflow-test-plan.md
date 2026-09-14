@@ -182,3 +182,48 @@ including revoked and expired, and still reject unknown values. The exact
 revocation rejection is classified as a confirmed refusal, not uncertain delivery.
 Live qualification must also read the resulting permission list: successfully
 receiving a notification alone does not prove the app can display its status.
+
+
+## September 14 central contract regressions
+
+[ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md) adds the
+following boundaries to the existing matrix:
+
+- `central-mutations` and message-box tests: exact persisted body/key before write,
+  response-loss recovery, expiry and backward clocks, concurrency, receipt rehydration
+  and no replacement key for an unknown outcome.
+- `central-renewal`, `central-verification-keys` and `execution-credential` tests:
+  compare-and-swap encrypted replacement, unchanged identity/key/device claims,
+  filesystem failure, restart, pre-request key reuse and readable old ciphertext.
+- `desktop-registration` and `desktop-execution-import` tests: explicit recovery,
+  no replay after lost recovery response, fresh code/cooldown, installation locks,
+  cancellation and refusal to overwrite a different identity.
+- `desktop-owner-account`, `desktop-owner-devices`, `desktop-owner-feed` and
+  `desktop-owner-pages`: current owner token realm, device review expiry/change,
+  unknown transfer responses, exact offered options/revisions, paginated cursors,
+  account switches, notification-custody failure and restart during resnapshot.
+- `desktop-native-push`: service unavailable, late OS registration after disable
+  or account change, and private native tokens. Fixtures do not prove APNs delivery.
+- `action-catalog`, `message-box` and native bridge tests: success-schema rejection,
+  null schema, nonterminal failure progress, correlated sequence/event deduplication,
+  no inferred grants and preserved ten-minute continuation behavior.
+
+The [adoption record](central-adoption-2026-09-14.md) records live disposable-owner
+qualification. After API issue 15 was repaired, controlled live checks passed
+leased redelivery, release/acknowledgement, keyed submission recovery after
+restart, progress/owner input, results, renewal and execution fencing. Calendar
+checks separately proved exact-action permissions and rejected decision-only
+results. The live run found the stale `delivered` action receipt expectation;
+the new queued-receipt regression and both fixtures now use `queued`.
+Owner roster tests cover persistent refresh without another code, unchanged
+account context, invalid/duplicate rosters, unavailable responses and executor
+epoch changes between review and confirmation. Invitation dates require offsets.
+
+## One-code onboarding
+
+Under ADR 0083, cover owner-only first verification, same-email agent adoption,
+response loss and restart, exact identity validation and safe retry. Device setup
+must compare the saved execution device and epoch with the refreshed roster.
+A move from another device requires a current review and explicit confirmation.
+A failed local install stays incomplete; provider Connect cannot claim success
+until the matching saved credential and read-only setup challenge are verified.

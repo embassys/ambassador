@@ -8,6 +8,13 @@ import { DesktopGateway } from "../src/desktop/gateway.js";
 import { DesktopInstances } from "../src/desktop/instances.js";
 import { OwnerAccount } from "../src/desktop/owner-account.js";
 import { parseDesktopCommand } from "../src/desktop/protocol.js";
+import {
+  centralJwkThumbprint,
+  DEVICE_ID,
+  ownerSession,
+  wireGrants,
+  wireRequests,
+} from "./support/owner-wire-fixture.js";
 
 const email = "owner@fixture.test";
 const agentId = "00000000-0000-4000-8000-000000000011";
@@ -28,6 +35,8 @@ function token(now: number, overrides: Record<string, unknown> = {}) {
 function fixture() {
   let now = Date.now();
   let rotated = 0;
+  let jkt = "";
+  let activeGrants: Record<string, unknown>[] = [];
   const calls: { path: string; init: RequestInit | undefined }[] = [];
   let override:
     | ((path: string, init?: RequestInit) => Response | Promise<Response> | undefined)
@@ -38,47 +47,108 @@ function fixture() {
     assert.equal(init?.redirect, "error");
     const path = url.pathname + url.search;
     calls.push({ path, init });
+    const wireResponse = async (response: Response): Promise<Response> => {
+      if (
+        response.headers.has("content-length") ||
+        response.headers.has("x-fixture-passthrough") ||
+        !response.ok ||
+        !response.headers.get("content-type")?.includes("application/json")
+      )
+        return response;
+      const raw = (await response.clone().json()) as Record<string, unknown>;
+      if (raw.permission_requests) return Response.json(wireRequests(raw));
+      if (raw.permissions) {
+        activeGrants = wireGrants(raw).items;
+        return Response.json(wireGrants(raw));
+      }
+      if (raw.status === "ok" && raw.permission_id)
+        return Response.json(
+          path.endsWith("/revoke")
+            ? {
+                permission_id: raw.permission_id,
+                state: "revoked",
+                revision: 2,
+                already_revoked: false,
+                message: "Revoked",
+                effect: "Stops future use",
+              }
+            : {
+                kind: "permission",
+                request_id: raw.permission_id,
+                state: raw.decision === "deny" ? "denied" : "granted",
+                revision: 2,
+                answer: raw.decision,
+                message: "Decided",
+              },
+        );
+      if (raw.status === "ok" && raw.request_id)
+        return Response.json({
+          kind: "human_input",
+          request_id: raw.request_id,
+          state: "answered",
+          revision: 2,
+          answer: raw.answer,
+          message: "Answered",
+        });
+      return response;
+    };
     const changed = await override?.(path, init);
-    if (changed) return changed;
-    if (path === "/api/app/login/request")
-      return Response.json({ status: "ok", expires_in_minutes: 10 });
-    if (path === "/api/app/login/verify") {
-      if (JSON.parse(String(init?.body)).code !== "314159")
-        return Response.json({}, { status: 401 });
-      return Response.json({
-        access_token: token(now),
-        refresh_token: "fixture-refresh-original",
-        token_type: "bearer",
-        expires_in: 900,
-        agent_id: agentId,
-        email,
-      });
+    if (changed) return wireResponse(changed);
+    if (url.pathname.startsWith("/api/owner/inbox/")) {
+      const listing = await override?.("/api/owner/inbox?limit=200", init);
+      const raw = listing
+        ? ((await listing.json()) as Record<string, unknown>)
+        : { permission_requests: [], input_requests: [] };
+      const wanted = url.pathname.split("/").at(-1);
+      const item = wireRequests(raw).items.find((item) => item.request_id === wanted);
+      if (item && activeGrants.some((grant) => grant.permission_id === wanted))
+        item.state = "granted";
+      return item ? Response.json({ item }) : Response.json({}, { status: 404 });
+    }
+    if (path === "/api/owner/start_sign_in")
+      return Response.json({ message: "Code sent", expires_in_minutes: 10 });
+    if (path === "/api/owner/verify_sign_in") {
+      const input = JSON.parse(String(init?.body));
+      if (input.code !== "314159") return Response.json({}, { status: 400 });
+      jkt = centralJwkThumbprint(input.device.jwk);
+      return Response.json(ownerSession(now, jkt), { headers: { "cache-control": "no-store" } });
     }
     assert.equal(new Headers(init?.headers).has("DPoP"), false);
-    if (path === "/api/app/session/refresh") {
+    if (path === "/api/owner/refresh") {
       rotated++;
-      return Response.json({
-        access_token: token(now),
-        refresh_token: `fixture-refresh-rotated-${rotated}`,
-        token_type: "bearer",
-        expires_in: 900,
-      });
+      return Response.json(
+        { ...ownerSession(now, jkt), refresh_token: `fixture-refresh-rotated-${rotated}` },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
     assert.match(new Headers(init?.headers).get("authorization") ?? "", /^Bearer /u);
-    if (path === "/api/app/me")
+    if (path === "/api/owner/agents")
+      return Response.json({ agents: ownerSession(now, jkt).agents, newly_attached_agent_ids: [] });
+    if (path === "/api/owner/devices")
       return Response.json({
-        agent_id: agentId,
-        email,
-        display_name: "Fixture owner",
-        username: null,
-        session_id: sessionId,
+        devices: [
+          {
+            id: DEVICE_ID,
+            device_name: "Fixture device",
+            platform: "darwin",
+            jkt,
+            created_at: new Date(now).toISOString(),
+            last_seen_at: null,
+            revoked_at: null,
+            executes_agent_ids: [],
+            is_current: true,
+          },
+        ],
       });
-    if (path === "/api/app/requests")
-      return Response.json({ permission_requests: [], input_requests: [], total: 0 });
-    if (path.startsWith("/api/app/permissions?"))
-      return Response.json({ direction: url.searchParams.get("direction"), permissions: [] });
-    if (path === "/api/app/communications?limit=200") return Response.json({ communications: [] });
-    if (path === "/api/app/session/signout") return Response.json({ status: "ok" });
+    if (path === "/api/owner/inbox?limit=200")
+      return Response.json({ items: [], next_cursor: null, has_more: false, watermark: 0 });
+    if (path.startsWith("/api/owner/permissions?"))
+      return Response.json({ items: [], next_cursor: null, has_more: false, watermark: 0 });
+    if (path === "/api/owner/communications?limit=200")
+      return Response.json({ communications: [] });
+    if (path === "/api/owner/push" && init?.method === "DELETE")
+      return Response.json({ removed: true, message: "Removed" });
+    if (path === "/api/owner/sign_out") return Response.json({ message: "Signed out" });
     throw new Error("Unexpected fixture route");
   };
   return {
@@ -162,13 +232,13 @@ test("owner snapshots accept JSON columns, preserve exact labels and redact nest
   const logs: unknown[] = [];
   s.service.options.log = (event, data) => logs.push({ event, data });
   s.f.override((path) =>
-    path === "/api/app/requests"
+    path === "/api/owner/inbox?limit=200"
       ? Response.json({
           total: 2,
           permission_requests: [
             {
               id: randomUUID(),
-              decision_options: "unknown_future_menu",
+              decision_options: "once_always",
               scope: '{"calendar_id":"primary","refresh_token":"private-refresh"}',
               created_at: new Date().toISOString(),
               expires_at: null,
@@ -215,7 +285,6 @@ test("owner lists reject mismatched direction, excessive rows, malformed fields 
   const s = await setup(t);
   await s.login();
   for (const reply of [
-    Response.json({ direction: "received", permissions: [] }),
     Response.json({ direction: "granted", permissions: Array(201).fill({}) }),
     Response.json({ direction: "granted", permissions: [{ id: "not-a-uuid" }] }),
     new Response("<h1>proxy error, secret=private</h1>", {
@@ -225,7 +294,7 @@ test("owner lists reject mismatched direction, excessive rows, malformed fields 
       headers: { "content-type": "application/json", "content-length": "5000000" },
     }),
   ]) {
-    s.f.override((path) => (path.startsWith("/api/app/permissions") ? reply : undefined));
+    s.f.override((path) => (path.startsWith("/api/owner/permissions") ? reply : undefined));
     const result = await s.request({ type: "owner_permissions", direction: "granted" });
     assert.equal(result.state, "unavailable");
     assert.equal(result.issue, "invalid_response");
@@ -236,17 +305,17 @@ test("owner lists reject mismatched direction, excessive rows, malformed fields 
 test("expired challenges and authentication throttles are not reported as successful sign-in", async (t) => {
   const s = await setup(t);
   s.f.override((path) =>
-    path === "/api/app/login/request" ? Response.json({}, { status: 429 }) : undefined,
+    path === "/api/owner/start_sign_in" ? Response.json({}, { status: 429 }) : undefined,
   );
   await s.request({ type: "owner_request_code", email });
   assert.equal(s.service.snapshot().issue, "rate_limited");
   s.f.advance(601000);
   await s.request({ type: "owner_verify", code: "314159" });
   assert.equal(s.service.snapshot().issue, "code_expired");
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/login/verify").length, 0);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length, 0);
 });
 
-test("a failed credential save after successful login keeps the no-replay marker", async (t) => {
+test("a failed credential save after successful login retains the same-device verification challenge", async (t) => {
   const s = await setup(t);
   await s.request({ type: "owner_request_code", email });
   const save = s.service.store.save.bind(s.service.store);
@@ -257,9 +326,10 @@ test("a failed credential save after successful login keeps the no-replay marker
   await assert.rejects(s.request({ type: "owner_verify", code: "314159" }));
   assert.equal(s.service.snapshot().status, "unavailable");
   await s.restart();
-  assert.equal(s.service.snapshot().status, "reauth_required");
-  await assert.rejects(s.request({ type: "owner_verify", code: "314159" }));
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/login/verify").length, 1);
+  assert.equal(s.service.snapshot().status, "code_sent");
+  await s.request({ type: "owner_verify", code: "314159" });
+  assert.equal(s.service.snapshot().status, "signed_in");
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length, 2);
 });
 
 test("saving uncertainty must finish before any one-use refresh is sent", async (t) => {
@@ -270,7 +340,7 @@ test("saving uncertainty must finish before any one-use refresh is sent", async 
     throw new Error("read only");
   };
   await assert.rejects(s.request({ type: "owner_requests" }));
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/session/refresh").length, 0);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/refresh").length, 0);
 });
 
 test("a body that stalls after HTTP headers is cancelled within the account deadline", async (t) => {
@@ -279,14 +349,14 @@ test("a body that stalls after HTTP headers is cancelled within the account dead
   s.service.options.timeoutMs = 30;
   let cancelled = false;
   s.f.override((path) =>
-    path === "/api/app/requests"
+    path === "/api/owner/inbox?limit=200"
       ? new Response(
           new ReadableStream({
             cancel() {
               cancelled = true;
             },
           }),
-          { headers: { "content-type": "application/json" } },
+          { headers: { "content-type": "application/json", "x-fixture-passthrough": "true" } },
         )
       : undefined,
   );
@@ -309,7 +379,7 @@ test("a queued read from before sign-out cannot return data for a later account"
   const staleRead = s.service.command({ type: "owner_requests", context });
   await signingOut;
   await assert.rejects(staleRead, /Account changed/u);
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/requests").length, 0);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/inbox?limit=200").length, 0);
 });
 
 test("owner IPC rejects paths, tokens, instance selection and decision commands", () => {
@@ -336,7 +406,7 @@ test("a pending code email shows no failure until the request outcome is unknown
   });
   let fail: (error: Error) => void = () => undefined;
   s.f.override((path) =>
-    path === "/api/app/login/request"
+    path === "/api/owner/start_sign_in"
       ? new Promise<Response>((_resolve, reject) => {
           fail = reject;
           entered();
@@ -367,7 +437,7 @@ test("owner login rejects bad codes, bounds resend and exposes no session creden
   const reply = await s.request({ type: "owner_verify", code: "314159" });
   assert.equal(s.service.snapshot().status, "signed_in");
   assert.doesNotMatch(JSON.stringify(reply), /access_token|refresh_token|314159|fixture-refresh/u);
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/login/request").length, 1);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/start_sign_in").length, 1);
 });
 
 test("owner encrypted session survives restart and refreshes only once for concurrent reads", async (t) => {
@@ -383,7 +453,7 @@ test("owner encrypted session survives restart and refreshes only once for concu
     s.request({ type: "owner_permissions", direction: "granted" }),
     s.request({ type: "owner_communications" }),
   ]);
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/session/refresh").length, 1);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/refresh").length, 1);
   assert.doesNotMatch(JSON.stringify(replies), /Bearer|fixture-refresh/u);
   for (const name of await readdir(s.options.directory)) {
     const bytes = await readFile(join(s.options.directory, name));
@@ -393,31 +463,34 @@ test("owner encrypted session survives restart and refreshes only once for concu
   }
 });
 
-test("lost refresh response requires a new login and is never replayed after restart", async (t) => {
+test("lost refresh response retries within overlap after restart without exposing tokens", async (t) => {
   const s = await setup(t);
   await s.login();
   s.f.advance(901_000);
   s.f.override((path) => {
-    if (path === "/api/app/session/refresh") throw new Error("lost fixture-refresh-secret");
+    if (path === "/api/owner/refresh") throw new Error("lost fixture-refresh-secret");
   });
   const result = await s.request({ type: "owner_requests" });
   assert.doesNotMatch(JSON.stringify(result), /fixture-refresh-secret/u);
-  assert.equal(s.service.snapshot().status, "reauth_required");
+  assert.equal(s.service.snapshot().status, "signed_in");
   await s.restart();
+  s.f.override(undefined);
   await s.request({ type: "owner_requests" });
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/session/refresh").length, 1);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/refresh").length, 2);
 });
 
-test("lost verification response cannot silently spend the same code again", async (t) => {
+test("lost verification response can be retried only on the same saved device", async (t) => {
   const s = await setup(t);
   await s.request({ type: "owner_request_code", email });
   s.f.override((path) => {
-    if (path === "/api/app/login/verify") throw new Error("unknown");
+    if (path === "/api/owner/verify_sign_in") throw new Error("unknown");
   });
   await s.request({ type: "owner_verify", code: "314159" });
   await s.restart();
-  await assert.rejects(s.request({ type: "owner_verify", code: "314159" }));
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/login/verify").length, 1);
+  s.f.override(undefined);
+  await s.request({ type: "owner_verify", code: "314159" });
+  assert.equal(s.service.snapshot().status, "signed_in");
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length, 2);
 });
 
 test("owner login refuses an agent token, mismatched email or another session on refresh", async (t) => {
@@ -429,7 +502,7 @@ test("owner login refuses an agent token, mismatched email or another session on
     const s = await setup(t);
     await s.request({ type: "owner_request_code", email });
     s.f.override((path) =>
-      path === "/api/app/login/verify"
+      path === "/api/owner/verify_sign_in"
         ? Response.json({
             access_token: token(s.f.now(), overrides),
             refresh_token: "fixture-refresh-secret",
@@ -441,13 +514,14 @@ test("owner login refuses an agent token, mismatched email or another session on
         : undefined,
     );
     await s.request({ type: "owner_verify", code: "314159" });
-    assert.equal(s.service.snapshot().status, "reauth_required");
+    assert.equal(s.service.snapshot().status, "code_sent");
+    assert.equal(s.service.snapshot().account, undefined);
   }
   const s = await setup(t);
   await s.login();
   s.f.advance(901_000);
   s.f.override((path) =>
-    path === "/api/app/session/refresh"
+    path === "/api/owner/refresh"
       ? Response.json({
           access_token: token(s.f.now(), { sid: randomUUID() }),
           refresh_token: "fixture-refresh-secret",
@@ -464,12 +538,12 @@ test("offline reads remain distinguishable from empty views; a revoked session c
   const s = await setup(t);
   await s.login();
   s.f.override((path) => {
-    if (path === "/api/app/requests") throw new Error("offline");
+    if (path === "/api/owner/inbox?limit=200") throw new Error("offline");
   });
   assert.equal((await s.request({ type: "owner_requests" })).state, "unavailable");
   assert.equal(s.service.snapshot().status, "signed_in");
   s.f.override((path) =>
-    path === "/api/app/requests" ? Response.json({}, { status: 401 }) : undefined,
+    path === "/api/owner/inbox?limit=200" ? Response.json({}, { status: 401 }) : undefined,
   );
   await s.request({ type: "owner_requests" });
   assert.equal(s.service.snapshot().status, "reauth_required");
@@ -483,7 +557,7 @@ test("sign-out commits locally despite a lost response and never touches instanc
   await writeFile(marker, "keep gateway");
   const context = s.service.snapshot().context;
   s.f.override((path) => {
-    if (path === "/api/app/session/signout") throw new Error("lost");
+    if (path === "/api/owner/sign_out") throw new Error("lost");
   });
   await s.request({ type: "owner_signout" });
   assert.equal(s.service.snapshot().status, "signed_out");
@@ -492,7 +566,7 @@ test("sign-out commits locally despite a lost response and never touches instanc
   await assert.rejects(s.service.command({ type: "owner_requests", context }));
   await s.restart();
   assert.equal(s.service.snapshot().status, "signed_out");
-  assert.equal(s.f.calls.filter((c) => c.path === "/api/app/session/signout").length, 1);
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/sign_out").length, 1);
 });
 
 test("sign-out does not show a failure while its confirmation is still pending", async (t) => {
@@ -507,7 +581,7 @@ test("sign-out does not show a failure while its confirmation is still pending",
     finish = resolve;
   });
   s.f.override((path) => {
-    if (path !== "/api/app/session/signout") return;
+    if (path !== "/api/owner/sign_out") return;
     entered();
     return response;
   });
@@ -603,9 +677,14 @@ test("owner mutations review exact options, confirm once and persist receipt acr
   const s = await setup(t);
   await s.login();
   s.f.override((path, init) => {
-    if (path === "/api/app/requests") return Response.json(ownerRequests());
+    if (path === "/api/owner/inbox?limit=200") return Response.json(ownerRequests());
     if (path.endsWith("/decide")) {
-      assert.deepEqual(JSON.parse(String(init?.body)), { decision: "allow_once" });
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        kind: "permission",
+        request_id: permissionId,
+        expected_revision: 1,
+        decision: "allow_once",
+      });
       return Response.json({
         status: "ok",
         permission_id: permissionId,
@@ -639,12 +718,14 @@ test("owner unknown menus, malformed options, stale and expired reviews never su
   const s = await setup(t);
   await s.login();
   let current = ownerRequests();
-  s.f.override((path) => (path === "/api/app/requests" ? Response.json(current) : undefined));
+  s.f.override((path) =>
+    path === "/api/owner/inbox?limit=200" ? Response.json(current) : undefined,
+  );
   assert.ok(current.permission_requests[0]);
   current.permission_requests[0].decision_options = "future_menu";
   assert.equal(
     (await s.request({ type: "owner_review", kind: "permission", id: permissionId })).issue,
-    "request_unavailable",
+    "invalid_response",
   );
   current = ownerRequests();
   current.input_requests[0]?.options.push({
@@ -679,22 +760,35 @@ test("owner unknown menus, malformed options, stale and expired reviews never su
     "review_expired",
   );
   assert.equal(
-    s.f.calls.filter((c) => c.path.endsWith("/decide") || c.path.endsWith("/answer")).length,
+    s.f.calls.filter((c) => c.path.endsWith("/decide") || c.path.endsWith("/decide")).length,
     0,
   );
 });
 
-test("lost owner answers survive sign-out and restart without replay or inferred success", async (t) => {
+test("lost owner answers recover the exact idempotent receipt after sign-out and restart", async (t) => {
   const s = await setup(t);
   await s.login();
   let answered = false;
+  let key: string | null = null;
   s.f.override((path, init) => {
-    if (path === "/api/app/requests")
+    if (path === "/api/owner/inbox?limit=200")
       return Response.json(
         answered ? { total: 0, permission_requests: [], input_requests: [] } : ownerRequests(),
       );
-    if (path.endsWith("/answer")) {
-      assert.deepEqual(JSON.parse(String(init?.body)), { value: "provider:allow-once" });
+    if (path.endsWith("/decide")) {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        kind: "human_input",
+        request_id: inputId,
+        expected_revision: 1,
+        value: "provider:allow-once",
+      });
+      const currentKey = new Headers(init?.headers).get("Idempotency-Key");
+      assert.ok(currentKey);
+      if (answered) {
+        assert.equal(currentKey, key);
+        return Response.json({ status: "ok", request_id: inputId, answer: "Only this invocation" });
+      }
+      key = currentKey;
       answered = true;
       throw new Error("Response lost after commit");
     }
@@ -713,8 +807,8 @@ test("lost owner answers survive sign-out and restart without replay or inferred
   const feed = await s.request({ type: "owner_requests" });
   assert.match(JSON.stringify(feed.data), /unconfirmed/);
   const repeat = await s.request({ type: "owner_review", kind: "input", id: inputId });
-  assert.equal((repeat.data as unknown as { status: string }).status, "unconfirmed");
-  assert.equal(s.f.calls.filter((c) => c.path.endsWith("/answer")).length, 1);
+  assert.equal((repeat.data as unknown as { status: string }).status, "confirmed");
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("/decide")).length, 2);
   const files = await readdir(join(s.root, "account"));
   for (const name of files.filter((n) => n.startsWith("mutations.sqlite")))
     assert.doesNotMatch(
@@ -728,7 +822,7 @@ test("email/app conflict is settled, mismatched success is unconfirmed, and reje
     const s = await setup(t);
     await s.login();
     s.f.override((path) => {
-      if (path === "/api/app/requests") return Response.json(ownerRequests());
+      if (path === "/api/owner/inbox?limit=200") return Response.json(ownerRequests());
       if (path.endsWith("/decide"))
         return Response.json(
           {
@@ -752,11 +846,7 @@ test("email/app conflict is settled, mismatched success is unconfirmed, and reje
     if (status === 400) {
       assert.equal(result.issue, "request_unavailable");
       reviewId(await s.request({ type: "owner_review", kind: "permission", id: permissionId }));
-    } else
-      assert.equal(
-        (result.data as unknown as { status: string }).status,
-        status === 409 ? "settled" : "unconfirmed",
-      );
+    } else assert.equal((result.data as unknown as { status: string }).status, "unconfirmed");
   }
 });
 
@@ -764,7 +854,7 @@ test("owner text answers and active grant revocation use the exact owner routes"
   const s = await setup(t);
   await s.login();
   s.f.override((path, init) => {
-    if (path === "/api/app/requests") {
+    if (path === "/api/owner/inbox?limit=200") {
       const current = ownerRequests();
       const item = current.input_requests[0];
       assert.ok(item);
@@ -772,8 +862,13 @@ test("owner text answers and active grant revocation use the exact owner routes"
       item.options = [];
       return Response.json(current);
     }
-    if (path.endsWith("/answer")) {
-      assert.deepEqual(JSON.parse(String(init?.body)), { text: "My exact answer" });
+    if (path.endsWith("/decide")) {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        kind: "human_input",
+        request_id: inputId,
+        expected_revision: 1,
+        text: "My exact answer",
+      });
       return Response.json({
         status: "ok",
         request_id: inputId,
@@ -781,7 +876,7 @@ test("owner text answers and active grant revocation use the exact owner routes"
         action_type: "get_phone_number",
       });
     }
-    if (path.startsWith("/api/app/permissions?"))
+    if (path.startsWith("/api/owner/permissions?"))
       return Response.json({
         direction: "granted",
         permissions: [
@@ -806,7 +901,10 @@ test("owner text answers and active grant revocation use the exact owner routes"
         ],
       });
     if (path.endsWith("/revoke")) {
-      assert.equal(init?.body, undefined);
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        permission_id: permissionId,
+        expected_revision: 1,
+      });
       assert.equal(init?.method, "POST");
       return Response.json({
         status: "ok",
@@ -820,6 +918,7 @@ test("owner text answers and active grant revocation use the exact owner routes"
     ["input", inputId, { text: "My exact answer" }],
     ["revoke", permissionId, {}],
   ] as const) {
+    if (kind === "revoke") await s.request({ type: "owner_permissions", direction: "granted" });
     const review = reviewId(await s.request({ type: "owner_review", kind, id }));
     const result = await s.request({ type: "owner_submit", review_id: review, ...answer });
     assert.equal((result.data as unknown as { status: string }).status, "confirmed");
@@ -831,7 +930,7 @@ test("owner mutation must save before sending, and a failed confirmation save re
     const s = await setup(t);
     await s.login();
     s.f.override((path) =>
-      path === "/api/app/requests"
+      path === "/api/owner/inbox?limit=200"
         ? Response.json(ownerRequests())
         : path.endsWith("/decide")
           ? Response.json({
@@ -864,7 +963,7 @@ test("owner context changes invalidate a reviewed decision", async (t) => {
   const s = await setup(t);
   await s.login();
   s.f.override((path) =>
-    path === "/api/app/requests" ? Response.json(ownerRequests()) : undefined,
+    path === "/api/owner/inbox?limit=200" ? Response.json(ownerRequests()) : undefined,
   );
   const context = s.service.snapshot().context;
   const review = reviewId(
@@ -880,4 +979,232 @@ test("owner context changes invalidate a reviewed decision", async (t) => {
     "review_expired",
   );
   assert.equal(s.f.calls.filter((c) => c.path.endsWith("/decide")).length, 0);
+});
+
+test("owner verification follows the expiry returned by the server", async (t) => {
+  const s = await setup(t);
+  s.f.override((path) =>
+    path === "/api/owner/start_sign_in"
+      ? Response.json({ message: "Code sent", expires_in_minutes: 1 })
+      : undefined,
+  );
+  await s.request({ type: "owner_request_code", email });
+  s.f.advance(61000);
+  await s.request({ type: "owner_verify", code: "314159" });
+  assert.equal(s.service.snapshot().issue, "code_expired");
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length, 0);
+});
+
+test("device mutation requires a current review and never repeats a lost transfer", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  let name = "Fixture device",
+    mutations = 0;
+  s.f.override((path) => {
+    if (path === "/api/owner/devices")
+      return Response.json({
+        devices: [
+          {
+            id: DEVICE_ID,
+            device_name: name,
+            platform: "darwin",
+            jkt: s.service.device.thumbprint,
+            created_at: new Date(s.f.now()).toISOString(),
+            last_seen_at: null,
+            revoked_at: null,
+            executes_agent_ids: [],
+            is_current: true,
+          },
+        ],
+      });
+    if (path === "/api/owner/select_executor") {
+      mutations++;
+      throw new Error("response lost");
+    }
+    return undefined;
+  });
+  const review = async () => {
+    const reply = await s.request({
+      type: "owner_device_review",
+      operation: "execute",
+      device_id: DEVICE_ID,
+      agent_id: agentId,
+    });
+    assert.equal(reply.data?.kind, "device_review");
+    if (reply.data?.kind !== "device_review") throw new Error();
+    return reply.data.review_id;
+  };
+  const old = await review();
+  name = "Renamed device";
+  assert.equal(
+    (await s.request({ type: "owner_device_submit", review_id: old })).issue,
+    "review_expired",
+  );
+  assert.equal(mutations, 0);
+  const current = await review();
+  const submitted = await s.request({ type: "owner_device_submit", review_id: current });
+  assert.equal(submitted.data?.kind, "device_result");
+  if (submitted.data?.kind === "device_result") assert.equal(submitted.data.confirmed, false);
+  assert.equal(
+    (await s.request({ type: "owner_device_submit", review_id: current })).issue,
+    "review_expired",
+  );
+  assert.equal(mutations, 1);
+});
+
+test("owner profile refreshes and persists the current roster without another email code", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  const roster = ownerSession(s.f.now(), s.service.device.thumbprint).agents;
+  const context = s.service.snapshot().context;
+  const changed = { ...roster[0], display_name: "Registered after sign-in", executor_epoch: 4 };
+  s.f.override((path) =>
+    path === "/api/owner/agents"
+      ? Response.json({ agents: [changed], newly_attached_agent_ids: [agentId] })
+      : undefined,
+  );
+  const reply = await s.request({ type: "owner_profile" });
+  assert.equal(reply.data?.kind, "profile");
+  assert.equal(reply.snapshot.context, context);
+  assert.equal(reply.snapshot.account?.agents[0]?.display_name, changed.display_name);
+  await s.restart();
+  assert.equal(s.service.snapshot().account?.agents[0]?.display_name, changed.display_name);
+  assert.equal(s.f.calls.filter((call) => call.path === "/api/owner/start_sign_in").length, 1);
+  assert.equal(s.f.calls.filter((call) => call.path === "/api/owner/verify_sign_in").length, 1);
+
+  s.f.override((path) =>
+    path === "/api/owner/agents"
+      ? Response.json({ agents: [], newly_attached_agent_ids: [] })
+      : undefined,
+  );
+  const empty = await s.request({ type: "owner_devices" });
+  assert.equal(empty.data?.kind, "devices");
+  assert.deepEqual(empty.snapshot.account?.agents, []);
+});
+
+test("invalid or unavailable owner rosters preserve the last confirmed profile", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  const previous = s.service.snapshot().account;
+  const agent = ownerSession(s.f.now(), s.service.device.thumbprint).agents[0];
+  for (const body of [
+    { agents: [agent, agent], newly_attached_agent_ids: [] },
+    { agents: [], newly_attached_agent_ids: [agentId] },
+    { agents: [{ ...agent, is_executed_here: true }], newly_attached_agent_ids: [] },
+    { agents: [{ ...agent, executor_epoch: -1 }], newly_attached_agent_ids: [] },
+  ]) {
+    s.f.override((path) => (path === "/api/owner/agents" ? Response.json(body) : undefined));
+    assert.equal((await s.request({ type: "owner_profile" })).issue, "invalid_response");
+    assert.deepEqual(s.service.snapshot().account, previous);
+  }
+  s.f.override((path) =>
+    path === "/api/owner/agents" ? Response.json({}, { status: 503 }) : undefined,
+  );
+  assert.equal((await s.request({ type: "owner_profile" })).issue, "offline");
+  assert.deepEqual(s.service.snapshot().account, previous);
+});
+
+test("an executor epoch change invalidates a device review even if the device is unchanged", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  let epoch = 1;
+  let mutations = 0;
+  const agent = ownerSession(s.f.now(), s.service.device.thumbprint).agents[0];
+  s.f.override((path) => {
+    if (path === "/api/owner/agents")
+      return Response.json({
+        agents: [{ ...agent, executor_epoch: epoch }],
+        newly_attached_agent_ids: [],
+      });
+    if (path === "/api/owner/select_executor") {
+      mutations++;
+      return Response.json({});
+    }
+    return undefined;
+  });
+  const review = await s.request({
+    type: "owner_device_review",
+    operation: "execute",
+    device_id: DEVICE_ID,
+    agent_id: agentId,
+  });
+  assert.equal(review.data?.kind, "device_review");
+  if (review.data?.kind !== "device_review") throw new Error();
+  epoch++;
+  assert.equal(
+    (await s.request({ type: "owner_device_submit", review_id: review.data.review_id })).issue,
+    "review_expired",
+  );
+  assert.equal(mutations, 0);
+});
+
+test("one-code setup creates the verified owner agent and survives a lost response and restart", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.request({ type: "owner_create_agent" })).issue, "session_expired");
+  await s.login();
+  const context = s.service.snapshot().context;
+  const initialAgent = ownerSession(s.f.now(), "unused").agents[0];
+  assert.ok(initialAgent);
+  const agent = { ...initialAgent, email_verified: true };
+  let created = false;
+  let loseResponse = true;
+  s.f.override((path, init) => {
+    if (path !== "/api/owner/agents") return;
+    if (init?.method === "POST") {
+      assert.deepEqual(JSON.parse(String(init.body)), {});
+      const wasCreated = !created;
+      created = true;
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("Response lost");
+      }
+      return Response.json({ agent, created: wasCreated });
+    }
+    return Response.json({ agents: created ? [agent] : [], newly_attached_agent_ids: [] });
+  });
+  assert.equal((await s.request({ type: "owner_create_agent" })).issue, "offline");
+  await s.restart();
+  const recovered = await s.request({ type: "owner_create_agent" });
+  assert.equal(recovered.data?.kind, "agent_setup");
+  if (recovered.data?.kind !== "agent_setup") throw new Error("Missing setup result");
+  assert.equal(recovered.data.created, false);
+  assert.equal(recovered.data.agent.id, agent.id);
+  assert.equal(recovered.snapshot.account?.agents[0]?.id, agent.id);
+  assert.equal((await s.request({ type: "owner_create_agent" })).data?.kind, "agent_setup");
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("start_sign_in")).length, 1);
+  assert.equal(s.f.calls.filter((c) => c.path.endsWith("verify_sign_in")).length, 1);
+  assert.equal(
+    s.f.calls.some((c) =>
+      /register_agent|verify_email|select_executor|execution_token/.test(c.path),
+    ),
+    false,
+  );
+  await assert.rejects(s.service.command({ type: "owner_create_agent", context }));
+});
+
+test("one-code setup rejects mismatched or unverified agents and preserves the signed-in account", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  const original = s.service.snapshot();
+  const agent = ownerSession(s.f.now(), "unused").agents[0];
+  assert.ok(agent);
+  for (const bad of [
+    { ...agent, email: "other@fixture.test" },
+    { ...agent, email_verified: false },
+    { ...agent, id: randomUUID() },
+    { ...agent, is_executed_here: true },
+  ]) {
+    s.f.override((path, init) =>
+      path === "/api/owner/agents" && init?.method === "POST"
+        ? Response.json({ agent: bad, created: false })
+        : undefined,
+    );
+    assert.equal((await s.request({ type: "owner_create_agent" })).issue, "invalid_response");
+    assert.deepEqual(s.service.snapshot().account, original.account);
+  }
+  assert.throws(() => s.request({ type: "owner_create_agent", email: "other@fixture.test" }));
+  s.f.override((path) =>
+    path === "/api/owner/agents" ? Response.json({}, { status: 409 }) : undefined,
+  );
+  assert.equal((await s.request({ type: "owner_create_agent" })).issue, "request_unavailable");
 });
