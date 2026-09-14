@@ -50,11 +50,10 @@ Remaining:
   Ambassador 0.2.20. Run versioned PR/main CI and verify published artifacts.
   [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
   Existing platform/provider qualification and signed distribution limits remain.
-- [ ] Reduce Windows CI runtime. The September 14 release check reached the
-  45-minute job limit while still running tests. Measure time by test file and
-  protected-store operation, then split independent files across isolated runners
-  if needed. Preserve the full suite and native ACL checks. The owner explicitly
-  deferred this work when approving the merge of PR 46.
+- [ ] Qualify the CI split approved September 14 in [ADR 0084](adr/0084-shared-core-and-platform-ci.md):
+  run shared flows once, native component checks on all four build targets and
+  full platform flows through local scripts. Implementation and baseline timings
+  are recorded in [CI and local testing](ci-and-local-testing.md).
 - [ ] Update the local four-provider qualification script's 256-entry archive
   limit for the current 364-file package. Keep bounded extraction and artifact
   validation. The release used separate installed-candidate connection checks

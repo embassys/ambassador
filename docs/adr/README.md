@@ -121,3 +121,5 @@ protocol instead of creating an API generation number.
 - [0074: Local stdio client for standalone desktop hosts](0074-desktop-stdio-client.md)
 
 - [0083: One-code desktop setup](0083-one-code-desktop-setup.md)
+
+- [0084 Shared core tests and isolated platform checks](0084-shared-core-and-platform-ci.md)

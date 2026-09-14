@@ -17,8 +17,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type TestContext, test } from "node:test";
 
-import { ProcessLock } from "../src/process-lock.js";
-import { assertNativeWindowsAcl } from "./support/windows-acl.js";
+import { ProcessLock } from "../../src/process-lock.js";
+import { assertNativeWindowsAcl } from "../support/windows-acl.js";
 
 const WORKER_SOURCE = `
 const lockPath = process.env.A2A_TEST_LOCK_PATH;
@@ -89,7 +89,7 @@ async function startWorker(t: TestContext, path: string): Promise<LockWorker> {
   const child = spawn(process.execPath, ["--input-type=module", "--eval", WORKER_SOURCE], {
     env: {
       ...process.env,
-      A2A_TEST_LOCK_MODULE_URL: new URL("../src/process-lock.js", import.meta.url).href,
+      A2A_TEST_LOCK_MODULE_URL: new URL("../../src/process-lock.js", import.meta.url).href,
       A2A_TEST_LOCK_PATH: path,
     },
     stdio: ["ignore", "ignore", "pipe", "ipc"],

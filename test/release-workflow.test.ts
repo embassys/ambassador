@@ -7,8 +7,10 @@ test("main publishes the Ambassador 0.2.20 candidate through npm OIDC after appr
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
-  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest\]/u);
-  assert.match(workflow, /name: Qualify native Windows state ACLs/u);
+  assert.match(workflow, /os: \[ubuntu-latest, macos-latest, windows-latest, ubuntu-24\.04-arm\]/u);
+  assert.match(workflow, /run: pnpm run test:platform/u);
+  assert.equal(workflow.match(/run: pnpm run check:core/gu)?.length, 1);
+  assert.doesNotMatch(workflow, /run: pnpm run check\n/u);
   assert.match(workflow, /name: Launch installed Windows command shim/u);
   assert.match(workflow, /\$PSNativeCommandUseErrorActionPreference = \$false/u);
   assert.match(workflow, /\[IO\.File\]::ReadAllText\(\$stderrPath\)/u);
@@ -37,14 +39,17 @@ test("main publishes the Ambassador 0.2.20 candidate through npm OIDC after appr
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });
 
-test("the Windows test runner serializes files that exercise native ACLs", async () => {
-  const runner = await readFile(join(process.cwd(), "scripts", "run-tests.mjs"), "utf8");
+test("shared flows run once while native matrix failures still block publication", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
-
-  assert.match(runner, /process\.platform === "win32" \? \["--test-concurrency=1"\] : \[\]/u);
-  assert.ok(
-    workflow.includes(`timeout-minutes: \${{ matrix.os == 'windows-latest' && 45 || 25 }}`),
-  );
+  const core = workflow.slice(workflow.indexOf("  check:"), workflow.indexOf("  central-fixture:"));
+  assert.match(core, /runs-on: ubuntu-latest/u);
+  assert.doesNotMatch(core, /matrix:|strategy:/u);
+  assert.match(core, /run: pnpm --filter @embassys\/desktop run typecheck/u);
+  assert.match(core, /run: pnpm --filter @embassys\/desktop run test:artifacts/u);
+  const platform = workflow.slice(workflow.indexOf("  package:"), workflow.indexOf("  publish:"));
+  assert.match(platform, /run: pnpm run test:platform/u);
+  assert.match(platform, /current-packed-platform\.test\.js/u);
+  assert.match(platform, /if: runner\.os == 'Linux' && runner\.arch == 'X64'/u);
   assert.doesNotMatch(workflow, /continue-on-error:/u);
 });
 

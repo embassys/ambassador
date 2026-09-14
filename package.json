@@ -43,7 +43,14 @@
     "test": "pnpm run test:build && node scripts/run-tests.mjs",
     "test:build": "node scripts/clean.mjs .test-dist && tsc -p tsconfig.test.json",
     "test:coverage": "pnpm run test:build && node scripts/run-tests.mjs --coverage",
-    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "check:core": "pnpm run lint && pnpm run typecheck && pnpm run test:core",
+    "test:core": "pnpm run test:build && node scripts/run-tests.mjs --suite=core",
+    "test:platform": "pnpm run test:build && node scripts/run-tests.mjs --suite=platform",
+    "qualify:platform": "node scripts/qualify-platform.mjs",
+    "qualify:macos": "node scripts/qualify-platform.mjs --platform=darwin",
+    "qualify:windows": "node scripts/qualify-platform.mjs --platform=win32",
+    "qualify:linux": "node scripts/qualify-platform.mjs --platform=linux"
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "*",
