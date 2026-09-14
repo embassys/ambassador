@@ -51,3 +51,40 @@ test("disabling notifications during OS registration prevents an obsolete token 
   assert.equal(sent, 0);
   assert.equal(push.snapshot().state, "disabled");
 });
+
+test("a delayed push registration cannot remove a newer enabled registration", async () => {
+  let finish!: () => void;
+  let entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const delayed = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let attempts = 0;
+  let registered = false;
+  const push = new NativePushRegistration({
+    platform: "darwin",
+    status: async () => ({ available: true, registered }),
+    osToken: async () => "a".repeat(64),
+    register: async () => {
+      if (++attempts === 1) {
+        entered();
+        await delayed;
+      }
+      registered = true;
+    },
+    unregister: async () => {
+      registered = false;
+    },
+  });
+  const first = push.configure("same-account", true);
+  await waiting;
+  const disabled = push.configure("same-account", false);
+  const latest = push.configure("same-account", true);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  finish();
+  await Promise.all([first, disabled, latest]);
+  assert.equal(push.snapshot().state, "registered");
+  assert.equal(registered, true);
+});

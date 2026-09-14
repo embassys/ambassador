@@ -5,7 +5,8 @@
 Implemented under [ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md).
 The [implementation and test record](central-adoption-2026-09-14.md) supersedes
 older statements below that issues 1–13 still require server implementation.
-This candidate is not merged or released. API source remains unchanged.
+Implementation and review are tracked in [PR 45](https://github.com/embassys/ambassador/pull/45).
+This candidate is not released. API source remains unchanged.
 
 Completed:
 
@@ -44,7 +45,8 @@ Remaining:
   review and live queue-isolation qualification. It is no longer server-blocked.
 - [ ] Follow the separate DPoP wire/nonce decision in issue 14. Keep the current
   protocol until a coordinated change is accepted.
-- [ ] Review and merge this candidate, then seek release approval and run release CI.
+- [ ] Obtain release approval and run release CI for the completed candidate.
+  [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
   Existing platform/provider qualification and signed distribution limits remain.
 
 After issue 15 was deployed, protected live tests passed leased redelivery,
