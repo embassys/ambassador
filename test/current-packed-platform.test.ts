@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,7 +16,7 @@ test("installed package loads native SQLite and rejects an invalid command throu
   assert.ok(cli);
   const root = await mkdtemp(join(tmpdir(), "ambassador-installed-native-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const InstalledDatabase = createRequire(cli)("better-sqlite3") as typeof Database;
+  const InstalledDatabase = createRequire(await realpath(cli))("better-sqlite3") as typeof Database;
   const database = new InstalledDatabase(join(root, "native.sqlite3"));
   try {
     database.exec("CREATE TABLE probe (value INTEGER) STRICT");
