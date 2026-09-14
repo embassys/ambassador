@@ -65,6 +65,14 @@ See the [retest evidence](central-adoption-2026-09-14.md#retest-after-issue-15-w
 
 ## Release evidence
 
+September 14 release CI exposed a false positive in the credential-storage test:
+it treated the six test-code digits inside random hexadecimal ciphertext as a
+plaintext leak. An authenticated encryption round trip reproduced the match even
+though the plaintext contained no code. The assertions now match serialized JSON
+code values, retaining the token/email scans, encrypted restart and refresh checks.
+The gateway and packaged candidate bytes are unchanged by this test correction.
+
+
 On September 11 the owner authorized a PR and desktop 0.1.2 preview 1 for the
 completed conversation, approval and People refinements.
 [Embassys 0.1.2 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.2-preview.1)

@@ -109,7 +109,7 @@ test("CLI → app → CLI retains encrypted identity, pending calls, registratio
   });
   assert.equal((await gateway.overview()).enrollment.email, email);
   const encrypted = await readFile(paths.credentialPath, "utf8");
-  assert.doesNotMatch(encrypted, /access_token|private_key|314159/u);
+  assert.doesNotMatch(encrypted, /access_token|private_key|"314159"/u);
   central.seedClient("peer@fixture.test");
   const callId = randomUUID();
   central.queueMessage(
