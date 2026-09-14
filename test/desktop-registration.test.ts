@@ -35,6 +35,7 @@ test("CLI registration can finish in the app and app registration can finish in 
     if (cliFirst) await registration.verify(f.central.verificationCode(email));
     else await registration.verifyFromTools({ email, code: f.central.verificationCode(email) });
     assert.equal(registration.snapshot().phase, "registered");
+    assert.equal(registration.snapshot().agentId, f.options.identity.enrollment.agent_id);
     assert.equal(f.options.identity.enrollment.email, email);
   }
 });
