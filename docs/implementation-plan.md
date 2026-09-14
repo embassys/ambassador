@@ -6,7 +6,8 @@ Implemented under [ADR 0082](adr/0082-current-central-recovery-and-owner-integra
 The [implementation and test record](central-adoption-2026-09-14.md) supersedes
 older statements below that issues 1–13 still require server implementation.
 Implementation and review are tracked in [PR 45](https://github.com/embassys/ambassador/pull/45).
-This candidate is not released. API source remains unchanged.
+The paired 0.1.3 desktop / 0.2.20 npm release is authorized and in validation.
+API source remains unchanged.
 
 Completed:
 
@@ -27,7 +28,7 @@ Completed:
 - Private macOS push registration and visible server/provider availability, with
   running-app fallback. This does not qualify remote delivery.
 
-Validation: 588 repository tests passed with seven expected skips; 45 desktop
+Validation: 591 repository tests passed with seven expected skips; 46 desktop
 artifact/render checks passed, along with typechecks, lint and production build.
 The bundled Node/SQLite/ACP/MCP worker check passed. Live disposable-owner tests
 passed sign-in, invitation email delivery/repeat/acceptance, connections, device
@@ -45,7 +46,8 @@ Remaining:
   review and live queue-isolation qualification. It is no longer server-blocked.
 - [ ] Follow the separate DPoP wire/nonce decision in issue 14. Keep the current
   protocol until a coordinated change is accepted.
-- [ ] Obtain release approval and run release CI for the completed candidate.
+- [ ] Complete the authorized paired release: Embassys 0.1.3 preview 1 and
+  Ambassador 0.2.20. Run versioned PR/main CI and verify published artifacts.
   [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
   Existing platform/provider qualification and signed distribution limits remain.
 
@@ -314,15 +316,15 @@ discovery were repeated separately to confirm each loaded its own skill path.
 Captured together at the user's request on 2026-09-07. API work remains
 issue-only. These items do not authorize another release.
 
-- [ ] Adopt central recovery. The server implementations for lost polls,
+- [x] Adopt central recovery. The server implementations for lost polls,
   listener lifecycle, credential recovery and uncertain submissions are now in
   closed issues
   [1](https://github.com/embassys/agent2agent/issues/1),
   [2](https://github.com/embassys/agent2agent/issues/2),
   [3](https://github.com/embassys/agent2agent/issues/3) and
-  [4](https://github.com/embassys/agent2agent/issues/4). Integrate durable keys,
-  reconciliation, renewal and acknowledgement recovery, then qualify them live.
-  The September 14 response-parser fixes alone do not complete that work.
+  [4](https://github.com/embassys/agent2agent/issues/4). Durable keys,
+  reconciliation, renewal and acknowledgement recovery are now integrated and
+  live-qualified under ADR 0082; see the current record above.
 - [x] Codex discovery. A fresh desktop task on September 8 answered "Am I
   registered with Embassys?" through `get_my_permissions` without a website
   question or tool hint. This test used the deployed central service and the
@@ -361,11 +363,11 @@ issue-only. These items do not authorize another release.
   This qualifies the calendar connector's invitation path, separately from the
   earlier Embassys scheduling coordination tests. See the
   [desktop PR review](desktop-pr-review-2026-09-08.md).
-- [ ] Adopt result contracts and progress. The server now supplies remote
+- [x] Adopt result contracts and progress. The server now supplies remote
   progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result
   schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6); both are
-  closed. Update local validation, operation handling, calendar fixtures and live
-  qualification. Result schemas are exposed by the current catalog parser.
+  closed. Local validation, operation handling and calendar fixtures are updated;
+  the September 14 live tests passed exact results and correlated progress.
 - [ ] Broader client qualification. Qualify Hermes native return and each
   supported real-agent mode on Windows. Hermes
   native return first needs trusted origin routing and busy-session semantics.

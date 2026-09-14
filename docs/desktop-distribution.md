@@ -64,8 +64,8 @@ manual agent setup is still offered on Linux.
 
 ARM64 Linux packaging and worker tests do not prove Pi graphics, tray behavior,
 notifications, keyring integration or live providers. Record those separately
-before claiming a fully qualified Raspberry Pi release. The already published
-0.1.2 preview has no ARM64 Linux asset; new builds do not amend that release.
+before claiming a fully qualified Raspberry Pi release. The 0.1.3 preview adds the ARM64 Linux download; earlier published previews
+remain unchanged.
 See the [September 12 ARM64 evidence](desktop-linux-arm64-2026-09-12.md).
 
 ## Signing
