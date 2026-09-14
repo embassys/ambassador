@@ -50,6 +50,15 @@ Remaining:
   Ambassador 0.2.20. Run versioned PR/main CI and verify published artifacts.
   [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
   Existing platform/provider qualification and signed distribution limits remain.
+- [ ] Reduce Windows CI runtime. The September 14 release check reached the
+  45-minute job limit while still running tests. Measure time by test file and
+  protected-store operation, then split independent files across isolated runners
+  if needed. Preserve the full suite and native ACL checks. The owner explicitly
+  deferred this work when approving the merge of PR 46.
+- [ ] Update the local four-provider qualification script's 256-entry archive
+  limit for the current 364-file package. Keep bounded extraction and artifact
+  validation. The release used separate installed-candidate connection checks
+  for all four providers; the old helper limit does not affect shipped code.
 
 After issue 15 was deployed, protected live tests passed leased redelivery,
 release/repeated acknowledgement, lost-response recovery for all four supported
@@ -64,6 +73,15 @@ redaction checks. Six independent Python fixture tests passed on Linux x64.
 See the [retest evidence](central-adoption-2026-09-14.md#retest-after-issue-15-was-repaired).
 
 ## Release evidence
+
+The owner approved merging [PR 46](https://github.com/embassys/ambassador/pull/46)
+without waiting further for Windows CI on September 14. It merged as
+`a12f59900193845ef17ffb8dec86f86c9947c75a`; its tree exactly matches tested source
+`c1518515963b01cd71b6d0e0a4c5017252ed1beb`. Fourteen of fifteen PR/branch checks
+passed. The remaining Windows core job was cancelled at its 45-minute limit,
+before the suite and subsequent native ACL qualification completed. This is a
+merge exception, not a passing Windows result. The main publication workflow
+and its release dependencies remain unchanged.
 
 September 14 release CI exposed a false positive in the credential-storage test:
 it treated the six test-code digits inside random hexadecimal ciphertext as a
