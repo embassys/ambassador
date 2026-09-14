@@ -12,7 +12,7 @@ authenticated agent to handle incoming requests.
 | Windows x64 | `Embassys-0.1.2-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
 | Linux x64 | `Embassys-0.1.2-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
 
-There is no Intel Mac or Windows/Linux ARM download in this preview. These are
+There is no Intel Mac or Windows/Linux ARM download in this published preview. These are
 unsigned development packages. Managed computers may refuse to run them.
 
 ## Mac
@@ -47,6 +47,21 @@ does not perform that setup. If startup reports a sandbox error, preserve the
 error for your administrator or a bug report; do not use `--no-sandbox` or run
 the application as root. See
 [Chromium's Linux sandbox documentation](https://chromium.googlesource.com/chromium/src/+/main/sandbox/linux/README.md).
+
+## Raspberry Pi build
+
+Raspberry Pi builds use a separate `linux-arm64` archive. It is
+not part of the published 0.1.2 preview linked above. Use 64-bit Raspberry Pi OS
+with a desktop, initially on Pi 4 or Pi 5. A 64-bit processor running a 32-bit
+operating system cannot run this build. Pi OS Lite has no desktop to show the app.
+Check `dpkg --print-architecture`: this build requires `arm64`, not `armhf`.
+
+When building locally, follow the [ARM64 build instructions](desktop-distribution.md#linux-arm64-and-raspberry-pi)
+on an ARM64 Linux machine. Keep the extracted `Embassys-linux-arm64` folder
+together and run `./Embassys` as your normal desktop user. The same Linux system
+library and sandbox requirements apply. Do not run the app as root or disable
+its sandbox. Live Raspberry Pi display and provider testing remains separate
+from automated ARM64 Linux package checks.
 
 ## First launch
 

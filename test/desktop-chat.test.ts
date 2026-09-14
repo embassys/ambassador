@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   chronologicalItems,
   conversationPeer,
+  conversationPeerFromRequests,
   incomingMessage,
   mergeChatPages,
 } from "../src/desktop/chat.js";
@@ -98,4 +99,27 @@ test("refresh retains a bounded reading window, updates existing messages and cl
     ).items.length,
     500,
   );
+});
+
+test("current owner requests identify only the exact local and remote agents", () => {
+  const peer = { agentId: "remote", messageId: "message" };
+  const request = {
+    agent_id: "local",
+    requester_agent_id: "remote",
+    requester_verified: true,
+    requester_email: "alex@fixture.test",
+    requester_name: "Alex",
+  };
+  assert.equal(
+    conversationPeerFromRequests(peer, [request], "local", true).email,
+    "alex@fixture.test",
+  );
+  for (const [rows, local, sameOwner] of [
+    [[request], "foreign", true],
+    [[request], "local", false],
+    [[{ ...request, requester_agent_id: "other" }], "local", true],
+    [[{ ...request, requester_verified: false }], "local", true],
+    [[request, { ...request, requester_email: "wrong@fixture.test" }], "local", true],
+  ] as const)
+    assert.equal(conversationPeerFromRequests(peer, rows, local, sameOwner).email, undefined);
 });

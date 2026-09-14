@@ -1,6 +1,7 @@
 import {
   type CentralCredentialRecord,
   createCentralCredentialRecord,
+  type LoadedCentralCredential,
   parseCentralCredential,
 } from "./central-credential.js";
 import {
@@ -9,6 +10,7 @@ import {
   isCentralRecord,
   readCentralJson,
 } from "./central-json.js";
+import type { CentralVerificationKeys } from "./central-verification-keys.js";
 import { generateDpopKeyMaterial } from "./dpop.js";
 import type { CentralToolDefinition } from "./mcp-contract.js";
 
@@ -56,6 +58,8 @@ export interface CentralEnrollmentClientOptions {
   readonly deadlineMs?: number;
   readonly deadlineSignal?: (milliseconds: number) => AbortSignal;
   readonly nowSeconds?: () => number;
+  readonly verificationKeys?: CentralVerificationKeys;
+  readonly recoveryKeys?: CentralVerificationKeys;
 }
 
 export interface VerificationEnrollmentSuccess {
@@ -198,9 +202,13 @@ export class CentralEnrollmentClient {
   readonly #deadlineMs: number;
   readonly #deadlineSignal: (milliseconds: number) => AbortSignal;
   readonly #nowSeconds: () => number;
+  readonly #verificationKeys: CentralVerificationKeys | undefined;
+  readonly #recoveryKeys: CentralVerificationKeys | undefined;
 
   constructor(options: CentralEnrollmentClientOptions) {
     this.#origin = exactOrigin(options.centralOrigin);
+    this.#verificationKeys = options.verificationKeys;
+    this.#recoveryKeys = options.recoveryKeys;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#deadlineMs = options.deadlineMs ?? DEFAULT_DEADLINE_MS;
     this.#deadlineSignal = options.deadlineSignal ?? AbortSignal.timeout;
@@ -276,7 +284,7 @@ export class CentralEnrollmentClient {
     if (typeof arguments_.code !== "string" || !CODE.test(arguments_.code)) {
       throw failure("central_enrollment_contract_failed");
     }
-    const key = generateDpopKeyMaterial();
+    const key = (await this.#verificationKeys?.forEmail(requestEmail)) ?? generateDpopKeyMaterial();
     const response = await this.#post(
       "/api/verify_email",
       { email: requestEmail, code: arguments_.code, jwk: key.publicJwk },
@@ -297,12 +305,13 @@ export class CentralEnrollmentClient {
       throw failure("central_verification_response_unsafe");
     }
     if (
-      !exactKeys(result, ["agent_id", "email", "token", "message"], ["jkt"]) ||
+      !exactKeys(result, ["agent_id", "email", "token", "message"], ["jkt", "replayed"]) ||
       typeof result.agent_id !== "string" ||
       !AGENT_ID.test(result.agent_id) ||
       result.email !== requestEmail ||
       typeof result.token !== "string" ||
       typeof result.message !== "string" ||
+      (result.replayed !== undefined && typeof result.replayed !== "boolean") ||
       (result.jkt !== undefined && result.jkt !== key.thumbprint)
     ) {
       throw failure("central_verification_credential_invalid");
@@ -335,6 +344,109 @@ export class CentralEnrollmentClient {
         message: "Email verified successfully.",
       },
     };
+  }
+
+  async startRecovery(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, string>> {
+    if (!exactKeys(arguments_, ["email"])) throw failure("central_enrollment_contract_failed");
+    const result = await this.#success(
+      await this.#post("/api/start_recovery", { email: email(arguments_.email) }, signal),
+    );
+    if (
+      !exactKeys(result, ["message"]) ||
+      typeof result.message !== "string" ||
+      result.message.length > 2048
+    )
+      throw failure("central_enrollment_contract_failed");
+    return { message: result.message };
+  }
+  async completeRecovery(
+    arguments_: unknown,
+    signal?: AbortSignal,
+    previous?: LoadedCentralCredential,
+  ): Promise<VerificationEnrollmentSuccess> {
+    if (
+      !exactKeys(arguments_, ["email", "code"]) ||
+      typeof arguments_.code !== "string" ||
+      !CODE.test(arguments_.code)
+    )
+      throw failure("central_enrollment_contract_failed");
+    const requestEmail = email(arguments_.email);
+    if (previous && (previous.token.email !== requestEmail || previous.token.executionDeviceId))
+      throw failure("central_enrollment_contract_failed");
+    const key = previous
+      ? {
+          privateKey: previous.privateKey,
+          privateKeyPkcs8: previous.record.dpop_private_key_pkcs8,
+          publicJwk: previous.publicJwk,
+          thumbprint: previous.keyThumbprint,
+        }
+      : ((await this.#recoveryKeys?.forEmail(requestEmail)) ?? generateDpopKeyMaterial());
+    const response = await this.#post(
+      "/api/complete_recovery",
+      { email: requestEmail, code: arguments_.code, jwk: key.publicJwk },
+      signal,
+    );
+    if (!response.ok) {
+      await cancel(response);
+      throw failure(
+        response.status === 429
+          ? "central_rate_limited"
+          : response.status >= 500
+            ? "central_enrollment_outcome_uncertain"
+            : "verification_failed",
+      );
+    }
+    if (!noStore(response.headers) || response.headers.has("set-cookie")) {
+      await cancel(response);
+      throw failure("central_verification_response_unsafe");
+    }
+    const result = await readCentralJson(response, RESPONSE_MAX_BYTES);
+    if (
+      !exactKeys(result, [
+        "agent_id",
+        "email",
+        "token",
+        "jkt",
+        "expires_at",
+        "revoked_keys",
+        "message",
+      ]) ||
+      typeof result.token !== "string" ||
+      result.email !== requestEmail ||
+      typeof result.agent_id !== "string" ||
+      !AGENT_ID.test(result.agent_id) ||
+      result.jkt !== key.thumbprint ||
+      !Number.isSafeInteger(result.revoked_keys) ||
+      Number(result.revoked_keys) < 0 ||
+      typeof result.expires_at !== "string" ||
+      !Number.isFinite(Date.parse(result.expires_at)) ||
+      typeof result.message !== "string" ||
+      result.message.length > 2048
+    )
+      throw failure("central_verification_credential_invalid");
+    const credential = createCentralCredentialRecord(result.token, key);
+    const loaded = parseCentralCredential(credential, this.#nowSeconds);
+    if (
+      loaded.token.email !== requestEmail ||
+      loaded.token.subject !== result.agent_id ||
+      (previous && previous.token.subject !== result.agent_id)
+    )
+      throw failure("central_verification_credential_invalid");
+    return {
+      credential,
+      localResult: {
+        verified: true,
+        agent_id: result.agent_id,
+        email: requestEmail,
+        message: "Email verified successfully.",
+      },
+    };
+  }
+  async recoveryCommitted(): Promise<void> {
+    await this.#recoveryKeys?.clear();
+  }
+  async verificationCommitted(): Promise<void> {
+    await this.#verificationKeys?.clear();
   }
 
   async #post(

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { type AcpSessionRecord, AcpSessionStore } from "../acp-session-store.js";
 import { capabilityForKind } from "../agent-capabilities.js";
+import { type CentralCredentialRecord, parseCentralCredential } from "../central-credential.js";
+import { DeliveryProfileStore } from "../delivery-profile.js";
 import { DiagnosticLog } from "../diagnostic-log.js";
 import { AcpSessionController } from "../direct-delivery.js";
 import { GatewayError } from "../errors.js";
@@ -30,6 +32,7 @@ import { type DiagnosticQuery, readDiagnostics } from "./diagnostics.js";
 import { readLocalSummary } from "./local-summary.js";
 import type { LocalNotification } from "./notifications.js";
 import type { DesktopCommand, GatewaySnapshot } from "./protocol.js";
+import { DesktopRegistration, desktopExecutor } from "./registration.js";
 import type { SetupPermission } from "./setup-approval.js";
 
 export interface DesktopGatewayOptions {
@@ -68,6 +71,9 @@ export class DesktopGateway {
   #handedOff = false;
   readonly #connectionCheck = new ConnectionCheck();
   #setupTask: Promise<unknown> | undefined;
+  #executionPreview:
+    | { id: string; agentId: string; lock: ProcessLock; timer: NodeJS.Timeout }
+    | undefined;
   #cleanPreview: { id: string; lock: ProcessLock; timer: NodeJS.Timeout } | undefined;
 
   constructor(readonly options: DesktopGatewayOptions) {
@@ -93,6 +99,8 @@ export class DesktopGateway {
   start(): Promise<void> {
     return this.#serial(async () => {
       if (this.#state.state === "running") return;
+      if (this.#executionPreview)
+        throw new Error("Finish the execution-device change before starting.");
       if (this.#cleanPreview) throw new Error("Finish the Clean preview before starting.");
       this.#changed({ id: this.options.id, state: "starting" });
       this.#handedOff = false;
@@ -187,6 +195,12 @@ export class DesktopGateway {
   }
 
   async #close(): Promise<void> {
+    const execution = this.#executionPreview;
+    this.#executionPreview = undefined;
+    if (execution) {
+      clearTimeout(execution.timer);
+      await execution.lock.release();
+    }
     await this.#releaseClean();
     this.#abort?.abort();
     await this.#setupTask?.catch(() => undefined);
@@ -390,6 +404,66 @@ export class DesktopGateway {
     });
   }
 
+  prepareExecution(agentId: string): Promise<string> {
+    return this.#serial(async () => {
+      if (this.#application || this.#executionPreview || this.#cleanPreview)
+        throw new Error("Stop this instance before changing its execution credential.");
+      await mkdir(this.options.stateDirectory, { recursive: true, mode: 0o700 });
+      const lock = await ProcessLock.acquire(this.#paths.lockPath);
+      try {
+        const identity = await GatewayIdentity.open(
+          desktopCredentialStores(this.#paths).credentialStore,
+        );
+        if (identity.enrolled && identity.localCredential().token.subject !== agentId)
+          throw new Error("This instance belongs to a different agent.");
+        const id = randomUUID();
+        const timer = setTimeout(() => {
+          void this.cancelExecution(id);
+        }, 120000);
+        timer.unref();
+        this.#executionPreview = { id, agentId, lock, timer };
+        return id;
+      } catch (error) {
+        await lock.release();
+        throw error;
+      }
+    });
+  }
+  cancelExecution(id: string): Promise<void> {
+    return this.#serial(async () => {
+      const preview = this.#executionPreview;
+      if (preview?.id !== id) return;
+      this.#executionPreview = undefined;
+      clearTimeout(preview.timer);
+      await preview.lock.release();
+    });
+  }
+  installExecution(id: string, record: CentralCredentialRecord): Promise<void> {
+    return this.#serial(async () => {
+      const preview = this.#executionPreview;
+      if (!preview || preview.id !== id) throw new Error("Execution review expired.");
+      const loaded = parseCentralCredential(record);
+      if (
+        loaded.token.subject !== preview.agentId ||
+        !loaded.token.executionDeviceId ||
+        loaded.token.executorEpoch === undefined
+      )
+        throw new Error("Execution credential does not match this review.");
+      const identity = await GatewayIdentity.open(
+        desktopCredentialStores(this.#paths).credentialStore,
+      );
+      const profile = await new DeliveryProfileStore(this.#paths.profilePath).load();
+      await DesktopRegistration.prepareImported(
+        join(this.options.stateDirectory, "registration.json"),
+        loaded.token.email,
+        profile ? desktopExecutor.parse(profile.agent_kind) : undefined,
+      );
+      await identity.replaceExecution(record);
+      this.#executionPreview = undefined;
+      clearTimeout(preview.timer);
+      await preview.lock.release();
+    });
+  }
   desktopCommand(command: DesktopCommand): Promise<unknown> {
     return this.#serial(async () => {
       const services = this.#application?.desktop;
@@ -405,6 +479,8 @@ export class DesktopGateway {
           });
         case "enrollment_verify":
           return services.registration.verify(command.code);
+        case "enrollment_recover":
+          return services.registration.recover(command.code);
         case "enrollment_resend":
           return services.registration.resend();
         case "enrollment_executor":
@@ -515,7 +591,7 @@ export class DesktopGateway {
       if (identity.enrolled)
         archive = new VisibleTranscripts(
           join(this.options.stateDirectory, "visible-transcripts.sqlite"),
-          identity.localCredential(),
+          identity.storageCredential(),
         );
       return await operation(archive);
     } finally {

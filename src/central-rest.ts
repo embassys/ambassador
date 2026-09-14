@@ -4,6 +4,7 @@ import {
   isCentralRecord,
   readCentralJson,
 } from "./central-json.js";
+import type { CentralMutation, CentralMutations, MutationReceipt } from "./central-mutations.js";
 import {
   type CentralProtectedTransport,
   CentralProtectedTransportError,
@@ -34,6 +35,7 @@ const FORBIDDEN_ARGUMENT_NAMES = new Set([
 export type CentralRestErrorCode =
   | "credential_expired"
   | "central_authentication_failed"
+  | "executor_inactive"
   | "central_request_failed"
   | "central_request_rejected"
   | "central_response_invalid"
@@ -64,6 +66,7 @@ export interface CentralActionType {
   readonly name: string;
   readonly description: string;
   readonly input_schema: Record<string, unknown>;
+  readonly result_schema?: Record<string, unknown> | null;
 }
 
 export interface CentralMessage {
@@ -118,6 +121,8 @@ export interface CentralHumanInputRequestResult extends Record<string, unknown> 
 export interface CentralRestClientOptions {
   readonly centralOrigin: string;
   readonly transport: CentralProtectedTransport;
+  readonly mutations?: CentralMutations;
+  readonly beforeRequest?: (signal?: AbortSignal) => Promise<void>;
 }
 
 function objectSchema(
@@ -304,7 +309,7 @@ function safeResultSize(value: unknown): void {
 
 function actionType(value: unknown): CentralActionType {
   if (
-    !exactKeys(value, ["id", "name", "description", "input_schema"]) ||
+    !exactKeys(value, ["id", "name", "description", "input_schema"], ["result_schema"]) ||
     typeof value.id !== "string" ||
     !NAME.test(value.id) ||
     typeof value.name !== "string" ||
@@ -312,28 +317,54 @@ function actionType(value: unknown): CentralActionType {
     typeof value.description !== "string" ||
     value.description.length > 1_024 ||
     !isCentralRecord(value.input_schema) ||
-    value.input_schema.type !== "object"
+    value.input_schema.type !== "object" ||
+    (value.result_schema !== undefined &&
+      value.result_schema !== null &&
+      !isCentralRecord(value.result_schema))
   ) {
     throw failure("central_response_invalid");
   }
   assertNoCentralCredentialFields(value.input_schema);
+  if (value.result_schema != null) assertNoCentralCredentialFields(value.result_schema);
   return {
     id: value.id,
     name: value.name,
     description: value.description,
     input_schema: value.input_schema,
+    ...(value.result_schema === undefined ? {} : { result_schema: value.result_schema }),
   };
 }
 
 function message(value: unknown): CentralMessage {
   if (
-    !exactKeys(value, ["sender_agent_id", "payload", "created_at"], ["id", "action_type_id"]) ||
+    !exactKeys(
+      value,
+      ["sender_agent_id", "payload", "created_at"],
+      [
+        "id",
+        "action_type_id",
+        "message_type",
+        "delivery_attempts",
+        "redelivered",
+        "lease_expires_at",
+      ],
+    ) ||
     (value.id !== undefined && (typeof value.id !== "string" || !NAME.test(value.id))) ||
     typeof value.sender_agent_id !== "string" ||
     value.sender_agent_id.length > 256 ||
     (value.action_type_id !== undefined &&
       value.action_type_id !== null &&
       (typeof value.action_type_id !== "string" || value.action_type_id.length > 256)) ||
+    (value.message_type != null &&
+      (typeof value.message_type !== "string" || !NAME.test(value.message_type))) ||
+    (value.delivery_attempts !== undefined &&
+      (!Number.isSafeInteger(value.delivery_attempts) ||
+        (value.delivery_attempts as number) < 1)) ||
+    (value.redelivered !== undefined && typeof value.redelivered !== "boolean") ||
+    (value.lease_expires_at != null &&
+      (typeof value.lease_expires_at !== "string" ||
+        value.lease_expires_at.length > 128 ||
+        !Number.isFinite(Date.parse(value.lease_expires_at)))) ||
     !isCentralRecord(value.payload) ||
     typeof value.created_at !== "string" ||
     value.created_at.length > 128
@@ -341,6 +372,8 @@ function message(value: unknown): CentralMessage {
     throw failure("central_response_invalid");
   }
   assertNoCentralCredentialFields(value.payload);
+  // Delivery attempts and leases change on redelivery. They must not change
+  // the canonical body used by durable custody to detect conflicting IDs.
   return {
     ...(value.id === undefined ? {} : { id: value.id }),
     sender_agent_id: value.sender_agent_id,
@@ -385,10 +418,14 @@ async function cancel(response: Response): Promise<void> {
 export class CentralRestClient {
   readonly #origin: URL;
   readonly #transport: CentralProtectedTransport;
+  readonly #mutations: CentralMutations | undefined;
+  readonly #beforeRequest: CentralRestClientOptions["beforeRequest"];
 
   constructor(options: CentralRestClientOptions) {
     this.#origin = origin(options.centralOrigin);
     this.#transport = options.transport;
+    this.#mutations = options.mutations;
+    this.#beforeRequest = options.beforeRequest;
   }
 
   async listActionTypes(signal?: AbortSignal): Promise<CentralActionType[]> {
@@ -414,9 +451,17 @@ export class CentralRestClient {
   async requestPermission(
     arguments_: unknown,
     signal?: AbortSignal,
+    requestKey?: string,
   ): Promise<CentralPermissionRequestResult> {
     const body = normalizePermissionRequest(arguments_);
-    const result = await this.#request("POST", "/api/request_permission", body, signal);
+    const result = await this.#request(
+      "POST",
+      "/api/request_permission",
+      body,
+      signal,
+      undefined,
+      requestKey,
+    );
     if (
       !exactKeys(result, ["permission_id", "status", "message"], ["already_granted", "decision"]) ||
       typeof result.permission_id !== "string" ||
@@ -440,6 +485,7 @@ export class CentralRestClient {
   async requestHumanInput(
     arguments_: CentralHumanInputRequest,
     signal?: AbortSignal,
+    requestKey?: string,
   ): Promise<CentralHumanInputRequestResult> {
     if (
       !exactKeys(
@@ -474,7 +520,14 @@ export class CentralRestClient {
       ...(options === null ? {} : { options }),
       message_id: requestUuid(arguments_.message_id),
     };
-    const result = await this.#request("POST", "/api/get_human_input", body, signal);
+    const result = await this.#request(
+      "POST",
+      "/api/get_human_input",
+      body,
+      signal,
+      undefined,
+      requestKey,
+    );
     if (
       !exactKeys(result, ["request_id", "status", "input_type", "message", "options"]) ||
       typeof result.request_id !== "string" ||
@@ -498,7 +551,11 @@ export class CentralRestClient {
     };
   }
 
-  async callAction(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async callAction(
+    arguments_: unknown,
+    signal?: AbortSignal,
+    requestKey?: string,
+  ): Promise<Record<string, unknown>> {
     if (!exactKeys(arguments_, ["target_email", "action_type", "payload"])) {
       throw failure("invalid_arguments");
     }
@@ -511,6 +568,8 @@ export class CentralRestClient {
         payload: requestObject(arguments_.payload),
       },
       signal,
+      undefined,
+      requestKey,
     );
     if (
       !exactKeys(result, ["call_id", "message_id", "status"]) ||
@@ -518,7 +577,7 @@ export class CentralRestClient {
       !UUID.test(result.call_id) ||
       typeof result.message_id !== "string" ||
       !NAME.test(result.message_id) ||
-      result.status !== "delivered"
+      result.status !== "queued"
     ) {
       throw failure("central_response_invalid");
     }
@@ -528,6 +587,7 @@ export class CentralRestClient {
   async submitActionResult(
     arguments_: unknown,
     signal?: AbortSignal,
+    requestKey?: string,
   ): Promise<Record<string, unknown>> {
     if (
       !exactKeys(arguments_, ["call_id", "result", "status"]) ||
@@ -546,6 +606,8 @@ export class CentralRestClient {
         status: requestedStatus,
       },
       signal,
+      undefined,
+      requestKey,
     );
     const expectedStatus = requestedStatus === "success" ? "completed" : "failed";
     if (
@@ -557,6 +619,44 @@ export class CentralRestClient {
     ) {
       throw failure("central_response_invalid");
     }
+    return result;
+  }
+
+  async reportActionProgress(
+    arguments_: {
+      call_id: string;
+      state: "working" | "waiting_for_owner_input" | "failed";
+      note?: string | undefined;
+    },
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    if (
+      !exactKeys(arguments_, ["call_id", "state"], ["note"]) ||
+      !["working", "waiting_for_owner_input", "failed"].includes(arguments_.state) ||
+      (arguments_.note !== undefined &&
+        (typeof arguments_.note !== "string" || arguments_.note.length > 200))
+    )
+      throw failure("invalid_arguments");
+    const callId = requestUuid(arguments_.call_id);
+    const result = await this.#request(
+      "POST",
+      "/api/report_action_progress",
+      { ...arguments_, call_id: callId },
+      signal,
+    );
+    if (
+      !exactKeys(result, ["call_id", "event_id", "sequence", "state", "message_id", "duplicate"]) ||
+      result.call_id !== callId ||
+      typeof result.event_id !== "string" ||
+      !UUID.test(result.event_id) ||
+      !Number.isSafeInteger(result.sequence) ||
+      (result.sequence as number) < 1 ||
+      result.state !== arguments_.state ||
+      (result.message_id !== null &&
+        (typeof result.message_id !== "string" || !UUID.test(result.message_id))) ||
+      typeof result.duplicate !== "boolean"
+    )
+      throw failure("central_response_invalid");
     return result;
   }
 
@@ -574,7 +674,13 @@ export class CentralRestClient {
       signal,
       Math.max(ORDINARY_DEADLINE_MS, timeout * 1_000 + POLL_RESPONSE_MARGIN_MS),
     );
-    if (!exactKeys(result, ["messages"]) || !Array.isArray(result.messages)) {
+    if (
+      !exactKeys(result, ["messages"], ["has_more", "lease_seconds"]) ||
+      !Array.isArray(result.messages) ||
+      (result.has_more !== undefined && typeof result.has_more !== "boolean") ||
+      (result.lease_seconds !== undefined &&
+        (!Number.isSafeInteger(result.lease_seconds) || (result.lease_seconds as number) < 0))
+    ) {
       throw failure("central_response_invalid");
     }
     if (result.messages.length > MAX_MESSAGES) throw failure("central_response_invalid");
@@ -615,13 +721,107 @@ export class CentralRestClient {
       signal,
     );
     if (
-      !exactKeys(result, ["message_id", "status"]) ||
+      !exactKeys(result, ["message_id", "status", "acknowledged", "already_acked", "unknown"]) ||
       result.message_id !== messageId ||
-      result.status !== "acked"
+      result.status !== "acked" ||
+      !Array.isArray(result.acknowledged) ||
+      result.acknowledged.length !== 1 ||
+      result.acknowledged[0] !== messageId ||
+      !Array.isArray(result.already_acked) ||
+      result.already_acked.length > 1 ||
+      result.already_acked.some((id) => id !== messageId) ||
+      !Array.isArray(result.unknown) ||
+      result.unknown.length !== 0
     ) {
       throw failure("central_response_invalid");
     }
     return { message_id: messageId, status: "acked" };
+  }
+
+  async releaseMessages(ids: readonly string[], signal?: AbortSignal): Promise<void> {
+    if (ids.length < 1 || ids.length > 256) throw failure("invalid_arguments");
+    const requested = [...new Set(ids.map(requestUuid))];
+    const result = await this.#request(
+      "POST",
+      "/api/release_messages",
+      { message_ids: requested },
+      signal,
+    );
+    if (
+      !exactKeys(result, ["released"]) ||
+      !Array.isArray(result.released) ||
+      result.released.length > requested.length ||
+      new Set(result.released).size !== result.released.length ||
+      result.released.some((id) => !requested.includes(id))
+    )
+      throw failure("central_response_invalid");
+  }
+
+  async resumeMutation(
+    operation: CentralMutation,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown> | undefined> {
+    const body = this.#mutations?.body(operation, key);
+    if (body === undefined) return undefined;
+    switch (operation) {
+      case "request_permission":
+        return this.requestPermission(body, signal, key);
+      case "call_action":
+        return this.callAction(body, signal, key);
+      case "submit_action_result":
+        return this.submitActionResult(body, signal, key);
+      case "get_human_input":
+        return this.requestHumanInput(body as unknown as CentralHumanInputRequest, signal, key);
+    }
+  }
+
+  async #lookupMutation(
+    operation: CentralMutation,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<MutationReceipt | undefined> {
+    const query = new URLSearchParams({ operation, idempotency_key: key });
+    const result = await this.#request(
+      "GET",
+      `/api/idempotency_status?${query}`,
+      undefined,
+      signal,
+    );
+    if (
+      !exactKeys(result, [
+        "operation",
+        "idempotency_key",
+        "found",
+        "state",
+        "status_code",
+        "response",
+        "message",
+      ]) ||
+      result.operation !== operation ||
+      result.idempotency_key !== key ||
+      typeof result.found !== "boolean" ||
+      !["accepted", "rejected", "unknown"].includes(String(result.state)) ||
+      typeof result.message !== "string" ||
+      result.message.length > 2000
+    )
+      throw failure("central_response_invalid");
+    if (result.state === "unknown") {
+      if (result.status_code !== null || result.response !== null)
+        throw failure("central_response_invalid");
+      // The same key is safe to retry, including after the server's in-progress lease expires.
+      return undefined;
+    }
+    if (
+      !result.found ||
+      !Number.isInteger(result.status_code) ||
+      !isCentralRecord(result.response) ||
+      (result.state === "accepted"
+        ? (result.status_code as number) < 200 || (result.status_code as number) >= 300
+        : (result.status_code as number) < 400 || (result.status_code as number) >= 500)
+    )
+      throw failure("central_response_invalid");
+    return { status: result.status_code as number, body: result.response };
   }
 
   async #request(
@@ -630,20 +830,46 @@ export class CentralRestClient {
     body: Record<string, unknown> | undefined,
     signal?: AbortSignal,
     deadlineMs?: number,
+    requestKey?: string,
   ): Promise<unknown> {
     let response: Response;
     try {
-      response = await this.#transport.fetch(
-        new URL(path, this.#origin),
-        {
-          method,
-          ...(body === undefined
-            ? {}
-            : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-          ...(signal === undefined ? {} : { signal }),
-        },
-        deadlineMs,
-      );
+      await this.#beforeRequest?.(signal);
+      const send = () =>
+        this.#transport.fetch(
+          new URL(path, this.#origin),
+          {
+            method,
+            ...(body === undefined
+              ? {}
+              : {
+                  headers: {
+                    "content-type": "application/json",
+                    ...(requestKey === undefined ? {} : { "Idempotency-Key": requestKey }),
+                  },
+                  body: JSON.stringify(body),
+                }),
+            ...(signal === undefined ? {} : { signal }),
+          },
+          deadlineMs,
+        );
+      if (requestKey !== undefined && body !== undefined && this.#mutations !== undefined) {
+        const operation = path.slice("/api/".length) as CentralMutation;
+        const receipt = await this.#mutations.execute(
+          operation,
+          requestKey,
+          body,
+          async () => {
+            const wire = await send();
+            const content = await readCentralJson(wire);
+            if (!isCentralRecord(content)) throw failure("central_response_invalid");
+            assertNoCentralCredentialFields(content);
+            return { status: wire.status, body: content };
+          },
+          () => this.#lookupMutation(operation, requestKey, signal),
+        );
+        response = Response.json(receipt.body, { status: receipt.status });
+      } else response = await send();
     } catch (error) {
       if (error instanceof CentralProtectedTransportError) {
         if (error.code === "central_protected_credential_expired") {
@@ -678,6 +904,19 @@ export class CentralRestClient {
       } catch {
         await cancel(response);
       }
+      if (
+        response.status === 403 &&
+        isCentralRecord(rejection) &&
+        isCentralRecord(rejection.detail) &&
+        rejection.detail.error === "Not the execution device for this agent" &&
+        ["executor_revoked", "executor_transferred", "execution_token_required"].includes(
+          String(rejection.detail.reason),
+        )
+      )
+        throw new CentralRestError("executor_inactive", {
+          httpStatus: response.status,
+          notAccepted: true,
+        });
       const permissionReason =
         path === "/api/call_action" &&
         response.status === 403 &&
@@ -701,7 +940,9 @@ export class CentralRestClient {
           : (permissionReason ?? "central_request_rejected"),
         {
           httpStatus: response.status,
-          notAccepted: rejectedStatuses.includes(response.status),
+          notAccepted:
+            rejectedStatuses.includes(response.status) &&
+            !(requestKey !== undefined && response.status === 409),
           ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
         },
       );

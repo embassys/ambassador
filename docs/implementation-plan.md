@@ -1,5 +1,68 @@
 # Current work
 
+## Central contract adoption, September 14
+
+Implemented under [ADR 0082](adr/0082-current-central-recovery-and-owner-integration.md).
+The [implementation and test record](central-adoption-2026-09-14.md) supersedes
+older statements below that issues 1–13 still require server implementation.
+Implementation and review are tracked in [PR 45](https://github.com/embassys/ambassador/pull/45).
+This candidate is not released. API source remains unchanged.
+
+Completed:
+
+- One-code desktop setup under [ADR 0083](adr/0083-one-code-desktop-setup.md):
+  owner sign-in, verified first-agent creation/adoption and guarded device setup.
+  [Live Claude onboarding and recovery tests passed](one-code-onboarding-2026-09-14.md).
+
+- Durable central idempotency keys and receipt recovery, retryable acknowledgements,
+  failed-custody release, same-key token renewal and explicit email recovery.
+- Current owner sign-in/refresh, device selection and revocation, and private
+  execution-credential installation with preserved encrypted conversations.
+- Paginated requests, grants and permission history; exact reviewed decisions,
+  answers and revocation; resumable account events and running-app notifications.
+- People invitations and connections alongside local contact import. Importing
+  or accepting a connection grants no action permissions.
+- Successful-result schema validation, correlated remote progress, waiting-for-owner
+  updates and persistent verification keys for explicit same-code retries.
+- Private macOS push registration and visible server/provider availability, with
+  running-app fallback. This does not qualify remote delivery.
+
+Validation: 588 repository tests passed with seven expected skips; 45 desktop
+artifact/render checks passed, along with typechecks, lint and production build.
+The bundled Node/SQLite/ACP/MCP worker check passed. Live disposable-owner tests
+passed sign-in, invitation email delivery/repeat/acceptance, connections, device
+transfer, execution-token issuance, revocation and same-key email recovery.
+Native sample-data checks covered People and device reviews, including Escape
+and focus return. These screenshots are not evidence of live provider delivery.
+
+Remaining:
+
+- [ ] Qualify signed native push with configured server credentials and actual
+  devices. The live server reports no push credentials. Windows still needs an
+  approved native WNS bridge; Linux uses running-app notifications.
+- [ ] Adopt the newly shipped general communication history endpoint in
+  [18](https://github.com/embassys/agent2agent/issues/18), with independent contract
+  review and live queue-isolation qualification. It is no longer server-blocked.
+- [ ] Follow the separate DPoP wire/nonce decision in issue 14. Keep the current
+  protocol until a coordinated change is accepted.
+- [ ] Obtain release approval and run release CI for the completed candidate.
+  [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
+  Existing platform/provider qualification and signed distribution limits remain.
+
+After issue 15 was deployed, protected live tests passed leased redelivery,
+release/repeated acknowledgement, lost-response recovery for all four supported
+agent mutations, progress/owner input, exact results, renewal and device fencing.
+The test found and fixed the client's stale `delivered` expectation for central's
+`queued` action receipt. The new owner roster route removes repeat sign-in after
+registration and invalidates device reviews when an executor epoch changes.
+Issues 16, 17, 19 and 20 are also closed and their client behavior is qualified.
+The clean-installed package passed the deployed MCP/action round trip with a
+controlled mock ACP target, including provider-tool approval and credential
+redaction checks. Six independent Python fixture tests passed on Linux x64.
+See the [retest evidence](central-adoption-2026-09-14.md#retest-after-issue-15-was-repaired).
+
+## Release evidence
+
 On September 11 the owner authorized a PR and desktop 0.1.2 preview 1 for the
 completed conversation, approval and People refinements.
 [Embassys 0.1.2 preview 1](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.2-preview.1)
@@ -76,6 +139,58 @@ is merged; publication and artifact verification are recorded in the
 The user approved [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md),
 implementation, regression coverage and live end-to-end testing, then authorized
 the release on 2026-09-05 with the remaining limitations below.
+
+## Raspberry Pi desktop, September 12
+
+The owner approved a native Linux ARM64 build under
+[ADR 0081](adr/0081-linux-arm64-desktop.md). The build selects matching Electron,
+Node and SQLite binaries and checks their platform and architecture. CI now has
+an ARM64 Linux job with the same package, archive, host and handoff gates, plus
+explicit Linux display libraries and an architecture-specific sandbox path.
+The candidate targets Pi 4/5 with 64-bit Raspberry Pi OS Desktop; 32-bit and Lite
+without a desktop are excluded. No dependency versions or central API changed.
+
+The ARM64 Debian build passed 45 artifact/render tests, 255 selected regressions,
+typecheck and extracted-package MCP checks. Linux host testing found an oversized
+window icon, now bounded to 256px with a regression in the host probe. The rebuilt
+app passed startup, duplicate launch, window reopening, shutdown and CLI/app
+handoffs in an isolated ARM64 Debian machine with the sandbox enabled. Physical
+Pi graphics, tray, notifications and installed providers still need qualification.
+This work is not released. See the [evidence](desktop-linux-arm64-2026-09-12.md)
+and [installation notes](desktop-install.md#raspberry-pi-build).
+
+## People discovery after setup, September 12
+
+Implemented on `codex/people-discovery`. People is visible above Inbox, and the
+empty workspace offers Add people and Connect agents. Contact import explains
+vCard export before opening the native picker. After the owner rejected the
+split list/detail layout, People now uses one list with direct Copy email
+buttons. Add, edit and contact details open in a compact sheet. The invitation
+limit appears once in a quiet footer. Empty sidebar labels are short and muted
+beneath stronger section headings.
+
+Server main `a8c0e77`, web main `a9cb3d3` and deployed OpenAPI still have no
+send-invitation route. API issue 11 remains open. Saving contacts does not send
+invitations, and no central contract was changed.
+
+Validation: 45 desktop artifact/render tests and desktop typecheck passed,
+including the new architecture checks. A native Mac walkthrough of the single
+list passed add, edit, confirmed removal, focus restoration, light/dark,
+680 x 540 contact sheets and empty sidebar states. Screenshots of fictional
+sample data are in `.build/people-list-review/`. The previous split-layout
+screenshots are superseded. Storage/private commands are unchanged; their
+35 account/contact/clean checks passed in the preceding implementation. This
+change is not released.
+
+The subsequent People toolbar refinement removes the duplicate title/back bar,
+boxed toolbar buttons and row/footer rules. Search and labelled import/add
+controls share one compact toolbar; the list scrolls separately from the count
+and local-storage footer. Typecheck, all 45 desktop checks, formatting and the
+production build pass. The unlocked Mac walkthrough passed search, Add person,
+Import contacts, Escape/focus return and light/dark appearance at 840 x 680 and
+680 x 540. The toolbar stays on one line at the minimum size. Current native
+captures with fictional data are in `.build/people-toolbar-review/`; the earlier
+People captures show the preceding toolbar. No central/provider test is claimed.
 
 ## Current desktop refinement
 
@@ -199,15 +314,15 @@ discovery were repeated separately to confirm each loaded its own skill path.
 Captured together at the user's request on 2026-09-07. API work remains
 issue-only. These items do not authorize another release.
 
-- [ ] Central API recovery. Prevent message loss on disconnect, recover accepted
-  submissions whose responses were lost, fix stuck polling, and support
-  credential and identity recovery after expiry or `clean`. This is the biggest
-  remaining reliability risk. Track server work in issues
+- [ ] Adopt central recovery. The server implementations for lost polls,
+  listener lifecycle, credential recovery and uncertain submissions are now in
+  closed issues
   [1](https://github.com/embassys/agent2agent/issues/1),
   [2](https://github.com/embassys/agent2agent/issues/2),
   [3](https://github.com/embassys/agent2agent/issues/3) and
-  [4](https://github.com/embassys/agent2agent/issues/4). Local durability cannot
-  recover a message that central consumed before a lost HTTP response.
+  [4](https://github.com/embassys/agent2agent/issues/4). Integrate durable keys,
+  reconciliation, renewal and acknowledgement recovery, then qualify them live.
+  The September 14 response-parser fixes alone do not complete that work.
 - [x] Codex discovery. A fresh desktop task on September 8 answered "Am I
   registered with Embassys?" through `get_my_permissions` without a website
   question or tool hint. This test used the deployed central service and the
@@ -246,11 +361,11 @@ issue-only. These items do not authorize another release.
   This qualifies the calendar connector's invitation path, separately from the
   earlier Embassys scheduling coordination tests. See the
   [desktop PR review](desktop-pr-review-2026-09-08.md).
-- [ ] API result contracts and progress. Define and validate action-specific
-  results, and tell callers when the other agent needs owner input. Track remote
+- [ ] Adopt result contracts and progress. The server now supplies remote
   progress in [issue 5](https://github.com/embassys/agent2agent/issues/5) and result
-  schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6). Update
-  Ambassador's validation, fixtures and qualification when those contracts exist.
+  schemas in [issue 6](https://github.com/embassys/agent2agent/issues/6); both are
+  closed. Update local validation, operation handling, calendar fixtures and live
+  qualification. Result schemas are exposed by the current catalog parser.
 - [ ] Broader client qualification. Qualify Hermes native return and each
   supported real-agent mode on Windows. Hermes
   native return first needs trusted origin routing and busy-session semantics.
@@ -296,13 +411,13 @@ issue-only. These items do not authorize another release.
   Mac controls are implemented. Owner-authenticated approval, answer and revocation
   endpoints already exist and the web app uses them. ADR 0075 now implements
   desktop review, approval, exact button/text answers and
-  revocation with durable no-replay markers. Full server-side mutation recovery
-  and complete request context remain separate follow-ups. Complete history, agent
-  identity recovery and native
-  remote push still need central contracts. Signed distribution,
+  revocation with durable no-replay markers. The new owner, recovery, request
+  context, permission-history and native-push contracts now need client adoption
+  and qualification; see the September 14 review. Signed distribution,
   trusted engine selection and native Windows/Linux/provider qualification need
   the release infrastructure and environments described in the
-  [desktop plan](desktop-app-plan.md). API gaps remain in issues 7–10.
+  [desktop plan](desktop-app-plan.md). Issues 7–10 are closed; the remaining
+  first-agent signup and platform push requirements are recorded above.
 
 The owner excluded central API changes and distribution from the current work
 on September 8. Native Windows/Linux qualification remains deferred. The combined

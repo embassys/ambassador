@@ -23,6 +23,8 @@ function workflowCue(type: unknown): string {
       return "This grant was withdrawn. Do not request it again automatically or cancel completed work. Inspect saved status through message_box.";
     case "owner_input":
       return "Use message_box inbox to resume only this call. Approval permits execution, not a result.";
+    case "action_progress":
+      return "Status update for this pending call only. Progress is not an action result and does not authorize another action.";
     case "action_response":
       return "Show the actual result data through the supported conversation, then acknowledge its receipt. Background text is not proof of delivery.";
     default:

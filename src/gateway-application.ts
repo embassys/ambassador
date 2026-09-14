@@ -11,8 +11,11 @@ import {
   CentralEnrollmentError,
   REST_BOOTSTRAP_TOOLS,
 } from "./central-enrollment.js";
+import { CentralMutations } from "./central-mutations.js";
 import { CentralProtectedTransport } from "./central-protected-transport.js";
+import { CentralRenewal } from "./central-renewal.js";
 import { CentralRestClient, CentralRestError, REST_AUTHENTICATED_TOOLS } from "./central-rest.js";
+import { CentralVerificationKeys } from "./central-verification-keys.js";
 import { type CredentialStore, EncryptedFileCredentialStore } from "./credential-store.js";
 import {
   type DeliveryProfile,
@@ -293,11 +296,20 @@ function runtimeFailure(error: unknown, agentName: string): GatewayError {
 function expiredCredentialNotice(): GatewayError {
   return new GatewayError(
     "credential_expired",
-    "Ambassador paused central delivery because its credential expired. Local inbox and session reads remain available. Embassys does not yet offer credential renewal; keep local state and contact the service owner for recovery",
+    "Ambassador paused central delivery because its credential expired. Local inbox and session reads remain available. Automatic renewal has not succeeded. Keep local state and use account recovery if the credential can no longer be renewed",
     0,
   );
 }
 
+function executionFenceFailure(error: unknown): boolean {
+  let current = error;
+  for (let i = 0; i < 4; i++) {
+    if (current instanceof CentralRestError && current.code === "executor_inactive") return true;
+    if (!current || typeof current !== "object") return false;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
 function credentialExpiryFailure(error: unknown): boolean {
   let current = error;
   for (let depth = 0; depth < 4; depth += 1) {
@@ -392,6 +404,10 @@ export async function openGatewayApplication(
   let desktopRegistration: DesktopRegistration | undefined;
   let local!: LocalMcpServer;
   let rest: CentralRestClient | undefined;
+  let centralMutations: CentralMutations | undefined;
+  let renewal: CentralRenewal | undefined;
+  let renewalTimer: NodeJS.Timeout | undefined;
+  let renewalNoticeSent = false;
   let relay: NotificationRelay | undefined;
   let notificationStore: NotificationStore | undefined;
   let humanInputMailbox: HumanInputMailbox | undefined;
@@ -424,8 +440,25 @@ export async function openGatewayApplication(
     return result;
   };
 
+  const verificationKeys = new CentralVerificationKeys(
+    new EncryptedFileCredentialStore(
+      `${options.credentialPath}.verification`,
+      `${options.credentialKeyPath}.verification`,
+      JSON.stringify({ centralOrigin, purpose: "verification-key" }),
+      { validatePlaintext: CentralVerificationKeys.validate },
+    ),
+  );
   const enrollment = new CentralEnrollmentClient({
     centralOrigin,
+    verificationKeys,
+    recoveryKeys: new CentralVerificationKeys(
+      new EncryptedFileCredentialStore(
+        `${options.credentialPath}.recovery`,
+        `${options.credentialKeyPath}.recovery`,
+        JSON.stringify({ centralOrigin, purpose: "recovery-key" }),
+        { validatePlaintext: CentralVerificationKeys.validate },
+      ),
+    ),
     ...(centralFetch === undefined ? {} : { fetch: centralFetch }),
     nowSeconds,
   });
@@ -495,7 +528,7 @@ export async function openGatewayApplication(
         url: context.profile.url,
         secret,
         contract: context.capability.webhook,
-        identityScope: identity.localCredential().keyThumbprint,
+        identityScope: identity.storageCredential().keyThumbprint,
         now: () => nowSeconds() * 1_000,
         fetch: traceFetch(options.webhookFetch ?? globalThis.fetch, log, "webhook"),
       });
@@ -507,7 +540,7 @@ export async function openGatewayApplication(
     if (sessionStore === undefined) throw new AcpSessionStoreError();
     const direct = new DirectDeliveryTarget({
       agentKind: context.capability.kind,
-      identityScope: identity.localCredential().keyThumbprint,
+      identityScope: identity.storageCredential().keyThumbprint,
       capability: context.capability.direct,
       workingDirectory: context.profile.working_directory,
       environment: options.environment,
@@ -529,7 +562,7 @@ export async function openGatewayApplication(
         try {
           transcripts = new VisibleTranscripts(
             options.visibleTranscriptPath,
-            identity.localCredential(),
+            identity.storageCredential(),
             { now: () => nowSeconds() * 1000 },
           );
           while (transcripts.recoverInterrupted())
@@ -576,38 +609,73 @@ export async function openGatewayApplication(
         ...(centralFetch === undefined ? {} : { fetch: centralFetch }),
         now: nowSeconds,
       });
-      const nextRest = new CentralRestClient({ centralOrigin, transport });
+      centralMutations ??= new CentralMutations(
+        join(dirname(options.pendingActionPath), "central-submissions.sqlite"),
+        identity.storageCredential(),
+      );
+      renewal ??= new CentralRenewal(identity, transport, centralOrigin, nowSeconds);
+      const renew = async (signal?: AbortSignal) => {
+        try {
+          await renewal?.ensure(signal);
+        } catch {
+          if (identity.expired) {
+            if (!renewalNoticeSent) {
+              renewalNoticeSent = true;
+              options.onRuntimeNotice?.(expiredCredentialNotice());
+            }
+            throw new CentralRestError("credential_expired");
+          }
+        }
+      };
+      await renew(lifetimeSignal).catch(() => undefined);
+      if (!renewalTimer) {
+        renewalTimer = setInterval(() => {
+          void renew(lifetimeSignal)
+            .then(async () => {
+              if (!closed && !identity.expired && relay === undefined)
+                await enableEnrolledIdentity();
+            })
+            .catch(() => undefined);
+        }, 30_000);
+        renewalTimer.unref();
+      }
+      const nextRest = new CentralRestClient({
+        centralOrigin,
+        transport,
+        mutations: centralMutations,
+        beforeRequest: renew,
+      });
       const nextPendingActionInbox =
         pendingActionInbox ??
-        new PendingActionInbox(options.pendingActionPath, identity.localCredential());
+        new PendingActionInbox(options.pendingActionPath, identity.storageCredential());
       pendingActionInbox = nextPendingActionInbox;
       const nextActionResultInbox =
         actionResultInbox ??
-        new ActionResultInbox(options.actionResultPath, identity.localCredential());
+        new ActionResultInbox(options.actionResultPath, identity.storageCredential());
       actionResultInbox = nextActionResultInbox;
       const nextOutboundActions =
         outboundActions ??
         new OutboundActions(
           options.outboundActionPath ??
             join(dirname(options.pendingActionPath), "outbound-actions.sqlite"),
-          identity.localCredential(),
+          identity.storageCredential(),
           nextRest,
         );
       outboundActions = nextOutboundActions;
       rest = nextRest;
       notificationStore ??= new NotificationStore(
         join(dirname(options.journalPath), "notification-custody.sqlite"),
-        identity.localCredential(),
+        identity.storageCredential(),
       );
       humanInputMailbox ??= new HumanInputMailbox(
         join(dirname(options.journalPath), "human-input-responses.sqlite"),
-        identity.localCredential(),
+        identity.storageCredential(),
       );
       const mailbox = humanInputMailbox;
       const custody = notificationStore;
       ownerQuestions ??= new OwnerQuestions({
         path: join(dirname(options.pendingActionPath), "owner-questions.sqlite"),
-        credential: identity.localCredential(),
+        credential: identity.storageCredential(),
         pending: nextPendingActionInbox,
         transport: nextRest,
         enqueueContinuation: (message) => {
@@ -620,7 +688,7 @@ export async function openGatewayApplication(
         await new Promise<void>((resolve) => setImmediate(resolve));
       messageBox ??= new MessageBox({
         path: join(dirname(options.pendingActionPath), "operations.sqlite"),
-        credential: identity.localCredential(),
+        credential: identity.storageCredential(),
         transport: nextRest,
         pending: nextPendingActionInbox,
         results: nextActionResultInbox,
@@ -689,11 +757,13 @@ export async function openGatewayApplication(
         store: notificationStore,
         onDeliveryError: (error) =>
           options.onRuntimeNotice?.(runtimeFailure(error, profile.capability.displayName)),
-        onAcknowledgementError: (error, messageId) =>
+        onAcknowledgementError: (error, messageId) => {
+          if (executionFenceFailure(error)) throw error;
           log("delivery.acknowledgement_uncertain", {
             message_id: messageId,
             error: describeVerboseError(error),
-          }),
+          });
+        },
         deliveryTarget: {
           prepare: async (signal) => {
             await baseTarget.prepare?.(signal);
@@ -719,7 +789,9 @@ export async function openGatewayApplication(
           } catch (error) {
             if (
               error instanceof CentralRestError &&
-              (error.code === "central_request_failed" || error.code === "central_request_rejected")
+              (error.code === "central_request_failed" ||
+                error.code === "central_request_rejected" ||
+                error.code === "credential_expired")
             ) {
               throw new RetryableNotificationReceiveError();
             }
@@ -733,6 +805,7 @@ export async function openGatewayApplication(
           await nextRest.ackMessage({ message_id: messageId }, signal);
           log("delivery.acknowledged", { message_id: messageId });
         },
+        releaseMessages: (ids, signal) => nextRest.releaseMessages(ids, signal),
         captureMessage,
       });
       rest = nextRest;
@@ -740,8 +813,18 @@ export async function openGatewayApplication(
       relayRun = nextRelay.run(lifetimeSignal);
       void relayRun.catch((error: unknown) => {
         if (!closed && !lifetimeSignal.aborted) {
-          const notice = runtimeFailure(error, profile.capability.displayName);
-          if (localDeliveryFailure(error) || credentialExpiryFailure(error)) {
+          const notice = executionFenceFailure(error)
+            ? new GatewayError(
+                "executor_inactive",
+                "This device is no longer authorized to execute the agent. Delivery is paused; local history remains available. Review the execution device in Embassys.",
+                0,
+              )
+            : runtimeFailure(error, profile.capability.displayName);
+          if (
+            executionFenceFailure(error) ||
+            localDeliveryFailure(error) ||
+            credentialExpiryFailure(error)
+          ) {
             options.onRuntimeNotice?.(notice);
           } else {
             reportFailure?.(notice);
@@ -862,6 +945,7 @@ export async function openGatewayApplication(
                 result = await desktopRegistration.verifyFromTools(arguments_);
               else {
                 result = await identity.enroll(() => enrollment.verify(arguments_, signal));
+                await enrollment.verificationCommitted();
                 await enableEnrolledIdentity();
               }
               break;
@@ -884,6 +968,7 @@ export async function openGatewayApplication(
           return result;
         }
 
+        if (identity.enrolled) await renewal?.ensure(signal).catch(() => undefined);
         if (REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name)) identity.credential();
         switch (name) {
           case "register_agent":
@@ -995,6 +1080,7 @@ export async function openGatewayApplication(
   } catch (error) {
     controller.abort();
     if (sessionCleanupTimer !== undefined) clearInterval(sessionCleanupTimer);
+    if (renewalTimer) clearInterval(renewalTimer);
     await relay?.shutdown().catch(() => undefined);
     await local?.close().catch(() => undefined);
     await messageBox?.close();
@@ -1005,6 +1091,7 @@ export async function openGatewayApplication(
     actionResultInbox?.close();
     outboundActions?.close();
     notificationStore?.close();
+    centralMutations?.close();
     humanInputMailbox?.close();
     await sessionMaintenance?.settled();
     acpSessionStore?.close();
@@ -1087,6 +1174,7 @@ export async function openGatewayApplication(
       closed = true;
       controller.abort();
       if (sessionCleanupTimer !== undefined) clearInterval(sessionCleanupTimer);
+      if (renewalTimer) clearInterval(renewalTimer);
       await relay?.shutdown().catch(() => undefined);
       await relayRun?.catch(() => undefined);
       await local.close();
@@ -1098,6 +1186,7 @@ export async function openGatewayApplication(
       actionResultInbox?.close();
       outboundActions?.close();
       notificationStore?.close();
+      centralMutations?.close();
       humanInputMailbox?.close();
       await sessionMaintenance?.settled();
       acpSessionStore?.close();

@@ -44,6 +44,18 @@ const permissionFields = {
 };
 const inputSchema = z.discriminatedUnion("type", [
   z.strictObject({
+    type: z.literal("report_progress"),
+    call_id: uuid,
+    state: z.enum(["working", "waiting_for_owner_input", "failed"]),
+    note: z
+      .string()
+      .max(200)
+      .optional()
+      .describe(
+        "A brief public status for the requester. Do not include the owner question, answer, private working data or tool output.",
+      ),
+  }),
+  z.strictObject({
     type: z.literal("request_action"),
     request_id: uuid,
     ...permissionFields,
@@ -112,7 +124,7 @@ function publicSchema(): Record<string, unknown> {
 export const MESSAGE_BOX_TOOL: CentralToolDefinition = {
   name: "message_box",
   description:
-    "Send or check an Embassys business message. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. The target person's human decides permissions through email or the signed-in Embassys app; MCP cannot decide permissions. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
+    "Send or check an Embassys business message. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. The target person's human decides permissions through email or the signed-in Embassys app; MCP cannot decide permissions. Use report_progress for brief public status on a known pending incoming call; progress never completes the call. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
   inputSchema: publicSchema(),
 };
 
@@ -122,6 +134,7 @@ const eventSchema = z.strictObject({
     "permission_status",
     "action_result",
     "action_result_submitted",
+    "action_progress",
     "operation_status",
     "rejected",
     "uncertain",
@@ -141,7 +154,9 @@ const operationSchema = z.strictObject({
   call_id: uuid.optional(),
   acknowledged_cursor: uuid.optional(),
   received_result_acknowledged: z.boolean().optional(),
-  events: z.array(eventSchema).max(32),
+  progress_sequence: z.number().int().positive().optional(),
+  progress_sender: z.string().min(1).max(256).optional(),
+  events: z.array(eventSchema).max(128),
 });
 type Operation = z.infer<typeof operationSchema>;
 
@@ -178,7 +193,8 @@ export interface MessageBoxOptions {
   readonly transport: Pick<
     CentralRestClient,
     "listActionTypes" | "requestPermission" | "submitActionResult"
-  >;
+  > &
+    Partial<Pick<CentralRestClient, "resumeMutation" | "reportActionProgress">>;
   readonly outbound: OutboundActions;
   readonly pending: PendingActionInbox;
   readonly results: ActionResultInbox;
@@ -313,6 +329,45 @@ export class MessageBox {
       );
       return this.#get(id);
     }
+    if (
+      ["submitting", "uncertain"].includes(operation.status) &&
+      this.options.expired?.() !== true
+    ) {
+      try {
+        const result = await this.options.transport.resumeMutation?.(
+          operation.type === "submit_action_result" ? "submit_action_result" : "request_permission",
+          id,
+          signal,
+        );
+        if (result !== undefined) {
+          if (operation.type === "submit_action_result") {
+            this.#save(
+              this.#event({ ...operation, status: "completed" }, "action_result_submitted", result),
+            );
+          } else {
+            this.#save(
+              this.#event(
+                {
+                  ...operation,
+                  permission_id: String(result.permission_id),
+                  status:
+                    result.status === "pending"
+                      ? "pending"
+                      : result.status === "granted"
+                        ? "completed"
+                        : "rejected",
+                },
+                "permission_status",
+                result,
+              ),
+            );
+          }
+          return this.#get(id);
+        }
+      } catch (error) {
+        if (signal.aborted) throw error;
+      }
+    }
     return operation;
   }
 
@@ -351,10 +406,18 @@ export class MessageBox {
       return await this.#run(async () => {
         combined.throwIfAborted();
         if (this.options.owners === undefined) throw new MessageBoxError("message_box_invalid");
-        if (type === "check_owner") return this.options.owners.get(input.request_id);
+        if (type === "check_owner") return this.options.owners.recover(input.request_id, combined);
         if (type === "answer_owner") return this.options.owners.answer(arguments_);
         return await this.options.owners.ask(arguments_, combined);
       });
+    }
+    if (input.type === "report_progress") {
+      if (!this.options.pending.get(input.call_id))
+        throw new MessageBoxError("action_call_not_pending");
+      if (!this.options.transport.reportActionProgress)
+        throw new MessageBoxError("message_box_invalid");
+      const { type: _type, ...report } = input;
+      return await this.options.transport.reportActionProgress(report, combined);
     }
     if (input.type === "inbox") {
       const { type: _type, ...page } = input;
@@ -451,18 +514,24 @@ export class MessageBox {
           throw new MessageBoxError("operation_already_pending");
       }
     } else {
-      if (this.options.pending.get(input.call_id) === undefined)
-        throw new MessageBoxError("action_call_not_pending");
+      const pending = this.options.pending.get(input.call_id);
+      if (pending === undefined) throw new MessageBoxError("action_call_not_pending");
       if (this.#store.find(`reply:${input.call_id}`) !== undefined)
         throw new MessageBoxError("operation_already_pending");
       operation = { ...operation, call_id: input.call_id };
+      if (input.status === "success")
+        await this.#catalog.validateResult(pending.action_type, input.result, signal);
     }
     signal.throwIfAborted();
     this.#save(operation);
     try {
       const { type: _type, request_id: _requestId, ...arguments_ } = stableInput;
       if (input.type === "submit_action_result") {
-        const result = await this.options.transport.submitActionResult(arguments_, signal);
+        const result = await this.options.transport.submitActionResult(
+          arguments_,
+          signal,
+          input.request_id,
+        );
         operation = this.#event(
           { ...operation, status: "completed" },
           "action_result_submitted",
@@ -474,7 +543,11 @@ export class MessageBox {
         return;
       }
       if (input.type === "request_permission") {
-        const result = await this.options.transport.requestPermission(arguments_, signal);
+        const result = await this.options.transport.requestPermission(
+          arguments_,
+          signal,
+          input.request_id,
+        );
         operation = {
           ...operation,
           permission_id: result.permission_id,
@@ -669,6 +742,45 @@ export class MessageBox {
     return this.#run(async () => {
       if (message.payload.type === "human_input_response")
         return this.options.owners?.capture(message) ?? false;
+      if (message.payload.type === "action_progress") {
+        const payload = message.payload;
+        if (typeof payload.call_id !== "string") return false;
+        const operation = this.#store.find(`call:${payload.call_id}`);
+        if (
+          operation?.type !== "request_action" ||
+          operation.action_type !== payload.action_type ||
+          (message.action_type_id != null && operation.action_type_id !== message.action_type_id) ||
+          (operation.progress_sender !== undefined &&
+            operation.progress_sender !== message.sender_agent_id) ||
+          !workflowUuid.safeParse(payload.event_id).success ||
+          !Number.isSafeInteger(payload.sequence) ||
+          (payload.sequence as number) < 1 ||
+          !["working", "waiting_for_owner_input", "failed"].includes(String(payload.state)) ||
+          (payload.note != null && (typeof payload.note !== "string" || payload.note.length > 200))
+        )
+          return false;
+        if (
+          operation.status === "completed" ||
+          (operation.progress_sequence ?? 0) >= (payload.sequence as number)
+        )
+          return true;
+        let updated: Operation = {
+          ...operation,
+          progress_sequence: payload.sequence as number,
+          progress_sender: message.sender_agent_id,
+        };
+        // Leave space for the authoritative result even if a service sends excessive progress.
+        if (operation.events.length < 120)
+          updated = this.#event(updated, "action_progress", {
+            call_id: payload.call_id,
+            event_id: payload.event_id,
+            sequence: payload.sequence,
+            state: payload.state,
+            note: payload.note ?? null,
+          });
+        this.#save(updated);
+        return true;
+      }
       const saved = this.options.outbound.forMessage(message);
       const tracked = saved === undefined ? undefined : this.#store.get(saved.operation_id);
       if (

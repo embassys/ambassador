@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { parseCentralCredential } from "../central-credential.js";
 import { ExecutorGuard, executorContextSchema } from "./executor-guard.js";
 import { DesktopGateway } from "./gateway.js";
 import { DESKTOP_PROTOCOL, workerInitSchema, workerRequestSchema } from "./protocol.js";
@@ -81,6 +83,72 @@ process.on("message", (raw: unknown) => {
     });
     return;
   }
+  if (
+    raw &&
+    typeof raw === "object" &&
+    "type" in raw &&
+    String(raw.type).startsWith("execution_")
+  ) {
+    const common = {
+      protocol: z.literal(DESKTOP_PROTOCOL),
+      requestId: z.uuid(),
+      instanceId: z.literal(gateway.options.id),
+    };
+    const parsed = z
+      .discriminatedUnion("type", [
+        z.strictObject({ ...common, type: z.literal("execution_prepare"), agentId: z.uuid() }),
+        z.strictObject({
+          ...common,
+          type: z.literal("execution_install"),
+          previewId: z.uuid(),
+          credential: z.unknown(),
+        }),
+        z.strictObject({ ...common, type: z.literal("execution_cancel"), previewId: z.uuid() }),
+      ])
+      .safeParse(raw);
+    if (!parsed.success || pending >= 16) {
+      void shutdown();
+      return;
+    }
+    const input = parsed.data;
+    pending++;
+    void (async () => {
+      let result: unknown;
+      if (input.type === "execution_prepare")
+        result = await gateway?.prepareExecution(input.agentId);
+      else if (input.type === "execution_cancel") {
+        await gateway?.cancelExecution(input.previewId);
+        result = { cancelled: true };
+      } else {
+        await gateway?.installExecution(
+          input.previewId,
+          parseCentralCredential(input.credential).record,
+        );
+        result = { installed: true };
+      }
+      send({
+        protocol: DESKTOP_PROTOCOL,
+        type: "reply",
+        requestId: input.requestId,
+        ok: true,
+        result,
+      });
+    })()
+      .catch(() =>
+        send({
+          protocol: DESKTOP_PROTOCOL,
+          type: "reply",
+          requestId: input.requestId,
+          ok: false,
+          error:
+            "Execution credential setup could not finish. Refresh devices and instance status.",
+        }),
+      )
+      .finally(() => {
+        pending--;
+      });
+    return;
+  }
   const parsed = workerRequestSchema.safeParse(raw);
   if (!parsed.success || pending >= 16) {
     void shutdown();
@@ -108,6 +176,7 @@ process.on("message", (raw: unknown) => {
       case "enrollment_status":
       case "enrollment_register":
       case "enrollment_verify":
+      case "enrollment_recover":
       case "enrollment_resend":
       case "enrollment_executor":
       case "permissions":

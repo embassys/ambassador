@@ -7,7 +7,19 @@ export const owner = {
   context: id(3),
   email: "morgan@fixture.test",
   account: {
-    agent_id: ownerId,
+    owner_id: ownerId,
+    device_id: id(4),
+    agents: [
+      {
+        id: id(5),
+        email: "morgan@fixture.test",
+        display_name: "Morgan",
+        executor_device_id: id(4),
+        email_verified: true,
+        is_executed_here: true,
+        executor_epoch: 1,
+      },
+    ],
     email: "morgan@fixture.test",
     display_name: "Morgan",
     username: null,
@@ -20,6 +32,9 @@ export const requests = {
   permission_requests: [
     {
       id: id(10),
+      agent_id: id(5),
+      requester_agent_id: id(90),
+      requester_verified: true,
       decision_options: "once_always",
       scope: {
         calendar_id: "primary",
@@ -28,13 +43,16 @@ export const requests = {
       },
       created_at: "2026-09-10T10:32:00Z",
       expires_at: "2026-09-11T17:00:00Z",
-      action_type: "get_free_busy_permission",
+      action_type: "get_free_busy",
       action_description: "Check your calendar availability",
       requester_name: "Alex Morgan",
       requester_email: "alex@fixture.test",
     },
     {
       id: id(11),
+      agent_id: id(5),
+      requester_agent_id: id(91),
+      requester_verified: true,
       decision_options: "once_always",
       scope: null,
       created_at: "2026-09-10T09:24:00Z",
@@ -46,6 +64,9 @@ export const requests = {
     },
     {
       id: id(12),
+      agent_id: id(5),
+      requester_agent_id: id(92),
+      requester_verified: true,
       decision_options: "accept_deny",
       scope: { title: "Project catch-up", calendar_id: "primary" },
       created_at: "2026-09-09T16:15:00Z",
@@ -67,7 +88,7 @@ export const requests = {
         { label: "Ask Alex for another day", value: "another-day" },
       ],
       created_at: "2026-09-10T10:41:00Z",
-      action_type: "get_free_busy_permission",
+      action_type: "get_free_busy",
     },
   ],
 };
@@ -137,7 +158,7 @@ export const histories = {
     nextCursor: 6,
     warnings: [],
     items: [
-      turn(a, 1, "get_free_busy_permission", "2026-09-10T10:38:00Z"),
+      turn(a, 1, "get_free_busy", "2026-09-10T10:38:00Z"),
       entry(
         a,
         1,
@@ -148,7 +169,7 @@ export const histories = {
             sender_agent_id: id(90),
             payload: {
               type: "action_call",
-              action_type: "get_free_busy_permission",
+              action_type: "get_free_busy",
               payload: {
                 reason:
                   "Alex would like a 30-minute catch-up tomorrow. Is Morgan available in the afternoon?",
@@ -185,7 +206,7 @@ export const histories = {
         ),
         "2026-09-10T10:40:00Z",
       ),
-      turn(a, 2, "get_free_busy_permission", "2026-09-10T10:41:00Z", "recording"),
+      turn(a, 2, "get_free_busy", "2026-09-10T10:41:00Z", "recording"),
       entry(
         a,
         5,
@@ -195,7 +216,7 @@ export const histories = {
           sender_agent_id: id(90),
           payload: {
             type: "action_call",
-            action_type: "get_free_busy_permission",
+            action_type: "get_free_busy",
             payload: { reason: "4:30 pm works for Alex. Could you confirm that time with Morgan?" },
           },
         }),
@@ -312,7 +333,7 @@ export const communications = [
   payload: {},
   created_at: "2026-09-10T10:38:00Z",
   delivered_at: "2026-09-10T10:38:00Z",
-  action_type: "get_free_busy_permission",
+  action_type: "get_free_busy",
   recipient_email: "morgan@fixture.test",
   recipient_name: "Morgan",
 }));

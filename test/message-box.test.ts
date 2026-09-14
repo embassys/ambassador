@@ -94,7 +94,7 @@ async function fixture(t: TestContext, granted = false, waitMs = 35) {
       calls += 1;
       assert.equal(value.action_type, "lookup");
       assert.deepEqual(value.payload, { query: "saved private intent" });
-      return { call_id: callId, message_id: randomUUID(), status: "delivered" };
+      return { call_id: callId, message_id: randomUUID(), status: "queued" };
     },
     async submitActionResult() {
       replies += 1;
@@ -528,5 +528,59 @@ test("a check continues a granted but never dispatched intent after interruption
   assert.equal(f.calls, 1);
   assert.equal(f.requests, 1);
   await f.box.call({ ...input, wait_seconds: 0 }, signal);
+  assert.equal(f.calls, 1);
+});
+
+test("remote progress wakes the right wait, orders redelivery and never completes the action", async (t) => {
+  const f = await fixture(t, true, 1000);
+  const request_id = randomUUID();
+  await f.box.call(
+    {
+      type: "request_action",
+      request_id,
+      action_type: "lookup",
+      target_email: "peer@example.test",
+      payload: { query: "saved private intent" },
+      wait_seconds: 0,
+    },
+    new AbortController().signal,
+  );
+  const progress = (sequence: number, state = "working"): CentralMessage => ({
+    ...f.outcome,
+    id: randomUUID(),
+    payload: {
+      type: "action_progress",
+      call_id: f.callId,
+      action_type: "lookup",
+      event_id: randomUUID(),
+      sequence,
+      state,
+      note: null,
+    },
+  });
+  const waiting = f.box.call(
+    { type: "check", request_id, wait_seconds: 1 },
+    new AbortController().signal,
+  );
+  const latest = progress(2, "waiting_for_owner_input");
+  assert.equal(await f.box.capture({ ...latest, action_type_id: "wrong-action" }), false);
+  assert.equal(await f.box.capture(latest), true);
+  const response = await waiting;
+  assert.equal(response.status, "pending");
+  assert.match(JSON.stringify(response), /waiting_for_owner_input/u);
+  await f.restart();
+  assert.equal(await f.box.capture(progress(1)), true);
+  assert.equal(await f.box.capture(latest), true);
+  const checked = await f.box.call(
+    { type: "check", request_id, wait_seconds: 0 },
+    new AbortController().signal,
+  );
+  assert.equal((checked.events as unknown[]).length, 1);
+  await f.box.capture(progress(3, "failed"));
+  const failed = await f.box.call(
+    { type: "check", request_id, wait_seconds: 0 },
+    new AbortController().signal,
+  );
+  assert.equal(failed.status, "pending", "failed progress is not an action result");
   assert.equal(f.calls, 1);
 });

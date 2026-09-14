@@ -1,5 +1,9 @@
 # Architecture decisions
 
+ADR [0082](0082-current-central-recovery-and-owner-integration.md) records the
+September 14 approval to adopt the new central recovery, owner, invitation,
+history, progress and push contracts without changing server code.
+
 Read ADR 0037 for central integration, ADR 0038 for local delivery, ADR 0039
 for zero-configuration local startup, ADR 0040 for Windows qualification, ADR
 0041 for agent-version handling, ADR 0042 for webhook-secret ownership and the
@@ -31,6 +35,7 @@ four-provider discovery skill and owner-started live connection check.
 
 | ADR | Decision |
 | --- | --- |
+| [0081](0081-linux-arm64-desktop.md) | Native Linux ARM64 packages for Raspberry Pi with separate runtime and hardware qualification |
 | [0080](0080-conversation-sidebar.md) | Conversation sidebar with attention-first threads and an unlinked request inbox |
 | [0079](0079-simple-desktop-inbox.md) | Inbox-first desktop with History, secondary tools and one mixed request list |
 | [0078](0078-desktop-polish-and-readable-reviews.md) | Readable approval sheets, desktop refinement and encrypted local People with selective contact import |
@@ -114,3 +119,5 @@ location, content-persistence rule, central transport, or agent-execution
 safety property. Routine server contract updates may amend ADR 0037 and the
 protocol instead of creating an API generation number.
 - [0074: Local stdio client for standalone desktop hosts](0074-desktop-stdio-client.md)
+
+- [0083: One-code desktop setup](0083-one-code-desktop-setup.md)

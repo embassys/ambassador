@@ -11,16 +11,12 @@ export function Registration({
   command,
   start,
   connected,
-  accountFirst = false,
-  registered,
 }: {
   instanceId: string;
   running: boolean;
   command(input: DesktopCommand): Promise<unknown>;
   start(): void;
   connected(): void;
-  accountFirst?: boolean;
-  registered?(email: string): void;
 }) {
   const [state, setState] = useState<State>();
   const [email, setEmail] = useState("");
@@ -28,6 +24,7 @@ export function Registration({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [recoveryReview, setRecoveryReview] = useState(false);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -51,7 +48,7 @@ export function Registration({
     if (busy) return;
     setBusy(true);
     setError("");
-    if (input.type === "enrollment_verify") setCode("");
+    if (input.type === "enrollment_verify" || input.type === "enrollment_recover") setCode("");
     try {
       setState((await command(input)) as State);
     } catch {
@@ -79,21 +76,11 @@ export function Registration({
         <h3>You're registered</h3>
         <p className="break">{state.email}</p>
         <p className="body-note">
-          {accountFirst
-            ? "Your email is verified. Log in with a new code to continue to agent setup."
-            : state.credentialStatus === "expired"
-              ? "Your saved credential has expired. Local history remains available; central identity recovery is not supported yet."
-              : "This instance uses your saved verified identity. Connect your agent's MCP tools to finish setup."}
+          {state.credentialStatus === "expired"
+            ? "Automatic renewal hasn’t completed. Open Devices & agents for an assigned execution credential, or recover this agent using email. Saved history remains here."
+            : "This instance uses your saved verified identity. Connect your agent's MCP tools to finish setup."}
         </p>
-        {accountFirst ? (
-          <button
-            type="button"
-            className="primary"
-            onClick={() => registered?.(state.email ?? email)}
-          >
-            Continue to log in
-          </button>
-        ) : state.needsExecutor ? (
+        {state.needsExecutor ? (
           <>
             <label>
               Agent for incoming requests
@@ -122,11 +109,32 @@ export function Registration({
             Connect an agent
           </button>
         )}
+        {state.credentialStatus === "expired" && (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() =>
+              void submit({
+                type: "enrollment_recover",
+                instanceId,
+                confirmation: "recover-this-agent",
+              })
+            }
+          >
+            Send recovery code
+          </button>
+        )}
         {error && <p role="alert">{error}</p>}
       </section>
     );
   const entry = state.phase === "new" || state.phase === "rejected";
-  const canVerify = state.phase === "awaiting_code" || state.phase === "registration_uncertain";
+  const canVerify = [
+    "awaiting_code",
+    "registration_uncertain",
+    "verification_uncertain",
+    "recovery_code",
+  ].includes(state.phase);
   const resendSeconds = Math.max(0, Math.ceil(((state.resendAfter ?? 0) - now) / 1000));
   return (
     <section className="settings-section registration-form">
@@ -144,19 +152,8 @@ export function Registration({
       </p>
       {state.message && (
         <p className="body-note" role="status">
-          {accountFirst && state.phase === "conflict"
-            ? "This email is already registered. Log in to your account to continue."
-            : state.message}
+          {state.message}
         </p>
-      )}
-      {accountFirst && ["conflict", "verification_uncertain"].includes(state.phase) && (
-        <button
-          type="button"
-          className="primary"
-          onClick={() => registered?.(state.email ?? email)}
-        >
-          {state.phase === "conflict" ? "Log in instead" : "Log in to check your account"}
-        </button>
       )}
       {error && (
         <p className="error-banner" role="alert">
@@ -187,11 +184,63 @@ export function Registration({
           </button>
         </form>
       )}
+      {["conflict", "verification_uncertain", "recovery_uncertain"].includes(state.phase) &&
+        (!recoveryReview ? (
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => setRecoveryReview(true)}
+          >
+            Recover this agent…
+          </button>
+        ) : (
+          <div className="settings-section">
+            <p>
+              Recover {state.email} on this device. Completing email verification signs out its
+              earlier installations. Saved conversations here are kept.
+            </p>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => setRecoveryReview(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || resendSeconds > 0}
+                onClick={() => {
+                  setRecoveryReview(false);
+                  void submit({
+                    type: "enrollment_recover",
+                    instanceId,
+                    confirmation: "recover-this-agent",
+                  });
+                }}
+              >
+                Send recovery code
+              </button>
+            </div>
+          </div>
+        ))}
       {canVerify && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void submit({ type: "enrollment_verify", instanceId, code });
+            void submit(
+              state.phase === "recovery_code"
+                ? {
+                    type: "enrollment_recover",
+                    instanceId,
+                    code,
+                    confirmation: "recover-this-agent",
+                  }
+                : { type: "enrollment_verify", instanceId, code },
+            );
           }}
         >
           <label>
@@ -216,7 +265,13 @@ export function Registration({
               type="button"
               className="secondary"
               disabled={busy || resendSeconds > 0}
-              onClick={() => void submit({ type: "enrollment_resend", instanceId })}
+              onClick={() =>
+                void submit(
+                  state.phase === "recovery_code"
+                    ? { type: "enrollment_recover", instanceId, confirmation: "recover-this-agent" }
+                    : { type: "enrollment_resend", instanceId },
+                )
+              }
             >
               {resendSeconds ? `Resend in ${resendSeconds}s` : "Resend code"}
             </button>

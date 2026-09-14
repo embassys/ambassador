@@ -19,6 +19,94 @@ const MESSAGE: CentralMessage = {
   created_at: "2026-09-05T00:00:00Z",
   payload: { type: "action_call" },
 };
+
+test("a lost acknowledgement retries the same receipt without repeating provider delivery", async (t) => {
+  const store = fixture(t);
+  store.ingest([MESSAGE]);
+  let receipts = 0;
+  let deliveries = 0;
+  const relay = new NotificationRelay({
+    store,
+    receiveMessages: pending,
+    retryDelayMs: 2,
+    acknowledgeMessage: async (id) => {
+      assert.equal(id, MESSAGE.id);
+      if (++receipts === 1) throw new Error("response lost after server accepted");
+    },
+    deliveryTarget: {
+      async deliver() {
+        deliveries++;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+  });
+  const running = relay.run(new AbortController().signal);
+  t.after(() => relay.shutdown());
+  await until(() => store.get("message-1")?.acknowledgement === "acked");
+  assert.equal(receipts, 2);
+  assert.equal(deliveries, 1);
+  await relay.shutdown();
+  await running;
+});
+
+test("retrying an old receipt does not starve later uncertain receipts", async (t) => {
+  const store = fixture(t);
+  for (let i = 0; i < 30; i++) {
+    const id = `receipt-${i}`;
+    store.ingest([{ ...MESSAGE, id }]);
+    store.processed(id, false);
+    store.beginAcknowledgement(id);
+    store.acknowledgementUncertain(id);
+  }
+  const attempts = new Set<string>();
+  const relay = new NotificationRelay({
+    store,
+    receiveMessages: pending,
+    retryDelayMs: 2,
+    acknowledgeMessage: async (id) => {
+      attempts.add(id);
+      throw new Error("offline");
+    },
+    deliveryTarget: {
+      async deliver() {
+        assert.fail();
+      },
+      async close() {},
+    },
+  });
+  void relay.run(new AbortController().signal);
+  t.after(() => relay.shutdown());
+  await until(() => attempts.size === 30);
+});
+
+test("failed custody releases only the received central IDs and does not dispatch or acknowledge", async (t) => {
+  const store = fixture(t);
+  const released: string[][] = [];
+  let delivered = 0;
+  let acknowledged = 0;
+  const relay = new NotificationRelay({
+    store,
+    receiveMessages: async () => [MESSAGE, { ...MESSAGE, payload: { conflict: true } }],
+    releaseMessages: async (ids) => {
+      released.push([...ids]);
+    },
+    acknowledgeMessage: async () => {
+      acknowledged++;
+    },
+    deliveryTarget: {
+      async deliver() {
+        delivered++;
+        return { status: "completed" };
+      },
+      async close() {},
+    },
+  });
+  await assert.rejects(relay.run(new AbortController().signal));
+  assert.deepEqual(released, [["message-1"]]);
+  assert.equal(delivered, 0);
+  assert.equal(acknowledged, 0);
+});
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "ambassador-relay-"));
   const store = new NotificationStore(
@@ -229,7 +317,7 @@ test("conflicting receipt stops before any processing or acknowledgement", async
   assert.equal(store.next("process"), undefined);
 });
 
-test("uncertain acknowledgement reports once without stopping reception or retrying", async (t) => {
+test("uncertain acknowledgements retry without stopping reception", async (t) => {
   const store = fixture(t);
   let polls = 0;
   let acknowledgements = 0;
@@ -259,8 +347,8 @@ test("uncertain acknowledgement reports once without stopping reception or retry
     controller.abort();
     await running;
   });
-  await until(() => errors === 1 && polls === 3);
-  assert.equal(acknowledgements, 1);
+  await until(() => errors >= 2 && polls >= 3);
+  assert.ok(acknowledgements >= 2);
   assert.equal(store.get("message-1")?.acknowledgement, "uncertain");
 });
 

@@ -343,6 +343,7 @@ class CurrentCentralFixtureTests(unittest.TestCase):
             },
         )
         self.assertEqual(called.status_code, 200)
+        self.assertEqual(called.json()["status"], "queued")
         self.assertEqual(fixture.state.messages[called.json()["message_id"]].state, "queued")
 
     def test_fixed_action_schemas_match_the_live_inventory(self) -> None:
@@ -357,6 +358,8 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         by_name = {action["name"]: action for action in response.json()}
+        self.assertIn("get_free_busy", by_name)
+        self.assertIn("busy", by_name["get_free_busy"]["result_schema"]["required"])
         expected_email = {
             "type": "object",
             "properties": {

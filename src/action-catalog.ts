@@ -3,7 +3,11 @@ import type { CentralActionType, CentralRestClient } from "./central-rest.js";
 
 export class ActionCatalogError extends Error {
   constructor(
-    readonly code: "action_type_unknown" | "invalid_action_payload" | "action_schema_unsupported",
+    readonly code:
+      | "action_type_unknown"
+      | "invalid_action_payload"
+      | "invalid_action_result"
+      | "action_schema_unsupported",
   ) {
     super("The requested action does not match its catalog contract");
     this.name = "ActionCatalogError";
@@ -23,6 +27,22 @@ export class ActionCatalog {
     if (action === undefined) throw new ActionCatalogError("action_type_unknown");
     if (payload !== undefined) await this.#validate(action.input_schema, payload, signal);
     return action;
+  }
+  async validateResult(
+    name: string,
+    result: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const action = await this.require(name, undefined, signal);
+    if (action.result_schema != null) {
+      try {
+        await this.#validate(action.result_schema, result, signal);
+      } catch (error) {
+        if (error instanceof ActionCatalogError && error.code === "invalid_action_payload")
+          throw new ActionCatalogError("invalid_action_result");
+        throw error;
+      }
+    }
   }
   async #validate(
     schema: Record<string, unknown>,

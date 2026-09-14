@@ -66,7 +66,7 @@ test("saved turns stay distinct from completed actions and preserve escaped tran
       {
         id: "turn",
         kind: "turn",
-        actionType: "get_free_busy_permission",
+        actionType: "get_free_busy",
         status: "complete",
         createdAt: 1789032600000,
       },

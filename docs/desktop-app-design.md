@@ -118,7 +118,8 @@ An open review keeps its own reading position, starting at its heading. Resizing
 a conversation at the bottom continues to show its latest content. Use system
 typography, neutral sidebar selection and consistent message and review surfaces;
 exact choices and keyboard focus remain visible at the minimum window size.
-The More menu opens People, Connect agents and Access. Settings has a labelled
+People has a labelled sidebar button above Inbox. An empty workspace offers Add
+people and Connect agents after setup. The More menu opens Connect agents and Access. Settings has a labelled
 sidebar button after setup and a toolbar button before setup, a native
 application/tray menu entry and the usual Command-comma
 (Control-comma on Windows/Linux) shortcut. Secondary views
@@ -134,7 +135,7 @@ transitional and attention states without claiming remote connectivity.
 | --- | --- |
 | Inbox sidebar section | Individual owner permissions and questions without a reliable local conversation link. Selecting a row opens its details and fresh Review. Unconfirmed submissions remain visible |
 | Conversations | Peer and topic in the sidebar; chronological chat with separate agent sides, opening at the newest messages, and linked owner reviews at the bottom |
-| More → People | Encrypted local contacts; add, search, edit and import names and emails |
+| People sidebar button | One list of encrypted local contacts with Copy email per row. Add/edit/details use a compact sheet; guided vCard import saves only selected people. Saving never sends an invitation |
 | More → Connect agents | One Connect action per provider; Options holds test, repair, disconnect and manual instructions |
 | More → Access | Access shared by you / shared with you, within the deployed server snapshot |
 | Settings | Local service status and Pause/Resume, account, notifications and appearance; Advanced holds instance, registration, local inspection and diagnostic controls |

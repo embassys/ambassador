@@ -82,8 +82,10 @@ ordinary tools available.
 Results survive checks, inbox reads, transport disconnects and restart until
 explicit receipt. The inbox also includes unanswered calls and outbound status.
 Unknown submission outcomes are visible and never automatically repeated.
-Saved identifiers can repair local partial state, but the current API cannot
-recover an accepted response lost before any identifier was saved.
+Saved identifiers can repair local partial state. Under ADR 0082, new supported
+mutations save an idempotency key and exact body before sending. They can recover
+an accepted response through central's outcome lookup inside the retention
+window. Historical unkeyed submissions remain uncertain.
 
 ## Missing owner information
 
@@ -175,13 +177,17 @@ may create another identity and does not inherit old grants.
 
 ## Remaining central limits
 
-The deployed API consumes messages before returning the HTTP response and has
-no recoverable lease, idempotent acknowledgement, submission idempotency key or
-outcome lookup. Its listener lifecycle also has known liveness gaps. Local
-durability begins only after receipt; it cannot promise exactly-once delivery.
-Remote waiting-for-owner progress is not currently published to callers.
-[API follow-ups](central-follow-ups.md) track these issues. No API code change
-is part of this implementation.
+The current API leases messages until acknowledgement, supports bounded keyed
+submission recovery and publishes correlated remote progress. The September 14
+client adoption and deployed retest are recorded in
+[the adoption record](central-adoption-2026-09-14.md). Local durability begins
+after receipt; uncertain provider dispatches are still never replayed, and
+submissions beyond the recovery window remain uncertain.
+[API follow-ups](central-follow-ups.md) track the separate DPoP protocol decision and push prerequisites.
+One-code setup is implemented under ADR 0083. The new owner communication
+history endpoint still needs client adoption.
+Remote push still requires server credentials, signed platform identity and
+actual-device qualification. No API code change is part of this implementation.
 
 Arbitrary agent commands, general conversations, provider
 credential management, central MCP discovery and automatic installation remain

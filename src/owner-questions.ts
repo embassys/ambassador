@@ -88,7 +88,8 @@ export class OwnerQuestions {
       path: string;
       credential: LoadedCentralCredential;
       pending: PendingActionInbox;
-      transport: Pick<CentralRestClient, "requestHumanInput">;
+      transport: Pick<CentralRestClient, "requestHumanInput"> &
+        Partial<Pick<CentralRestClient, "resumeMutation" | "reportActionProgress">>;
       enqueueContinuation: (message: CentralMessage) => void;
     },
   ) {
@@ -165,6 +166,27 @@ export class OwnerQuestions {
           },
         };
   }
+  async recover(requestId: string, signal: AbortSignal): Promise<Record<string, unknown>> {
+    const record = this.#store.get(requestId);
+    if (record && ["submitting", "uncertain"].includes(record.status)) {
+      try {
+        const result = await this.options.transport.resumeMutation?.(
+          "get_human_input",
+          requestId,
+          signal,
+        );
+        if (result && typeof result.request_id === "string")
+          this.#save({
+            ...record,
+            status: "waiting_for_owner",
+            remote_request_id: result.request_id,
+          });
+      } catch (error) {
+        if (signal.aborted) throw error;
+      }
+    }
+    return this.get(requestId);
+  }
   async ask(arguments_: unknown, signal: AbortSignal): Promise<Record<string, unknown>> {
     const parsed = ownerQuestionSchema.safeParse(arguments_);
     if (!parsed.success) throw new OwnerQuestionError("invalid_arguments");
@@ -175,7 +197,7 @@ export class OwnerQuestions {
     const prior = this.#store.get(input.request_id);
     if (prior !== undefined) {
       if (prior.fingerprint !== hash) throw new OwnerQuestionError("request_id_conflict");
-      return this.#response(prior);
+      return await this.recover(input.request_id, signal);
     }
     const call = this.options.pending.get(input.call_id);
     if (call === undefined || !workflowUuid.safeParse(call.source_message_id).success)
@@ -207,9 +229,17 @@ export class OwnerQuestions {
           message_id: record.source_message_id,
         },
         signal,
+        input.request_id,
       );
       record = { ...record, status: "waiting_for_owner", remote_request_id: result.request_id };
       this.#save(record);
+      // Publish only the fact that input is needed. The question and answer stay private.
+      await this.options.transport
+        .reportActionProgress?.(
+          { call_id: input.call_id, state: "waiting_for_owner_input" },
+          signal,
+        )
+        .catch(() => undefined);
     } catch (error) {
       record = {
         ...record,

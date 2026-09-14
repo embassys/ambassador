@@ -87,3 +87,39 @@ Electron/React stack and CSS; no dependency or protocol change is required.
 An open owner review owns its reading position. Bottom-following must not hide
 its heading or jump while the owner considers a choice. Resizing a conversation
 at the bottom keeps the newest content visible.
+
+## People discovery after setup, September 12
+
+The owner reported that adding friends and importing contacts were hard to find
+after onboarding. Give People a permanent labelled sidebar row above Inbox;
+remove its duplicate entry from More. Keep the accepted conversation layout.
+An empty workspace offers Add people and Connect agents, without adding another
+mandatory onboarding step or taking focus from pending requests.
+
+People explains local saving and the invitation limit before any action.
+Import contacts first explains exporting a vCard file from a contacts app, then
+opens the existing file picker and explicit selection preview. Nothing is selected
+by default or sent to contacts. Keep exact account scoping and import bounds.
+No OS address-book permission or new dependency is introduced. At compact window
+sizes, opening a person shows their details with an All people back action.
+
+Server main a8c0e77, web main a9cb3d3 and deployed OpenAPI were checked again on
+September 12. Only invitation acceptance and approval checking are exposed;
+sending invitations remains API issue 11. Do not invent a send action or imply
+that saving a person sends an invitation. This is a desktop presentation change,
+with no API, CLI or release change.
+
+The owner rejected the split People layout and empty-sidebar text hierarchy in
+follow-up review. Use one contact list with direct Copy email actions. Open add,
+edit and contact details in a compact modal sheet. Keep local-only/invitation
+status in one quiet footer instead of a repeated introduction. Empty sidebar
+sections use short muted labels below stronger headings; longer guidance stays
+in the main empty workspace. Preserve account scope, explicit import selection,
+confirmation before removal and exact email copying.
+
+The owner then rejected the extra People header and borders. Use one compact
+search/action toolbar in the content pane, without the duplicate title/back bar
+or toolbar, row and footer rules. Keep visible Import and Add person actions,
+accessible control names, keyboard focus and window dragging. The list scrolls
+within the pane while the toolbar and quiet count/local-storage footer stay in
+place. This changes presentation only.

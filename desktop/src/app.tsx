@@ -24,7 +24,14 @@ import {
   type ConversationPage,
 } from "./history.js";
 import { inboxEntries, selectInboxRequest } from "./inbox-navigation.js";
-import { AppMenu, Navigation, ServiceStatus, SettingsButton, serviceStatus } from "./navigation.js";
+import {
+  AppMenu,
+  Navigation,
+  ServiceStatus,
+  SettingsButton,
+  serviceStatus,
+  WorkspaceWelcome,
+} from "./navigation.js";
 import { Onboarding } from "./onboarding.js";
 import { onboardingKey } from "./onboarding-state.js";
 import { People } from "./people.js";
@@ -38,7 +45,11 @@ interface AppSnapshot {
   dark: boolean;
   focused: boolean;
   reducedTransparency: boolean;
-  notifications: { enabled: boolean; supported: boolean };
+  notifications: {
+    enabled: boolean;
+    supported: boolean;
+    remote?: { state: string; reason?: string };
+  };
   settingsRequest?: string;
   navigation?: {
     id: string;
@@ -671,6 +682,13 @@ function App() {
                 ? "Requests and results while Embassys is running."
                 : "Unavailable here. Check Inbox for updates."}
             </p>
+            {snapshot.notifications.enabled && snapshot.notifications.remote && (
+              <p>
+                {snapshot.notifications.remote.state === "registered"
+                  ? "Remote notification registration is ready."
+                  : snapshot.notifications.remote.reason || "Checking remote notifications…"}
+              </p>
+            )}
           </div>
           <input
             type="checkbox"
@@ -765,6 +783,7 @@ function App() {
             requestError={workspace.source.error}
             requestsLoading={workspace.source.loading}
             refresh={() => void workspace.refresh()}
+            openPeople={() => navigate("people")}
           />
           <div className="sidebar-bottom">
             <div className="sidebar-tools">
@@ -780,69 +799,71 @@ function App() {
         </aside>
       )}
       <main>
-        <header className="page-header simple-header">
-          <div className="window-title">
-            {onboarded &&
-            !(page === "attention" && dataSource === "account") &&
-            !(page === "conversations" && dataSource === "local") ? (
-              <button
-                type="button"
-                className="toolbar-back"
-                aria-label="Back to requests and conversations"
-                onClick={() => {
-                  if (!inboxRequest && historySession) {
-                    navigate("conversations");
-                    void loadHistory(historySession);
-                  } else navigate("attention");
-                }}
-              >
-                <svg
-                  viewBox="0 0 20 20"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  aria-hidden="true"
+        {page !== "people" && (
+          <header className="page-header simple-header">
+            <div className="window-title">
+              {onboarded &&
+              !(page === "attention" && dataSource === "account") &&
+              !(page === "conversations" && dataSource === "local") ? (
+                <button
+                  type="button"
+                  className="toolbar-back"
+                  aria-label="Back to requests and conversations"
+                  onClick={() => {
+                    if (!inboxRequest && historySession) {
+                      navigate("conversations");
+                      void loadHistory(historySession);
+                    } else navigate("attention");
+                  }}
                 >
-                  <path d="m12 4-6 6 6 6" />
-                </svg>
-              </button>
-            ) : !onboarded ? (
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => {
-                  setSetupSettings(false);
-                  navigate("attention");
-                }}
-              >
-                Back to setup
-              </button>
-            ) : null}
-            {page === "conversations" && dataSource === "local" ? (
-              <ConversationHeading
-                session={sessions.find((session) => session.session_id === historySession)}
-              />
-            ) : (
-              <h1>
-                {(page === "attention" && dataSource === "account") ||
-                (page === "conversations" && dataSource === "local")
-                  ? page === "attention"
-                    ? inboxRequest
-                      ? "Request"
-                      : "Embassys"
-                    : (sessions.find((session) => session.session_id === historySession)?.preview
-                        ?.title ?? "Conversation")
-                  : page === "attention"
-                    ? "Agent activity"
-                    : page === "conversations"
-                      ? "Network events"
-                      : currentPage.label}
-              </h1>
-            )}
-          </div>
-        </header>
+                  <svg
+                    viewBox="0 0 20 20"
+                    width="18"
+                    height="18"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    aria-hidden="true"
+                  >
+                    <path d="m12 4-6 6 6 6" />
+                  </svg>
+                </button>
+              ) : !onboarded ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    setSetupSettings(false);
+                    navigate("attention");
+                  }}
+                >
+                  Back to setup
+                </button>
+              ) : null}
+              {page === "conversations" && dataSource === "local" ? (
+                <ConversationHeading
+                  session={sessions.find((session) => session.session_id === historySession)}
+                />
+              ) : (
+                <h1>
+                  {(page === "attention" && dataSource === "account") ||
+                  (page === "conversations" && dataSource === "local")
+                    ? page === "attention"
+                      ? inboxRequest
+                        ? "Request"
+                        : "Embassys"
+                      : (sessions.find((session) => session.session_id === historySession)?.preview
+                          ?.title ?? "Conversation")
+                    : page === "attention"
+                      ? "Agent activity"
+                      : page === "conversations"
+                        ? "Network events"
+                        : currentPage.label}
+                </h1>
+              )}
+            </div>
+          </header>
+        )}
         <div className={`page-body page-${page}`} ref={pageBody}>
           {onboarded && dataSource === "local" && ["attention", "permissions"].includes(page) && (
             <p className="local-view-label">
@@ -918,12 +939,26 @@ function App() {
                     signIn={() => navigate("account")}
                   />
                 )}
-              {onboarded && page === "attention" && dataSource === "account" && !inboxRequest && (
-                <section className="workspace-placeholder">
-                  <h2>Select a request or conversation</h2>
-                  <p>Choose an item in the sidebar to read it here.</p>
-                </section>
-              )}
+              {onboarded &&
+                page === "attention" &&
+                dataSource === "account" &&
+                !inboxRequest &&
+                (workspace.loaded &&
+                workspace.sessionsLoaded &&
+                !firstInboxRequest &&
+                !sessions.length &&
+                !workspace.sessionError &&
+                !workspace.source.error ? (
+                  <WorkspaceWelcome
+                    people={() => navigate("people")}
+                    agents={() => navigate("agents")}
+                  />
+                ) : (
+                  <section className="workspace-placeholder">
+                    <h2>Select a request or conversation</h2>
+                    <p>Choose an item in the sidebar to read it here.</p>
+                  </section>
+                ))}
               {page === "attention" &&
                 dataSource === "local" &&
                 (overview === undefined ? (
@@ -1022,7 +1057,14 @@ function App() {
                       </button>
                     </section>
                   )}
-                  <Account snapshot={snapshot.owner} call={call} changed={refresh} compact />
+                  <Account
+                    snapshot={snapshot.owner}
+                    instanceId={selected?.id}
+                    instanceName={selected?.name}
+                    call={call}
+                    changed={refresh}
+                    compact
+                  />
                   {preferenceControls}
                   <section className="device-links simple-settings-links">
                     <details className="advanced-settings">

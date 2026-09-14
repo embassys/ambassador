@@ -303,7 +303,10 @@ test("asks the enrolled agent's own human and receives the correlated answer", a
     { label: "Allow once", value: "allow_once" },
     { label: "Deny", value: "deny" },
   ]);
-  assert.deepEqual(await client.listActionTypes(), central.actions);
+  assert.deepEqual(
+    await client.listActionTypes(),
+    central.actions.map((action) => ({ ...action, result_schema: action.result_schema ?? null })),
+  );
 
   const answered = await fetch(`${central.apiUrl}/api/human_input_response`, {
     method: "POST",
@@ -382,7 +385,7 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
   central.resetRequests();
 
   const catalog = await requester.listActionTypes();
-  assert.equal(catalog.length, 6);
+  assert.equal(catalog.length, 9);
   for (const name of ["get_email", "get_phone_number"]) {
     assert.deepEqual(catalog.find((action) => action.name === name)?.input_schema, {
       type: "object",
@@ -443,7 +446,7 @@ test("I02-R02 REST client projects the fixed action and permission routes", asyn
     action_type: "get_email",
     payload: { reason: "current fixture" },
   });
-  assert.equal(called.status, "delivered");
+  assert.equal(called.status, "queued");
   const actionPoll = await target.pollRemoteMessages(0);
   assert.equal(actionPoll.messages[0]?.id, called.message_id);
   assert.equal(actionPoll.messages[0]?.payload.type, "action_call");

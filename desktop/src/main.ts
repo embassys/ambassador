@@ -13,6 +13,7 @@ import {
   nativeImage,
   nativeTheme,
   protocol,
+  pushNotifications,
   session,
   shell,
   systemPreferences,
@@ -41,7 +42,9 @@ import { verifyExecutorConnection } from "../../src/desktop/executor-connection.
 import { DesktopInstances } from "../../src/desktop/instances.js";
 import { desktopLaunchEnvironment } from "../../src/desktop/launch-environment.js";
 import { DesktopLoginItem } from "../../src/desktop/login-item.js";
+import { NativePushRegistration } from "../../src/desktop/native-push.js";
 import { DesktopNotifications } from "../../src/desktop/notifications.js";
+import { type DeviceReview, deviceReview } from "../../src/desktop/owner-devices.js";
 import { ownerCommandSchema } from "../../src/desktop/owner-protocol.js";
 import { OwnerWorkerClient } from "../../src/desktop/owner-worker-client.js";
 import {
@@ -72,6 +75,44 @@ let loginItem: DesktopLoginItem;
 let appearance: DesktopAppearance;
 let notifications: DesktopNotifications;
 let owner: OwnerWorkerClient | undefined;
+const deviceReviews = new Map<string, { context: string; review: DeviceReview }>();
+const nativePush = new NativePushRegistration({
+  platform: process.platform,
+  status: async (context) => {
+    const reply = await getOwner().request({ type: "owner_push_status", context });
+    if (reply.state !== "ready" || reply.data?.kind !== "push")
+      throw new Error("Push status unavailable");
+    return reply.data;
+  },
+  osToken: async () => {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        pushNotifications.registerForAPNSNotifications(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("Native registration timed out")), 15000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  },
+  register: async (token, context) => {
+    const reply = await getOwner().nativePush(context, token);
+    if (reply.state !== "ready" || reply.data?.kind !== "push" || !reply.data.registered)
+      throw new Error("Push registration unconfirmed");
+  },
+  unregister: async (context) => {
+    await getOwner().nativePush(context, null);
+    if (process.platform === "darwin") pushNotifications.unregisterForAPNSNotifications();
+  },
+  changed,
+});
+if (process.platform === "darwin")
+  pushNotifications.on("received-apns-notification", () => {
+    // The payload is a wake-up hint. Only authenticated owner reads supply UI data.
+    owner?.wake();
+  });
 let notificationTimer: NodeJS.Timeout | undefined;
 let settingsRequest: string | undefined;
 let navigation:
@@ -204,7 +245,11 @@ async function snapshot() {
     focused: window?.isFocused() ?? false,
     reducedTransparency: nativeTheme.prefersReducedTransparency,
     palette: controlPalette(accent, nativeTheme.shouldUseDarkColors),
-    notifications: { enabled: notifications.enabled, supported: Notification.isSupported() },
+    notifications: {
+      enabled: notifications.enabled,
+      supported: Notification.isSupported(),
+      remote: nativePush.snapshot(),
+    },
     navigation,
     settingsRequest,
     loginItem: await loginItem.read(),
@@ -226,6 +271,13 @@ function getOwner(): OwnerWorkerClient {
       expectedRuntime: `v${BUNDLED_NODE_VERSION}`,
       diagnostics: diagnosticsMode,
       onChange: changed,
+      onNotifications: async (ownerId, events) => {
+        const instance = instances.list()[0];
+        if (!instance) throw new Error("No instance can show this account update");
+        for (const event of events)
+          await notifications.receive(instance.id, { ...event, enrollmentId: ownerId });
+        await notifications.flush();
+      },
     });
   }
   return owner;
@@ -239,6 +291,11 @@ function changed(): void {
     if (!quitLifecycle.stopping) {
       window?.webContents.send("ambassador:changed");
       updateMenu();
+      const account = owner?.snapshot();
+      void nativePush.configure(
+        account?.status === "signed_in" ? account.context : undefined,
+        notifications?.enabled ?? false,
+      );
     }
   }, 50);
 }
@@ -353,8 +410,11 @@ async function execute(input: unknown): Promise<unknown> {
     "set_notifications",
     "enrollment_register",
     "enrollment_verify",
+    "enrollment_recover",
     "enrollment_resend",
     "enrollment_executor",
+    "owner_device_submit",
+    "owner_create_agent",
   ].includes(command.type);
   if (mutation && busy) throw new Error("An operation is already in progress.");
   if (mutation) busy = true;
@@ -390,10 +450,98 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
       await owner.close();
       owner = undefined;
     }
-    return getOwner().request(accountCommand.data);
+    const accountInput = accountCommand.data;
+    if (accountInput.type === "owner_device_review") {
+      const reply = await getOwner().request(accountInput);
+      if (reply.data?.kind === "device_review") {
+        if (deviceReviews.size >= 64) deviceReviews.delete(deviceReviews.keys().next().value ?? "");
+        deviceReviews.set(reply.data.review_id, {
+          context: accountInput.context,
+          review: deviceReview.parse(reply.data),
+        });
+      }
+      return reply;
+    }
+    if (accountInput.type === "owner_device_submit") {
+      const saved = deviceReviews.get(accountInput.review_id);
+      deviceReviews.delete(accountInput.review_id);
+      if (
+        !saved ||
+        saved.context !== accountInput.context ||
+        Date.parse(saved.review.expires_at) <= Date.now()
+      )
+        throw new Error("Review this device again.");
+      const review = saved.review;
+      const affected =
+        review.operation === "execute" && review.agent
+          ? [review.agent.id]
+          : review.device.executes_agent_ids;
+      const instance = instances.list().find((item) => item.id === accountInput.instanceId);
+      let target: SupervisedGateway | undefined;
+      let preview: string | undefined;
+      try {
+        if (review.operation === "execute" && review.device.is_current) {
+          if (!instance || !review.agent)
+            throw new Error("Choose the local instance for this agent.");
+          target = getWorker(instance);
+          const before = (await target.request({ type: "overview", instanceId: instance.id })) as {
+            enrollment?: { agent_id?: string };
+          };
+          if (before.enrollment?.agent_id && before.enrollment.agent_id !== review.agent.id)
+            throw new Error(
+              "The selected local installation belongs to a different agent. Choose its installation first.",
+            );
+          await target.request({ type: "stop", instanceId: instance.id });
+        }
+        for (const [id, worker] of workers) {
+          if (worker === target || worker.snapshot().state !== "running") continue;
+          const overview = (await worker.request({ type: "overview", instanceId: id })) as {
+            enrollment?: { agent_id?: string };
+          };
+          if (overview.enrollment?.agent_id && affected.includes(overview.enrollment.agent_id))
+            await worker.request({ type: "stop", instanceId: id });
+        }
+        if (target && review.agent) preview = await target.prepareExecution(review.agent.id);
+        const reply = await getOwner().request(accountInput);
+        if (
+          reply.data?.kind === "device_result" &&
+          reply.data.confirmed &&
+          target &&
+          preview &&
+          instance &&
+          review.agent
+        ) {
+          try {
+            const credential = await getOwner().executionCredential(
+              accountInput.context,
+              review.agent.id,
+            );
+            await target.installExecution(preview, credential);
+            preview = undefined;
+            await target.request({ type: "start", instanceId: instance.id });
+            return {
+              ...reply,
+              data: { ...reply.data, local_ready: target.snapshot().state === "running" },
+            };
+          } catch {
+            return { ...reply, data: { ...reply.data, local_ready: false } };
+          }
+        }
+        return reply;
+      } finally {
+        if (target && preview) await target.cancelExecution(preview).catch(() => undefined);
+      }
+    }
+    return getOwner().request(accountInput);
   }
   if (command.type === "set_notifications") {
     await notifications.setEnabled(command.enabled);
+    const account = owner?.snapshot();
+    await nativePush.configure(
+      account?.status === "signed_in" ? account.context : undefined,
+      command.enabled,
+      true,
+    );
     changed();
     return snapshot();
   }
@@ -759,7 +907,15 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
   }
   if (["clean_preview", "clean_cancel"].includes(command.type))
     throw new Error("Clean review is managed by the app.");
-  return await getWorker(instance).request(command);
+  const result = await getWorker(instance).request(command);
+  if (command.type === "enrollment_verify" || command.type === "enrollment_recover") {
+    const account = owner?.snapshot();
+    if (account?.status === "signed_in")
+      await getOwner()
+        .request({ type: "owner_profile", context: account.context })
+        .catch(() => undefined);
+  }
+  return result;
 }
 
 function trusted(event: Electron.IpcMainInvokeEvent): boolean {
@@ -794,7 +950,13 @@ function openWindow(): void {
     minWidth: 680,
     minHeight: 540,
     title: "Embassys",
-    icon: join(ownDirectory, "assets", "app-icon.png"),
+    // The full 2048px artwork exceeds X11's window-icon request limit.
+    icon:
+      process.platform === "linux"
+        ? nativeImage
+            .createFromPath(join(ownDirectory, "assets", "app-icon.png"))
+            .resize({ width: 256, height: 256 })
+        : join(ownDirectory, "assets", "app-icon.png"),
     ...windowAppearance(
       process.platform,
       nativeTheme.shouldUseDarkColors,

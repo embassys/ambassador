@@ -34,6 +34,8 @@ export interface CentralTokenClaims {
   readonly issuedAt: number;
   readonly expiresAt: number;
   readonly keyThumbprint: string;
+  readonly executionDeviceId?: string;
+  readonly executorEpoch?: number;
 }
 
 export interface LoadedCentralCredential {
@@ -329,6 +331,14 @@ function parseToken(
   ) {
     invalid();
   }
+  if (
+    (payload.dev !== undefined || payload.fence !== undefined) &&
+    (typeof payload.dev !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(payload.dev) ||
+      !Number.isSafeInteger(payload.fence) ||
+      (payload.fence as number) < 0)
+  )
+    invalid();
   const issuedAt = payload.iat as number;
   const expiresAt = payload.exp as number;
   const now = Math.floor(nowSeconds());
@@ -347,6 +357,9 @@ function parseToken(
     issuedAt,
     expiresAt,
     keyThumbprint,
+    ...(typeof payload.dev === "string"
+      ? { executionDeviceId: payload.dev, executorEpoch: payload.fence as number }
+      : {}),
   };
 }
 
