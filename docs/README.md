@@ -31,6 +31,7 @@ release evidence is preserved in dated records.
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Run shared tests, native checks or full local platform flows | [CI and local testing](ci-and-local-testing.md) |
 | Check public downloads and the repaired 0.1.3 links | [September 15 release verification](release-verification-2026-09-15.md) |
+| Install the renamed npm CLI and review its release checks | [Embassys CLI 0.2.21](embassys-cli-release-2026-09-15.md) |
 | Check account history, provider discovery and live Mac test status | [September 15 implementation and tests](account-history-and-mac-test-2026-09-15.md) |
 | Review the Inbox / Conversations / People sidebar and header controls | [Sidebar segments](sidebar-segments-2026-09-15.md) |
 | Review desktop buttons, Back and separate detail sheets | [Desktop controls](desktop-controls-2026-09-14.md) |

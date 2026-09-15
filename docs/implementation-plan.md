@@ -14,8 +14,11 @@ app/CLI shared state, and updates setup and installed-package checks.
   install of the candidate passed bare-command MCP startup, session inspection,
   shared-state restart, graceful stop and clean. The separate clean-installed
   business flow and command/native checks also passed.
-- [ ] Publish through the existing gated OIDC workflow and verify the public
-  package from a clean global installation.
+- Published `embassys@0.2.21` through the gated OIDC workflow after
+  [PR 50](https://github.com/embassys/ambassador/pull/50) merged. The public
+  archive matches registry checksums, and a fresh global install passed the
+  terminal checks after npm processing completed. See the
+  [release record](embassys-cli-release-2026-09-15.md).
 
 ## Sidebar segments, September 15
 
