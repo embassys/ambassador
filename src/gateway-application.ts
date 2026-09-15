@@ -172,7 +172,7 @@ function startupFailure(error: unknown): GatewayError {
   ) {
     return new GatewayError(
       "local_state_invalid",
-      "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
+      "Ambassador could not open its local state. Stop Ambassador, run `embassys clean`, then start it again",
       7,
     );
   }
@@ -195,7 +195,7 @@ function startupFailure(error: unknown): GatewayError {
   if (code === "SQLITE_NOTADB" || code === "SQLITE_FORMAT" || code === "SQLITE_CORRUPT") {
     return new GatewayError(
       "local_state_invalid",
-      "Ambassador could not open its local state. Stop Ambassador, run `npx --yes @embassys/ambassador@latest clean`, then start it again",
+      "Ambassador could not open its local state. Stop Ambassador, run `embassys clean`, then start it again",
       7,
     );
   }
@@ -208,7 +208,7 @@ function startupFailure(error: unknown): GatewayError {
   }
   return new GatewayError(
     "local_state_unavailable",
-    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `npx --yes @embassys/ambassador@latest clean`",
+    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `embassys clean`",
     7,
   );
 }

@@ -89,7 +89,7 @@ jobs:
             --dir "$install_root" \
             --allow-build=better-sqlite3 \
             add "$tarball"
-          test -x "$install_root/node_modules/.bin/ambassador"
+          test -x "$install_root/node_modules/.bin/embassys"
       - name: Run packaged Ambassador against current REST fixture
         shell: bash
         run: |
@@ -110,7 +110,7 @@ jobs:
           done
 
           curl --fail --silent http://127.0.0.1:8000/readyz >/dev/null
-          AMBASSADOR_PACKED_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/@embassys/ambassador/dist/cli.js" \
+          AMBASSADOR_PACKED_CLI="$RUNNER_TEMP/a2a-docker-install/node_modules/embassys/dist/cli.js" \
             AMBASSADOR_CENTRAL_REST_FIXTURE_URL=http://127.0.0.1:8000 \
             node --test .test-dist/test/current-rest-docker-e2e.test.js
       - name: Verify hardened runtime fixture
@@ -201,16 +201,16 @@ jobs:
           node --input-type=module -e '
             import { accessSync, constants } from "node:fs";
             import { join } from "node:path";
-            const command = join(process.argv[1], "node_modules", ".bin", process.platform === "win32" ? "ambassador.cmd" : "ambassador");
+            const command = join(process.argv[1], "node_modules", ".bin", process.platform === "win32" ? "embassys.cmd" : "embassys");
             accessSync(command, process.platform === "win32" ? constants.F_OK : constants.X_OK);
           ' "$install_root"
-          AMBASSADOR_PACKED_CLI="$install_root/node_modules/@embassys/ambassador/dist/cli.js" \
+          AMBASSADOR_PACKED_CLI="$install_root/node_modules/embassys/dist/cli.js" \
             node --test .test-dist/test/current-packed-platform.test.js
       - name: Verify installed business flows once on Linux x64
         if: runner.os == 'Linux' && runner.arch == 'X64'
         shell: bash
         run: |
-          AMBASSADOR_PACKED_CLI="$RUNNER_TEMP/a2a-install/node_modules/@embassys/ambassador/dist/cli.js" \
+          AMBASSADOR_PACKED_CLI="$RUNNER_TEMP/a2a-install/node_modules/embassys/dist/cli.js" \
             node --test .test-dist/test/current-packed-e2e.test.js
       - name: Launch installed Windows command shim
         if: runner.os == 'Windows'
@@ -221,7 +221,7 @@ jobs:
           $nativeErrorPreference = $PSNativeCommandUseErrorActionPreference
           try {
             $PSNativeCommandUseErrorActionPreference = $false
-            & "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\ambassador.cmd" invalid 1> $stdoutPath 2> $stderrPath
+            & "$env:RUNNER_TEMP\a2a-install\node_modules\.bin\embassys.cmd" invalid 1> $stdoutPath 2> $stderrPath
             $exitCode = $LASTEXITCODE
             $stdout = [IO.File]::ReadAllText($stdoutPath)
             $stderr = [IO.File]::ReadAllText($stderrPath).Replace("`r`n", "`n")
@@ -305,8 +305,8 @@ jobs:
               const localOnly = status === 1 && clean && report.invalid?.length === 1 && report.audited === report.verified + 1 && report.invalid[0]?.name === name && report.invalid[0]?.version === version && report.invalid[0]?.registry === "https://registry.npmjs.org/" && report.invalid[0]?.reason === `Missing registry metadata for ${name}@${version}`;
               if (!allVerified && !localOnly) process.exit(1);
             '
-          test -x "$install_root/node_modules/.bin/ambassador"
-          AMBASSADOR_PACKED_CLI="$install_root/node_modules/@embassys/ambassador/dist/cli.js" \
+          test -x "$install_root/node_modules/.bin/embassys"
+          AMBASSADOR_PACKED_CLI="$install_root/node_modules/embassys/dist/cli.js" \
             node --test .test-dist/test/current-packed-e2e.test.js
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Use OIDC-capable npm publisher

@@ -84,9 +84,9 @@ test("webhook selection explains secret setup before creating local or central s
   assert.deepEqual(result, {
     status: "input_required",
     prompt:
-      "Run `ambassador webhook-secret`, configure the displayed secret in Hermes, then retry with the receiver URL.",
+      "Run `embassys webhook-secret`, configure the displayed secret in Hermes, then retry with the receiver URL.",
     required: ["delivery.url"],
-    command: "ambassador webhook-secret",
+    command: "embassys webhook-secret",
   });
   assert.deepEqual(calls, []);
 });
@@ -104,9 +104,9 @@ test("OpenClaw webhook selection points to its native hook without a plugin", as
   assert.deepEqual(result, {
     status: "input_required",
     prompt:
-      "Run `ambassador webhook-secret`, set the displayed value as OpenClaw `hooks.token`, enable hooks for agent `main`, restart OpenClaw, then retry with its `/hooks/agent` URL.",
+      "Run `embassys webhook-secret`, set the displayed value as OpenClaw `hooks.token`, enable hooks for agent `main`, restart OpenClaw, then retry with its `/hooks/agent` URL.",
     required: ["delivery.url"],
-    command: "ambassador webhook-secret",
+    command: "embassys webhook-secret",
   });
   assert.deepEqual(calls, []);
 });

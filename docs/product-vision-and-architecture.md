@@ -18,7 +18,8 @@ records the approved design.
 
 ## Product boundary
 
-The public package is `@embassys/ambassador`; the binary is `ambassador`.
+The public package and binary are `embassys` under
+[ADR 0086](adr/0086-embassys-cli-package.md). Bare `embassys` starts the server.
 Commands are `start`, `clean`, `webhook-secret`, `sessions list`,
 `sessions show <id>`, `sessions delete <id>` and `sessions forget <id>`.
 Only start and sessions show accept `--verbose`. Commands cannot select an

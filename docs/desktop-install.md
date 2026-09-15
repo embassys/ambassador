@@ -89,7 +89,10 @@ automatically. A connection does not grant access to actions or private data.
 Review permission requests, answer questions and manage grants in the app.
 
 The app and its bundled CLI can hand off the same installation. This release
-bundles Ambassador 0.2.20, also available from npm. Use the app's **Use the CLI**
+bundles Ambassador 0.2.20. The CLI is named `embassys` from 0.2.21 onward;
+install it with `npm install -g embassys` and start it with `embassys`.
+Its state location and MCP connection names remain the same.
+Use the app's **Use the CLI**
 guidance for the matching command; older builds are not qualified to open this
 release's state.
 

@@ -61,8 +61,11 @@ scope on your own.
   after reviewing the remaining client limits. Keep those limits documented and
   require all release CI gates before publication. Later releases need approval.
 
-- The product and public npm package are `@embassys/ambassador`. The public
-  binary is `ambassador`. Do not keep the old package or binary as aliases.
+- ADR 0086 renames the public npm package and binary to `embassys`. Bare
+  `embassys` starts the server; explicit `embassys start` remains available.
+  The owner confirmed package ownership and trusted publishing. Keep existing
+  state locations, MCP names and app/CLI handoff intact. Do not add an old-name
+  binary alias or modify previous published packages.
 - One foreground Ambassador process owns one enrolled central identity and one
   local delivery profile.
 - `start` accepts only the optional `--verbose` diagnostic flag. Do not add
@@ -104,7 +107,7 @@ scope on your own.
 - A persisted profile derived from the matched capability entry and any
   required user choice is authoritative.
 - Webhook registration accepts only a URL after the owner creates Ambassador's
-  encrypted receiver secret with `ambassador webhook-secret`. The secret value
+  encrypted receiver secret with `embassys webhook-secret`. The secret value
   never enters MCP. The gateway sends the complete validated central message
   with the profile's fixed authentication. A `2xx` transfers responsibility to
   the webhook receiver, while central acknowledgement follows durable Ambassador custody independently.

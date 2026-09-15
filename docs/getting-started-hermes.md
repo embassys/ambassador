@@ -4,16 +4,18 @@ Using the Embassys app? Choose **Connect Hermes** during setup. The app installs
 the connection and discovery skill, then checks the agent. See
 [guided connection](guided-agent-connection.md). The terminal flow below remains available.
 
-## 1. Start Ambassador
+## 1. Start Embassys
 
 - Install Node.js `>=24.19.0` and Hermes Agent.
 - Sign in to Hermes normally and make sure `hermes-acp` is on `PATH`.
 - In the directory Hermes may access, run:
 
   ```sh
-  npx --yes @embassys/ambassador@latest start
+  npm install -g embassys
+  embassys
   ```
 
+- Update to the latest CLI with `npm install -g embassys`.
 - Keep that terminal open.
 
 ## 2. Add Ambassador to Hermes
@@ -68,7 +70,7 @@ gateway.
 2. In another terminal, get Ambassador's receiver secret:
 
    ```sh
-   npx --yes @embassys/ambassador@latest webhook-secret
+   embassys webhook-secret
    ```
 
 3. Enable Hermes webhooks with `WEBHOOK_ENABLED=true` and your chosen

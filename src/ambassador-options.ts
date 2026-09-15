@@ -30,6 +30,7 @@ export type AmbassadorCommand =
 const SESSION_ID = /^[\x20-\x7e]{1,512}$/u;
 
 export function parseAmbassadorCommand(args: readonly string[]): AmbassadorCommand {
+  if (args.length === 0) return { command: "start", verbose: false };
   if (
     args[0] === "start" &&
     (args.length === 1 || (args.length === 2 && args[1] === "--verbose"))

@@ -4,16 +4,18 @@ Using the Embassys app? Choose **Connect Codex** during setup. The app installs
 the connection and discovery skill, then checks the agent. See
 [guided connection](guided-agent-connection.md). The terminal flow below remains available.
 
-## 1. Start Ambassador
+## 1. Start Embassys
 
 - Install Node.js `>=24.19.0` and Codex.
 - Sign in to Codex normally. Ambassador never receives your Codex credential.
 - In the directory Codex may access, run:
 
   ```sh
-  npx --yes @embassys/ambassador@latest start
+  npm install -g embassys
+  embassys
   ```
 
+- Update to the latest CLI with `npm install -g embassys`.
 - Keep that terminal open. Ambassador prints its MCP endpoint and the setup
   commands below.
 
@@ -84,8 +86,8 @@ Embassys. Ambassador presents the provider's exact choices and returns your sele
 ## Inspect sessions
 
 - Keep Ambassador running.
-- Run `npx --yes @embassys/ambassador@latest sessions list`.
-- Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
+- Run `embassys sessions list`.
+- Run `embassys sessions show <session-id>`.
 - Add `--verbose` to `show` for bounded tool events.
 - Stop Ambassador before using `sessions delete <session-id>` to delete
   provider history or `sessions forget <session-id>` to remove only

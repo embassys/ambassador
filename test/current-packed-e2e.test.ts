@@ -160,7 +160,7 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   });
   let stdout = "";
   let stderr = "";
-  const running = packed.runCli(["start"], {
+  const running = packed.runCli([], {
     io: {
       stdout: {
         write(chunk: string | Uint8Array) {

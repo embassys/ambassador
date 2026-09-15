@@ -125,3 +125,5 @@ protocol instead of creating an API generation number.
 - [0084 Shared core tests and isolated platform checks](0084-shared-core-and-platform-ci.md)
 
 - [0085 Account communication history](0085-account-communication-history.md)
+
+- [0086 Embassys npm package and command](0086-embassys-cli-package.md)
