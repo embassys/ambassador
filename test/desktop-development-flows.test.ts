@@ -30,6 +30,11 @@ test("unfinished email-first setup survives gateway restart without polling or d
     await rm(root, { recursive: true, force: true });
   });
   await gateway.start();
+  const initialClient = new TestMcpClient(gateway.snapshot().endpoint as string);
+  await initialClient.initialize({ name: "claude-code", version: "fixture" });
+  assert.match(initialClient.serverInstructions ?? "", /setup in the Embassys app/);
+  for (const name of ["get_my_permissions", "list_action_types", "message_box", "register_agent"])
+    await assert.rejects(initialClient.callTool(name, {}), /Embassys app/);
   await gateway.desktopCommand({
     type: "enrollment_register",
     instanceId,

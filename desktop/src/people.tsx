@@ -73,14 +73,17 @@ export function ContactImportGuide({ chooseFile }: { chooseFile(): void }) {
   );
 }
 
+export type PeopleView = "saved" | "connections" | "invitations";
+
 export function People({
   owner,
   call,
+  view: tab,
 }: {
   owner: OwnerSnapshot;
   call(command: OwnerCommand): Promise<unknown>;
+  view: PeopleView;
 }) {
-  const [tab, setTab] = useState<"saved" | "connections" | "invitations">("saved");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -336,20 +339,7 @@ export function People({
           {notice}
         </p>
       )}
-      <fieldset className="people-tabs">
-        <legend className="sr-only">People views</legend>
-        {(["saved", "connections", "invitations"] as const).map((value) => (
-          <button
-            type="button"
-            className="quiet-button"
-            aria-pressed={tab === value}
-            key={value}
-            onClick={() => setTab(value)}
-          >
-            {value === "saved" ? "Saved" : value === "connections" ? "Connected" : "Invitations"}
-          </button>
-        ))}
-      </fieldset>
+
       <div className="people-content">
         {tab !== "saved" ? (
           <PeopleNetwork

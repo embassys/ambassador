@@ -6,7 +6,8 @@ Status: accepted target. [Implementation progress](implementation-plan.md) and
 [ADR 0064](adr/0064-desktop-application.md) adds the approved desktop target in
 [Desktop app design](desktop-app-design.md). It amends the CLI-only product,
 owner setup, instance isolation and content persistence boundaries below for the
-Embassys app. CLI import and migration are outside scope. The remainder describes the published gateway baseline.
+Embassys app. ADR 0069 adds shared CLI/app handoffs without copying credentials.
+The remainder describes the published gateway baseline.
 
 Embassys Ambassador connects a local agent to the Embassys REST service.
 One foreground process owns one enrolled identity and one incoming delivery
@@ -184,8 +185,8 @@ client adoption and deployed retest are recorded in
 after receipt; uncertain provider dispatches are still never replayed, and
 submissions beyond the recovery window remain uncertain.
 [API follow-ups](central-follow-ups.md) track the separate DPoP protocol decision and push prerequisites.
-One-code setup is implemented under ADR 0083. The new owner communication
-history endpoint still needs client adoption.
+One-code setup is implemented under ADR 0083. Account communication history is
+implemented under ADR 0085; its live queue-isolation qualification remains pending.
 Remote push still requires server credentials, signed platform identity and
 actual-device qualification. No API code change is part of this implementation.
 

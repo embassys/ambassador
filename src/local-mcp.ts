@@ -52,7 +52,7 @@ function toolErrorMessage(code: string): string {
     case "unsupported_email_format":
       return "Embassys rejected this email address format. The current service does not accept '+' email aliases; use the mailbox address without its +tag.";
     case "registration_conflict":
-      return "This email is already registered with Embassys. Local clean removes enrollment but does not unregister centrally. Preserve any existing identity backup; central recovery is not available yet.";
+      return "This email is already registered with Embassys. Local clean removes enrollment but does not unregister centrally. Preserve existing local state. Open Embassys and sign in to recover the existing identity or set up this device; do not delete the central account.";
     case "central_rate_limited":
       return "Embassys rate-limited this request. Wait before trying again.";
     case "invalid_arguments":
@@ -109,6 +109,7 @@ function toolErrorMessage(code: string): string {
 }
 
 export interface LocalMcpRouter {
+  registrationInApp?: boolean;
   enrollmentContext?(): Record<string, string | boolean>;
   listTools(): Promise<CentralToolDefinition[]>;
   callTool(
@@ -480,7 +481,12 @@ export class LocalMcpServer {
             ...(this.router.enrollmentContext === undefined
               ? []
               : [`Local Embassys enrollment: ${JSON.stringify(this.router.enrollmentContext())}.`]),
-            SERVER_INSTRUCTIONS,
+            this.router.registrationInApp
+              ? SERVER_INSTRUCTIONS.replace(
+                  "When not enrolled and the user asks to register or connect and gives an email, call register_agent immediately. After the emailed code arrives, call verify_email.",
+                  "Complete setup in the Embassys app. When not enrolled, ask the user to open Embassys, sign in with one email code and connect their agent. Do not collect an email code or register through MCP for this app-owned installation.",
+                )
+              : SERVER_INSTRUCTIONS,
           ].join(" ") +
           " Enrollment metadata at initialization is a snapshot; later successful verification and tool responses supersede it.",
         supportedProtocolVersions: ["2026-07-28", "2025-11-25", PROTOCOL_VERSION],

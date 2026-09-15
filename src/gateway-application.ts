@@ -885,6 +885,7 @@ export async function openGatewayApplication(
   };
 
   const router: LocalMcpRouter = {
+    registrationInApp: Boolean(options.desktopRegistrationPath),
     enrollmentContext: () => identity.enrollment,
     async listTools() {
       return [
@@ -927,7 +928,9 @@ export async function openGatewayApplication(
         if (!identity.enrolled) {
           if (
             options.desktopRegistrationPath &&
-            REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name)
+            (REST_BOOTSTRAP_TOOLS.some((tool) => tool.name === name) ||
+              REST_AUTHENTICATED_TOOLS.some((tool) => tool.name === name) ||
+              name === "message_box")
           )
             throw new LocalMcpToolError("registration_in_app");
           switch (name) {

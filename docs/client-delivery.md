@@ -1,6 +1,7 @@
 # Client delivery and qualification
 
-This describes the ADR 0061 development release, version 0.2.19. Configuration does not prove
+The released gateway is 0.2.20. The provider observations below have their own
+dates and do not imply that every path was repeated for each release. Configuration does not prove
 that a client displayed a result. Evidence belongs in [qualification](qualification.md).
 
 | Client | Implemented path | Current qualification |
@@ -194,6 +195,6 @@ Reviewed on 2026-09-05 against installed provider source and these primary docs:
 Qualify initial acceptance, the full wait, permission-only progress, owner
 questions, exact final data, reconnect, duplicate events, closed conversations,
 provider restart and ambiguous injection. Use synthetic test data and record
-which real app actually displayed it. Existing API recovery gaps remain
-documented limitations. The owner approved detailed body retention for this
+which real app actually displayed it. Central leases and idempotent recovery are implemented under ADR 0082;
+uncertain provider dispatch and provider display remain separate boundaries. The owner approved detailed body retention for this
 development release, with mandatory credential redaction, under ADR 0059.

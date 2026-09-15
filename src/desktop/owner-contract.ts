@@ -230,3 +230,53 @@ export const pushStatus = z.object({
   endpoint: pushEndpoint.nullable(),
   known_categories: z.array(z.string().min(1).max(128)).max(32),
 });
+
+const communicationParty = z.object({
+  agent_id: z.uuid(),
+  email: ownerEmail.nullable(),
+  display_name: nullableText,
+  is_mine: z.boolean(),
+});
+export const communicationItem = z
+  .object({
+    message_id: z.uuid(),
+    call_id: z.string().max(8192).nullable(),
+    message_type: z.string().max(128).nullable(),
+    action_type: z.string().max(128).nullable(),
+    direction: z.enum(["inbound", "outbound", "internal"]),
+    sender: communicationParty.nullable(),
+    sender_deleted: z.boolean(),
+    recipient: communicationParty,
+    payload: z.record(z.string(), z.unknown()),
+    status: z.string().max(128),
+    created_at: timestamp,
+    delivered_at: timestamp.nullable(),
+    acked_at: timestamp.nullable(),
+    call_status: z.string().max(128).nullable(),
+  })
+  .refine(
+    (item) =>
+      item.sender_deleted === (item.sender === null) &&
+      (item.direction === "internal"
+        ? item.sender?.is_mine && item.recipient.is_mine
+        : item.direction === "outbound"
+          ? item.sender?.is_mine && !item.recipient.is_mine
+          : !item.sender?.is_mine && item.recipient.is_mine),
+  );
+export const communicationRetention = z.object({
+  complete_since: timestamp,
+  acked_messages_removed_after_days: z.number().int().nonnegative(),
+  dead_messages_removed_after_days: z.number().int().nonnegative(),
+  may_be_incomplete: z.boolean(),
+});
+export const communicationsPage = z
+  .object({
+    items: z.array(communicationItem).max(200),
+    ...pageFields,
+    retention: communicationRetention,
+  })
+  .refine(consistentPage)
+  .refine((page) => new Set(page.items.map((i) => i.message_id)).size === page.items.length)
+  .refine((page) => !page.has_more || page.items.length > 0);
+export type Communication = z.infer<typeof communicationItem>;
+export type CommunicationsPage = z.infer<typeof communicationsPage>;

@@ -31,7 +31,19 @@ test("desktop relay keeps the ten-minute default and continuation in tool help w
   );
   assert.match(JSON.stringify(adapted.inputSchema), /600/u);
   assert.match(JSON.stringify(MESSAGE_BOX_TOOL.inputSchema), /Omit to wait up to 600/u);
-  const ordinary = { name: "list_action_types", inputSchema: { type: "object" } };
+  for (const name of [
+    "get_my_permissions",
+    "list_action_types",
+    "register_agent",
+    "verify_email",
+    "resend_verification",
+  ]) {
+    const inputSchema = { type: "object" };
+    const discovered = desktopRelayTool({ name, inputSchema });
+    assert.match(discovered.description ?? "", /Embassys/u);
+    assert.equal(discovered.inputSchema, inputSchema);
+  }
+  const ordinary = { name: "unrelated_tool", inputSchema: { type: "object" } };
   assert.equal(desktopRelayTool(ordinary), ordinary);
 });
 

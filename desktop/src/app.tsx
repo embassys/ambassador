@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { combineConversation } from "../../src/desktop/account-conversations.js";
 import type { controlPalette } from "../../src/desktop/appearance.js";
 import { mergeChatPages } from "../../src/desktop/chat.js";
 import type { DiagnosticPage, DiagnosticQuery } from "../../src/desktop/diagnostic-query.js";
@@ -27,16 +28,16 @@ import {
 } from "./history.js";
 import { inboxEntries, selectInboxRequest } from "./inbox-navigation.js";
 import {
-  AppMenu,
   Navigation,
   ServiceStatus,
-  SettingsButton,
+  SidebarHeader,
+  type SidebarSection,
   serviceStatus,
   WorkspaceWelcome,
 } from "./navigation.js";
 import { Onboarding } from "./onboarding.js";
 import { onboardingKey } from "./onboarding-state.js";
-import { People } from "./people.js";
+import { People, type PeopleView } from "./people.js";
 import { Registration } from "./registration.js";
 import { ReviewSheet } from "./review-sheet.js";
 
@@ -175,9 +176,13 @@ function App() {
   );
   const [dataSource, setDataSource] = useState<"account" | "local">("account");
   const [inboxRequest, setInboxRequest] = useState("");
+  const [sidebarSection, setSidebarSection] = useState<SidebarSection>("inbox");
+  const [peopleView, setPeopleView] = useState<PeopleView>("saved");
   const navigate = (destination: Page) => {
     viewGeneration.current++;
-    if (destination === "conversations") setInboxRequest("");
+    if (destination === "attention") setSidebarSection("inbox");
+    else if (destination === "conversations" || destination === "people")
+      setSidebarSection(destination);
     setPage(destination);
     setDataSource(destination === "conversations" ? "local" : "account");
   };
@@ -294,6 +299,7 @@ function App() {
     localStorage.setItem("ambassador.navigation", snapshot.navigation.id);
     setSelectedId(snapshot.navigation.instanceId);
     setPage(snapshot.navigation.page);
+    if (snapshot.navigation.page === "attention") setSidebarSection("inbox");
     setDataSource("local");
   }, [snapshot?.navigation, onboarded]);
   useEffect(() => {
@@ -480,6 +486,14 @@ function App() {
       setError("");
       setBusy(true);
     }
+    const session = sessions.find((item) => item.session_id === sessionId);
+    if (session?.localSessionId === null) {
+      if (viewGeneration.current === generation) {
+        setHistory(undefined);
+        setBusy(false);
+      }
+      return;
+    }
     historyReading.current = true;
     try {
       const result = (await call({
@@ -504,6 +518,24 @@ function App() {
       if (viewGeneration.current === generation && !quiet) setBusy(false);
     }
   }
+  function openSidebarSection(section: SidebarSection) {
+    const destination = section === "inbox" ? "attention" : section;
+    const source = section === "conversations" ? "local" : "account";
+    if (page === destination && dataSource === source) return;
+    navigate(destination);
+    if (section === "conversations") {
+      const session = sessions.find((item) => item.session_id === historySession) ?? sessions[0];
+      if (session) void loadHistory(session.session_id);
+    }
+  }
+  const activeConversation = sessions.find((item) => item.session_id === historySession);
+  const shownHistory = activeConversation?.accountMessages
+    ? combineConversation(
+        history?.source === "archive" ? history : undefined,
+        activeConversation.accountMessages,
+        historySession,
+      )
+    : history;
   const historyAtCapacity = history?.source === "archive" && history.items.length >= 500;
   historyRead.current = () => {
     void loadHistory(historySession, Number.MAX_SAFE_INTEGER, true);
@@ -755,11 +787,20 @@ function App() {
       {reviewSheet}
       {onboarded && (
         <aside className="conversation-sidebar" aria-label="Workspace">
-          <div className="sidebar-brand">
-            <img src="brand.svg" alt="" />
-            <strong>Embassys</strong>
-          </div>
+          <SidebarHeader
+            runtime={selected?.runtime}
+            name={selected?.name}
+            openSettings={() => navigate("account")}
+            select={navigate}
+          />
           <Navigation
+            section={sidebarSection}
+            selectSection={openSidebarSection}
+            peopleView={peopleView}
+            selectPeopleView={(view) => {
+              setPeopleView(view);
+              navigate("people");
+            }}
             page={
               dataSource === "account" && page === "conversations"
                 ? "network"
@@ -785,19 +826,11 @@ function App() {
             requestError={workspace.source.error}
             requestsLoading={workspace.source.loading}
             refresh={() => void workspace.refresh()}
-            openPeople={() => navigate("people")}
+            historyHasMore={workspace.historyHasMore}
+            historyBusy={workspace.historyBusy}
+            loadOlder={() => void workspace.loadOlder()}
+            reloadRecent={() => void workspace.reloadRecent()}
           />
-          <div className="sidebar-bottom">
-            <div className="sidebar-tools">
-              <SettingsButton open={() => navigate("account")} />
-              <AppMenu select={navigate} />
-            </div>
-            <ServiceStatus
-              runtime={selected?.runtime}
-              name={selected?.name}
-              open={() => navigate("account")}
-            />
-          </div>
         </aside>
       )}
       <main>
@@ -808,13 +841,8 @@ function App() {
               !(page === "attention" && dataSource === "account") &&
               !(page === "conversations" && dataSource === "local") ? (
                 <BackButton
-                  label="Back to requests and conversations"
-                  onClick={() => {
-                    if (!inboxRequest && historySession) {
-                      navigate("conversations");
-                      void loadHistory(historySession);
-                    } else navigate("attention");
-                  }}
+                  label="Back to workspace"
+                  onClick={() => openSidebarSection(sidebarSection)}
                 />
               ) : !onboarded ? (
                 <BackButton
@@ -893,7 +921,12 @@ function App() {
           ) : (
             <>
               {page === "people" && snapshot.owner.status === "signed_in" && (
-                <People key={snapshot.owner.context} owner={snapshot.owner} call={call} />
+                <People
+                  key={snapshot.owner.context}
+                  owner={snapshot.owner}
+                  call={call}
+                  view={peopleView}
+                />
               )}
               {dataSource === "account" &&
                 ["attention", "permissions", "conversations"].includes(page) &&
@@ -1260,14 +1293,18 @@ function App() {
               {page === "conversations" && dataSource === "local" && (
                 <ChatScroll
                   key={`${snapshot.owner.context}:${id}:${historySession}`}
-                  history={history}
+                  history={shownHistory}
                 >
                   <ConversationContent
-                    history={history}
+                    history={shownHistory}
                     busy={busy}
                     sessionId={historySession}
                     session={sessions.find((session) => session.session_id === historySession)}
-                    reload={() => void loadHistory(historySession)}
+                    reload={() => {
+                      if (activeConversation?.localSessionId === null)
+                        void workspace.reloadRecent();
+                      else void loadHistory(historySession);
+                    }}
                     next={() => void loadHistory(historySession, history?.nextCursor)}
                     remove={() => void deleteHistory()}
                   />
@@ -1769,7 +1806,7 @@ function App() {
                   </DetailSheet>
                   <p className="body-note">
                     Closing the window keeps Embassys in the menu bar. Quit Embassys stops its
-                    servers. Updates and account recovery will follow in later development stages.
+                    servers.
                   </p>
                   <p className="body-note app-version">
                     Embassys {snapshot.appVersion} · {snapshot.build}

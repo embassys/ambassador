@@ -13,7 +13,22 @@ export function desktopRelayTool(tool: {
   readonly description?: string | undefined;
   readonly inputSchema: Record<string, unknown>;
 }) {
-  if (tool.name !== "message_box") return tool;
+  const discovery: Record<string, string> = {
+    get_my_permissions:
+      "Check whether the user is registered with Embassys and see their agent permissions. An empty permission list does not mean they are unregistered. Embassys is this connected agent network, not a website to look up.",
+    list_action_types:
+      "Discover Embassys actions for contacting another person's agent, requesting contact details and coordinating meetings. Read the exact catalog and use the owner's permission flow.",
+    register_agent:
+      "Set up Embassys agent registration. For an app-owned installation, the user signs in and connects their agent in the Embassys app.",
+    verify_email:
+      "Verify an Embassys CLI agent's email when registration requires it. App-owned setup is completed in the Embassys app.",
+    resend_verification:
+      "Resend an Embassys agent verification email only when that enrollment flow requires it.",
+  };
+  if (tool.name !== "message_box")
+    return Object.hasOwn(discovery, tool.name)
+      ? { ...tool, description: `${discovery[tool.name]} ${tool.description ?? ""}` }
+      : tool;
   const schema = structuredClone(tool.inputSchema);
   const help: Record<string, string> = {
     wait_seconds:

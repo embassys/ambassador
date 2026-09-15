@@ -1,6 +1,6 @@
 # Central service follow-ups
 
-## Current status, September 14
+## Current status, September 15
 
 Issues 1–13 are closed, and reviewed server main plus deployed OpenAPI now expose
 their new contracts. They are no longer all missing server features. See the
@@ -28,7 +28,10 @@ Current API follow-ups:
 Issue [21](https://github.com/embassys/agent2agent/issues/21) is closed. Desktop
 one-code setup is implemented under [ADR 0083](adr/0083-one-code-desktop-setup.md).
 Issue [18](https://github.com/embassys/agent2agent/issues/18) has also shipped;
-communication history needs client adoption and live qualification.
+communication history is integrated under
+[ADR 0085](adr/0085-account-communication-history.md). Contract tests and native
+sample-data checks pass. Live queue-isolation qualification remains blocked by
+test-mailbox authentication; see the [test record](account-history-and-mac-test-2026-09-15.md).
 
 The native push routes are adopted, but the live server reports no push
 credentials configured. Signed app identity, Windows native integration and

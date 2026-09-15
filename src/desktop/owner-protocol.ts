@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  communicationsPage,
   connectionsPage,
   devicesResponse,
   eventsPage,
@@ -76,7 +77,7 @@ export const ownerCommands = [
     direction: z.enum(["granted", "received"]),
     cursor: pageCursor,
   }),
-  z.strictObject({ type: z.literal("owner_communications"), context }),
+  z.strictObject({ type: z.literal("owner_communications"), context, cursor: pageCursor }),
   z.strictObject({ type: z.literal("owner_review"), context, kind: mutationKind, id: z.uuid() }),
   z.strictObject({
     type: z.literal("owner_submit"),
@@ -238,20 +239,6 @@ export const permissionSchema = z.object({
   grantee_name: nullableText,
   direction: z.enum(["granted_by_me", "granted_to_me"]),
 });
-export const communicationSchema = z.object({
-  id: z.uuid(),
-  message_type: z.string().max(128),
-  status: z.string().max(128),
-  payload: json,
-  created_at: timestamp,
-  delivered_at: timestamp.nullable(),
-  action_type: text,
-  sender_email: nullableText,
-  sender_name: nullableText,
-  recipient_email: nullableText,
-  recipient_name: nullableText,
-  outbound: z.boolean(),
-});
 const pagination = {
   next_cursor: z.string().max(2048).nullable().optional(),
   has_more: z.boolean().optional(),
@@ -268,9 +255,7 @@ export const permissionsSchema = z.object({
   direction: z.enum(["granted", "received"]),
   permissions: z.array(permissionSchema).max(200),
 });
-export const communicationsSchema = z.object({
-  communications: z.array(communicationSchema).max(200),
-});
+export const communicationsSchema = communicationsPage;
 export const mutationSchema = z.object({
   kind: mutationKind,
   id: z.uuid(),

@@ -10,7 +10,7 @@ import { edgeRequests, requests } from "./visual/data.mjs";
 const root = await mkdtemp(join(tmpdir(), "embassys-history-ui-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ConversationList,ConversationContent} from './src/history.tsx'; import {requestsSchema} from "../src/desktop/owner-protocol.ts"; import {DetailSheet, StructuredData} from './src/details.tsx'; export const detail = value => renderToStaticMarkup(createElement(DetailSheet,{title:'Request details'},createElement(StructuredData,{value}))); export const validateRequests = value => requestsSchema.parse(value); export const list = (sessions,selected='',attention) => renderToStaticMarkup(createElement(ConversationList,{sessions,selected,attention,select:()=>{}})); export const content = (history,busy=false) => renderToStaticMarkup(createElement(ConversationContent,{history,busy,sessionId:'exact-session',reload:()=>{},next:()=>{},remove:()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {ConversationList,ConversationContent} from './src/history.tsx'; import {requestsSchema} from "../src/desktop/owner-protocol.ts"; import {DetailSheet, StructuredData} from './src/details.tsx'; export const detail = value => renderToStaticMarkup(createElement(DetailSheet,{title:'Request details'},createElement(StructuredData,{value}))); export const validateRequests = value => requestsSchema.parse(value); export const list = (sessions,selected='',attention) => renderToStaticMarkup(createElement(ConversationList,{sessions,selected,attention,select:()=>{}})); export const content = (history,busy=false,session) => renderToStaticMarkup(createElement(ConversationContent,{history,busy,session,sessionId:'exact-session',reload:()=>{},next:()=>{},remove:()=>{}}));`,
     resolveDir: fileURLToPath(new URL("../", import.meta.url)),
     sourcefile: "history-test.tsx",
   },
@@ -267,4 +267,21 @@ test("sidebar identifies the peer separately from the conversation topic", () =>
   assert.match(html, /session-excerpt">Calendar availability/);
   assert.match(html, /alex@example.test/);
   assert.doesNotMatch(html, /<untrusted>/);
+});
+
+test("account-only conversations show server retention and no local history deletion", () => {
+  const html = content(
+    { source: "archive", items: [], warnings: [], hasMore: false, nextCursor: 0 },
+    false,
+    {
+      session_id: "account-pair",
+      agent_kind: "Embassys",
+      status: "history",
+      last_used_at_ms: 0,
+      localSessionId: null,
+      retention: { complete_since: "2026-09-01T00:00:00Z", may_be_incomplete: true },
+    },
+  );
+  assert.match(html, /Account messages are read from Embassys/);
+  assert.doesNotMatch(html, /Delete local history|Local transcripts are saved/);
 });

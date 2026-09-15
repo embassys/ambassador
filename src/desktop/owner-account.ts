@@ -11,6 +11,7 @@ import { redactVerboseValue, type VerboseLogger } from "../verbose-log.js";
 import { permissionChoices } from "./owner-choices.js";
 import {
   agentsResponse,
+  communicationsPage,
   connectionsPage,
   devicesResponse,
   eventsPage,
@@ -463,8 +464,6 @@ export class OwnerAccount {
     const state = this.#state;
     if (command.type === "owner_device_review" || command.type === "owner_device_submit")
       return this.#deviceCommand(command, state.credential);
-    if (command.type === "owner_communications")
-      return this.#reply(undefined, "history_unavailable");
     if (
       [
         "owner_create_agent",
@@ -473,6 +472,7 @@ export class OwnerAccount {
         "owner_invitations",
         "owner_connections",
         "owner_history",
+        "owner_communications",
         "owner_devices",
         "owner_push_status",
         "owner_events",
@@ -737,7 +737,14 @@ export class OwnerAccount {
             await this.#request(`/connections?${query}`, { access: session.access }),
           ),
         };
-      else if (command.type === "owner_history") {
+      else if (command.type === "owner_communications") {
+        query.set("limit", "50");
+        const page = communicationsPage.parse(
+          await this.#request(`/communications?${query}`, { access: session.access }),
+        );
+        if (command.cursor && page.next_cursor === command.cursor) throw new InvalidResponse();
+        data = { kind: "communications", ...page };
+      } else if (command.type === "owner_history") {
         if (command.permission_id) query.set("permission_id", command.permission_id);
         data = {
           kind: "history",

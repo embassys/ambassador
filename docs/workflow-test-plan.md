@@ -1,6 +1,7 @@
 # Workflow regression and live test plan
 
-Status: deterministic and packaged checks pass; real-client qualification in progress
+Status: current requirements below; dated counts describe their recorded candidates.
+Current central recovery and one-code setup are governed by ADRs 0082 and 0083.
 
 Every discovered failure gets a regression at the boundary that caused it.
 Tests run before implementation. Mock tests exercise failure timing without
@@ -128,23 +129,18 @@ unqualified until their exact user-facing path passes. Central failure modes
 that cannot safely be induced live remain deterministic regression cases plus
 explicit API limitations. Do not publish while release blockers remain.
 
-## Account-first onboarding (ADR 0072)
+## Account-first onboarding (ADRs 0072 and 0083)
 
-- Signed-out users see Log in and Register without the dashboard. A temporary
-  sign-out uncertainty notice must not leave the UI stuck in the login form.
-- Registration without an executor sends the existing email-only contract.
-  Verify, close and reopen before choosing a provider. No central receiver or
-  provider dispatch may start until that choice is saved.
-- Invalid codes and uncertain verification preserve the existing retry rules.
-  Choosing or retrying a saved provider must not re-register or re-verify.
-- Owner login is a separate realm and challenge. Reuse the email, never its
-  registration code or agent token. After login show guided setup first.
-- Remember setup completion or deferral by account and instance. Account changes,
-  sign-out, missing credentials and a new installation must not inherit another
-  account's completion. A stored UI preference grants no permissions.
-- Use the native app for registration, login, connection review, completion,
-  restart and sign-out. Distinguish a saved provider configuration from a real
-  provider conversation.
+- Signed-out users see Log in and Register. Both use owner email verification.
+- One owner code precedes first-agent creation/adoption and device setup. Do not
+  call the legacy agent registration or verification routes from this flow.
+- Reject invalid/expired codes without losing the email or saved device key.
+- Close and reopen at each stage. Resume setup without duplicate identities.
+- Review an existing remote executor before transfer and recheck its epoch.
+- Connect verifies an actual read-only call from the chosen installed provider.
+- Account changes discard stale reviews, views and partially typed codes.
+- Native Mac tests cover registration, connection, approval cancellation/retry,
+  saved setup after restart, sign-out and fresh sign-in. Fixtures are separate.
 
 ## Desktop executor binding (ADR 0071)
 
@@ -172,7 +168,8 @@ unchanged encrypted identity, durable pending actions, stale process identifiers
 and authenticated stop. Supervisor tests prove handoff disables crash recovery.
 A packaged process test runs the public CLI, starts the fresh app against its
 installation, hands back to the CLI, and reopens the app without interrupting it.
-This test runs on all three desktop CI platforms with isolated user data.
+This test runs in the explicit local platform scripts with isolated user data.
+ADR 0084 keeps CI focused on shared flows and isolated native components.
 
 Revocation tests cover pending and ready actions, submitted and uncertain calls,
 wrong permission/action/grantor metadata, a stale later grant, restart and an
@@ -227,3 +224,19 @@ must compare the saved execution device and epoch with the refreshed roster.
 A move from another device requires a current review and explicit confirmation.
 A failed local install stays incomplete; provider Connect cannot claim success
 until the matching saved credential and read-only setup challenge are verified.
+
+## Account communication history (ADR 0085)
+
+- Read owner history while a message is queued, then claim and complete it through
+  the normal agent channel. History reads never lease, acknowledge or execute.
+- Exercise page overlap, duplicate and cyclic cursors, tied timestamps, response
+  size limits, memory bounds, missing/deleted senders and internal traffic.
+- Combine only a unique local peer-session match with the exact local identity.
+  Keep other owners, other local identities and ambiguous sessions separate.
+- Deduplicate the same central message against its archived incoming envelope;
+  retain local agent/tool output and never infer success from queue status.
+- Preserve loaded data on offline reads, discard stale account responses and show
+  retention limits. Earlier-page reads and refreshes must not overlap.
+- Load an older page containing a peer absent from the recent page. Selecting
+  that conversation, leaving it and returning must retain its messages. Only
+  explicitly reloading recent history resets the loaded pages.

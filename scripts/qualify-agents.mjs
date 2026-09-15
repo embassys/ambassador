@@ -6,8 +6,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { arch, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-
 import { observeAgentVersion } from "./agent-version-probes.mjs";
+import { validateCandidateEntries } from "./qualification-archive.mjs";
 
 const CONFIRMATION = "run-installed-supported-agents";
 const FIXTURE_ORIGIN = process.env.AMBASSADOR_QUALIFICATION_CENTRAL ?? "http://127.0.0.1:8000";
@@ -50,20 +50,7 @@ async function runBounded(command, args, capture = false) {
 
 async function loadCandidate(candidatePath) {
   const listing = await runBounded("tar", ["-tzf", candidatePath], true);
-  const entries = listing.trim().split("\n");
-  if (
-    entries.length < 2 ||
-    entries.length > 256 ||
-    entries.some(
-      (entry) =>
-        !entry.startsWith("package/") ||
-        entry.includes("..") ||
-        entry.includes("\\") ||
-        entry.includes("\u0000"),
-    )
-  ) {
-    throw new Error("candidate archive failed");
-  }
+  validateCandidateEntries(listing);
   const candidateRoot = await mkdtemp(
     join(process.cwd(), "node_modules", ".ambassador-qualification-"),
   );

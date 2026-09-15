@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  accountConversations,
+  mergeCommunicationPages,
+} from "../../src/desktop/account-conversations.js";
 import { conversationPeerFromRequests } from "../../src/desktop/chat.js";
 import {
   groupConversationRequests,
   type RequestLinkPage,
 } from "../../src/desktop/conversations.js";
+import type { CommunicationsPage } from "../../src/desktop/owner-contract.js";
 import { collectOwnerRequests } from "../../src/desktop/owner-pages.js";
 import type { OwnerReply, OwnerSnapshot, OwnerView } from "../../src/desktop/owner-protocol.js";
 import type { DesktopCommand } from "../../src/desktop/protocol.js";
@@ -37,12 +42,17 @@ export function useConversationWorkspace(
   const [state, setState] = useState<{
     scope: string;
     sessions: ConversationSession[];
+    communications?: CommunicationsPage | undefined;
+    communicationError?: string;
+    communicationBusy?: boolean;
     requests?: RequestSnapshot | undefined;
     links: RequestLinkPage;
     updated: string;
     requestError: string;
     sessionError: string;
   }>();
+  const reloadRecent = useRef<(() => Promise<void>) | undefined>(undefined);
+  const loadOlder = useRef<(() => Promise<void>) | undefined>(undefined);
   const readers = useRef<{ refresh(): Promise<void> }[]>([]);
   const refresh = useCallback(async () => {
     await Promise.all(readers.current.map((reader) => reader.refresh()));
@@ -115,7 +125,61 @@ export function useConversationWorkspace(
       publish: (links) => update({ links }),
       failed: () => update({ links: { links: [], hasMore: false, nextCursor: 0 } }),
     });
-    readers.current = [requests, sessions, links];
+    let historyPage = state?.scope === scope ? state.communications : undefined;
+    let historyBusy = false;
+    let closed = false;
+    const seenCursors = new Set<string>();
+    const readHistory = async (earlier = false) => {
+      if (historyBusy || (earlier && !historyPage?.has_more)) return;
+      historyBusy = true;
+      update({ communicationBusy: true });
+      try {
+        const cursor = earlier ? historyPage?.next_cursor : undefined;
+        const reply = (await call({
+          type: "owner_communications",
+          context: owner.context,
+          ...(cursor ? { cursor } : {}),
+        })) as OwnerReply;
+        if (closed) return;
+        if (reply.snapshot.context !== owner.context || reply.snapshot.status !== "signed_in") {
+          update({
+            communications: undefined,
+            communicationError: "Sign in again to load account history.",
+          });
+          void accountChanged();
+          return;
+        }
+        if (reply.state !== "ready" || reply.data?.kind !== "communications")
+          throw new Error("Account history couldn't refresh. Showing the last loaded messages.");
+        const next = mergeCommunicationPages(
+          historyPage,
+          reply.data,
+          earlier ? "earlier" : "refresh",
+          earlier ? seenCursors : undefined,
+        );
+        if (!earlier && next === reply.data) seenCursors.clear();
+        if (cursor) seenCursors.add(cursor);
+        historyPage = next;
+        update({ communications: next, communicationError: "" });
+      } catch (error) {
+        if (!closed)
+          update({
+            communicationError:
+              error instanceof Error ? error.message : "Account history unavailable.",
+          });
+      } finally {
+        historyBusy = false;
+        if (!closed) update({ communicationBusy: false });
+      }
+    };
+    reloadRecent.current = async () => {
+      if (historyBusy) return;
+      historyPage = undefined;
+      seenCursors.clear();
+      await readHistory();
+    };
+    loadOlder.current = () => readHistory(true);
+    readers.current = [requests, sessions, links, { refresh: () => readHistory() }];
     void refresh();
     const visible = () => {
       if (!document.hidden) void refresh();
@@ -124,6 +188,9 @@ export function useConversationWorkspace(
     document.addEventListener("visibilitychange", visible);
     return () => {
       for (const reader of [requests, sessions, links]) reader.close();
+      closed = true;
+      loadOlder.current = undefined;
+      reloadRecent.current = undefined;
       readers.current = [];
       clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
@@ -141,14 +208,20 @@ export function useConversationWorkspace(
   ]);
   const current = active && state?.scope === scope ? state : undefined;
   const grouped = groupConversationRequests(
-    (current?.sessions ?? []).map((session) => ({
+    accountConversations(
+      current?.sessions ?? [],
+      current?.communications,
+      current?.links.agentId,
+    ).map((session) => ({
       ...session,
-      peer: conversationPeerFromRequests(
-        session.preview?.peer,
-        current?.requests?.permission_requests ?? [],
-        current?.links.agentId,
-        Boolean(owner?.account?.agents.some((agent) => agent.id === current?.links.agentId)),
-      ),
+      peer:
+        session.peer ??
+        conversationPeerFromRequests(
+          session.preview?.peer,
+          current?.requests?.permission_requests ?? [],
+          current?.links.agentId,
+          Boolean(owner?.account?.agents.some((agent) => agent.id === current?.links.agentId)),
+        ),
     })),
     current?.requests ?? empty,
     current?.links.links ?? [],
@@ -163,7 +236,11 @@ export function useConversationWorkspace(
     ]).size,
     loaded: Boolean(current?.requests),
     sessionsLoaded: Boolean(current?.sessions),
-    sessionError: current?.sessionError ?? "",
+    sessionError: [current?.sessionError, current?.communicationError].filter(Boolean).join(" "),
+    reloadRecent: () => reloadRecent.current?.(),
+    historyHasMore: current?.communications?.has_more ?? false,
+    historyBusy: current?.communicationBusy ?? false,
+    loadOlder: () => loadOlder.current?.(),
     incompleteLinks: current?.links.hasMore ?? false,
     source: {
       data: current?.requests,

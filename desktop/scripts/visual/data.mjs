@@ -322,18 +322,48 @@ export function edgeRequests() {
 }
 
 export const communications = [
-  { id: id(51), sender_name: "Alex Morgan", sender_email: "alex@fixture.test" },
-  { id: id(53), sender_name: "Sam Chen", sender_email: "sam@fixture.test" },
-  { id: id(54), sender_name: "Priya Patel", sender_email: "priya@fixture.test" },
+  { n: 51, agent: 90, name: "Alex Morgan", email: "alex@fixture.test" },
+  { n: 53, agent: 91, name: "Sam Chen", email: "sam@fixture.test" },
+  { n: 54, agent: 92, name: "Priya Patel", email: "priya@fixture.test" },
+  { n: 55, agent: 93, name: "Nora Lewis", email: "nora@fixture.test" },
 ].map((message) => ({
-  ...message,
-  outbound: false,
+  message_id: id(message.n),
+  call_id: id(message.n + 100),
+  sender: {
+    agent_id: id(message.agent),
+    display_name: message.name,
+    email: message.email,
+    is_mine: false,
+  },
+  recipient: {
+    agent_id: id(5),
+    display_name: "Morgan",
+    email: "morgan@fixture.test",
+    is_mine: true,
+  },
+  sender_deleted: false,
+  direction: "inbound",
   message_type: "action_call",
   status: "delivered",
-  payload: {},
+  payload: {
+    type: "action_call",
+    action_type: "get_free_busy",
+    payload: { reason: "Find a time to meet" },
+  },
   created_at: "2026-09-10T10:38:00Z",
   delivered_at: "2026-09-10T10:38:00Z",
+  acked_at: null,
   action_type: "get_free_busy",
-  recipient_email: "morgan@fixture.test",
-  recipient_name: "Morgan",
+  call_status: "pending",
 }));
+export const communicationHistory = {
+  items: communications,
+  has_more: true,
+  next_cursor: "older-communications",
+  retention: {
+    complete_since: "2026-09-01T00:00:00Z",
+    may_be_incomplete: true,
+    acked_messages_removed_after_days: 14,
+    dead_messages_removed_after_days: 90,
+  },
+};
