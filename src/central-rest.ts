@@ -1,4 +1,10 @@
 import {
+  actionName,
+  agentAddress,
+  availableActionNames,
+  validActionName,
+} from "./agent-address.js";
+import {
   assertNoCentralCredentialFields,
   CentralJsonError,
   isCentralRecord,
@@ -39,6 +45,7 @@ export type CentralRestErrorCode =
   | "central_request_failed"
   | "central_request_rejected"
   | "central_response_invalid"
+  | "action_not_accepted"
   | "permission_missing"
   | "permission_pending"
   | "permission_denied"
@@ -67,6 +74,43 @@ export interface CentralActionType {
   readonly description: string;
   readonly input_schema: Record<string, unknown>;
   readonly result_schema?: Record<string, unknown> | null;
+  readonly verified?: boolean;
+}
+
+export interface CentralAvailableActions {
+  readonly agent_email: string;
+  readonly available_actions: string[] | null;
+  readonly restricted: boolean;
+}
+
+export interface CentralActionProgress {
+  readonly call_id: string;
+  readonly call_status: "pending" | "completed" | "failed";
+  readonly events: readonly {
+    readonly event_id: string;
+    readonly sequence: number;
+    readonly state: "working" | "waiting_for_owner_input" | "failed";
+    readonly note?: string | null;
+    readonly reported_at: string;
+  }[];
+}
+
+function availableActions(value: unknown): CentralAvailableActions {
+  if (
+    !exactKeys(value, ["agent_email", "available_actions", "restricted"]) ||
+    typeof value.agent_email !== "string" ||
+    !EMAIL.test(value.agent_email) ||
+    value.agent_email.length > 254 ||
+    typeof value.restricted !== "boolean" ||
+    value.restricted !== (value.available_actions !== null) ||
+    (value.available_actions !== null &&
+      (!Array.isArray(value.available_actions) ||
+        value.available_actions.length > 500 ||
+        !value.available_actions.every(validActionName) ||
+        new Set(value.available_actions).size !== value.available_actions.length))
+  )
+    throw failure("central_response_invalid");
+  return value as unknown as CentralAvailableActions;
 }
 
 export interface CentralMessage {
@@ -108,6 +152,13 @@ export interface CentralHumanInputRequest {
   readonly input_type: "buttons" | "text";
   readonly options?: readonly CentralHumanInputOption[];
   readonly message_id: string;
+  readonly request_kind?: "text_answer" | "provider_option";
+  readonly provider?: {
+    readonly provider_key: string;
+    readonly generation: number;
+    readonly expires_in_seconds?: number;
+  };
+  readonly expires_in_seconds?: number;
 }
 
 export interface CentralHumanInputRequestResult extends Record<string, unknown> {
@@ -182,8 +233,8 @@ export const REST_AUTHENTICATED_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "list_action_types",
     description:
-      "Use this Embassys Ambassador tool when the user asks what Embassys actions are available or what another agent can request. List the deployed action names and input schemas.",
-    inputSchema: objectSchema({}),
+      "Use this Embassys Ambassador tool when the user asks what Embassys actions are available or what another agent can request. List the deployed action names, schemas and review status. Set verified_only to true for reviewed actions only; omit it to include custom actions. Review status is not a permission grant or a provider capability guarantee.",
+    inputSchema: objectSchema({ verified_only: { type: "boolean" } }),
   },
   {
     name: "get_my_permissions",
@@ -244,22 +295,19 @@ function noForbiddenArguments(value: unknown): void {
 }
 
 function requestEmail(value: unknown): string {
-  if (typeof value !== "string" || value.length > 254 || !EMAIL.test(value)) {
-    throw failure("invalid_arguments");
-  }
-  return value;
+  const parsed = agentAddress.safeParse(value);
+  if (!parsed.success) throw failure("invalid_arguments");
+  return parsed.data;
 }
 
 function requestName(value: unknown): string {
-  if (typeof value !== "string" || !NAME.test(value)) throw failure("invalid_arguments");
-  return value;
+  const parsed = actionName.safeParse(value);
+  if (!parsed.success) throw failure("invalid_arguments");
+  return parsed.data;
 }
 
 function requestPermissionName(value: unknown): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 128) {
-    throw failure("invalid_arguments");
-  }
-  return value;
+  return requestName(value);
 }
 
 function requestHumanInputText(value: unknown, maximumLength: number): string {
@@ -309,15 +357,19 @@ function safeResultSize(value: unknown): void {
 
 function actionType(value: unknown): CentralActionType {
   if (
-    !exactKeys(value, ["id", "name", "description", "input_schema"], ["result_schema"]) ||
+    !exactKeys(
+      value,
+      ["id", "name", "description", "input_schema"],
+      ["result_schema", "verified"],
+    ) ||
     typeof value.id !== "string" ||
     !NAME.test(value.id) ||
     typeof value.name !== "string" ||
-    !NAME.test(value.name) ||
+    !validActionName(value.name) ||
     typeof value.description !== "string" ||
     value.description.length > 1_024 ||
     !isCentralRecord(value.input_schema) ||
-    value.input_schema.type !== "object" ||
+    (value.verified !== undefined && typeof value.verified !== "boolean") ||
     (value.result_schema !== undefined &&
       value.result_schema !== null &&
       !isCentralRecord(value.result_schema))
@@ -332,6 +384,7 @@ function actionType(value: unknown): CentralActionType {
     description: value.description,
     input_schema: value.input_schema,
     ...(value.result_schema === undefined ? {} : { result_schema: value.result_schema }),
+    ...(value.verified === undefined ? {} : { verified: value.verified }),
   };
 }
 
@@ -397,7 +450,7 @@ function permission(value: unknown): CentralPermission {
     typeof value.grantee_email !== "string" ||
     !EMAIL.test(value.grantee_email) ||
     typeof value.action_type !== "string" ||
-    !NAME.test(value.action_type) ||
+    !validActionName(value.action_type) ||
     !["pending", "granted", "denied", "revoked", "expired"].includes(value.status as string) ||
     (value.scope !== undefined && value.scope !== null && !isCentralRecord(value.scope)) ||
     !["created_at", "decided_at", "expires_at"].every(
@@ -428,9 +481,18 @@ export class CentralRestClient {
     this.#beforeRequest = options.beforeRequest;
   }
 
-  async listActionTypes(signal?: AbortSignal): Promise<CentralActionType[]> {
-    const result = await this.#request("GET", "/api/list_action_types", undefined, signal);
-    if (!Array.isArray(result) || result.length > 128) throw failure("central_response_invalid");
+  async listActionTypes(
+    signal?: AbortSignal,
+    options: { readonly verified_only?: boolean } = {},
+  ): Promise<CentralActionType[]> {
+    if (
+      !exactKeys(options, [], ["verified_only"]) ||
+      (options.verified_only !== undefined && typeof options.verified_only !== "boolean")
+    )
+      throw failure("invalid_arguments");
+    const query = options.verified_only === true ? "?verified_only=true" : "";
+    const result = await this.#request("GET", `/api/list_action_types${query}`, undefined, signal);
+    if (!Array.isArray(result) || result.length > 5000) throw failure("central_response_invalid");
     const actions = result
       .filter(
         (value) =>
@@ -444,8 +506,46 @@ export class CentralRestClient {
     if (new Set(actions.map((action) => action.name)).size !== actions.length) {
       throw failure("central_response_invalid");
     }
+    if (options.verified_only && actions.some((action) => action.verified !== true))
+      throw failure("central_response_invalid");
     safeResultSize(actions);
     return actions;
+  }
+
+  async getAvailableActions(
+    address?: string,
+    signal?: AbortSignal,
+  ): Promise<CentralAvailableActions> {
+    const query =
+      address === undefined
+        ? ""
+        : `?${new URLSearchParams({ agent_email: requestEmail(address) })}`;
+    return availableActions(
+      await this.#request("GET", `/api/available_actions${query}`, undefined, signal),
+    );
+  }
+
+  async setAvailableActions(
+    names: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<CentralAvailableActions> {
+    const parsed = availableActionNames.safeParse(names);
+    if (!parsed.success) throw failure("invalid_arguments");
+    const requested = [...new Set(parsed.data)];
+    const result = availableActions(
+      await this.#request(
+        "PUT",
+        "/api/available_actions",
+        { available_actions: requested },
+        signal,
+      ),
+    );
+    if (
+      !result.restricted ||
+      JSON.stringify(result.available_actions) !== JSON.stringify(requested)
+    )
+      throw failure("central_response_invalid");
+    return result;
   }
 
   async requestPermission(
@@ -491,7 +591,7 @@ export class CentralRestClient {
       !exactKeys(
         arguments_,
         ["permission_type", "request", "input_type", "message_id"],
-        ["options"],
+        ["options", "request_kind", "provider", "expires_in_seconds"],
       ) ||
       !["buttons", "text"].includes(arguments_.input_type) ||
       (arguments_.input_type === "buttons"
@@ -499,6 +599,24 @@ export class CentralRestClient {
           arguments_.options.length < 1 ||
           arguments_.options.length > 10
         : arguments_.options !== undefined)
+    )
+      throw failure("invalid_arguments");
+    const expiryValid = (value: unknown) =>
+      value === undefined ||
+      (Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= 604800);
+    if (
+      (arguments_.request_kind !== undefined &&
+        !["text_answer", "provider_option"].includes(arguments_.request_kind)) ||
+      !expiryValid(arguments_.expires_in_seconds) ||
+      (arguments_.request_kind === "provider_option"
+        ? !exactKeys(arguments_.provider, ["provider_key", "generation"], ["expires_in_seconds"]) ||
+          typeof arguments_.provider.provider_key !== "string" ||
+          arguments_.provider.provider_key.length < 1 ||
+          arguments_.provider.provider_key.length > 128 ||
+          !Number.isSafeInteger(arguments_.provider.generation) ||
+          arguments_.provider.generation < 1 ||
+          !expiryValid(arguments_.provider.expires_in_seconds)
+        : arguments_.provider !== undefined)
     )
       throw failure("invalid_arguments");
     const options =
@@ -519,6 +637,11 @@ export class CentralRestClient {
       input_type: arguments_.input_type,
       ...(options === null ? {} : { options }),
       message_id: requestUuid(arguments_.message_id),
+      ...(arguments_.request_kind === undefined ? {} : { request_kind: arguments_.request_kind }),
+      ...(arguments_.provider === undefined ? {} : { provider: arguments_.provider }),
+      ...(arguments_.expires_in_seconds === undefined
+        ? {}
+        : { expires_in_seconds: arguments_.expires_in_seconds }),
     };
     const result = await this.#request(
       "POST",
@@ -658,6 +781,50 @@ export class CentralRestClient {
     )
       throw failure("central_response_invalid");
     return result;
+  }
+
+  async getActionProgress(callId: string, signal?: AbortSignal): Promise<CentralActionProgress> {
+    const id = requestUuid(callId);
+    const result = await this.#request(
+      "GET",
+      `/api/action_progress?call_id=${id}`,
+      undefined,
+      signal,
+    );
+    if (
+      !exactKeys(result, ["call_id", "call_status", "events"]) ||
+      result.call_id !== id ||
+      !["pending", "completed", "failed"].includes(result.call_status as string) ||
+      !Array.isArray(result.events) ||
+      result.events.length > 1000
+    )
+      throw failure("central_response_invalid");
+    let previous = 0;
+    const ids = new Set<string>();
+    for (const event of result.events) {
+      if (
+        !exactKeys(event, ["event_id", "sequence", "state", "reported_at"], ["note"]) ||
+        typeof event.event_id !== "string" ||
+        !UUID.test(event.event_id) ||
+        ids.has(event.event_id) ||
+        !Number.isSafeInteger(event.sequence) ||
+        (event.sequence as number) <= previous ||
+        !["working", "waiting_for_owner_input", "failed"].includes(event.state as string) ||
+        (event.note !== undefined &&
+          event.note !== null &&
+          (typeof event.note !== "string" || event.note.length > 200)) ||
+        typeof event.reported_at !== "string" ||
+        event.reported_at.length > 64 ||
+        !/(Z|[+-]\d{2}:\d{2})$/u.test(event.reported_at) ||
+        !Number.isFinite(Date.parse(event.reported_at))
+      )
+        throw failure("central_response_invalid");
+      previous = event.sequence as number;
+      ids.add(event.event_id);
+    }
+    assertNoCentralCredentialFields(result);
+    safeResultSize(result);
+    return result as unknown as CentralActionProgress;
   }
 
   async pollRemoteMessages(
@@ -825,7 +992,7 @@ export class CentralRestClient {
   }
 
   async #request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT",
     path: string,
     body: Record<string, unknown> | undefined,
     signal?: AbortSignal,
@@ -917,6 +1084,16 @@ export class CentralRestClient {
           httpStatus: response.status,
           notAccepted: true,
         });
+      if (
+        path === "/api/request_permission" &&
+        response.status === 403 &&
+        isCentralRecord(rejection) &&
+        typeof rejection.detail === "string" &&
+        /^Agent '[^'\n]{1,254}' does not accept permission requests for '[^'\n]{1,128}'\. Call GET \/api\/available_actions\?agent_email=/u.test(
+          rejection.detail,
+        )
+      )
+        throw new CentralRestError("action_not_accepted", { httpStatus: 403, notAccepted: true });
       const permissionReason =
         path === "/api/call_action" &&
         response.status === 403 &&

@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
-
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 interface ArtifactScanner {
@@ -204,8 +204,12 @@ test("clean-installed Ambassador runs the current Node REST fixture", async (t) 
   );
 
   const email = "clean-installed@fixture.test";
-  assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
+  assert.equal(
+    (await client.callTool("register_agent", { username: fixtureUsername(email), email })).status,
+    "input_required",
+  );
   await client.callTool("register_agent", {
+    username: fixtureUsername(email),
     email,
     delivery: {
       mode: "webhook",

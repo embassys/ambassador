@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-
 import { CENTRAL_ORIGIN, openGatewayApplication } from "../src/gateway-application.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
@@ -56,6 +56,7 @@ test("production ignores legacy development endpoint variables", async (t) => {
       return new Response(
         JSON.stringify({
           agent_id: "production-origin-agent",
+          username: fixtureUsername("production-origin@fixture.test"),
           email: "production-origin@fixture.test",
           message: "Verification email sent.",
         }),
@@ -74,12 +75,14 @@ test("production ignores legacy development endpoint variables", async (t) => {
   assert.equal(
     (
       await client.callTool("register_agent", {
+        username: fixtureUsername("production-origin@fixture.test"),
         email: "production-origin@fixture.test",
       })
     ).status,
     "input_required",
   );
   await client.callTool("register_agent", {
+    username: fixtureUsername("production-origin@fixture.test"),
     email: "production-origin@fixture.test",
     delivery: {
       mode: "webhook",

@@ -6,6 +6,7 @@ import { CentralProtectedTransport } from "../src/central-protected-transport.js
 import { CentralRestClient, CentralRestError } from "../src/central-rest.js";
 import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 // Reviewed against agent2agent 58e554b4 and deployed OpenAPI on 2026-09-14.
 function client(response: unknown): CentralRestClient {
@@ -180,7 +181,7 @@ test("verification accepts only a boolean replay indicator and keeps it out of a
         return Response.json({ ...body, replayed }, { headers: response.headers });
       },
     });
-    await enrollment.register({ email });
+    await enrollment.register({ username: fixtureUsername(email), email });
     const verify = enrollment.verify({ email, code: central.verificationCode(email) });
     if (typeof replayed === "boolean") {
       const result = await verify;

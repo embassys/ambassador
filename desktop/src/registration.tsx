@@ -20,6 +20,7 @@ export function Registration({
 }) {
   const [state, setState] = useState<State>();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [executor, setExecutor] = useState<"claude" | "codex" | "openclaw" | "hermes">("claude");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -147,7 +148,7 @@ export function Registration({
       </h3>
       <p className="body-note">
         {entry
-          ? "Enter your email to get started. You'll choose your agent after logging in."
+          ? "Choose your public username and verify your email. Usernames contain 5–32 letters or numbers."
           : state.email}
       </p>
       {state.message && (
@@ -164,7 +165,7 @@ export function Registration({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            void submit({ type: "enrollment_register", instanceId, email });
+            void submit({ type: "enrollment_register", instanceId, email, username });
           }}
         >
           <label>
@@ -177,6 +178,19 @@ export function Registration({
               value={email}
               disabled={busy}
               onChange={(event) => setEmail(event.target.value)}
+            />
+          </label>
+          <label>
+            Username
+            <input
+              autoComplete="username"
+              required
+              minLength={5}
+              maxLength={32}
+              pattern="[A-Za-z0-9]{5,32}"
+              value={username}
+              disabled={busy}
+              onChange={(event) => setUsername(event.target.value)}
             />
           </label>
           <button type="submit" className="primary" disabled={busy}>

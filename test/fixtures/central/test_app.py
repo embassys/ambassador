@@ -34,14 +34,63 @@ class CurrentCentralFixtureTests(unittest.TestCase):
         )
         return {"Authorization": f"Bearer {token}", "DPoP": proof}
 
+    def test_available_actions_distinguish_unrestricted_empty_and_selected(self) -> None:
+        owner, key, token = fixture.seed_verified_identity("accepts@fixture.test")
+        peer, peer_key, peer_token = fixture.seed_verified_identity("requester@fixture.test")
+        path = "/api/available_actions"
+        def own(method, route, **kwargs):
+            return self.client.request(method, route, headers=self.protected_headers(key, owner.public_jwk, token, method, route), **kwargs)
+        initial = own("GET", path)
+        self.assertEqual(initial.json()["available_actions"], None)
+        self.assertFalse(initial.json()["restricted"])
+        selected = own("PUT", path, json={"available_actions": [" Get_Email ", "get_email", "custom lookup"]})
+        self.assertEqual(selected.status_code, 200)
+        self.assertEqual(selected.json()["available_actions"], ["get_email", "custom lookup"])
+        by_name = own("GET", path + "?agent_email=" + owner.username.upper())
+        self.assertEqual(by_name.json()["agent_email"], owner.email)
+        own("PUT", path, json={"available_actions": []})
+        self.assertEqual(own("GET", path).json(), {"agent_email": owner.email, "available_actions": [], "restricted": True})
+        route = "/api/request_permission"
+        denied = self.client.post(route, headers=self.protected_headers(peer_key, peer.public_jwk, peer_token, "POST", route), json={"target_email": owner.username, "action_type": "get_email"})
+        self.assertEqual(denied.status_code, 403)
+        self.assertIn("does not accept permission requests", denied.json()["detail"])
+        self.assertEqual(len(fixture.state.permissions), 0)
+        all_actions = own("GET", "/api/list_action_types").json()
+        reviewed = own("GET", "/api/list_action_types?verified_only=true").json()
+        self.assertTrue(any(item["name"] == "custom lookup" for item in all_actions))
+        self.assertTrue(reviewed)
+        self.assertTrue(all(item["verified"] for item in reviewed))
+
+    def test_provider_questions_supersede_prior_invocations_and_expire(self) -> None:
+        owner, key, token = fixture.seed_verified_identity("provider@fixture.test")
+        path = "/api/get_human_input"
+        def question(generation):
+            return self.client.post(path, headers=self.protected_headers(key, owner.public_jwk, token, "POST", path), json={
+                "permission_type": "ambassador_acp_tool_execution", "request": "Run the tool?",
+                "input_type": "buttons", "options": [{"label": "Run once", "value": "opaque:7"}],
+                "request_kind": "provider_option",
+                "provider": {"provider_key": "embassys-acp:fixture:codex", "generation": generation, "expires_in_seconds": 1},
+                "expires_in_seconds": 1,
+            })
+        first = question(1)
+        self.assertEqual(first.status_code, 200)
+        second = question(2)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(question(1).status_code, 409)
+        first_token = fixture.state.human_input_tokens_by_id[first.json()["request_id"]]
+        self.assertEqual(self.client.post("/api/human_input_response", json={"token": first_token, "value": "opaque:7"}).status_code, 410)
+        fixture.state.now += 2
+        second_token = fixture.state.human_input_tokens_by_id[second.json()["request_id"]]
+        self.assertEqual(self.client.post("/api/human_input_response", json={"token": second_token, "value": "opaque:7"}).status_code, 410)
+
     def test_enrollment_uses_email_and_public_jwk(self) -> None:
         email = "python-enrollment@fixture.test"
         registered = self.client.post(
             "/api/register_agent",
-            json={"email": email, "display_name": "Python fixture"},
+            json={"username": "fixtureuser", "email": email, "display_name": "Python fixture"},
         )
         self.assertEqual(registered.status_code, 200)
-        self.assertEqual(set(registered.json()), {"agent_id", "email", "message"})
+        self.assertEqual(set(registered.json()), {"agent_id", "email", "message", "username"})
 
         private_key = ec.generate_private_key(ec.SECP256R1())
         numbers = private_key.public_key().public_numbers()

@@ -2247,11 +2247,15 @@ async function main() {
           ]),
         "bootstrap_catalog",
       );
-      const initial = await client.call("register_agent", { email: addresses[index] });
+      const initial = await client.call("register_agent", {
+        email: addresses[index],
+        username: `live${addresses[index].split("@")[0].slice(-24)}`,
+      });
       if ((index === 0 && !realCodexClaude) || !realDirectOnly) {
         assert(initial.status === "input_required" && initial.default === "direct", "registration");
         await client.call("register_agent", {
           email: addresses[index],
+          username: `live${addresses[index].split("@")[0].slice(-24)}`,
           delivery:
             index === 0
               ? {

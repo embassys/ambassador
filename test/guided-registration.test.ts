@@ -3,11 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
-
 import { type AgentCapability, PRODUCTION_AGENT_CAPABILITIES } from "../src/agent-capabilities.js";
 import { DeliveryProfileStore } from "../src/delivery-profile.js";
 import { GuidedRegistration, GuidedRegistrationError } from "../src/guided-registration.js";
 import type { WebhookSecretStore } from "../src/webhook-secret-store.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -52,7 +52,7 @@ test("OpenClaw and Hermes ask for delivery with direct as the default", async (t
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
       const result = await registration.register(
-        { email: "agent@example.test" },
+        { username: fixtureUsername("agent@example.test"), email: "agent@example.test" },
         clientInfo,
         new AbortController().signal,
       );
@@ -75,6 +75,7 @@ test("webhook selection explains secret setup before creating local or central s
   const { calls, registration } = await fixture(t, PRODUCTION_AGENT_CAPABILITIES, undefined);
   const result = await registration.register(
     {
+      username: fixtureUsername("webhook@example.test"),
       email: "webhook@example.test",
       delivery: { mode: "webhook" },
     },
@@ -95,6 +96,7 @@ test("OpenClaw webhook selection points to its native hook without a plugin", as
   const { calls, registration } = await fixture(t, PRODUCTION_AGENT_CAPABILITIES, undefined);
   const result = await registration.register(
     {
+      username: fixtureUsername("webhook@example.test"),
       email: "webhook@example.test",
       delivery: { mode: "webhook" },
     },
@@ -119,12 +121,14 @@ test("Codex and Claude Code register directly without a delivery question", asyn
     await t.test(`${clientInfo.name}-${clientInfo.version}`, async (t) => {
       const { calls, registration } = await fixture(t);
       const result = await registration.register(
-        { email: "direct@example.test" },
+        { username: fixtureUsername("direct@example.test"), email: "direct@example.test" },
         clientInfo,
         new AbortController().signal,
       );
       assert.equal(result.agent_id, "agent-1");
-      assert.deepEqual(calls, [{ email: "direct@example.test" }]);
+      assert.deepEqual(calls, [
+        { username: fixtureUsername("direct@example.test"), email: "direct@example.test" },
+      ]);
     });
   }
 });
@@ -139,6 +143,7 @@ test("direct-only production profiles reject webhook input before state or centr
       await assert.rejects(
         registration.register(
           {
+            username: fixtureUsername("webhook@example.test"),
             email: "webhook@example.test",
             delivery: {
               mode: "webhook",
@@ -159,16 +164,23 @@ test("direct-only production profiles reject webhook input before state or centr
 test("persists the derived direct or webhook profile before central registration", async (t) => {
   const direct = await fixture(t);
   const directResult = await direct.registration.register(
-    { email: "direct@example.test", delivery: { mode: "direct" } },
+    {
+      username: fixtureUsername("direct@example.test"),
+      email: "direct@example.test",
+      delivery: { mode: "direct" },
+    },
     { name: "openclaw-bundle-mcp", version: "qualification" },
     new AbortController().signal,
   );
   assert.equal(directResult.agent_id, "agent-1");
-  assert.deepEqual(direct.calls, [{ email: "direct@example.test" }]);
+  assert.deepEqual(direct.calls, [
+    { username: fixtureUsername("direct@example.test"), email: "direct@example.test" },
+  ]);
 
   const webhook = await fixture(t);
   const webhookResult = await webhook.registration.register(
     {
+      username: fixtureUsername("webhook@example.test"),
       email: "webhook@example.test",
       display_name: "Webhook agent",
       delivery: {
@@ -181,7 +193,11 @@ test("persists the derived direct or webhook profile before central registration
   );
   assert.equal(webhookResult.agent_id, "agent-1");
   assert.deepEqual(webhook.calls, [
-    { email: "webhook@example.test", display_name: "Webhook agent" },
+    {
+      username: fixtureUsername("webhook@example.test"),
+      email: "webhook@example.test",
+      display_name: "Webhook agent",
+    },
   ]);
 
   for (const clientInfo of [
@@ -191,7 +207,11 @@ test("persists the derived direct or webhook profile before central registration
     await t.test(clientInfo.name, async (t) => {
       const selected = await fixture(t);
       const result = await selected.registration.register(
-        { email: `${clientInfo.name}@example.test`, delivery: { mode: "direct" } },
+        {
+          email: `${clientInfo.name}@example.test`,
+          username: fixtureUsername(`${clientInfo.name}@example.test`),
+          delivery: { mode: "direct" },
+        },
         clientInfo,
         new AbortController().signal,
       );
@@ -215,18 +235,21 @@ test("a direct-only profile registers without asking a delivery question", async
   };
   const { calls, registration } = await fixture(t, [profile]);
   const result = await registration.register(
-    { email: "direct-only@example.test" },
+    { username: fixtureUsername("direct-only@example.test"), email: "direct-only@example.test" },
     { name: "fixture-direct", version: "1" },
     new AbortController().signal,
   );
   assert.equal(result.agent_id, "agent-1");
-  assert.deepEqual(calls, [{ email: "direct-only@example.test" }]);
+  assert.deepEqual(calls, [
+    { username: fixtureUsername("direct-only@example.test"), email: "direct-only@example.test" },
+  ]);
 });
 
 test("unsupported metadata and model-supplied process fields fail before state or central", async (t) => {
   for (const value of [
     {
       arguments: {
+        username: fixtureUsername("unknown@example.test"),
         email: "unknown@example.test",
         delivery: {
           mode: "webhook",
@@ -237,17 +260,29 @@ test("unsupported metadata and model-supplied process fields fail before state o
       status: "unsupported_agent",
     },
     {
-      arguments: { email: "bad@example.test", agent: "openclaw" },
+      arguments: {
+        username: fixtureUsername("bad@example.test"),
+        email: "bad@example.test",
+        agent: "openclaw",
+      },
       clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
     {
-      arguments: { email: "bad@example.test", command: "openclaw" },
+      arguments: {
+        username: fixtureUsername("bad@example.test"),
+        email: "bad@example.test",
+        command: "openclaw",
+      },
       clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
     {
-      arguments: { email: "bad@example.test", working_directory: "/tmp" },
+      arguments: {
+        username: fixtureUsername("bad@example.test"),
+        email: "bad@example.test",
+        working_directory: "/tmp",
+      },
       clientInfo: { name: "openclaw-bundle-mcp", version: "qualification" },
       status: "error",
     },
@@ -276,4 +311,20 @@ test("unsupported metadata and model-supplied process fields fail before state o
       assert.deepEqual(calls, []);
     });
   }
+});
+
+test("missing username asks before persisting a profile or registering centrally", async (t) => {
+  const f = await fixture(t);
+  const result = await f.registration.register(
+    { email: "owner@fixture.test" },
+    { name: "claude-code", version: "fixture" },
+    new AbortController().signal,
+  );
+  assert.equal(result.status, "input_required");
+  assert.deepEqual(result.required, ["username"]);
+  assert.equal(f.calls.length, 0);
+  assert.equal(
+    await new DeliveryProfileStore(join(f.root, "delivery-profile.json")).load(),
+    undefined,
+  );
 });

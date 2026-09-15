@@ -1,5 +1,34 @@
 # Current work
 
+## Current usernames and accepted requests, September 15
+
+The owner has requested live qualification, merge and a paired release.
+[The follow-up record](release-readiness-2026-09-15.md) tracks the current checks,
+corrected recovery guidance, fresh provider-source review and remaining external
+test prerequisites. Versions remain unchanged until live qualification can finish.
+
+Implemented under [ADR 0087](adr/0087-usernames-and-accepted-actions.md). CLI
+signup now asks for a username, catalog reads preserve review metadata, targeted
+requests resolve usernames and check accepted actions before permission, and the
+app and message box share explicit accepted-list controls. Owner-first app signup
+keeps its one-code flow. See [the audit and test record](central-adoption-2026-09-15.md).
+
+The follow-up API review adds optional reviewed-only discovery, a read-only
+progress snapshot, and invocation-bound provider approvals with durable generations
+and expiry. A reproduced provider-exit bug is fixed: its approval wait is cancelled
+when the provider ends. API issues [23](https://github.com/embassys/agent2agent/issues/23)
+and [24](https://github.com/embassys/agent2agent/issues/24) track incorrect examples
+and immediate removal of stopped-provider questions from the owner's server inbox.
+Existing exact grants remain usable after accepted-list changes, without sending
+another permission request. Central revocation, scope and use limits still apply.
+
+Remaining qualification: fresh live signup and protected availability calls need
+a working test inbox; the saved Mailosaur credential returns HTTP 401. Native
+Mac UI inspection needs an unlocked desktop. Browser security policy also blocked
+the local preview, so it is not counted as a UI test. Server issue
+[22](https://github.com/embassys/agent2agent/issues/22) tracks owner username choice
+and roster visibility. This branch has not been released.
+
 ## Embassys CLI name, September 15
 
 Under [ADR 0086](adr/0086-embassys-cli-package.md), the owner approved the

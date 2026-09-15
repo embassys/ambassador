@@ -1,10 +1,10 @@
+import { validActionName } from "./agent-address.js";
 import type { LoadedCentralCredential } from "./central-credential.js";
 import { assertNoCentralCredentialFields, isCentralRecord } from "./central-json.js";
 import type { CentralMessage } from "./central-rest.js";
 import { EncryptedRecordStore, type RecordPage } from "./encrypted-record-store.js";
 
 const CALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const ACTION_NAME = /^[A-Za-z0-9._~-]{1,128}$/u;
 
 export interface PendingActionCall {
   readonly source_message_id?: string;
@@ -46,7 +46,7 @@ function pendingActionFromMessage(message: CentralMessage): PendingActionCall | 
     typeof message.payload.call_id !== "string" ||
     !CALL_ID.test(message.payload.call_id) ||
     typeof message.payload.action_type !== "string" ||
-    !ACTION_NAME.test(message.payload.action_type) ||
+    !validActionName(message.payload.action_type) ||
     !isCentralRecord(message.payload.payload) ||
     typeof message.sender_agent_id !== "string" ||
     message.sender_agent_id.length < 1 ||

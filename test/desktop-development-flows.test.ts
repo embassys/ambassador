@@ -9,6 +9,7 @@ import type { LocalNotification } from "../src/desktop/notifications.js";
 import { openGatewayApplication } from "../src/gateway-application.js";
 import { pathsForStateDirectory } from "../src/gateway-paths.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 test("unfinished email-first setup survives gateway restart without polling or dispatch", async (t) => {
@@ -37,6 +38,7 @@ test("unfinished email-first setup survives gateway restart without polling or d
     await assert.rejects(initialClient.callTool(name, {}), /Embassys app/);
   await gateway.desktopCommand({
     type: "enrollment_register",
+    username: fixtureUsername("account-first@fixture.test"),
     instanceId,
     email: "account-first@fixture.test",
   });
@@ -85,7 +87,10 @@ test("CLI verification can finish an email-first app registration without select
     await central.close();
     await rm(root, { recursive: true, force: true });
   });
-  await application.desktop?.registration.register({ email: "email-first-cli@fixture.test" });
+  await application.desktop?.registration.register({
+    username: fixtureUsername("email-first-cli@fixture.test"),
+    email: "email-first-cli@fixture.test",
+  });
   await application.close();
   application = await openGatewayApplication({ ...common, toolRegistrationPath: path });
   const mcp = new TestMcpClient(application.endpoint);
@@ -138,6 +143,7 @@ test("desktop pauses a mismatched executor before dispatch and resumes queued wo
   await gateway.start();
   await gateway.desktopCommand({
     type: "enrollment_register",
+    username: fixtureUsername("guarded@fixture.test"),
     instanceId,
     email: "guarded@fixture.test",
     executor: "claude",
@@ -237,15 +243,25 @@ test("app enrollment is shared with MCP; local activity pages and notifications 
   const mcp = new TestMcpClient(application.endpoint);
   await mcp.initialize({ name: "claude-code", version: "qualification" });
   await assert.rejects(
-    mcp.callTool("register_agent", { email: "foreign@fixture.test" }),
+    mcp.callTool("register_agent", {
+      username: fixtureUsername("foreign@fixture.test"),
+      email: "foreign@fixture.test",
+    }),
     /Account.*Set up this device/,
   );
   assert.equal(central.requests().length, 0);
-  await desktop.registration.register({ email: "app@fixture.test", executor: "claude" });
+  await desktop.registration.register({
+    username: fixtureUsername("app@fixture.test"),
+    email: "app@fixture.test",
+    executor: "claude",
+  });
   await desktop.registration.verify(central.verificationCode("app@fixture.test"));
   assert.equal(application.localOverview().enrollment.email, "app@fixture.test");
   await assert.rejects(
-    mcp.callTool("register_agent", { email: "foreign@fixture.test" }),
+    mcp.callTool("register_agent", {
+      username: fixtureUsername("foreign@fixture.test"),
+      email: "foreign@fixture.test",
+    }),
     /already enrolled/,
   );
   await assert.doesNotReject(mcp.callTool("get_my_permissions", {}));
@@ -329,6 +345,7 @@ test("private desktop reads and registration commands never start a stopped serv
     { type: "enrollment_status" as const, instanceId },
     {
       type: "enrollment_register" as const,
+      username: fixtureUsername("app@fixture.test"),
       instanceId,
       email: "app@fixture.test",
       executor: "claude" as const,
@@ -337,4 +354,83 @@ test("private desktop reads and registration commands never start a stopped serv
     assert.equal(((await gateway.desktopCommand(command)) as { state: string }).state, "stopped");
     assert.equal(gateway.snapshot().state, "stopped");
   }
+});
+
+test("desktop accepted requests share the same server policy with MCP and persist across restarts", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "embassys-actions-"));
+  const central = await startFakeCentral();
+  const id = randomUUID();
+  const gateway = new DesktopGateway({
+    id,
+    name: "Accepted requests",
+    port: 0,
+    stateDirectory: root,
+    workingDirectory: root,
+    environment: {},
+    testOverrides: { centralOrigin: central.apiUrl, nowSeconds: () => 1_788_220_800 },
+  });
+  t.after(async () => {
+    await gateway.stop();
+    await central.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  await gateway.start();
+  const email = "policy@fixture.test";
+  await gateway.desktopCommand({
+    type: "enrollment_register",
+    instanceId: id,
+    email,
+    username: "policyowner",
+    executor: "claude",
+  });
+  await gateway.desktopCommand({
+    type: "enrollment_verify",
+    instanceId: id,
+    code: central.verificationCode(email),
+  });
+  const mcp = new TestMcpClient(gateway.snapshot().endpoint as string);
+  await mcp.initialize({ name: "claude-code", version: "fixture" });
+  const initial = await mcp.callTool("message_box", { type: "get_available_actions" });
+  assert.equal(initial.available_actions, null);
+  assert.equal(initial.restricted, false);
+  await gateway.desktopCommand({
+    type: "set_accepted_actions",
+    instanceId: id,
+    agent_id: String((await gateway.overview()).enrollment.agent_id),
+    available_actions: ["Get_Email", "custom lookup"],
+  });
+  await assert.rejects(
+    gateway.desktopCommand({
+      type: "set_accepted_actions",
+      instanceId: id,
+      agent_id: "another-agent",
+      available_actions: [],
+    }),
+    /agent changed/,
+  );
+  const updated = await mcp.callTool("message_box", {
+    type: "get_available_actions",
+    agent_email: "PolicyOwner",
+  });
+  assert.deepEqual(updated.available_actions, ["get_email", "custom lookup"]);
+  assert.equal(updated.agent_email, email);
+  const catalog = await mcp.callTool("list_action_types", {});
+  assert.equal(
+    (catalog.action_types as Array<{ name: string; verified: boolean }>).find(
+      (entry) => entry.name === "custom lookup",
+    )?.verified,
+    false,
+  );
+  const reviewed = await mcp.callTool("list_action_types", { verified_only: true });
+  assert.ok((reviewed.action_types as Array<{ verified: boolean }>).length > 0);
+  assert.ok((reviewed.action_types as Array<{ verified: boolean }>).every((item) => item.verified));
+  await mcp.callTool("message_box", { type: "set_available_actions", available_actions: [] });
+  await gateway.stop();
+  await gateway.start();
+  const read = (await gateway.desktopCommand({ type: "accepted_actions", instanceId: id })) as {
+    policy: { available_actions: string[]; restricted: boolean };
+  };
+  assert.deepEqual(read.policy.available_actions, []);
+  assert.equal(read.policy.restricted, true);
+  assert.equal((await gateway.overview()).enrollment.verified, true);
 });

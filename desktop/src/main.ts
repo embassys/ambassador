@@ -847,7 +847,7 @@ async function executeCommand(command: DesktopCommand): Promise<unknown> {
           `Local session records: ${preview.sessionCount}`,
           "",
           "Counts can refer to the same request. Saved requests and questions include completed work.",
-          "Local enrollment and work will be removed. Logs, provider configuration and provider history remain. Central registration remains, so Clean may leave you unable to register again until central identity recovery is available.",
+          "Local enrollment and work will be removed. Logs, provider configuration and provider history remain. Your central identity remains. To use it again, sign in and choose Account > Set up this device. Local work deleted by Clean cannot be recovered this way.",
         ].join("\n"),
         buttons: ["Cancel", "Erase local data"],
         defaultId: 0,

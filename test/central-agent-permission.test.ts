@@ -8,6 +8,8 @@ const MESSAGE_ID = "10000000-0000-4000-8000-000000000001";
 const OUTCOME_ID = "10000000-0000-4000-8000-000000000002";
 const PROMPT =
   "Codex wants to use the local tool “Run a shell command” while handling an Embassys request. Choose one of the options provided by the agent.";
+const invocation = { provider_key: "embassys-acp:test:codex", generation: 1 };
+const nextInvocation = () => invocation;
 
 const request: AcpPermissionRequest = {
   agentKind: "codex",
@@ -77,6 +79,7 @@ test("requests one email and waits for the shared receiver without polling centr
     release = resolve;
   });
   const coordinator = new CentralAgentPermissionCoordinator({
+    nextInvocation,
     onQuestion: (id) => {
       notifications.push(id);
       throw new Error("OS notification unavailable");
@@ -106,6 +109,9 @@ test("requests one email and waits for the shared receiver without polling centr
     request: PROMPT,
     input_type: "buttons",
     options: response("request-1").options,
+    request_kind: "provider_option",
+    provider: { ...invocation, expires_in_seconds: 72 * 60 * 60 },
+    expires_in_seconds: 72 * 60 * 60,
   });
   release(message(OUTCOME_ID, outcome("request-1", "provider-once")));
   assert.equal(await waiting, "provider-once");
@@ -120,6 +126,7 @@ test("presents every exact provider option and returns its opaque ID", async () 
   ];
   for (const choice of choices) {
     const coordinator = new CentralAgentPermissionCoordinator({
+      nextInvocation,
       transport: {
         async requestHumanInput(args) {
           assert.deepEqual(
@@ -157,6 +164,7 @@ test("unrepresentable menus fail before email submission", async () => {
     ],
   ]) {
     const coordinator = new CentralAgentPermissionCoordinator({
+      nextInvocation,
       transport: {
         async requestHumanInput() {
           emails++;
@@ -185,6 +193,7 @@ test("wrong request, triggering message, prompt, input type, or choice cannot ap
     { action_type: "other" },
   ]) {
     const coordinator = new CentralAgentPermissionCoordinator({
+      nextInvocation,
       transport: {
         async requestHumanInput() {
           return response("expected");
@@ -200,6 +209,7 @@ test("wrong request, triggering message, prompt, input type, or choice cannot ap
 test("cancellation while waiting never approves and already-cancelled requests send no email", async () => {
   let emails = 0;
   const coordinator = new CentralAgentPermissionCoordinator({
+    nextInvocation,
     transport: {
       async requestHumanInput() {
         emails++;
@@ -224,6 +234,7 @@ test("a lost provider question response resumes one exact mutation while its ACP
   let savedKey: string | undefined;
   let submissions = 0;
   const coordinator = new CentralAgentPermissionCoordinator({
+    nextInvocation,
     transport: {
       async requestHumanInput(_args, _signal, key) {
         savedKey = key;
@@ -240,4 +251,44 @@ test("a lost provider question response resumes one exact mutation while its ACP
   });
   assert.equal(await coordinator.approve(request, new AbortController().signal), "provider-once");
   assert.equal(submissions, 1);
+});
+
+test("an expired provider approval releases the wait and cannot approve a late answer", async () => {
+  const coordinator = new CentralAgentPermissionCoordinator({
+    nextInvocation,
+    approvalTimeoutMs: 20,
+    transport: {
+      async requestHumanInput(args) {
+        assert.equal(args.request_kind, "provider_option");
+        assert.equal(args.expires_in_seconds, 1);
+        return response("expired");
+      },
+    },
+    waitForResponse: async (_id, signal) =>
+      new Promise((resolve) => {
+        signal.addEventListener(
+          "abort",
+          () => resolve(message(OUTCOME_ID, outcome("expired", "provider-once"))),
+          { once: true },
+        );
+      }),
+  });
+  await assert.rejects(coordinator.approve(request, new AbortController().signal));
+});
+
+test("failure to persist a provider generation sends no approval request", async () => {
+  const coordinator = new CentralAgentPermissionCoordinator({
+    nextInvocation: () => {
+      throw new Error("disk full");
+    },
+    transport: {
+      async requestHumanInput() {
+        assert.fail("no email before durable generation");
+      },
+    },
+    waitForResponse: async () => {
+      assert.fail("no wait");
+    },
+  });
+  await assert.rejects(coordinator.approve(request, new AbortController().signal));
 });

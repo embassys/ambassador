@@ -77,6 +77,7 @@ class PublicJwk(StrictModel):
 
 class RegisterRequest(StrictModel):
     email: str
+    username: str = Field(pattern=r"^[a-z0-9]{5,32}$")
     display_name: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -110,6 +111,12 @@ class HumanInputOption(StrictModel):
     value: str = Field(min_length=1, max_length=64)
 
 
+class ProviderInvocation(StrictModel):
+    provider_key: str = Field(min_length=1, max_length=128)
+    generation: int = Field(ge=1)
+    expires_in_seconds: int | None = Field(default=None, ge=1, le=604800)
+
+
 class HumanInputRequest(StrictModel):
     permission_type: str | None = Field(default=None, min_length=1, max_length=128)
     action_type: str | None = Field(default=None, min_length=1, max_length=128)
@@ -117,6 +124,9 @@ class HumanInputRequest(StrictModel):
     input_type: Literal["buttons", "text"] = "text"
     options: list[str | HumanInputOption] | None = Field(default=None, max_length=10)
     message_id: str | None = None
+    request_kind: Literal["text_answer", "provider_option", "resource_grant"] = "text_answer"
+    provider: ProviderInvocation | None = None
+    expires_in_seconds: int | None = Field(default=None, ge=1, le=604800)
 
 
 class HumanInputResponseRequest(StrictModel):
@@ -145,6 +155,8 @@ class MessageAck(StrictModel):
 class Identity:
     id: str
     email: str
+    username: str = "fixture"
+    available_actions: list[str] | None = None
     code: str = VERIFICATION_CODE
     verified: bool = False
     public_jwk: dict[str, str] | None = None
@@ -189,6 +201,8 @@ class HumanInput:
     status: Literal["pending", "answered"] = "pending"
     response_value: str | None = None
     response_text: str | None = None
+    provider: ProviderInvocation | None = None
+    expires_at: int | None = None
 
 
 @dataclass
@@ -831,17 +845,30 @@ async def permission_token(
     return {"token": token}
 
 
+def resolve_agent_address(value: str) -> str:
+    address = value.strip().lower()
+    if "@" in address:
+        validate_email(address)
+    elif not re.fullmatch(r"[a-z0-9]{1,32}", address):
+        raise HTTPException(status_code=422, detail="Invalid agent identifier")
+    target = next((item for item in state.identities.values() if item.email == address or item.username == address), None)
+    return target.email if target is not None else address
+
+
 @app.post("/api/register_agent")
 async def register_agent(input: RegisterRequest) -> dict[str, str]:
     email = validate_email(input.email)
     existing = state.identities.get(email)
     if existing is not None and existing.verified:
         raise HTTPException(status_code=409, detail="Agent already registered")
-    identity = Identity(id=state.next_id("agent"), email=email)
+    if any(item.username == input.username and item.email != email for item in state.identities.values()):
+        raise HTTPException(status_code=409, detail=f"Username '{input.username}' is already taken")
+    identity = Identity(id=state.next_id("agent"), email=email, username=input.username)
     state.identities[email] = identity
     return {
         "agent_id": identity.id,
         "email": identity.email,
+        "username": identity.username,
         "message": "Verification code sent to your email. Please verify to complete registration.",
     }
 
@@ -882,14 +909,59 @@ async def verify_email(input: VerifyRequest, response: Response) -> dict[str, st
 
 
 @app.get("/api/list_action_types")
-async def list_action_types(request: Request) -> list[dict[str, Any]]:
+async def list_action_types(request: Request, verified_only: bool = False) -> list[dict[str, Any]]:
     validate_dpop(request)
-    return [*ACTIONS, *state.human_input_actions.values()]
+    return [{**item, "verified": item in ACTIONS} for item in [*ACTIONS, *state.human_input_actions.values()] if not verified_only or item in ACTIONS]
+
+
+class AvailableActionsRequest(StrictModel):
+    available_actions: list[str] = Field(max_length=500)
+
+
+@app.get("/api/action_progress")
+async def action_progress(request: Request, call_id: str) -> dict[str, Any]:
+    identity = validate_dpop(request)
+    call = state.action_calls.get(call_id)
+    if call is None or identity.email not in (call.caller_email, call.target_email):
+        raise HTTPException(status_code=404, detail="Action call not found or you are not a party to it")
+    return {"call_id": call.id, "call_status": call.status, "events": []}
+
+
+@app.get("/api/available_actions")
+async def get_available_actions(request: Request, agent_email: str | None = None) -> dict[str, Any]:
+    identity = validate_dpop(request)
+    address = (agent_email or identity.email).strip().lower()
+    target = next((item for item in state.identities.values() if item.email == address or item.username == address), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"agent_email": target.email, "available_actions": target.available_actions, "restricted": target.available_actions is not None}
+
+
+@app.put("/api/available_actions")
+async def set_available_actions(input: AvailableActionsRequest, request: Request) -> dict[str, Any]:
+    identity = validate_dpop(request)
+    names = list(dict.fromkeys(name.strip().lower() for name in input.available_actions))
+    if any(not name or len(name) > 128 for name in names):
+        raise HTTPException(status_code=422, detail="Invalid action names")
+    for name in names:
+        if not any(item["name"] == name for item in ACTIONS) and name not in state.human_input_actions:
+            state.human_input_actions[name] = {"id": state.next_id("action"), "name": name, "description": "Custom declaration", "input_schema": {}}
+    identity.available_actions = names
+    return {"agent_email": identity.email, "available_actions": names, "restricted": True}
 
 
 @app.post("/api/get_human_input")
 async def get_human_input(input: HumanInputRequest, request: Request) -> dict[str, Any]:
     identity = validate_dpop(request)
+    if (input.request_kind == "provider_option") != (input.provider is not None):
+        raise HTTPException(status_code=422, detail="Provider invocation does not match question kind")
+    if input.provider is not None and any(
+        other.agent_email == identity.email and other.provider is not None
+        and other.provider.provider_key == input.provider.provider_key
+        and other.provider.generation > input.provider.generation
+        for other in state.human_inputs.values()
+    ):
+        raise HTTPException(status_code=409, detail="Provider generation has ended")
     if input.permission_type is None and input.action_type is None:
         raise HTTPException(status_code=422, detail="Choose one human input type")
     if (
@@ -947,6 +1019,8 @@ async def get_human_input(input: HumanInputRequest, request: Request) -> dict[st
         input_type=input.input_type,
         options=options or None,
         message_id=source_message_id,
+        provider=input.provider,
+        expires_at=state.now + input.expires_in_seconds if input.expires_in_seconds else None,
     )
     token = secrets.token_urlsafe(32)
     state.human_input_tokens[token] = (request_id, state.now + 72 * 60 * 60, False)
@@ -970,6 +1044,13 @@ async def human_input_response(input: HumanInputResponseRequest) -> dict[str, An
         or record[2]
         or record[1] <= state.now
         or human_input.status != "pending"
+        or (human_input.expires_at is not None and human_input.expires_at <= state.now)
+        or (human_input.provider is not None and any(
+            other.agent_email == human_input.agent_email and other.provider is not None
+            and other.provider.provider_key == human_input.provider.provider_key
+            and other.provider.generation > human_input.provider.generation
+            for other in state.human_inputs.values()
+        ))
     ):
         raise HTTPException(status_code=410, detail="This link is no longer usable")
     if (input.value is None) == (input.text is None):
@@ -1039,7 +1120,7 @@ async def request_permission(input: PermissionRequest, request: Request) -> dict
         raise HTTPException(status_code=422, detail="Choose a target selector")
     if (input.action_type is None) == (input.permission_type is None):
         raise HTTPException(status_code=422, detail="Choose one permission name")
-    target_email = validate_email(input.target_email) if input.target_email is not None else None
+    target_email = resolve_agent_address(input.target_email) if input.target_email is not None else None
     if input.message_id is not None:
         message = state.messages.get(input.message_id or "")
         sender = next(
@@ -1060,11 +1141,15 @@ async def request_permission(input: PermissionRequest, request: Request) -> dict
     assert target_email is not None
     action_type = input.action_type or input.permission_type
     assert action_type is not None
+    action_type = action_type.strip().lower()
     if target_email == identity.email:
         raise HTTPException(status_code=400, detail="Cannot request permission from yourself")
-    target = state.identities.get(target_email)
+    target = next((item for item in state.identities.values() if item.email == target_email.strip().lower() or item.username == target_email.strip().lower()), None)
     if target is None or not target.verified:
         raise HTTPException(status_code=404, detail="Target not found")
+    target_email = target.email
+    if target.available_actions is not None and action_type not in target.available_actions:
+        raise HTTPException(status_code=403, detail=f"Agent '{target_email}' does not accept permission requests for '{action_type}'. Call GET /api/available_actions?agent_email={target_email} to see what it accepts.")
     permission = next(
         (
             value
@@ -1194,7 +1279,8 @@ async def permission_decision(input: PermissionDecisionRequest) -> dict[str, Any
 @app.post("/api/call_action")
 async def call_action(input: ActionCall, request: Request) -> dict[str, str]:
     identity = validate_dpop(request)
-    target_email = validate_email(input.target_email)
+    target_email = resolve_agent_address(input.target_email)
+    input.action_type = input.action_type.strip().lower()
     action = find_action(input.action_type)
     permission = next(
         (
@@ -1337,6 +1423,7 @@ def seed_verified_identity(email: str) -> tuple[Identity, ec.EllipticCurvePrivat
     identity = Identity(
         id=state.next_id("agent"),
         email=email,
+        username=f"fixture{hashlib.sha256(email.encode()).hexdigest()[:20]}",
         verified=True,
         public_jwk=jwk,
         thumbprint=jwk_thumbprint(jwk),

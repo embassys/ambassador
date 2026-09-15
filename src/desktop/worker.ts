@@ -179,6 +179,8 @@ process.on("message", (raw: unknown) => {
       case "enrollment_recover":
       case "enrollment_resend":
       case "enrollment_executor":
+      case "accepted_actions":
+      case "set_accepted_actions":
       case "permissions":
       case "activity":
         result = await current.desktopCommand(command);

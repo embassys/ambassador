@@ -1,3 +1,4 @@
+import { signupUsername } from "./agent-address.js";
 import {
   type AgentCapability,
   type AgentClientInfo,
@@ -23,6 +24,7 @@ export class GuidedRegistrationError extends Error {
 
 export interface CentralRegistrationArguments {
   readonly email: string;
+  readonly username: string;
   readonly display_name?: string;
 }
 
@@ -77,7 +79,8 @@ function centralArguments(value: Record<string, unknown>): CentralRegistrationAr
     throw invalid();
   }
   return {
-    email: value.email,
+    email: value.email.trim().toLowerCase(),
+    username: signupUsername.parse(value.username),
     ...(value.display_name === undefined ? {} : { display_name: value.display_name as string }),
   };
 }
@@ -126,10 +129,18 @@ export class GuidedRegistration {
     }
     if (
       !isRecord(untrustedArguments) ||
-      !exactKeys(untrustedArguments, ["email"], ["display_name", "delivery"])
+      !exactKeys(untrustedArguments, ["email"], ["username", "display_name", "delivery"])
     ) {
       throw invalid();
     }
+    if (untrustedArguments.username === undefined)
+      return {
+        status: "input_required",
+        prompt:
+          "Choose a public Embassys username: 5–32 letters or numbers, without spaces or punctuation.",
+        required: ["username"],
+      };
+    if (!signupUsername.safeParse(untrustedArguments.username).success) throw invalid();
     const registration = centralArguments(untrustedArguments);
     const capability = resolution.profile;
     const suppliedDelivery =

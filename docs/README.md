@@ -1,5 +1,9 @@
 # Documentation
 
+- [September 15 usernames and accepted-request adoption](central-adoption-2026-09-15.md)
+- [ADR 0087: Usernames and accepted actions](adr/0087-usernames-and-accepted-actions.md)
+- [September 15 release follow-up](release-readiness-2026-09-15.md)
+
 ## Start here
 
 1. [Product and architecture](product-vision-and-architecture.md)

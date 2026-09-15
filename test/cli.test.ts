@@ -26,6 +26,7 @@ import { LocalMcpServer } from "../src/local-mcp.js";
 import { ProcessLock } from "../src/process-lock.js";
 import { WebhookDeliveryError } from "../src/webhook-delivery.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 
 const NOW_SECONDS = 1_788_220_800;
@@ -474,7 +475,10 @@ for (const verbose of [false, true])
     const client = new TestMcpClient(endpoint);
     await client.initialize({ name: "codex-mcp-client", version: "qualification" });
     await assert.rejects(
-      client.callTool("register_agent", { email: "verbose+claude@fixture.test" }),
+      client.callTool("register_agent", {
+        username: fixtureUsername("verbose+claude@fixture.test"),
+        email: "verbose+claude@fixture.test",
+      }),
       (error: unknown) =>
         error instanceof McpCallError &&
         error.serverMessage.includes("does not accept '+' email aliases") &&
@@ -483,7 +487,10 @@ for (const verbose of [false, true])
         (error.data as { code?: unknown; source?: unknown } | undefined)?.source ===
           "central_enrollment",
     );
-    await client.callTool("register_agent", { email: "verbose@fixture.test" });
+    await client.callTool("register_agent", {
+      username: fixtureUsername("verbose@fixture.test"),
+      email: "verbose@fixture.test",
+    });
     if (verbose) {
       assert.match(output.stderr(), /Verbose mode can print personal message, tool, and API data/u);
       assert.match(output.stderr(), /mcp\.tool\.request/u);
@@ -766,7 +773,7 @@ test("keeps MCP running and explains an unavailable direct agent without leaking
     nowSeconds: () => NOW_SECONDS,
   });
   const email = "direct-unavailable@fixture.test";
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const codex = capabilityForKind("codex");
   assert.ok(codex !== undefined);
@@ -844,7 +851,7 @@ test("keeps MCP running and explains a failed webhook without leaking transport 
     nowSeconds: () => NOW_SECONDS,
   });
   const email = "webhook-unavailable@fixture.test";
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const codex = capabilityForKind("codex");
   assert.ok(codex !== undefined);

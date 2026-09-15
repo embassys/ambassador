@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-
 import { createFixtureKeyPair, startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const jsonHeaders = { "content-type": "application/json" };
 
@@ -20,13 +20,18 @@ test("I02-F01 fixture exposes email enrollment and issues the current bound toke
   const registered = await fetch(`${central.apiUrl}/api/register_agent`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ email, display_name: "Fixture enrollment" }),
+    body: JSON.stringify({
+      email,
+      username: fixtureUsername(email),
+      display_name: "Fixture enrollment",
+    }),
   });
   assert.equal(registered.status, 200);
   assert.deepEqual(Object.keys((await registered.json()) as Record<string, unknown>).sort(), [
     "agent_id",
     "email",
     "message",
+    "username",
   ]);
 
   const key = createFixtureKeyPair();
@@ -57,7 +62,7 @@ test("I02-F01 fixture exposes email enrollment and issues the current bound toke
       path: "/api/register_agent",
       authorizationScheme: null,
       dpopCount: 0,
-      bodyKeys: ["display_name", "email"],
+      bodyKeys: ["display_name", "email", "username"],
     },
     {
       method: "POST",

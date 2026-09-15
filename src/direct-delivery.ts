@@ -604,6 +604,9 @@ export class DirectDeliveryTarget {
     });
     const withChildFailure = <T>(operation: Promise<T>): Promise<T> =>
       Promise.race([operation, childFailure]);
+    const invocation = new AbortController();
+    const approvalSignal = AbortSignal.any([outerSignal, invocation.signal]);
+    child.once("exit", () => invocation.abort());
     let promptDispatched = false;
     let connection: acp.ClientConnection | undefined;
     let currentSessionId: string | undefined;
@@ -644,13 +647,13 @@ export class DirectDeliveryTarget {
                 toolCall: context.params.toolCall,
                 options,
               },
-              outerSignal,
+              approvalSignal,
             );
           } finally {
             resumePromptDeadline();
             resumeOuterDeadline();
           }
-          const selected = outerSignal.aborted
+          const selected = approvalSignal.aborted
             ? undefined
             : options.find((option) => option.optionId === approval);
           this.#log("acp.permission", {
@@ -893,6 +896,7 @@ export class DirectDeliveryTarget {
           error instanceof DirectDeliveryError ? error : new DirectDeliveryError("startup_failed");
       }
     } finally {
+      invocation.abort();
       promptDeadline?.close();
       try {
         connection?.close();

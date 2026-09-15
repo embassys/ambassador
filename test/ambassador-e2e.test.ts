@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type TestContext, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-
 import {
   type GatewayApplicationOptions,
   openGatewayApplication,
@@ -13,6 +12,7 @@ import {
 import type { DeliveryTarget } from "../src/notification-relay.js";
 import { startFakeCentral } from "./support/fake-central.js";
 import { startFakeWebhook } from "./support/fake-webhook.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { McpCallError, TestMcpClient } from "./support/mcp-client.js";
 
 const WEBHOOK_SECRET = "abcdef0123456789abcdef0123456789";
@@ -90,8 +90,12 @@ async function enrollWebhook(
 ): Promise<TestMcpClient> {
   const client = new TestMcpClient(gateway.endpoint);
   await client.initialize(OPENCLAW);
-  assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
+  assert.equal(
+    (await client.callTool("register_agent", { username: fixtureUsername(email), email })).status,
+    "input_required",
+  );
   await client.callTool("register_agent", {
+    username: fixtureUsername(email),
     email,
     delivery: {
       mode: "webhook",
@@ -109,7 +113,7 @@ async function enrollDirect(
 ): Promise<TestMcpClient> {
   const client = new TestMcpClient(gateway.endpoint);
   await client.initialize(CODEX);
-  await client.callTool("register_agent", { email });
+  await client.callTool("register_agent", { username: fixtureUsername(email), email });
   await client.callTool("verify_email", { email, code: central.verificationCode(email) });
   return client;
 }
@@ -589,7 +593,7 @@ test("returns a correlated action result from the target MCP tool to the request
   });
 });
 
-test("resumes mixed-case request IDs after restart and exposes their correlated result", async (t) => {
+test("resumes mixed-case requests and preserves a standing grant after accepted actions change", async (t) => {
   const value = await fixture(t);
   const gateway = value.trackGateway(await openGatewayApplication(value.options));
   const requesterEmail = "saved-intent-requester@fixture.test";
@@ -617,7 +621,7 @@ test("resumes mixed-case request IDs after restart and exposes their correlated 
     headers: JSON_HEADERS,
     body: JSON.stringify({
       token: value.central.permissionDecisionToken(String(permission.permission_id)),
-      decision: "allow_once",
+      decision: "allow_always",
     }),
   });
   assert.equal(decision.status, 200);
@@ -632,6 +636,14 @@ test("resumes mixed-case request IDs after restart and exposes their correlated 
   assert.equal(messages.length, 1);
   assert.deepEqual(messages[0]?.payload.payload, { reason: "exact saved request" });
   const callId = messages[0]?.payload.call_id;
+  assert.deepEqual(
+    await client.callTool("message_box", { type: "get_action_progress", call_id: callId }),
+    {
+      call_id: callId,
+      call_status: "pending",
+      events: [],
+    },
+  );
   const submission = await target.protectedFetch("/api/submit_action_result", {
     method: "POST",
     headers: JSON_HEADERS,
@@ -642,6 +654,14 @@ test("resumes mixed-case request IDs after restart and exposes their correlated 
     }),
   });
   assert.equal(submission.status, 200);
+  assert.deepEqual(
+    await client.callTool("message_box", { type: "get_action_progress", call_id: callId }),
+    {
+      call_id: callId,
+      call_status: "completed",
+      events: [],
+    },
+  );
   const result = await client.callTool("message_box", {
     type: "check",
     request_id: permission.request_id,
@@ -660,6 +680,26 @@ test("resumes mixed-case request IDs after restart and exposes their correlated 
     count: 0,
     items: [],
   });
+  const closed = await target.protectedFetch("/api/available_actions", {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ available_actions: [] }),
+  });
+  assert.equal(closed.status, 200);
+  const permissionRequests = () =>
+    value.central.requests().filter((entry) => entry.path === "/api/request_permission").length;
+  const before = permissionRequests();
+  const again = await client.callTool("message_box", {
+    type: "request_action",
+    request_id: randomUUID(),
+    target_email: targetEmail,
+    action_type: "get_phone_number",
+    payload: { reason: "use existing standing permission" },
+    wait_seconds: 0,
+  });
+  assert.equal(again.status, "pending");
+  assert.equal(typeof again.call_id, "string");
+  assert.equal(permissionRequests(), before);
 });
 
 for (const answerSource of ["email", "foreground"] as const) {

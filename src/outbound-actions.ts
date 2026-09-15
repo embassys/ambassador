@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { validActionName } from "./agent-address.js";
 import type { LoadedCentralCredential } from "./central-credential.js";
 import { assertNoCentralCredentialFields, isCentralRecord } from "./central-json.js";
 import {
@@ -44,6 +45,7 @@ export interface OutboundAction {
 }
 
 const REJECTION_REASONS = [
+  "action_not_accepted",
   "permission_missing",
   "permission_pending",
   "permission_denied",
@@ -67,18 +69,19 @@ function confirmedRejection(error: unknown): OutboundAction["rejection"] {
   if (error.code === "central_authentication_failed")
     return { reason: "authentication_required", http_status: 401 };
   if (error.response?.notAccepted !== true) return undefined;
-  const reason = error.code.startsWith("permission_")
-    ? error.code
-    : (
-        {
-          400: "invalid_request",
-          403: "permission_required",
-          404: "target_or_action_missing",
-          409: "request_conflict",
-          422: "invalid_payload",
-          429: "rate_limited",
-        } as Record<number, string>
-      )[error.response.httpStatus];
+  const reason =
+    error.code === "action_not_accepted" || error.code.startsWith("permission_")
+      ? error.code
+      : (
+          {
+            400: "invalid_request",
+            403: "permission_required",
+            404: "target_or_action_missing",
+            409: "request_conflict",
+            422: "invalid_payload",
+            429: "rate_limited",
+          } as Record<number, string>
+        )[error.response.httpStatus];
   if (reason === undefined) return undefined;
   return {
     reason,
@@ -150,7 +153,7 @@ function parse(plaintext: Buffer): OutboundAction {
     value.target_email.length > 254 ||
     !EMAIL.test(value.target_email) ||
     typeof value.action_type !== "string" ||
-    !NAME.test(value.action_type) ||
+    !validActionName(value.action_type) ||
     !isCentralRecord(value.payload) ||
     !STATUSES.includes(value.status as Status) ||
     typeof value.created_at !== "string" ||
@@ -235,9 +238,15 @@ export class OutboundActions {
     arguments_: Record<string, unknown>,
     signal?: AbortSignal,
     operationId?: string,
+    existingGrantId?: string,
   ): Promise<Record<string, unknown>> {
     return this.#run(async () => {
       const { action_payload: payload, ...permissionArguments } = arguments_;
+      if (
+        existingGrantId !== undefined &&
+        (!NAME.test(existingGrantId) || !Object.hasOwn(arguments_, "action_payload"))
+      )
+        throw new McpContractError();
       const normalized = normalizePermissionRequest(permissionArguments);
       if (!Object.hasOwn(arguments_, "action_payload"))
         return await this.transport.requestPermission(normalized, signal, operationId);
@@ -249,7 +258,8 @@ export class OutboundActions {
       )
         throw new McpContractError();
       const actionType = normalized.action_type ?? normalized.permission_type;
-      if (typeof actionType !== "string" || !NAME.test(actionType)) throw new McpContractError();
+      if (typeof actionType !== "string" || !validActionName(actionType))
+        throw new McpContractError();
       assertNoCentralCredentialFields(payload);
       signal?.throwIfAborted();
       const key = { target_email: normalized.target_email, action_type: actionType };
@@ -267,7 +277,8 @@ export class OutboundActions {
         ...key,
         operation_id: workflowUuid.parse(operationId ?? randomUUID()),
         payload,
-        status: "request_uncertain",
+        status: existingGrantId === undefined ? "request_uncertain" : "ready",
+        ...(existingGrantId === undefined ? {} : { permission_id: existingGrantId }),
         created_at: new Date().toISOString(),
       };
       try {
@@ -278,14 +289,19 @@ export class OutboundActions {
         throw new OutboundNotSubmittedError(error);
       }
       // A crash or lost response leaves a visible uncertainty marker, never an automatic retry.
-      const response = await this.transport
-        .requestPermission(normalized, signal, value.operation_id)
-        .catch((error: unknown) => {
-          const rejection = confirmedRejection(error);
-          if (rejection !== undefined)
-            this.#save({ ...value, status: "request_rejected", rejection });
-          throw error;
-        });
+      // The saved intent may use a standing grant even when the peer has stopped
+      // accepting new permission requests. Central still checks it when called.
+      const response =
+        existingGrantId === undefined
+          ? await this.transport
+              .requestPermission(normalized, signal, value.operation_id)
+              .catch((error: unknown) => {
+                const rejection = confirmedRejection(error);
+                if (rejection !== undefined)
+                  this.#save({ ...value, status: "request_rejected", rejection });
+                throw error;
+              })
+          : { permission_id: existingGrantId, status: "granted", already_granted: true };
       value = {
         ...value,
         permission_id: response.permission_id,

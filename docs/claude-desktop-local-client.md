@@ -32,6 +32,20 @@ Cowork to search its tools. Do not re-register, expose the loopback server
 publicly, or reinstall the connection solely because the model asks for a website.
 See the [final review](desktop-pr-review-2026-09-08.md) for evidence.
 
+### Enable discovery in fresh chats
+
+Claude Code's local skill installation does not install a skill into standalone
+Chat or Cowork. In those clients, use Customize > Skills to upload and enable
+the [bundled Embassys skill](../desktop/assets/skills/embassys/SKILL.md), then
+start a fresh conversation with the Embassys connector enabled. The skill tells
+Claude how to find the existing tools for registration checks, contact requests
+and meeting coordination. It does not create a connection or register an agent.
+
+Anthropic documents [uploading and enabling custom skills](https://support.claude.com/en/articles/12512180-using-skills-in-claude).
+This is a discovery workaround to qualify in the native client, not evidence
+that every fresh Cowork conversation finds the connector. If Claude still asks
+for a website, "Use the Embassys connector" remains the explicit fallback.
+
 For a Mac app placed at `/Applications/Embassys.app`, the entry is:
 
 ```json

@@ -65,6 +65,7 @@ import { NotificationStore } from "./notification-store.js";
 import { OutboundActionError, OutboundActions } from "./outbound-actions.js";
 import { OwnerQuestionError, OwnerQuestions } from "./owner-questions.js";
 import { PendingActionInbox, PendingActionInboxError } from "./pending-action-inbox.js";
+import { ProviderInvocations } from "./provider-invocations.js";
 import { SessionMaintenance } from "./session-maintenance.js";
 import { describeVerboseError, traceFetch, type VerboseLogger } from "./verbose-log.js";
 import { type TranscriptPage, VisibleTranscripts } from "./visible-transcripts.js";
@@ -147,6 +148,16 @@ export interface RunningGatewayApplication {
       fetchedAt?: string;
       email?: string;
     }>;
+    acceptedActions(address?: string): Promise<{
+      state: "ready";
+      agent_id: string;
+      policy: import("./central-rest.js").CentralAvailableActions;
+      catalog: import("./central-rest.js").CentralActionType[];
+    }>;
+    setAcceptedActions(
+      names: readonly string[],
+      agentId: string,
+    ): Promise<import("./central-rest.js").CentralAvailableActions>;
     activity(kind: ActivityKind, after?: number): ActivityPage;
     requestLinks(after?: number): RequestLinkPage;
   };
@@ -411,6 +422,7 @@ export async function openGatewayApplication(
   let relay: NotificationRelay | undefined;
   let notificationStore: NotificationStore | undefined;
   let humanInputMailbox: HumanInputMailbox | undefined;
+  let providerInvocations: ProviderInvocations | undefined;
   let messageBox: MessageBox | undefined;
   let ownerQuestions: OwnerQuestions | undefined;
   let transcripts: VisibleTranscripts | undefined;
@@ -467,7 +479,7 @@ export async function openGatewayApplication(
       ? {
           registerPrepared: (
             profile: DeliveryProfile,
-            arguments_: { email: string; display_name?: string },
+            arguments_: { email: string; username: string; display_name?: string },
           ) => {
             if (!desktopRegistration) throw new Error("Registration state is unavailable.");
             return desktopRegistration.registerFromTools(arguments_, profile);
@@ -732,7 +744,13 @@ export async function openGatewayApplication(
         }
         return internal ? owned && owners.deliveryMessage(message) !== undefined : !owned;
       };
+      providerInvocations ??= new ProviderInvocations(
+        join(dirname(options.pendingActionPath), "provider-invocations.sqlite"),
+        identity.storageCredential(),
+      );
+      const invocations = providerInvocations;
       const permissionCoordinator = new CentralAgentPermissionCoordinator({
+        nextInvocation: (provider) => invocations.next(provider),
         transport: nextRest,
         log,
         onQuestion: (id) =>
@@ -983,10 +1001,12 @@ export async function openGatewayApplication(
               enrollment: identity.enrollment,
               workflow_guidance: {
                 requester_email: identity.enrollment.email,
+                accepted_requests:
+                  "The catalog lists what exists, not what a specific agent accepts. Use message_box get_available_actions with agent_email (email or username). A reviewed action is not a permission grant. Unreviewed entries may have empty schemas; never infer missing requirements or results.",
                 meetings:
                   "For a coordinated meeting, get actual availability through a supported catalog action before requesting creation, even when the user proposes a specific time. Include requester_email as an attendee unless the user explicitly supplies another address; the agent provider's account email is not the Embassys requester identity. The target person's human decides permission. A denial must not be offered to the requester for approval.",
               },
-              action_types: await requireRest().listActionTypes(signal),
+              action_types: await requireRest().listActionTypes(signal, arguments_),
             };
             break;
           case "message_box":
@@ -1096,6 +1116,7 @@ export async function openGatewayApplication(
     notificationStore?.close();
     centralMutations?.close();
     humanInputMailbox?.close();
+    providerInvocations?.close();
     await sessionMaintenance?.settled();
     acpSessionStore?.close();
 
@@ -1118,6 +1139,23 @@ export async function openGatewayApplication(
                     after,
                   )
                 : { links: [], hasMore: false, nextCursor: after },
+            acceptedActions: async (address?: string) => {
+              identity.credential();
+              const policy = await requireRest().getAvailableActions(address, lifetimeSignal);
+              const catalog = await requireRest().listActionTypes(lifetimeSignal);
+              return {
+                state: "ready" as const,
+                agent_id: String(identity.enrollment.agent_id),
+                policy,
+                catalog,
+              };
+            },
+            setAcceptedActions: async (names: readonly string[], agentId: string) => {
+              identity.credential();
+              if (identity.enrollment.agent_id !== agentId)
+                throw new Error("The agent changed. Reopen Accepted requests before saving.");
+              return requireRest().setAvailableActions(names, lifetimeSignal);
+            },
             permissions: async () => {
               if (!identity.enrolled) return { state: "not_registered" as const, items: [] };
               if (identity.expired) return { state: "expired" as const, items: [] };
@@ -1191,6 +1229,7 @@ export async function openGatewayApplication(
       notificationStore?.close();
       centralMutations?.close();
       humanInputMailbox?.close();
+      providerInvocations?.close();
       await sessionMaintenance?.settled();
       acpSessionStore?.close();
     },

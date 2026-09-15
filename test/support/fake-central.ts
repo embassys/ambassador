@@ -14,6 +14,7 @@ import {
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { TestContext } from "node:test";
+import { fixtureUsername } from "./fixture-username.js";
 
 const FIXTURE_CLOCK_SECONDS = 1_788_220_800;
 const TOKEN_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
@@ -62,6 +63,8 @@ export type FixtureMessageState = "queued" | "delivered" | "acked";
 interface IdentityRecord {
   readonly id: string;
   readonly email: string;
+  readonly username: string;
+  availableActions?: string[];
   readonly displayName?: string;
   code: string;
   verified: boolean;
@@ -101,6 +104,8 @@ interface HumanInputRecord {
   readonly options: readonly { readonly label: string; readonly value: string }[];
   readonly messageId: string;
   status: "pending" | "answered";
+  readonly provider?: { provider_key: string; generation: number };
+  readonly expiresAt?: number;
 }
 
 interface HumanInputTokenRecord {
@@ -934,7 +939,7 @@ async function route(
 ): Promise<void> {
   let body: unknown;
   try {
-    body = request.method === "POST" ? await readJson(request) : {};
+    body = ["POST", "PUT"].includes(request.method ?? "") ? await readJson(request) : {};
   } catch {
     detail(response, 400, "Invalid request");
     return;
@@ -951,7 +956,9 @@ async function route(
 
   if (request.method === "POST" && target.pathname === "/api/register_agent") {
     if (
-      !exactKeys(body, ["email"], ["display_name"]) ||
+      !exactKeys(body, ["email", "username"], ["display_name"]) ||
+      typeof body.username !== "string" ||
+      !/^[a-z0-9]{5,32}$/u.test(body.username) ||
       typeof body.email !== "string" ||
       !EMAIL.test(body.email) ||
       (body.display_name !== undefined &&
@@ -963,6 +970,14 @@ async function route(
       return;
     }
     const existing = state.identities.get(body.email);
+    if (
+      [...state.identities.values()].some(
+        (entry) => entry.username === body.username && entry.email !== body.email,
+      )
+    ) {
+      detail(response, 409, `Username '${body.username}' is already taken`);
+      return;
+    }
     if (existing?.verified === true) {
       detail(response, 409, "Agent already registered");
       return;
@@ -970,6 +985,7 @@ async function route(
     const identity: IdentityRecord = {
       id: nextId(state, "agent"),
       email: body.email,
+      username: body.username,
       ...(body.display_name === undefined ? {} : { displayName: body.display_name }),
       code: VERIFICATION_CODE,
       verified: false,
@@ -978,6 +994,7 @@ async function route(
     safeJson(response, 200, {
       agent_id: identity.id,
       email: identity.email,
+      username: identity.username,
       message: "Verification code sent to your email. Please verify to complete registration.",
     });
     return;
@@ -1145,7 +1162,16 @@ async function route(
       input === undefined ||
       responseToken.usedAt !== undefined ||
       responseToken.expiresAt <= state.nowSeconds ||
-      input.status !== "pending"
+      input.status !== "pending" ||
+      (input.expiresAt !== undefined && input.expiresAt <= state.nowSeconds) ||
+      (input.provider !== undefined &&
+        [...state.humanInputs.values()].some(
+          (other) =>
+            other.agentEmail === input.agentEmail &&
+            other.provider?.provider_key === input.provider?.provider_key &&
+            other.provider !== undefined &&
+            other.provider.generation > (input.provider?.generation ?? Number.MAX_SAFE_INTEGER),
+        ))
     ) {
       detail(response, 410, "This link is no longer usable");
       return;
@@ -1193,21 +1219,85 @@ async function route(
   const identity = authenticateProtected(request, response, target.href, state);
   if (identity === undefined) return;
 
+  if (request.method === "GET" && target.pathname === "/api/action_progress") {
+    const call = state.actionCalls.get(target.searchParams.get("call_id") ?? "");
+    if (!call || (call.callerEmail !== identity.email && call.targetEmail !== identity.email)) {
+      detail(response, 404, "Action call not found or you are not a party to it");
+      return;
+    }
+    safeJson(response, 200, { call_id: call.id, call_status: call.status, events: [] });
+    return;
+  }
+
   if (request.method === "GET" && target.pathname === "/api/list_action_types") {
     safeJson(
       response,
       200,
-      [...ACTIONS, ...state.humanInputActionTypes.values()].map((action) => ({
-        ...action,
-        result_schema: action.result_schema ?? null,
-      })),
+      [...ACTIONS, ...state.humanInputActionTypes.values()]
+        .map((action) => ({
+          ...action,
+          result_schema: action.result_schema ?? null,
+          verified: ACTIONS.some((known) => known.name === action.name),
+        }))
+        .filter((action) => target.searchParams.get("verified_only") !== "true" || action.verified),
     );
+    return;
+  }
+
+  if (
+    target.pathname === "/api/available_actions" &&
+    ["GET", "PUT"].includes(request.method ?? "")
+  ) {
+    const address = (target.searchParams.get("agent_email") ?? identity.email).trim().toLowerCase();
+    const peer =
+      request.method === "PUT"
+        ? identity
+        : [...state.identities.values()].find(
+            (entry) => entry.email === address || entry.username === address,
+          );
+    if (!peer) {
+      detail(response, 404, "Agent not found");
+      return;
+    }
+    if (request.method === "PUT") {
+      if (
+        !exactKeys(body, ["available_actions"]) ||
+        !Array.isArray(body.available_actions) ||
+        body.available_actions.length > 500 ||
+        body.available_actions.some(
+          (name) => typeof name !== "string" || !name.trim() || name.trim().length > 128,
+        )
+      ) {
+        detail(response, 422, "Invalid available actions");
+        return;
+      }
+      peer.availableActions = [
+        ...new Set(body.available_actions.map((name: string) => name.trim().toLowerCase())),
+      ];
+      for (const name of peer.availableActions)
+        if (!actionByName(state, name))
+          state.humanInputActionTypes.set(name, {
+            id: nextId(state, "action"),
+            name,
+            description: "Custom declaration",
+            input_schema: {},
+          });
+    }
+    safeJson(response, 200, {
+      agent_email: peer.email,
+      available_actions: peer.availableActions ?? null,
+      restricted: peer.availableActions !== undefined,
+    });
     return;
   }
 
   if (request.method === "POST" && target.pathname === "/api/get_human_input") {
     if (
-      !exactKeys(body, ["permission_type", "request", "input_type", "message_id"], ["options"]) ||
+      !exactKeys(
+        body,
+        ["permission_type", "request", "input_type", "message_id"],
+        ["options", "request_kind", "provider", "expires_in_seconds"],
+      ) ||
       typeof body.permission_type !== "string" ||
       body.permission_type.length < 1 ||
       body.permission_type.length > 128 ||
@@ -1224,6 +1314,42 @@ async function route(
       return;
     }
     const options: Array<{ label: string; value: string }> = [];
+    const provider = body.provider;
+    if (
+      (body.request_kind !== undefined &&
+        !["text_answer", "provider_option", "resource_grant"].includes(
+          String(body.request_kind),
+        )) ||
+      (body.request_kind === "provider_option") !== (provider !== undefined) ||
+      (provider !== undefined &&
+        (!exactKeys(provider, ["provider_key", "generation"], ["expires_in_seconds"]) ||
+          typeof provider.provider_key !== "string" ||
+          provider.provider_key.length < 1 ||
+          provider.provider_key.length > 128 ||
+          !Number.isSafeInteger(provider.generation) ||
+          (provider.generation as number) < 1)) ||
+      [body.expires_in_seconds, isRecord(provider) ? provider.expires_in_seconds : undefined].some(
+        (expiry) =>
+          expiry !== undefined &&
+          (!Number.isInteger(expiry) || (expiry as number) < 1 || (expiry as number) > 604800),
+      )
+    ) {
+      detail(response, 422, "Invalid provider invocation");
+      return;
+    }
+    const invocation = provider as HumanInputRecord["provider"];
+    if (
+      invocation &&
+      [...state.humanInputs.values()].some(
+        (other) =>
+          other.agentEmail === identity.email &&
+          other.provider?.provider_key === invocation.provider_key &&
+          other.provider.generation > invocation.generation,
+      )
+    ) {
+      detail(response, 409, "Provider generation has ended");
+      return;
+    }
     for (const option of (body.options ?? []) as unknown[]) {
       if (
         !exactKeys(option, ["label", "value"]) ||
@@ -1273,6 +1399,10 @@ async function route(
       options,
       messageId: body.message_id,
       status: "pending",
+      ...(invocation ? { provider: invocation } : {}),
+      ...(body.expires_in_seconds === undefined
+        ? {}
+        : { expiresAt: state.nowSeconds + Number(body.expires_in_seconds) }),
     };
     state.humanInputs.set(requestId, input);
     const token = randomBytes(32).toString("base64url");
@@ -1345,10 +1475,28 @@ async function route(
       detail(response, 404, "Message party not found");
       return;
     }
-    const actionType = (body.action_type ?? body.permission_type) as string;
-    const targetIdentity = state.identities.get(targetEmail);
+    const actionType = String(body.action_type ?? body.permission_type)
+      .trim()
+      .toLowerCase();
+    const targetIdentity = [...state.identities.values()].find(
+      (entry) =>
+        entry.email === targetEmail?.trim().toLowerCase() ||
+        entry.username === targetEmail?.trim().toLowerCase(),
+    );
     if (targetIdentity?.verified !== true) {
       detail(response, 404, "Target or action not found");
+      return;
+    }
+    targetEmail = targetIdentity.email;
+    if (
+      targetIdentity.availableActions !== undefined &&
+      !targetIdentity.availableActions.includes(actionType)
+    ) {
+      detail(
+        response,
+        403,
+        `Agent '${targetEmail}' does not accept permission requests for '${actionType}'. Call GET /api/available_actions?agent_email=${targetEmail} to see what it accepts.`,
+      );
       return;
     }
     if (targetEmail === identity.email) {
@@ -1425,12 +1573,18 @@ async function route(
       detail(response, 422, "Invalid action call");
       return;
     }
-    const action = actionByName(state, body.action_type);
+    const actionName = body.action_type.trim().toLowerCase();
+    const address = body.target_email.trim().toLowerCase();
+    const targetEmail =
+      [...state.identities.values()].find(
+        (entry) => entry.email === address || entry.username === address,
+      )?.email ?? address;
+    const action = actionByName(state, actionName);
     const permission = [...state.permissions.values()].find(
       (candidate) =>
-        candidate.grantorEmail === body.target_email &&
+        candidate.grantorEmail === targetEmail &&
         candidate.granteeEmail === identity.email &&
-        candidate.actionType === body.action_type &&
+        candidate.actionType === actionName &&
         candidate.status === "granted" &&
         (candidate.usesRemaining === null || (candidate.usesRemaining ?? 0) > 0),
     );
@@ -1449,13 +1603,13 @@ async function route(
     state.actionCalls.set(callId, {
       id: callId,
       callerEmail: identity.email,
-      targetEmail: body.target_email,
+      targetEmail,
       actionType: action.name,
       status: "pending",
     });
     const messageId = queueMessage(
       state,
-      body.target_email,
+      targetEmail,
       identity.email,
       { type: "action_call", call_id: callId, action_type: action.name, payload: body.payload },
       action.name,
@@ -1673,6 +1827,7 @@ export async function startFakeCentral(t?: TestContext): Promise<FakeCentral> {
     const identity: IdentityRecord = {
       id: nextId(state, "agent"),
       email,
+      username: fixtureUsername(email),
       code: VERIFICATION_CODE,
       verified: true,
       publicJwk: jwk,
