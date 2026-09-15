@@ -1,3 +1,4 @@
+import { signupUsername } from "./agent-address.js";
 import {
   type CentralCredentialRecord,
   createCentralCredentialRecord,
@@ -26,6 +27,8 @@ export type CentralEnrollmentErrorCode =
   | "central_rate_limited"
   | "central_verification_credential_invalid"
   | "central_verification_response_unsafe"
+  | "username_unavailable"
+  | "username_invalid"
   | "registration_conflict"
   | "unsupported_email_format"
   | "verification_failed";
@@ -34,6 +37,10 @@ function errorMessage(code: CentralEnrollmentErrorCode): string {
   switch (code) {
     case "unsupported_email_format":
       return "The current Embassys service rejected this email address format";
+    case "username_unavailable":
+      return "This username is unavailable. Choose another username.";
+    case "username_invalid":
+      return "Choose a username with 5–32 letters or numbers.";
     case "registration_conflict":
       return "The email is already registered with Embassys";
     case "central_rate_limited":
@@ -83,10 +90,11 @@ export const REST_BOOTSTRAP_TOOLS: readonly CentralToolDefinition[] = [
   {
     name: "register_agent",
     description:
-      "Register this local agent with Embassys Ambassador. Call this tool when the user says 'register me', 'sign me up', 'connect me to Embassys', or 'register me in Ambassador'. Use the supplied email. Do not ask for a website URL or password. Follow any setup question returned by the tool.",
+      "Register this local agent with Embassys Ambassador. Call this tool when the user says 'register me', 'sign me up', 'connect me to Embassys', or 'register me in Ambassador'. Use the supplied email and chosen username (5–32 letters or numbers). If the username is missing, ask the user to choose it; never claim a public handle on their behalf. Do not ask for a website URL or password. Follow any setup question returned by the tool.",
     inputSchema: schema(
       {
         email: { type: "string", minLength: 3, maxLength: 254 },
+        username: { type: "string", minLength: 5, maxLength: 32, pattern: "^[A-Za-z0-9]{5,32}$" },
         display_name: { type: "string", minLength: 1, maxLength: 128 },
         delivery: {
           oneOf: [
@@ -173,7 +181,7 @@ function email(value: unknown): string {
   if (typeof value !== "string" || value.length > 254 || !EMAIL.test(value)) {
     throw failure("central_enrollment_contract_failed");
   }
-  return value;
+  return value.trim().toLowerCase();
 }
 
 function safeString(value: unknown, maximum: number): string {
@@ -219,19 +227,37 @@ export class CentralEnrollmentClient {
   }
 
   async register(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, string>> {
-    if (!exactKeys(arguments_, ["email"], ["display_name"])) {
+    if (!exactKeys(arguments_, ["email", "username"], ["display_name"])) {
       throw failure("central_enrollment_contract_failed");
     }
-    const requestEmail = email(arguments_.email);
+    const requestEmail = email(arguments_.email).trim().toLowerCase();
+    const parsedUsername = signupUsername.safeParse(arguments_.username);
+    if (!parsedUsername.success) throw failure("username_invalid");
+    const username = parsedUsername.data;
     const displayName =
       arguments_.display_name === undefined ? undefined : safeString(arguments_.display_name, 128);
     const response = await this.#post(
       "/api/register_agent",
-      { email: requestEmail, ...(displayName === undefined ? {} : { display_name: displayName }) },
+      {
+        email: requestEmail,
+        username,
+        ...(displayName === undefined ? {} : { display_name: displayName }),
+      },
       signal,
     );
     if (response.status === 409) {
-      await cancel(response);
+      let detail: unknown;
+      try {
+        detail = await readCentralJson(response, RESPONSE_MAX_BYTES);
+      } catch {
+        await cancel(response);
+      }
+      if (
+        isCentralRecord(detail) &&
+        typeof detail.detail === "string" &&
+        /^Username .* (?:is already taken|is reserved)$/u.test(detail.detail)
+      )
+        throw failure("username_unavailable");
       throw failure("registration_conflict");
     }
     if (response.status === 422 && requestEmail.includes("+")) {
@@ -240,7 +266,8 @@ export class CentralEnrollmentClient {
     }
     const result = await this.#success(response);
     if (
-      !exactKeys(result, ["agent_id", "email", "message"]) ||
+      !exactKeys(result, ["agent_id", "email", "username", "message"]) ||
+      result.username !== username ||
       typeof result.agent_id !== "string" ||
       !AGENT_ID.test(result.agent_id) ||
       result.email !== requestEmail ||
@@ -251,7 +278,7 @@ export class CentralEnrollmentClient {
       throw failure("central_enrollment_contract_failed");
     }
     assertNoCentralCredentialFields(result);
-    return { agent_id: result.agent_id, email: requestEmail, message: result.message };
+    return { agent_id: result.agent_id, email: requestEmail, username, message: result.message };
   }
 
   async resend(arguments_: unknown, signal?: AbortSignal): Promise<Record<string, string>> {

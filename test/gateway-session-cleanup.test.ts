@@ -11,6 +11,7 @@ import { createDeliveryProfile, DeliveryProfileStore } from "../src/delivery-pro
 import { openGatewayApplication } from "../src/gateway-application.js";
 import { LocalControlClient } from "../src/local-control.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const NOW_SECONDS = 1_788_220_800;
 
@@ -23,7 +24,7 @@ test("startup deletes or forgets expired sessions and retains transient failures
     nowSeconds: () => NOW_SECONDS,
   });
   const email = "session-cleanup@fixture.test";
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const codex = capabilityForKind("codex");
   assert.ok(codex !== undefined);
@@ -125,7 +126,7 @@ test("running session history waits for active direct delivery", async (t) => {
     nowSeconds: () => NOW_SECONDS,
   });
   const email = "session-control-order@fixture.test";
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const codex = capabilityForKind("codex");
   assert.ok(codex !== undefined);

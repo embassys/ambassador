@@ -10,6 +10,7 @@ import type { AcpPermissionApproval, AcpPermissionRequest } from "./direct-deliv
 import type { VerboseLogger } from "./verbose-log.js";
 
 const MAX_TOOL_LABEL_LENGTH = 160;
+const APPROVAL_TIMEOUT_MS = 72 * 60 * 60 * 1000;
 
 export interface CentralAgentPermissionTransport {
   requestHumanInput(
@@ -26,6 +27,8 @@ export interface CentralAgentPermissionTransport {
 
 export interface CentralAgentPermissionCoordinatorOptions {
   readonly transport: CentralAgentPermissionTransport;
+  readonly nextInvocation: (provider: string) => { provider_key: string; generation: number };
+  readonly approvalTimeoutMs?: number;
   readonly log?: VerboseLogger;
   readonly onQuestion?: (requestId: string) => void;
   readonly waitForResponse: (requestId: string, signal: AbortSignal) => Promise<CentralMessage>;
@@ -123,19 +126,43 @@ export class CentralAgentPermissionCoordinator {
   constructor(options: CentralAgentPermissionCoordinatorOptions) {
     this.#options = options;
     this.#log = options.log ?? (() => undefined);
+    const timeout = options.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS;
+    if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > APPROVAL_TIMEOUT_MS)
+      throw new CentralAgentPermissionError("invalid_permission_request");
   }
   readonly approve: AcpPermissionApproval = (request, signal) => {
     if (signal.aborted) return Promise.reject(new CentralAgentPermissionError("cancelled"));
-    const operation = this.#approvalTail.then(() => this.#approve(request, signal));
+    const operation = this.#approvalTail.then(() => this.#boundedApproval(request, signal));
     this.#approvalTail = operation.then(
       () => undefined,
       () => undefined,
     );
     return this.#wait(operation, signal);
   };
+  async #boundedApproval(request: AcpPermissionRequest, parent: AbortSignal): Promise<string> {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([parent, controller.signal]);
+    const timer = setTimeout(
+      () => controller.abort(),
+      this.#options.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS,
+    );
+    try {
+      return await this.#wait(this.#approve(request, signal), signal);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  }
   async #approve(request: AcpPermissionRequest, signal: AbortSignal): Promise<string> {
     if (signal.aborted) throw new CentralAgentPermissionError("cancelled");
-    const args = humanInputArguments(request);
+    const question = humanInputArguments(request);
+    const expires = Math.ceil((this.#options.approvalTimeoutMs ?? APPROVAL_TIMEOUT_MS) / 1000);
+    const args = {
+      ...question,
+      request_kind: "provider_option" as const,
+      provider: { ...this.#options.nextInvocation(request.agentKind), expires_in_seconds: expires },
+      expires_in_seconds: expires,
+    };
     const key = randomUUID();
     let result: CentralHumanInputRequestResult;
     try {

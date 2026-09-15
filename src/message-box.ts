@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ActionCatalog } from "./action-catalog.js";
 import type { ActionResultInbox } from "./action-result-inbox.js";
+import { actionName, agentAddress, availableActionNames } from "./agent-address.js";
 import type { LoadedCentralCredential } from "./central-credential.js";
 import { assertNoCentralCredentialFields, isCentralRecord } from "./central-json.js";
 import { type CentralMessage, type CentralRestClient, CentralRestError } from "./central-rest.js";
@@ -16,7 +17,7 @@ import type { VerboseLogger } from "./verbose-log.js";
 import { workflowUuid } from "./workflow-uuid.js";
 
 export const MESSAGE_BOX_WAIT_MS = 600_000;
-const name = z.string().regex(/^[A-Za-z0-9._~-]{1,128}$/u);
+const name = actionName;
 const uuid = workflowUuid;
 const object = z.record(z.string(), z.unknown());
 const wait_seconds = z
@@ -30,7 +31,7 @@ const wait_seconds = z
   );
 const permissionFields = {
   action_type: name,
-  target_email: z.string().min(3).max(254).optional(),
+  target_email: agentAddress.optional(),
   message_id: uuid.optional(),
   decision_options: z.enum(["accept_deny", "once_always"]).optional(),
   reason: z
@@ -43,6 +44,17 @@ const permissionFields = {
   scope: object.nullable().optional(),
 };
 const inputSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("get_action_progress"), call_id: uuid }),
+  z.strictObject({
+    type: z.literal("get_available_actions"),
+    agent_email: agentAddress.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("set_available_actions"),
+    available_actions: availableActionNames.describe(
+      "The complete replacement list for this agent. Only change it on the owner’s explicit instruction. Empty stops new permission requests; existing grants remain. Unknown names create unreviewed catalog entries.",
+    ),
+  }),
   z.strictObject({
     type: z.literal("report_progress"),
     call_id: uuid,
@@ -59,7 +71,7 @@ const inputSchema = z.discriminatedUnion("type", [
     type: z.literal("request_action"),
     request_id: uuid,
     ...permissionFields,
-    target_email: z.string().min(3).max(254),
+    target_email: agentAddress,
     message_id: z.never().optional(),
     payload: object,
     wait_seconds,
@@ -124,7 +136,7 @@ function publicSchema(): Record<string, unknown> {
 export const MESSAGE_BOX_TOOL: CentralToolDefinition = {
   name: "message_box",
   description:
-    "Send or check an Embassys business message. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. The target person's human decides permissions through email or the signed-in Embassys app; MCP cannot decide permissions. Use report_progress for brief public status on a known pending incoming call; progress never completes the call. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
+    "Send or check an Embassys business message. Use get_available_actions to see what you or another agent accepts (agent_email also accepts a username). Use set_available_actions only when the owner explicitly asks to change their accepted requests; it replaces the entire list and never grants or revokes permission. Use request_action with one exact catalog action_type and the user's exact payload; Ambassador requests that action's permission and dispatches once after a matching grant. Broad-sounding permission names do not authorize other actions. Supply a new UUID request_id for new work, and reuse it only with identical input. The initial call stays open up to ten minutes for a related update. Do not schedule a background check unless the user asks. On wait_timeout, tell the user no update has arrived and they can ask again; use the supplied check continuation for another ten-minute wait, never resubmit the action. Use inbox for pending incoming calls and unread results, submit_action_result to answer a known call after the user supplies missing information, and acknowledge returned event cursors or result IDs after processing them. The target person's human decides permissions through email or the signed-in Embassys app; MCP cannot decide permissions. Use report_progress for brief public status on a known pending incoming call. Use get_action_progress with call_id to read central status and ordered progress without polling or consuming messages. Even a completed status is not the action result; retrieve the actual answer through check or inbox. Progress never completes the local call. Request cancellation ends waiting, not an accepted action. Keep uncertain operations for inspection.",
   inputSchema: publicSchema(),
 };
 
@@ -192,9 +204,18 @@ export interface MessageBoxOptions {
   readonly credential: LoadedCentralCredential;
   readonly transport: Pick<
     CentralRestClient,
-    "listActionTypes" | "requestPermission" | "submitActionResult"
+    "listActionTypes" | "getAvailableActions" | "requestPermission" | "submitActionResult"
   > &
-    Partial<Pick<CentralRestClient, "resumeMutation" | "reportActionProgress">>;
+    Partial<
+      Pick<
+        CentralRestClient,
+        | "resumeMutation"
+        | "reportActionProgress"
+        | "getActionProgress"
+        | "setAvailableActions"
+        | "getMyPermissions"
+      >
+    >;
   readonly outbound: OutboundActions;
   readonly pending: PendingActionInbox;
   readonly results: ActionResultInbox;
@@ -389,6 +410,20 @@ export class MessageBox {
     assertNoCentralCredentialFields(input);
     const combined = AbortSignal.any([signal, this.#lifetime.signal]);
     combined.throwIfAborted();
+    if (input.type === "get_action_progress") {
+      if (!this.options.transport.getActionProgress)
+        throw new MessageBoxError("message_box_invalid");
+      return { ...(await this.options.transport.getActionProgress(input.call_id, combined)) };
+    }
+    if (input.type === "get_available_actions")
+      return { ...(await this.options.transport.getAvailableActions(input.agent_email, combined)) };
+    if (input.type === "set_available_actions") {
+      if (!this.options.transport.setAvailableActions)
+        throw new MessageBoxError("message_box_invalid");
+      return {
+        ...(await this.options.transport.setAvailableActions(input.available_actions, combined)),
+      };
+    }
     const deadline =
       performance.now() +
       Math.min(
@@ -483,6 +518,7 @@ export class MessageBox {
       return;
     }
     signal.throwIfAborted();
+    let existingGrant: string | undefined;
     let operation: Operation = {
       request_id: input.request_id,
       fingerprint,
@@ -499,6 +535,48 @@ export class MessageBox {
         input.type === "request_action" ? input.payload : undefined,
         signal,
       );
+      if (input.target_email !== undefined) {
+        const accepted = await this.options.transport.getAvailableActions(
+          input.target_email,
+          signal,
+        );
+        const restricted =
+          accepted.restricted && !accepted.available_actions?.includes(action.name);
+        if (restricted && input.type === "request_action") {
+          const grants = await this.options.transport.getMyPermissions?.(signal);
+          existingGrant = grants?.find(
+            (grant) =>
+              grant.status === "granted" &&
+              grant.action_type === action.name &&
+              grant.grantor_email === accepted.agent_email &&
+              grant.grantee_email === this.options.credential.token.email,
+          )?.id;
+        }
+        if (restricted && existingGrant === undefined) {
+          this.#save(
+            this.#event(
+              {
+                ...operation,
+                status: "rejected",
+                action_type: action.name,
+                target_email: accepted.agent_email,
+              },
+              "rejected",
+              {
+                error_code: "action_not_accepted",
+                message:
+                  "This agent does not accept new permission requests for this action. Inspect its accepted actions; do not substitute another action without the user’s instruction.",
+                agent_email: accepted.agent_email,
+                available_actions_preview: accepted.available_actions?.slice(0, 25),
+                inspect: { type: "get_available_actions", agent_email: accepted.agent_email },
+              },
+            ),
+          );
+          return;
+        }
+        // Resolve once, before custody. Notifications name the canonical email.
+        input = { ...input, target_email: accepted.agent_email };
+      }
       operation = {
         ...operation,
         action_type: action.name,
@@ -526,6 +604,8 @@ export class MessageBox {
     this.#save(operation);
     try {
       const { type: _type, request_id: _requestId, ...arguments_ } = stableInput;
+      if (operation.target_email !== undefined)
+        (arguments_ as Record<string, unknown>).target_email = operation.target_email;
       if (input.type === "submit_action_result") {
         const result = await this.options.transport.submitActionResult(
           arguments_,
@@ -570,6 +650,7 @@ export class MessageBox {
           { ...permissionArguments, action_payload: payload },
           signal,
           input.request_id,
+          existingGrant,
         );
         const outbound = this.options.outbound.get(input.target_email, input.action_type);
         if (outbound === undefined || !isCentralRecord(response.outbound_action))

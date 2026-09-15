@@ -169,6 +169,7 @@ const app = acp
       return { stopReason: "cancelled" };
     }
     if (scenario.startsWith("permission")) {
+      if (scenario === "permission-exit-session-mcp") setTimeout(() => process.exit(17), 100);
       const response = await context.client.request(acp.methods.client.session.requestPermission, {
         sessionId: context.params.sessionId,
         toolCall: {

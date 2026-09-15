@@ -1,6 +1,6 @@
 # Client delivery and qualification
 
-The released gateway is 0.2.20. The provider observations below have their own
+The released CLI is `embassys` 0.2.21. The provider observations below have their own
 dates and do not imply that every path was repeated for each release. Configuration does not prove
 that a client displayed a result. Evidence belongs in [qualification](qualification.md).
 

@@ -475,6 +475,7 @@ export class DesktopGateway {
         case "enrollment_register":
           return services.registration.register({
             email: command.email,
+            username: command.username,
             executor: command.executor,
           });
         case "enrollment_verify":
@@ -485,6 +486,10 @@ export class DesktopGateway {
           return services.registration.resend();
         case "enrollment_executor":
           return services.registration.selectExecutor(command.executor);
+        case "accepted_actions":
+          return services.acceptedActions(command.agent_email);
+        case "set_accepted_actions":
+          return services.setAcceptedActions(command.available_actions, command.agent_id);
         case "permissions":
           return services.permissions();
         case "activity":

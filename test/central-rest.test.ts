@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { type LoadedCentralCredential, parseCentralCredential } from "../src/central-credential.js";
 import { CentralEnrollmentClient } from "../src/central-enrollment.js";
 import { CentralProtectedTransport } from "../src/central-protected-transport.js";
@@ -12,6 +11,7 @@ import {
 import { DpopNonceCache } from "../src/dpop.js";
 import { currentCredential, FIXTURE_NOW_SECONDS } from "./support/current-credential.js";
 import { type FakeCentral, startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const NOW_SECONDS = 1_788_220_800;
 
@@ -148,7 +148,7 @@ async function enroll(central: FakeCentral, email: string): Promise<LoadedCentra
     centralOrigin: central.apiUrl,
     nowSeconds: () => NOW_SECONDS,
   });
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   return parseCentralCredential(verified.credential, () => NOW_SECONDS);
 }
@@ -305,7 +305,11 @@ test("asks the enrolled agent's own human and receives the correlated answer", a
   ]);
   assert.deepEqual(
     await client.listActionTypes(),
-    central.actions.map((action) => ({ ...action, result_schema: action.result_schema ?? null })),
+    central.actions.map((action) => ({
+      ...action,
+      result_schema: action.result_schema ?? null,
+      verified: true,
+    })),
   );
 
   const answered = await fetch(`${central.apiUrl}/api/human_input_response`, {

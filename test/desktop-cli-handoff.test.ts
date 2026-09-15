@@ -14,6 +14,7 @@ import { pathsForStateDirectory } from "../src/gateway-paths.js";
 import { gatewayWorkingDirectory } from "../src/gateway-working-directory.js";
 import { LocalControlClient } from "../src/local-control.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 async function eventually(check: () => boolean | Promise<boolean>) {
@@ -77,7 +78,7 @@ test("CLI → app → CLI retains encrypted identity, pending calls, registratio
   let mcp = new TestMcpClient(endpoint);
   await mcp.initialize({ name: "claude-code", version: "handoff-test" });
   const email = "shared@fixture.test";
-  await mcp.callTool("register_agent", { email });
+  await mcp.callTool("register_agent", { username: fixtureUsername(email), email });
   const id = randomUUID();
   gateway = new DesktopGateway({
     id,

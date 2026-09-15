@@ -22,7 +22,7 @@ export class ActionCatalog {
     signal?: AbortSignal,
   ): Promise<CentralActionType> {
     const action = (await this.central.listActionTypes(signal)).find(
-      (entry) => entry.name === name,
+      (entry) => entry.name === name.trim().toLowerCase(),
     );
     if (action === undefined) throw new ActionCatalogError("action_type_unknown");
     if (payload !== undefined) await this.#validate(action.input_schema, payload, signal);

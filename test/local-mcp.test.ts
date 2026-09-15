@@ -394,11 +394,13 @@ test("workflow errors tell the agent how to recover without repeating uncertain 
     ["invalid_action_payload", /schema/],
     ["permission_denied", /target person's human.*caller cannot approve/],
     ["owner_question_pending", /question/],
+    ["credential_expired", /Open Embassys.*Set up this device/],
   ] as const) {
     code = next;
     await assert.rejects(client.callTool("echo", {}), (error: unknown) => {
       assert.ok(error instanceof McpCallError);
       assert.match(error.serverMessage, expected);
+      assert.doesNotMatch(error.serverMessage, /does not yet offer credential renewal/u);
       return true;
     });
   }

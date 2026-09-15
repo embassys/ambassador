@@ -1,6 +1,6 @@
 # Ambassador protocol
 
-Status: 0.2.19 development cutover; qualification follow-ups are listed in
+Status: current client contract, September 15; release and qualification status are listed in
 [Current work](implementation-plan.md)
 
 [ADR 0061](adr/0061-durable-workflows-and-client-delivery.md) is the approved
@@ -256,11 +256,18 @@ The local catalog response also includes `workflow_guidance`: the verified
 requester email and meeting guidance. It tells the agent to use actual returned
 availability before coordinated booking and to include the requester as an
 attendee. Central action definitions and submitted payloads remain unchanged.
+The optional boolean `verified_only` requests reviewed catalog entries. Omit it
+to include custom actions; internal payload/result validation always uses the
+full catalog. Filtering discovery does not change an agent's accepted list.
 
 `message_box` is a strict discriminated union. Unknown fields fail validation.
 
 | Type | Purpose and required input |
 | --- | --- |
+| `get_available_actions` | Read own accepted requests or a peer's `agent_email` (email or username) |
+| `set_available_actions` | Owner-instructed full replacement `available_actions` list; never a grant |
+| `get_action_progress` | Read the central status and ordered progress for a call UUID; does not consume or complete local work |
+| `report_progress` | Pending incoming call UUID, `working` / `waiting_for_owner_input` / `failed`, optional bounded public note |
 | `request_action` | New request UUID, exact catalog action name, target email, exact object payload; optional decision menu, reason, scope and wait |
 | `request_permission` | New request UUID, exact catalog name, target email or triggering message ID; no action payload |
 | `submit_action_result` | New request UUID, pending call UUID, success/error status and result object |
@@ -284,8 +291,9 @@ tells the user they can ask again. There is no scheduled retry or new submission
 Events carry receipt cursors. Reading a check or inbox never consumes results.
 A check with a previous cursor acknowledges those events before waiting for
 later events. Explicit receipts durably precede result removal. Cancellation
-ends observation, not accepted work. Uncertain external outcomes are retained
-and never automatically repeated. The API has no reconciliation endpoint.
+ends observation, not accepted work. Uncertain external outcomes are retained.
+Only supported mutations recorded under their original idempotency key and exact
+body can be reconciled through central; unkeyed work is never replayed.
 
 Inbox pages visit pending calls, unread results, then outbound intents in
 insertion order. The default limit is 50, maximum 100, with a 500 KiB page
@@ -313,9 +321,17 @@ results or diagnostic output.
 ```json
 {
   "email": "agent@example.test",
+  "username": "agentname",
   "display_name": "Optional display name"
 }
 ```
+
+The username is a chosen public handle, 5–32 ASCII letters or numbers. A missing
+handle returns `input_required` with `required: ["username"]` before any write.
+Central registration sends both email and username, retains the canonical handle
+in registration progress and distinguishes username conflicts from an existing
+email. Existing shorter handles remain valid lookup targets. Owner-first desktop
+setup still uses its one-code owner endpoint, which assigns the handle centrally.
 
 Before writing state or contacting central, Ambassador resolves the current MCP
 session's exact client name to one enabled capability profile. OpenClaw and
@@ -539,7 +555,9 @@ The currently implemented protected routes are:
 
 | Operation | Method and path | Input |
 | --- | --- | --- |
-| List actions | `GET /api/list_action_types` | none |
+| List actions | `GET /api/list_action_types` | optional boolean `verified_only` |
+| Read accepted requests | `GET /api/available_actions` | optional `agent_email`, email or username; defaults to self |
+| Replace accepted requests | `PUT /api/available_actions` | complete `available_actions` list, at most 500 names; self only |
 | Request permission | `POST /api/request_permission` | `target_email`, `message_id`, or both when consistent; exactly one of `action_type` / `permission_type`; optional `decision_options`, `reason`, and `scope` |
 | Ask the local agent's owner | `POST /api/get_human_input` | internal only; bounded question, `text` or `buttons`, exact options for buttons, triggering `message_id` |
 | Call action | `POST /api/call_action` | `target_email`, `action_type`, `payload` |
@@ -551,6 +569,35 @@ The currently implemented protected routes are:
 | Recover mutation outcome | `GET /api/idempotency_status?operation=…&idempotency_key=…` | internal only; original operation/key |
 | Renew credential | `POST /api/renew_token` | internal only; same retained key, no body |
 | Report progress | `POST /api/report_action_progress` | original `call_id`, state and bounded note |
+| Read progress | `GET /api/action_progress?call_id=…` | call UUID; central authorizes either participant |
+
+Under [ADR 0087](adr/0087-usernames-and-accepted-actions.md), `message_box` also
+accepts `get_available_actions` and `set_available_actions`. Null/unrestricted
+means no list was declared; an empty restricted list accepts no new requests.
+These settings neither grant access nor revoke existing grants. Writes require
+an explicit owner request, replace the whole list and are not automatically
+replayed after a lost response. Unknown declarations create unreviewed actions.
+
+For a new targeted request, read availability and resolve the canonical email
+before saving dispatch state. Keep the caller's normalized original fingerprint
+for retries. Rejected availability is durable and makes no permission request.
+The server still enforces its current policy if it changes after this read.
+Saved continuations never resolve the target again or create another intent.
+If a target stops accepting an action, a matching existing grant remains usable.
+For action requests, read central permissions and match the action and both
+identities before saving ready intent under that grant. Skip a new permission
+request; central still enforces scope, expiry, use limits and revocation on the
+action call. A denied call never triggers an automatic replacement grant.
+
+Catalog entries now include `verified`. Expose it without treating it as a grant.
+Empty schemas are valid, especially for unreviewed actions. Apply server action
+name trimming/lowercasing consistently; do not map one action to another. Reads
+remain bounded to 5,000 entries and the existing 512 KiB normalized response cap.
+Progress reads require exact call correlation, unique event IDs, increasing
+positive sequence numbers, known states and timestamps with offsets. At most
+1,000 events and 512 KiB are accepted. A completed central call status does not
+supply the result: callers still use their saved check or inbox to receive it.
+See the [September 15 contract review](central-adoption-2026-09-15.md).
 
 The September 14 catalog adds nullable `result_schema` alongside `input_schema`.
 Ambassador validates its shape, exposes it unchanged and validates successful
@@ -666,6 +713,17 @@ ACP approval poller. An ACP turn waiting on its owner cannot stop receipt of its
 answer. Provider failure pauses provider delivery and preserves uncertainty;
 reception, operation updates and acknowledgements continue.
 
+Provider tool questions use `request_kind: provider_option`, an encrypted durable
+generation per gated invocation, and an installation/provider key. The exact
+option labels and values remain unchanged. A new generation supersedes older
+questions; recovery of a lost submission response reuses the saved body and key.
+Both the question and local approval wait expire after 72 hours. Provider exit,
+turn completion and shutdown cancel the invocation's local wait. A late answer
+cannot approve another tool. Ordinary owner questions remain text answers and do
+not create resource grants. Central lacks an invocation-end route, so immediate
+removal of a stopped provider's question is tracked in
+[issue 24](https://github.com/embassys/agent2agent/issues/24).
+
 Persist dispatch intent before a provider invocation and acknowledgement intent
 before sending it. Restart resumes prepared work, marks interrupted external
 attempts uncertain, and never replays a dispatched prompt. Recovery uses bounded
@@ -681,8 +739,8 @@ Unowned valid notifications use the configured incoming profile.
 Central leases a batch and may redeliver it after expiry. A poll response lost
 before local capture can therefore be recovered by central. Local custody handles
 duplicate IDs without repeating provider dispatch. This is not an exactly-once
-model-execution guarantee. Deployed protected-flow qualification remains blocked
-by the replay-protection failure recorded in API issue 15.
+model-execution guarantee. The issue 15 repair passed protected live qualification;
+the latest changes' separate validation limits are recorded in the implementation plan.
 
 ## Webhook delivery
 

@@ -40,6 +40,23 @@ const SPAWN_ENVIRONMENT = [
   "WINDIR",
 ] as const;
 
+test("provider exit cancels its approval wait before a later invocation starts", async (t) => {
+  let approvalSignal: AbortSignal | undefined;
+  const value = await target(t, "permission-exit-session-mcp", {
+    permissionApproval: async (_request, signal) => {
+      approvalSignal = signal;
+      return await new Promise<string>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new Error("provider exited")), {
+          once: true,
+        });
+      });
+    },
+  });
+  await assert.rejects(value.delivery.deliver(MESSAGE, new AbortController().signal));
+  assert.ok(approvalSignal);
+  assert.equal(approvalSignal.aborted, true);
+});
+
 async function target(
   t: TestContext,
   scenario: string,

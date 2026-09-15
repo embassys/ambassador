@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { startFakeWebhook } from "./support/fake-webhook.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 const FIXTURE_NOW_SECONDS = 1_788_220_800;
@@ -126,8 +127,12 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
   const client = new TestMcpClient(endpoint);
   await client.initialize({ name: "openclaw-bundle-mcp", version: "0.0.0" });
   const email = `packed-${randomUUID()}@fixture.test`;
-  assert.equal((await client.callTool("register_agent", { email })).status, "input_required");
+  assert.equal(
+    (await client.callTool("register_agent", { username: fixtureUsername(email), email })).status,
+    "input_required",
+  );
   await client.callTool("register_agent", {
+    username: fixtureUsername(email),
     email,
     delivery: {
       mode: "webhook",
@@ -155,6 +160,29 @@ test("packed Ambassador completes REST enrollment through the Docker fixture", a
     ],
   );
   assert.equal(Array.isArray((await client.callTool("list_action_types", {})).action_types), true);
+  const unrestricted = await client.callTool("message_box", { type: "get_available_actions" });
+  assert.equal(unrestricted.available_actions, null);
+  assert.equal(unrestricted.restricted, false);
+  const accepted = await client.callTool("message_box", {
+    type: "set_available_actions",
+    available_actions: ["GET_EMAIL"],
+  });
+  assert.deepEqual(accepted.available_actions, ["get_email"]);
+  const reviewed = await client.callTool("list_action_types", { verified_only: true });
+  assert.ok((reviewed.action_types as Array<{ verified: boolean }>).length > 0);
+  assert.ok((reviewed.action_types as Array<{ verified: boolean }>).every((item) => item.verified));
+  const byUsername = await client.callTool("message_box", {
+    type: "get_available_actions",
+    agent_email: fixtureUsername(email).toUpperCase(),
+  });
+  assert.equal(byUsername.agent_email, email);
+  assert.deepEqual(byUsername.available_actions, ["get_email"]);
+  const closed = await client.callTool("message_box", {
+    type: "set_available_actions",
+    available_actions: [],
+  });
+  assert.equal(closed.restricted, true);
+  assert.deepEqual(closed.available_actions, []);
   assert.deepEqual(await client.callTool("message_box", { type: "inbox" }), {
     count: 0,
     items: [],

@@ -7,7 +7,11 @@ import { type TestContext, test } from "node:test";
 import Database from "better-sqlite3";
 import { ActionResultInbox } from "../src/action-result-inbox.js";
 import { parseCentralCredential } from "../src/central-credential.js";
-import type { CentralMessage } from "../src/central-rest.js";
+import {
+  type CentralMessage,
+  type CentralPermission,
+  CentralRestError,
+} from "../src/central-rest.js";
 import { EncryptedRecordStore } from "../src/encrypted-record-store.js";
 import { MESSAGE_BOX_TOOL, MessageBox } from "../src/message-box.js";
 import { OutboundActions } from "../src/outbound-actions.js";
@@ -67,6 +71,18 @@ async function fixture(t: TestContext, granted = false, waitMs = 35) {
   let replies = 0;
   let afterPermission: (() => void) | undefined;
   const transport = {
+    async getMyPermissions(): Promise<CentralPermission[]> {
+      return [];
+    },
+    async getAvailableActions(
+      address?: string,
+    ): Promise<import("../src/central-rest.js").CentralAvailableActions> {
+      return {
+        agent_email: address ?? "owner@fixture.test",
+        available_actions: null,
+        restricted: false,
+      };
+    },
     async listActionTypes() {
       return [
         {
@@ -137,6 +153,9 @@ async function fixture(t: TestContext, granted = false, waitMs = 35) {
   };
   return {
     root,
+    ownerEmail: credential.token.email,
+    transport,
+    outbound,
     pending,
     outcome,
     callId,
@@ -201,6 +220,116 @@ const request = () => ({
   target_email: "peer@example.test",
   action_type: "lookup",
   payload: { query: "saved private intent" },
+});
+
+test("a restricted accepted list does not block an existing grant or send another permission request", async (t) => {
+  const f = await fixture(t);
+  f.transport.getAvailableActions = async () => ({
+    agent_email: "peer@example.test",
+    available_actions: [],
+    restricted: true,
+  });
+  f.transport.getMyPermissions = async () => [
+    {
+      id: "permission-existing",
+      grantor_email: "peer@example.test",
+      grantee_email: f.ownerEmail,
+      action_type: "lookup",
+      status: "granted",
+    },
+  ];
+  const input = { ...request(), wait_seconds: 0 };
+  const result = await f.box.call(input, new AbortController().signal);
+  assert.equal(result.status, "pending");
+  assert.equal(f.requests, 0);
+  assert.equal(f.calls, 1);
+  await f.restart();
+  await f.box.call(input, new AbortController().signal);
+  assert.equal(f.requests, 0);
+  assert.equal(f.calls, 1);
+});
+
+test("availability bypass requires the exact granted action and both identities", async (t) => {
+  const f = await fixture(t);
+  f.transport.getAvailableActions = async () => ({
+    agent_email: "peer@example.test",
+    available_actions: [],
+    restricted: true,
+  });
+  for (const change of [
+    { grantee_email: "different@example.test" },
+    { grantor_email: "different@example.test" },
+    { action_type: "other" },
+    { status: "revoked" as const },
+    { status: "pending" as const },
+  ]) {
+    f.transport.getMyPermissions = async () => [
+      {
+        id: "permission-existing",
+        grantor_email: "peer@example.test",
+        grantee_email: f.ownerEmail,
+        action_type: "lookup",
+        status: "granted",
+        ...change,
+      },
+    ];
+    assert.equal(
+      (await f.box.call({ ...request(), wait_seconds: 0 }, new AbortController().signal)).status,
+      "rejected",
+    );
+  }
+  assert.equal(f.requests, 0);
+  assert.equal(f.calls, 0);
+});
+
+test("central can revoke a pre-existing grant between the read and dispatch without a replacement permission request", async (t) => {
+  const f = await fixture(t);
+  f.transport.getAvailableActions = async () => ({
+    agent_email: "peer@example.test",
+    available_actions: [],
+    restricted: true,
+  });
+  f.transport.getMyPermissions = async () => [
+    {
+      id: "permission-existing",
+      grantor_email: "peer@example.test",
+      grantee_email: f.ownerEmail,
+      action_type: "lookup",
+      status: "granted",
+    },
+  ];
+  f.transport.callAction = async () => {
+    throw new CentralRestError("permission_revoked", { httpStatus: 403, notAccepted: true });
+  };
+  const result = await f.box.call({ ...request(), wait_seconds: 0 }, new AbortController().signal);
+  assert.equal(result.status, "rejected");
+  assert.match(JSON.stringify(result), /permission_revoked/);
+  assert.equal(f.requests, 0);
+});
+
+test("a remote progress read does not complete, replay or acknowledge the saved operation", async (t) => {
+  const f = await fixture(t, true);
+  const signal = new AbortController().signal;
+  const input = { ...request(), wait_seconds: 0 };
+  await f.box.call(input, signal);
+  const snapshot = { call_id: f.callId, call_status: "completed", events: [] };
+  Object.assign(f.transport, {
+    getActionProgress: async (id: string) => {
+      assert.equal(id, f.callId);
+      return snapshot;
+    },
+  });
+  const read = { type: "get_action_progress", call_id: f.callId };
+  assert.deepEqual(await f.box.call(read, signal), snapshot);
+  assert.deepEqual(await f.box.call(read, signal), snapshot);
+  assert.equal(
+    (await f.box.call({ type: "check", request_id: input.request_id, wait_seconds: 0 }, signal))
+      .status,
+    "pending",
+  );
+  assert.equal(f.calls, 1);
+  assert.equal(f.requests, 1);
+  assert.equal(f.replies, 0);
 });
 
 for (const id of ["8719E7BB-A799-4410-BB26-BBC80921D6CC", "01990acb-C3a4-7d21-A827-Ddee789af321"]) {
@@ -583,4 +712,87 @@ test("remote progress wakes the right wait, orders redelivery and never complete
   );
   assert.equal(failed.status, "pending", "failed progress is not an action result");
   assert.equal(f.calls, 1);
+});
+
+test("username lookup uses canonical custody, survives restart, and does not re-resolve a saved request", async (t) => {
+  const f = await fixture(t);
+  let reads = 0;
+  f.transport.getAvailableActions = async () => {
+    reads++;
+    return { agent_email: "peer@example.test", available_actions: null, restricted: false };
+  };
+  const input = {
+    type: "request_action",
+    request_id: randomUUID(),
+    target_email: " Amin ",
+    action_type: " LOOKUP ",
+    payload: { query: "saved private intent" },
+    wait_seconds: 0,
+  };
+  await f.box.call(input, new AbortController().signal);
+  assert.equal(reads, 1);
+  assert.equal(f.outbound.get("peer@example.test", "lookup")?.operation_id, input.request_id);
+  await f.restart();
+  f.transport.getAvailableActions = async () => {
+    throw new Error("must not re-resolve");
+  };
+  await f.box.call(input, new AbortController().signal);
+  await f.box.capture(f.outcome);
+  assert.equal(f.calls, 1);
+  assert.equal(f.requests, 1);
+});
+
+test("an empty peer list rejects new work without sending permission, including after restart", async (t) => {
+  const f = await fixture(t);
+  f.transport.getAvailableActions = async () => ({
+    agent_email: "peer@example.test",
+    available_actions: [],
+    restricted: true,
+  });
+  const input = {
+    type: "request_action",
+    request_id: randomUUID(),
+    target_email: "peer@example.test",
+    action_type: "lookup",
+    payload: { query: "saved private intent" },
+    wait_seconds: 0,
+  };
+  const result = await f.box.call(input, new AbortController().signal);
+  assert.equal(result.status, "rejected");
+  assert.match(JSON.stringify(result), /action_not_accepted/);
+  assert.equal(f.requests, 0);
+  assert.equal(f.calls, 0);
+  await f.restart();
+  assert.equal(
+    (
+      await f.box.call(
+        { type: "check", request_id: input.request_id, wait_seconds: 0 },
+        new AbortController().signal,
+      )
+    ).status,
+    "rejected",
+  );
+});
+
+test("a large refusal list still fits durable operation custody", async (t) => {
+  const f = await fixture(t);
+  f.transport.getAvailableActions = async () => ({
+    agent_email: "peer@example.test",
+    restricted: true,
+    available_actions: Array.from({ length: 500 }, (_, n) => `${n}${"x".repeat(120)}`),
+  });
+  const result = await f.box.call(
+    {
+      type: "request_action",
+      request_id: randomUUID(),
+      target_email: "peer@example.test",
+      action_type: "lookup",
+      payload: { query: "saved private intent" },
+      wait_seconds: 0,
+    },
+    new AbortController().signal,
+  );
+  assert.equal(result.status, "rejected");
+  assert.ok(JSON.stringify(result).length < 10000);
+  assert.equal(f.requests, 0);
 });

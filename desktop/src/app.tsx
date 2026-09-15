@@ -15,6 +15,7 @@ import type {
 import type { DesktopReview } from "../../src/desktop/review.js";
 import { createViewReader } from "../../src/desktop/view-reader.js";
 import type { GatewayOverview } from "../../src/gateway-application.js";
+import { AcceptedActions } from "./accepted-actions.js";
 import { Account } from "./account.js";
 import { Activity, Permissions } from "./agent-status.js";
 import { BackButton } from "./controls.js";
@@ -1083,6 +1084,9 @@ function App() {
                     changed={refresh}
                     compact
                   />
+                  {selected && (
+                    <AcceptedActions key={selected.id} instanceId={selected.id} command={call} />
+                  )}
                   {preferenceControls}
                   <section className="device-links simple-settings-links">
                     <DetailSheet className="advanced-settings" title="Advanced">

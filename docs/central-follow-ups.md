@@ -22,6 +22,18 @@ execution-token cache headers. See the adoption record for test boundaries.
 
 Current API follow-ups:
 
+- [23](https://github.com/embassys/agent2agent/issues/23): correct the shared
+  September 15 examples for result status, owner decisions and provider questions.
+  The client follows the reviewed server models and runtime validation.
+- [24](https://github.com/embassys/agent2agent/issues/24): end an exact provider
+  invocation and invalidate its pending owner approvals when the local provider
+  stops. The client cancels local waits, preserves invocation correlation, and
+  uses central generation supersession plus a 72-hour expiry meanwhile.
+
+- [22](https://github.com/embassys/agent2agent/issues/22): let owner-first signup
+  choose a username and return the stored handle in sign-in and roster responses.
+  The current app keeps the one-code flow and does not guess the assigned handle.
+
 - [14](https://github.com/embassys/agent2agent/issues/14): DPoP wire/nonce decision.
   Keep the current wire contract until a coordinated change is accepted.
 

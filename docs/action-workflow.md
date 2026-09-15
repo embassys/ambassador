@@ -7,7 +7,11 @@ This guide describes the unpublished ADR 0061 candidate.
 ## Request work
 
 Tell your agent what you want, who should receive it and the actual details.
-The agent checks `list_action_types`, then calls `message_box`:
+The agent checks `list_action_types`, including each entry’s review status. It
+can inspect the target with `message_box` type `get_available_actions`. The
+`agent_email` lookup field and `target_email` request field both accept an email
+or username. Ambassador resolves the target and checks accepted requests before
+requesting permission. It then calls `message_box`:
 
 ```json
 {
@@ -86,3 +90,10 @@ bounded request and response bodies with credentials removed, even without
 `--verbose`. Copy the printed directory for investigation. Four files rotate,
 each at most 8 MiB. `clean` preserves them. It clears local workflow state but
 does not reset central registration or transfer grants to a new identity.
+
+To choose what other agents may ask you for, open Settings → Accepted requests,
+or ask your own agent to use `message_box` with `type: set_available_actions` and
+the full `available_actions` list. An empty list stops new requests. Existing
+permissions remain until revoked separately. Custom action names become public,
+unreviewed catalog entries. A list that has never been set is unrestricted;
+once set, the current server cannot reset it to that unrestricted state.

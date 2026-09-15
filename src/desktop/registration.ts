@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { signupUsername } from "../agent-address.js";
 import { capabilityForKind } from "../agent-capabilities.js";
 import { type CentralEnrollmentClient, CentralEnrollmentError } from "../central-enrollment.js";
 import {
@@ -15,9 +16,11 @@ export const registrationInput = z.strictObject({
   email: z
     .string()
     .trim()
+    .toLowerCase()
     .min(3)
     .max(254)
     .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/u),
+  username: signupUsername.optional(),
   executor: desktopExecutor.optional(),
 });
 const recordSchema = registrationInput.extend({
@@ -40,6 +43,7 @@ export interface RegistrationSnapshot {
   phase: "new" | "registered" | RegistrationRecord["phase"];
   agentId?: string | undefined;
   email?: string;
+  username?: string | undefined;
   executor?: z.infer<typeof desktopExecutor> | undefined;
   message?: string | undefined;
   resendAfter?: number;
@@ -111,6 +115,11 @@ export class DesktopRegistration {
         phase: "registered",
         agentId: String(this.options.identity.enrollment.agent_id),
         email: String(this.options.identity.enrollment.email),
+        ...(this.#record?.username &&
+        this.#record.agentId === this.options.identity.enrollment.agent_id &&
+        !this.#record.phase.startsWith("recovery_")
+          ? { username: this.#record.username }
+          : {}),
         credentialStatus: this.options.identity.expired ? "expired" : "active",
         ...(this.options.identity.localCredential().token.executionDeviceId
           ? {
@@ -146,10 +155,12 @@ export class DesktopRegistration {
   ): Promise<RegistrationSnapshot> {
     return this.#exclusive(async () => {
       const input = registrationInput.parse(raw);
+      if (!input.username) throw new CentralEnrollmentError("username_invalid");
       const previous = this.#record;
       if (previous && previous.phase !== "rejected") {
         if (
           previous.email !== input.email ||
+          previous.username !== input.username ||
           previous.executor !== input.executor ||
           previous.displayName !== displayName
         )
@@ -188,7 +199,11 @@ export class DesktopRegistration {
       await this.#save(record);
       try {
         const result = await this.options.client.register(
-          { email: input.email, ...(displayName ? { display_name: displayName } : {}) },
+          {
+            email: input.email,
+            username: input.username,
+            ...(displayName ? { display_name: displayName } : {}),
+          },
           this.options.signal,
         );
         await this.#save({
@@ -201,30 +216,38 @@ export class DesktopRegistration {
         if (error instanceof CentralEnrollmentError) this.#lastError = error;
         if (
           error instanceof CentralEnrollmentError &&
-          ["registration_conflict", "unsupported_email_format", "central_rate_limited"].includes(
-            error.code,
-          )
+          [
+            "registration_conflict",
+            "username_unavailable",
+            "username_invalid",
+            "unsupported_email_format",
+            "central_rate_limited",
+          ].includes(error.code)
         ) {
           await this.#save({
             ...record,
             phase: error.code === "registration_conflict" ? "conflict" : "rejected",
             message:
               error.code === "registration_conflict"
-                ? "This email is already registered. Open its shared CLI installation, or use Account to sign in. Account sign-in cannot restore a lost local agent; Clean will not fix that."
-                : error.code === "central_rate_limited"
-                  ? "Too many requests. Wait before trying again."
-                  : "The server rejected this email format. It does not support +tag addresses yet.",
+                ? "This email is already registered. Open its shared CLI installation, or sign in and use Account > Set up this device to restore execution for the existing identity. Keep local state; Clean is not needed."
+                : error.code === "username_unavailable"
+                  ? "That username is unavailable. Choose another username."
+                  : error.code === "username_invalid"
+                    ? "Choose a username with 5–32 letters or numbers."
+                    : error.code === "central_rate_limited"
+                      ? "Too many requests. Wait before trying again."
+                      : "The server rejected this email format. It does not support +tag addresses yet.",
           });
         }
       }
     });
   }
   async registerFromTools(
-    arguments_: { email: string; display_name?: string },
+    arguments_: { email: string; username: string; display_name?: string },
     profile: DeliveryProfile,
   ): Promise<Record<string, unknown>> {
     const state = await this.register(
-      { email: arguments_.email, executor: profile.agent_kind },
+      { email: arguments_.email, username: arguments_.username, executor: profile.agent_kind },
       profile,
       arguments_.display_name,
     );
@@ -232,7 +255,12 @@ export class DesktopRegistration {
     if (state.phase === "conflict") throw new CentralEnrollmentError("registration_conflict");
     if (state.phase !== "awaiting_code" || !this.#record?.agentId)
       throw new CentralEnrollmentError("central_enrollment_outcome_uncertain");
-    return { agent_id: this.#record.agentId, email: state.email, message: state.message };
+    return {
+      agent_id: this.#record.agentId,
+      email: state.email,
+      username: state.username,
+      message: state.message,
+    };
   }
   async verifyFromTools(raw: unknown): Promise<Record<string, unknown>> {
     const input = z

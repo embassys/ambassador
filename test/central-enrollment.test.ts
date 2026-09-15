@@ -7,6 +7,7 @@ import {
   REST_BOOTSTRAP_TOOLS,
 } from "../src/central-enrollment.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const NOW_SECONDS = 1_788_220_800;
 
@@ -16,7 +17,7 @@ test("I02-E01 bootstrap catalog contains only current enrollment tools", () => {
     ["register_agent", "verify_email", "resend_verification"],
   );
   for (const tool of REST_BOOTSTRAP_TOOLS) {
-    assert.equal(JSON.stringify(tool).includes("username"), false);
+    assert.equal(JSON.stringify(tool).includes("username"), tool.name === "register_agent");
     assert.equal(JSON.stringify(tool).includes("token"), false);
   }
   const registration = REST_BOOTSTRAP_TOOLS[0];
@@ -58,9 +59,13 @@ test("I02-E02 enrollment sends exact REST bodies and returns token-free results"
   });
   const email = "gateway-enrollment@fixture.test";
 
-  const registered = await client.register({ email, display_name: "Ambassador fixture" });
+  const registered = await client.register({
+    username: fixtureUsername(email),
+    email,
+    display_name: "Ambassador fixture",
+  });
   assert.equal(registered.email, email);
-  assert.deepEqual(Object.keys(registered).sort(), ["agent_id", "email", "message"]);
+  assert.deepEqual(Object.keys(registered).sort(), ["agent_id", "email", "message", "username"]);
   const resent = await client.resend({ email });
   assert.deepEqual(Object.keys(resent), ["message"]);
 
@@ -93,7 +98,7 @@ test("I02-E02 enrollment sends exact REST bodies and returns token-free results"
         path: "/api/register_agent",
         authorizationScheme: null,
         dpopCount: 0,
-        bodyKeys: ["display_name", "email"],
+        bodyKeys: ["display_name", "email", "username"],
       },
       {
         method: "POST",
@@ -147,11 +152,19 @@ test("plus-addressed email reaches central and reports the current rejection pre
   });
 
   await assert.rejects(
-    client.register({ email: "person+claude@example.test" }),
+    client.register({
+      username: fixtureUsername("person+claude@example.test"),
+      email: "person+claude@example.test",
+    }),
     (error: unknown) =>
       error instanceof CentralEnrollmentError && error.code === "unsupported_email_format",
   );
-  assert.deepEqual(requests, [{ email: "person+claude@example.test" }]);
+  assert.deepEqual(requests, [
+    {
+      email: "person+claude@example.test",
+      username: fixtureUsername("person+claude@example.test"),
+    },
+  ]);
 });
 
 test("I02-E04 redirects and uncertain verification outcomes are never retried", async () => {
@@ -177,7 +190,10 @@ test("I02-E04 redirects and uncertain verification outcomes are never retried", 
       new Response(null, { status: 307, headers: { location: "https://elsewhere.invalid" } }),
   });
   await assert.rejects(
-    redirectClient.register({ email: "redirect@fixture.test" }),
+    redirectClient.register({
+      username: fixtureUsername("redirect@fixture.test"),
+      email: "redirect@fixture.test",
+    }),
     (error: unknown) =>
       error instanceof CentralEnrollmentError &&
       error.code === "central_enrollment_contract_failed",

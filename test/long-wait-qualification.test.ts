@@ -24,6 +24,13 @@ test("wall-clock qualification: initial MCP request waits ten minutes and a late
   let requests = 0;
   let calls = 0;
   const transport = {
+    async getAvailableActions(address?: string) {
+      return {
+        agent_email: address ?? "owner@fixture.test",
+        available_actions: null,
+        restricted: false,
+      };
+    },
     async listActionTypes() {
       return [
         {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentAddress, availableActionNames } from "../agent-address.js";
 import { connectionOperation, connectionProvider } from "./agent-connections.js";
 import { appearanceSchema } from "./appearance.js";
 import { diagnosticQuerySchema } from "./diagnostic-query.js";
@@ -70,6 +71,17 @@ const commandSchema = z.discriminatedUnion("type", [
     executor: desktopExecutor,
   }),
   z.strictObject({ type: z.literal("permissions"), ...selected }),
+  z.strictObject({
+    type: z.literal("accepted_actions"),
+    ...selected,
+    agent_email: agentAddress.optional(),
+  }),
+  z.strictObject({
+    type: z.literal("set_accepted_actions"),
+    ...selected,
+    agent_id: z.string().min(1).max(256),
+    available_actions: availableActionNames,
+  }),
   z.strictObject({
     type: z.literal("activity"),
     ...selected,

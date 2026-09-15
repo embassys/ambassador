@@ -195,3 +195,16 @@ Arbitrary agent commands, general conversations, provider
 credential management, central MCP discovery and automatic installation remain
 outside scope. The user authorized the 0.2.19 development release through the
 existing publication workflow, with the limits recorded in ADR 0015.
+
+## Agent usernames and accepted requests
+
+[ADR 0087](adr/0087-usernames-and-accepted-actions.md) adopts the September 15
+central contract. Agent signup asks for a public username. The owner-first app
+flow keeps its single code and server-assigned handle. Targets may be addressed
+by email or username and are resolved centrally before recording outbound work.
+The agent ID remains the authority for sessions and results.
+
+Catalog review status, an agent's accepted-request list, and a permission grant
+are separate concepts. The app and typed message box expose the accepted list
+without changing it automatically. The app uses private IPC and the enrolled
+agent's credential; it does not route owner settings through an MCP impersonation.

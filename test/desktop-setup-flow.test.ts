@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DesktopGateway } from "../src/desktop/gateway.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 import { TestMcpClient } from "./support/mcp-client.js";
 
 test("four-provider connection checks require actual MCP evidence and never repeat registration", async (t) => {
@@ -59,6 +60,7 @@ test("four-provider connection checks require actual MCP evidence and never repe
   assert.equal((await gateway.testAgent("claude_code")).state, "configured");
   await gateway.desktopCommand({
     type: "enrollment_register",
+    username: fixtureUsername("setup@fixture.test"),
     instanceId: id,
     email: "setup@fixture.test",
   });

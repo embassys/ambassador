@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-
 import { parseCentralCredential } from "../src/central-credential.js";
 import { CentralEnrollmentClient } from "../src/central-enrollment.js";
 import {
@@ -9,6 +8,7 @@ import {
 } from "../src/central-protected-transport.js";
 import { DpopNonceCache } from "../src/dpop.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 const NOW_SECONDS = 1_788_220_800;
 
@@ -19,7 +19,7 @@ test("I02-D04 transport sends Bearer authorization and one separate fresh proof"
     centralOrigin: central.apiUrl,
     nowSeconds: () => NOW_SECONDS,
   });
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const credential = parseCentralCredential(verified.credential, () => NOW_SECONDS);
   central.resetRequests();
@@ -70,7 +70,7 @@ test("I02-D05 one valid nonce challenge retries once with a new proof", async (t
     centralOrigin: central.apiUrl,
     nowSeconds: () => NOW_SECONDS,
   });
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const credential = parseCentralCredential(verified.credential, () => NOW_SECONDS);
   central.setNonce(email, "fixture-initial-nonce");
@@ -92,7 +92,7 @@ test("I02-D06 non-nonce authentication failures never retry or fall back", async
     centralOrigin: central.apiUrl,
     nowSeconds: () => NOW_SECONDS,
   });
-  await enrollment.register({ email });
+  await enrollment.register({ username: fixtureUsername(email), email });
   const verified = await enrollment.verify({ email, code: central.verificationCode(email) });
   const credential = parseCentralCredential(verified.credential, () => NOW_SECONDS);
 

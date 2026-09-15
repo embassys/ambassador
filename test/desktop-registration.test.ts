@@ -10,6 +10,7 @@ import { parseDesktopCommand } from "../src/desktop/protocol.js";
 import { DesktopRegistration } from "../src/desktop/registration.js";
 import { GatewayIdentity } from "../src/identity.js";
 import { startFakeCentral } from "./support/fake-central.js";
+import { fixtureUsername } from "./support/fixture-username.js";
 
 test("CLI registration can finish in the app and app registration can finish in CLI", async (t) => {
   for (const cliFirst of [true, false]) {
@@ -23,11 +24,13 @@ test("CLI registration can finish in the app and app registration can finish in 
       f.options.workingDirectory,
     );
     let registration = await DesktopRegistration.open(f.options);
-    if (cliFirst) await registration.registerFromTools({ email }, profile);
-    else await registration.register({ email, executor: "claude" });
+    if (cliFirst)
+      await registration.registerFromTools({ username: fixtureUsername(email), email }, profile);
+    else
+      await registration.register({ username: fixtureUsername(email), email, executor: "claude" });
     registration = await DesktopRegistration.open(f.options);
     const count = f.central.requests().length;
-    await registration.registerFromTools({ email }, profile);
+    await registration.registerFromTools({ username: fixtureUsername(email), email }, profile);
     assert.equal(f.central.requests().length, count);
     await assert.rejects(
       registration.verifyFromTools({ email: "wrong@fixture.test", code: "123456" }),
@@ -73,7 +76,10 @@ async function setup(t: TestContext) {
 test("email registration defers executor choice and activation until the owner finishes setup", async (t) => {
   const f = await setup(t);
   let registration = await DesktopRegistration.open(f.options);
-  await registration.register({ email: "first-account@fixture.test" });
+  await registration.register({
+    username: fixtureUsername("first-account@fixture.test"),
+    email: "first-account@fixture.test",
+  });
   assert.equal(await f.options.profileStore.load(), undefined);
   await registration.verify(f.central.verificationCode("first-account@fixture.test"));
   assert.equal(f.activations(), 0);
@@ -103,7 +109,10 @@ test("retrying selected executor activation never registers or verifies again", 
       activated = true;
     },
   });
-  await registration.register({ email: "deferred-retry@fixture.test" });
+  await registration.register({
+    username: fixtureUsername("deferred-retry@fixture.test"),
+    email: "deferred-retry@fixture.test",
+  });
   await registration.verify(f.central.verificationCode("deferred-retry@fixture.test"));
   const count = f.central.requests().length;
   await assert.rejects(registration.selectExecutor("claude"));
@@ -117,7 +126,11 @@ test("retrying selected executor activation never registers or verifies again", 
 test("desktop registration binds the executor and email, survives restart and keeps secrets out of UI state", async (t) => {
   const f = await setup(t);
   let registration = await DesktopRegistration.open(f.options);
-  const input = { email: "desktop@fixture.test", executor: "claude" as const };
+  const input = {
+    username: fixtureUsername("desktop@fixture.test"),
+    email: "desktop@fixture.test",
+    executor: "claude" as const,
+  };
   assert.equal((await registration.register(input)).phase, "awaiting_code");
   assert.equal((await f.options.profileStore.load())?.agent_kind, "claude");
   registration = await DesktopRegistration.open(f.options);
@@ -148,7 +161,11 @@ test("lost registration responses are not repeated and an emailed code can finis
     resend: f.options.client.resend.bind(f.options.client),
   };
   const options = { ...f.options, client };
-  const input = { email: "lost@fixture.test", executor: "codex" as const };
+  const input = {
+    username: fixtureUsername("lost@fixture.test"),
+    email: "lost@fixture.test",
+    executor: "codex" as const,
+  };
   let registration = await DesktopRegistration.open(options);
   assert.equal((await registration.register(input)).phase, "registration_uncertain");
   registration = await DesktopRegistration.open(options);
@@ -173,7 +190,11 @@ test("lost verification permits an explicit same-code retry after restart", asyn
   };
   const options = { ...f.options, client };
   let registration = await DesktopRegistration.open(options);
-  await registration.register({ email: "verify-lost@fixture.test", executor: "hermes" });
+  await registration.register({
+    username: fixtureUsername("verify-lost@fixture.test"),
+    email: "verify-lost@fixture.test",
+    executor: "hermes",
+  });
   assert.equal((await registration.verify("123456")).phase, "verification_uncertain");
   registration = await DesktopRegistration.open(options);
   await registration.verify("123456");
@@ -187,7 +208,11 @@ test("a failed credential write leaves verification uncertain across restart", a
     throw new Error("disk full");
   };
   let registration = await DesktopRegistration.open(f.options);
-  await registration.register({ email: "disk@fixture.test", executor: "claude" });
+  await registration.register({
+    username: fixtureUsername("disk@fixture.test"),
+    email: "disk@fixture.test",
+    executor: "claude",
+  });
   assert.equal(
     (await registration.verify(f.central.verificationCode("disk@fixture.test"))).phase,
     "verification_uncertain",
@@ -208,7 +233,11 @@ test("activation failure preserves the registered identity and never repeats ver
     },
   };
   const registration = await DesktopRegistration.open(options);
-  await registration.register({ email: "activation@fixture.test", executor: "codex" });
+  await registration.register({
+    username: fixtureUsername("activation@fixture.test"),
+    email: "activation@fixture.test",
+    executor: "codex",
+  });
   await assert.rejects(registration.verify(f.central.verificationCode("activation@fixture.test")));
   assert.equal(registration.snapshot().phase, "registered");
   assert.equal((await DesktopRegistration.open(options)).snapshot().phase, "registered");
@@ -221,8 +250,14 @@ test("an existing email is a conflict and never becomes a recovery or repeat reg
   const f = await setup(t);
   f.central.seedClient("existing@fixture.test");
   const registration = await DesktopRegistration.open(f.options);
-  const input = { email: "existing@fixture.test", executor: "claude" as const };
+  const input = {
+    username: fixtureUsername("existing@fixture.test"),
+    email: "existing@fixture.test",
+    executor: "claude" as const,
+  };
   assert.equal((await registration.register(input)).phase, "conflict");
+  assert.match(registration.snapshot().message ?? "", /sign in.*Set up this device/u);
+  assert.doesNotMatch(registration.snapshot().message ?? "", /cannot restore/u);
   const calls = f.central.requests().length;
   await registration.register(input);
   await assert.rejects(registration.resend());
@@ -248,7 +283,11 @@ test("resend binds the saved email and persists cooldown even when its response 
     },
   };
   let registration = await DesktopRegistration.open(options);
-  await registration.register({ email: "resend@fixture.test", executor: "hermes" });
+  await registration.register({
+    username: fixtureUsername("resend@fixture.test"),
+    email: "resend@fixture.test",
+    executor: "hermes",
+  });
   await assert.rejects(registration.resend());
   now += 60_000;
   await registration.resend();
@@ -277,8 +316,18 @@ test("concurrent registration cannot create a second identity", async (t) => {
       },
     },
   });
-  const first = registration.register({ email: "first@fixture.test", executor: "codex" });
-  await assert.rejects(registration.register({ email: "second@fixture.test", executor: "claude" }));
+  const first = registration.register({
+    username: fixtureUsername("first@fixture.test"),
+    email: "first@fixture.test",
+    executor: "codex",
+  });
+  await assert.rejects(
+    registration.register({
+      username: fixtureUsername("second@fixture.test"),
+      email: "second@fixture.test",
+      executor: "claude",
+    }),
+  );
   release();
   await first;
   assert.equal(calls, 1);
@@ -297,7 +346,11 @@ test("verification cannot commit a different central identity", async (t) => {
       },
     },
   });
-  await registration.register({ email: "binding@fixture.test", executor: "claude" });
+  await registration.register({
+    username: fixtureUsername("binding@fixture.test"),
+    email: "binding@fixture.test",
+    executor: "claude",
+  });
   assert.equal(
     (await registration.verify(f.central.verificationCode("binding@fixture.test"))).phase,
     "verification_uncertain",
@@ -310,6 +363,7 @@ test("desktop IPC rejects credentials, arbitrary executors, foreign email verifi
   assert.equal(
     parseDesktopCommand({
       type: "enrollment_register",
+      username: fixtureUsername("one@fixture.test"),
       instanceId,
       email: "one@fixture.test",
       executor: "claude",
@@ -317,7 +371,13 @@ test("desktop IPC rejects credentials, arbitrary executors, foreign email verifi
     "enrollment_register",
   );
   for (const command of [
-    { type: "enrollment_register", instanceId, email: "one@fixture.test", executor: "/bin/sh" },
+    {
+      type: "enrollment_register",
+      username: fixtureUsername("one@fixture.test"),
+      instanceId,
+      email: "one@fixture.test",
+      executor: "/bin/sh",
+    },
     { type: "enrollment_verify", instanceId, code: "123456", email: "other@fixture.test" },
     { type: "enrollment_verify", instanceId, code: "abcdef" },
     { type: "permissions", instanceId, token: "private" },
@@ -329,7 +389,7 @@ test("desktop IPC rejects credentials, arbitrary executors, foreign email verifi
 test("explicit recovery survives restart and requires a fresh code after an uncertain response", async (t) => {
   const f = await setup(t);
   const email = "recover-existing@fixture.test";
-  await f.options.client.register({ email });
+  await f.options.client.register({ username: fixtureUsername(email), email });
   const result = await f.options.client.verify({ email, code: f.central.verificationCode(email) });
   let now = Date.now(),
     attempts = 0,
@@ -353,7 +413,7 @@ test("explicit recovery survives restart and requires a fresh code after an unce
     },
   };
   let registration = await DesktopRegistration.open(options);
-  await registration.register({ email, executor: "claude" });
+  await registration.register({ username: fixtureUsername(email), email, executor: "claude" });
   assert.equal(registration.snapshot().phase, "conflict");
   await registration.recover();
   assert.equal(registration.snapshot().phase, "recovery_code");
