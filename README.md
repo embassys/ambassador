@@ -7,7 +7,7 @@ experimental; packages still lack verified publisher signing. See the
 [desktop build guide](desktop/README.md), [design](docs/desktop-app-design.md)
 and [implementation plan](docs/desktop-app-plan.md).
 
-The instructions below describe the released `@embassys/ambassador` gateway.
+The npm CLI is named `embassys`, starting with version 0.2.21.
 The desktop app is released separately from the npm CLI.
 
 Embassys Ambassador is a local bridge between an agent and the Embassys REST
@@ -20,9 +20,14 @@ agent over ACP v1 or to an authenticated webhook.
 - From the directory the agent may access, run:
 
 ```sh
-npx --yes @embassys/ambassador@latest start
+npm install -g embassys
+embassys
 ```
 
+- Bare `embassys` starts the server. `embassys start` does the same;
+  `embassys start --verbose` also prints detailed diagnostics.
+- Updating uses the same `npm install -g embassys` command. To run without a
+  global install, use `npx --yes embassys@latest`.
 - Keep that process open. It prints the MCP endpoint, diagnostic-log directory,
   and setup commands for Codex, Claude Code, Hermes, and OpenClaw.
 - Add `http://127.0.0.1:8787/mcp` to the agent as a token-free Streamable HTTP
@@ -33,7 +38,7 @@ npx --yes @embassys/ambassador@latest start
 - OpenClaw and Hermes users choose **direct** (the default) or **webhook**.
   Codex and Claude Code proceed directly without a delivery question.
 - Webhook users run
-  `npx --yes @embassys/ambassador@latest webhook-secret`, copy the displayed
+  `embassys webhook-secret`, copy the displayed
   value into Hermes's owner-only receiver configuration or OpenClaw's
   owner-only hooks configuration, and give the agent only the receiver URL
   during registration.
@@ -71,7 +76,7 @@ Each encrypted store allows 1 GiB; reads remain bounded.
 
 ## Wait for a response
 
-The 0.2.20 development release uses `message_box` for requests, checks,
+The CLI uses `message_box` for requests, checks,
 owner questions, replies and receipts. An initial request waits up to ten
 minutes for a related update. If it times out, ask the agent to check the same
 saved request again. The next check starts another wait without resubmitting
@@ -96,8 +101,8 @@ logs so a failed session can still be diagnosed.
 Keep Ambassador running and use:
 
 ```sh
-npx --yes @embassys/ambassador@latest sessions list
-npx --yes @embassys/ambassador@latest sessions show <session-id>
+embassys sessions list
+embassys sessions show <session-id>
 ```
 
 Add `--verbose` to `show` for bounded tool events. Stop Ambassador before
@@ -108,7 +113,7 @@ using `sessions delete <session-id>` or `sessions forget <session-id>`.
 Reset local Ambassador state:
 
 ```sh
-npx --yes @embassys/ambassador@latest clean
+embassys clean
 ```
 
 If Ambassador is running, `clean` asks whether to stop it and clear local state.
@@ -133,7 +138,7 @@ or to an owner-only backup after stopping Ambassador:
 
 Remove the directory as one unit. Deleting only `delivery-profile.json`, an
 encrypted value, or its key leaves an intentionally invalid partial state. The
-next `ambassador start` enables registration or explicit emailed recovery again.
+next `embassys start` enables registration or explicit emailed recovery again.
 Neither reset method deletes the central registration or changes the agent's
 normal provider configuration or credentials. The desktop also offers signed-in
 owner device setup and execution transfer; see its installation guide.
@@ -150,7 +155,11 @@ submission keys, leased message redelivery, retryable receipts, credential renew
 exact result schemas and remote progress. The paired desktop preview adds one-code
 setup, device controls, in-app decisions and People invitations. This remains a
 development release with the client limits below.
-The `@latest` commands install the latest published npm release.
+Version 0.2.21 renames the npm package and terminal command to `embassys`.
+Existing registration, state directories, MCP connections and app/CLI handoff
+continue to use the same installation. Stop the old CLI before starting the new
+one; no clean or re-registration is needed. The older `@embassys/ambassador`
+package remains a separate previously published package.
 
 The current runtime passed real Codex, Claude Code, Hermes and OpenClaw ACP
 qualification, plus real OpenClaw and Hermes webhook checks. OpenClaw native
@@ -159,8 +168,8 @@ despite one saved answer. Fresh Codex discovery and actual calendar invitation
 delivery passed native tests on September 8. Hermes native return remains
 unqualified. The separately configured Claude Chat/Cowork client passed natural
 requests; fresh Cowork discovery remains intermittent. Account-wide communication
-history is not yet integrated, and remote push needs server credentials and signed
-device qualification. See
+history is implemented, with live queue-isolation qualification still pending.
+Remote push needs server credentials and signed device qualification. See
 [client delivery](docs/client-delivery.md), [qualification](docs/qualification.md)
 and [the implementation plan](docs/implementation-plan.md). Gemini CLI and
 Antigravity remain inactive under

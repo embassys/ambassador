@@ -61,17 +61,22 @@ continue through `get_human_input`.
 The public package and commands are:
 
 ```text
-@embassys/ambassador
-ambassador start
-ambassador start --verbose
-ambassador sessions list
-ambassador sessions show <session-id>
-ambassador sessions show <session-id> --verbose
-ambassador sessions delete <session-id>
-ambassador sessions forget <session-id>
-ambassador webhook-secret
-ambassador clean
+npm install -g embassys
+embassys
+embassys start
+embassys start --verbose
+embassys sessions list
+embassys sessions show <session-id>
+embassys sessions show <session-id> --verbose
+embassys sessions delete <session-id>
+embassys sessions forget <session-id>
+embassys webhook-secret
+embassys clean
 ```
+
+Bare `embassys` starts the server exactly like `embassys start`. The package and
+binary rename in [ADR 0086](adr/0086-embassys-cli-package.md) preserves existing
+state locations and MCP connection names.
 
 Only `start --verbose` and `sessions show <session-id> --verbose` accept an
 option. `webhook-secret` creates one encrypted 48-character lowercase
@@ -386,9 +391,9 @@ structured content equivalent to:
 ```json
 {
   "status": "input_required",
-  "prompt": "Run `ambassador webhook-secret`, configure the displayed secret in this agent, then retry with the receiver URL.",
+  "prompt": "Run `embassys webhook-secret`, configure the displayed secret in this agent, then retry with the receiver URL.",
   "required": ["delivery.url"],
-  "command": "ambassador webhook-secret"
+  "command": "embassys webhook-secret"
 }
 ```
 
@@ -412,7 +417,7 @@ configuration. The final call is:
 
 Ambassador refuses central registration until its separately encrypted webhook
 secret exists. Neither the secret nor a selector for it is accepted through
-MCP. Repeating `ambassador webhook-secret` reveals the existing value and does
+MCP. Repeating `embassys webhook-secret` reveals the existing value and does
 not rotate it.
 
 Webhook URLs may use HTTPS. Plain HTTP is accepted only for a literal loopback

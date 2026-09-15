@@ -58,7 +58,7 @@ async function loadCandidate(candidatePath) {
     await runBounded("tar", ["-xzf", candidatePath, "-C", candidateRoot]);
     const packageRoot = join(candidateRoot, "package");
     const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
-    if (manifest.name !== "@embassys/ambassador" || manifest.bin?.ambassador !== "dist/cli.js") {
+    if (manifest.name !== "embassys" || manifest.bin?.embassys !== "dist/cli.js") {
       throw new Error("candidate archive failed");
     }
     const moduleUrl = (name) => pathToFileURL(join(packageRoot, "dist", name)).href;

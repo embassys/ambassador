@@ -1,5 +1,22 @@
 # Current work
 
+## Embassys CLI name, September 15
+
+Under [ADR 0086](adr/0086-embassys-cli-package.md), the owner approved the
+`embassys` npm package and terminal command, confirmed ownership of its
+placeholder and configured trusted publishing. The 0.2.21 candidate makes bare
+`embassys` start the server, preserves explicit commands, registration and
+app/CLI shared state, and updates setup and installed-package checks.
+
+- Core checks passed with 587 tests and four expected skips; Mac platform checks
+  passed with 22 tests and two expected skips. All 53 desktop tests, typechecking,
+  lint, the desktop build and its bundled worker check passed. A global npm
+  install of the candidate passed bare-command MCP startup, session inspection,
+  shared-state restart, graceful stop and clean. The separate clean-installed
+  business flow and command/native checks also passed.
+- [ ] Publish through the existing gated OIDC workflow and verify the public
+  package from a clean global installation.
+
 ## Sidebar segments, September 15
 
 Implemented the owner's Inbox / Conversations / People segmented sidebar.
@@ -101,8 +118,9 @@ See the [retest evidence](central-adoption-2026-09-14.md#retest-after-issue-15-w
 ## September 15 implementation and live Mac test
 
 The owner approved account history, qualification tooling, provider experience
-work, documentation cleanup and a live Mac end-to-end test. Changes are on
-`codex/account-history-and-live-mac`; no release or server change is included.
+work, documentation cleanup and a live Mac end-to-end test. Changes were merged
+in [PR 49](https://github.com/embassys/ambassador/pull/49); no release or server
+change was included in that PR.
 
 Implemented under [ADR 0085](adr/0085-account-communication-history.md):
 

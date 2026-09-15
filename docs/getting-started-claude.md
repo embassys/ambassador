@@ -8,7 +8,7 @@ For the unpublished desktop app's separate Chat/Cowork connection, see
 [Claude Desktop local client](claude-desktop-local-client.md). The steps below
 configure Claude Code and its incoming ACP executor.
 
-## 1. Start Ambassador
+## 1. Start Embassys
 
 - Install Node.js `>=24.19.0` and Claude Code.
 - Configure Claude Code authentication normally. Ambassador leaves account,
@@ -16,9 +16,11 @@ configure Claude Code and its incoming ACP executor.
 - In the directory Claude Code may access, run:
 
   ```sh
-  npx --yes @embassys/ambassador@latest start
+  npm install -g embassys
+  embassys
   ```
 
+- Update to the latest CLI with `npm install -g embassys`.
 - Keep that terminal open.
 
 ## 2. Add Ambassador to Claude Code
@@ -70,8 +72,8 @@ is signed in, update Ambassador, and restart it. For a clean local registration 
 ## Inspect sessions
 
 - Keep Ambassador running.
-- Run `npx --yes @embassys/ambassador@latest sessions list`.
-- Run `npx --yes @embassys/ambassador@latest sessions show <session-id>`.
+- Run `embassys sessions list`.
+- Run `embassys sessions show <session-id>`.
 - Add `--verbose` to `show` for bounded tool events.
 - Stop Ambassador before using `sessions delete <session-id>` to delete
   provider history or `sessions forget <session-id>` to remove only

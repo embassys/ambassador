@@ -2752,7 +2752,7 @@ async function main() {
         deleted.result === 5 &&
         deleted.stdout === "" &&
         deleted.stderr ===
-          "This agent cannot delete provider sessions; use `ambassador sessions forget` to remove only Ambassador metadata\n";
+          "This agent cannot delete provider sessions; use `embassys sessions forget` to remove only Ambassador metadata\n";
       assert(
         unsupported ||
           (deleted.result === 0 &&

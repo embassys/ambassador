@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-test("main publishes the Ambassador 0.2.20 candidate through npm OIDC after approval", async () => {
+test("main publishes the Embassys 0.2.21 candidate through npm OIDC after approval", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
@@ -22,6 +22,10 @@ test("main publishes the Ambassador 0.2.20 candidate through npm OIDC after appr
   );
   assert.match(workflow, /needs: \[check, central-fixture, package\]/u);
   assert.match(workflow, /id-token: write/u);
+  assert.match(workflow, /node_modules\/embassys\/dist\/cli\.js/u);
+  assert.match(workflow, /\.bin\/embassys/u);
+  assert.match(workflow, /embassys\.cmd/u);
+  assert.doesNotMatch(workflow, /@embassys\/ambassador|ambassador\.cmd|\.bin\/ambassador/u);
   assert.match(workflow, /npm install --global npm@11\.19\.0/u);
   assert.match(workflow, /npm publish "\$\{\{ steps\.artifact\.outputs\.tarball \}\}"/u);
   assert.equal(
@@ -33,8 +37,8 @@ test("main publishes the Ambassador 0.2.20 candidate through npm OIDC after appr
   const packageJson = JSON.parse(
     await readFile(join(process.cwd(), "package.json"), "utf8"),
   ) as Record<string, unknown>;
-  assert.equal(packageJson.name, "@embassys/ambassador");
-  assert.equal(packageJson.version, "0.2.20");
+  assert.equal(packageJson.name, "embassys");
+  assert.equal(packageJson.version, "0.2.21");
   assert.deepEqual(packageJson.engines, { node: ">=24.19.0" });
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });
@@ -53,7 +57,7 @@ test("shared flows run once while native matrix failures still block publication
   assert.doesNotMatch(workflow, /continue-on-error:/u);
 });
 
-test("every supported-agent guide uses latest Ambassador without pinning a provider release", async () => {
+test("every supported-agent guide uses latest Embassys without pinning a provider release", async () => {
   const guides = ["codex", "claude", "hermes", "openclaw"];
   for (const guide of guides) {
     const contents = await readFile(
@@ -61,7 +65,7 @@ test("every supported-agent guide uses latest Ambassador without pinning a provi
       "utf8",
     );
 
-    assert.match(contents, /npx --yes @embassys\/ambassador@latest start/u, guide);
+    assert.match(contents, /npm install -g embassys/u, guide);
     assert.match(contents, /Node\.js `>=24\.19\.0`/u, guide);
     assert.doesNotMatch(contents, /<25/u, guide);
     assert.match(contents, /latest/iu, guide);
@@ -73,7 +77,7 @@ test("every supported-agent guide uses latest Ambassador without pinning a provi
     assert.doesNotMatch(contents, /local-token|AMBASSADOR_LOCAL_TOKEN/u, guide);
     assert.match(contents, /Register me with Embassys/u, guide);
     if (guide === "hermes" || guide === "openclaw") {
-      assert.match(contents, /ambassador(?:@latest)? webhook-secret/u, guide);
+      assert.match(contents, /embassys(?:@latest)? webhook-secret/u, guide);
       assert.match(contents, /delivery\.url/u, guide);
     } else {
       assert.doesNotMatch(contents, /webhook/u, guide);

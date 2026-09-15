@@ -29,7 +29,7 @@ test("installed package loads native SQLite and rejects an invalid command throu
   const command =
     process.platform === "win32"
       ? process.execPath
-      : join(dirname(cli), "..", "..", "..", ".bin", "ambassador");
+      : join(dirname(cli), "..", "..", ".bin", "embassys");
   const args = process.platform === "win32" ? [cli, "invalid"] : ["invalid"];
   await new Promise<void>((resolve, reject) => {
     execFile(command, args, { cwd: root, timeout: 20_000 }, (error, stdout, stderr) => {

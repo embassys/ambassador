@@ -6,7 +6,7 @@ service or delete a registered central identity.
 1. Run:
 
    ```sh
-   npx --yes @embassys/ambassador@latest clean
+   embassys clean
    ```
 
    If Ambassador is running, the terminal asks whether to stop it and clear
@@ -32,7 +32,7 @@ service or delete a registered central identity.
    | Windows | `%LOCALAPPDATA%\ambassador` |
 
    Delete the directory only after checking the exact path and confirming that
-   no Ambassador process is running. Do not run `ambassador webhook-secret`
+   no Ambassador process is running. Do not run `embassys webhook-secret`
    concurrently with cleanup.
 
 3. Remove any test-only Ambassador MCP entry or Hermes webhook route that you

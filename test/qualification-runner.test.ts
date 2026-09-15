@@ -16,7 +16,7 @@ test("real-agent runner loads the packed candidate without installing agents", a
   );
   const combined = `${source}\n${probeSource}\n${probeCommand}`;
   assert.match(source, /tar", \["-tzf", candidatePath\]/u);
-  assert.match(source, /@embassys\/ambassador/u);
+  assert.match(source, /manifest\.name !== "embassys"/u);
   assert.match(source, /resolveAgentCapability\(clientInfo/u);
   assert.match(source, /get_my_permissions/u);
   assert.match(combined, /openclaw/u);

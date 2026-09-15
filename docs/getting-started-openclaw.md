@@ -4,16 +4,18 @@ Using the Embassys app? Choose **Connect OpenClaw** during setup. The app instal
 the connection and discovery skill, then checks the agent. See
 [guided connection](guided-agent-connection.md). The terminal flow below remains available.
 
-## 1. Start Ambassador
+## 1. Start Embassys
 
 - Install Node.js `>=24.19.0` and OpenClaw.
 - Sign in to OpenClaw normally.
 - In the directory OpenClaw may access, run:
 
   ```sh
-  npx --yes @embassys/ambassador@latest start
+  npm install -g embassys
+  embassys
   ```
 
+- Update to the latest CLI with `npm install -g embassys`.
 - Keep that terminal open.
 
 ## 2. Add Ambassador to OpenClaw
@@ -78,7 +80,7 @@ Embassys. Ambassador presents the provider's exact choices and returns your sele
 2. In another terminal, get Ambassador's receiver secret:
 
    ```sh
-   npx --yes @embassys/ambassador@latest webhook-secret
+   embassys webhook-secret
    ```
 
 3. Run `openclaw config patch --stdin`, paste the block below with the secret,

@@ -340,7 +340,7 @@ export async function runCli(args: string[], context: CliContext): Promise<numbe
       );
       if (deleted === "unsupported") {
         context.io.stderr.write(
-          "This agent cannot delete provider sessions; use `ambassador sessions forget` to remove only Ambassador metadata\n",
+          "This agent cannot delete provider sessions; use `embassys sessions forget` to remove only Ambassador metadata\n",
         );
         return 5;
       }

@@ -7,7 +7,12 @@ import {
   parseAmbassadorStartOptions,
 } from "../src/ambassador-options.js";
 
-test("accepts ambassador start with optional verbose output", () => {
+test("bare embassys starts the same server as explicit start", () => {
+  assert.deepEqual(parseAmbassadorCommand([]), { command: "start", verbose: false });
+  assert.deepEqual(parseAmbassadorStartOptions([]), { verbose: false });
+});
+
+test("accepts embassys start with optional verbose output", () => {
   assert.deepEqual(parseAmbassadorStartOptions(["start"]), { verbose: false });
   assert.deepEqual(parseAmbassadorStartOptions(["start", "--verbose"]), { verbose: true });
 });
@@ -54,7 +59,10 @@ test("accepts the explicit utility and session commands", () => {
 
 test("rejects old, split, duplicate, positional, configuration, and secret-value options", () => {
   const cases = [
-    [],
+    ["--verbose"],
+    ["unknown"],
+    ["start", "--verbose", "--verbose"],
+    ["start", "extra"],
     ["start", "--local-token-env", "AMBASSADOR_TOKEN"],
     ["start", "--local-token-env=AMBASSADOR_TOKEN"],
     ["start", "--local-token-env=AMBASSADOR_TOKEN", "--local-token-env=SECOND_TOKEN"],

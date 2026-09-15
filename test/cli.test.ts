@@ -354,7 +354,7 @@ test("creates and prints one stable webhook secret without taking the gateway lo
   assert.equal(output[1], output[0]);
 });
 
-test("starts and serves MCP with no options or environment variables", async (t) => {
+test("bare embassys starts and serves MCP with no arguments or environment variables", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ambassador-zero-config-"));
   const controller = new AbortController();
   let running: Promise<number> | undefined;
@@ -368,7 +368,7 @@ test("starts and serves MCP with no options or environment variables", async (t)
   });
   let stdout = "";
   let stderr = "";
-  running = runCli(["start"], {
+  running = runCli([], {
     io: {
       stdout: {
         write(chunk) {
@@ -744,7 +744,7 @@ test("explains invalid local state and gives the supported reset command", async
   assert.match(output.stdout(), /Development diagnostic logs:/u);
   assert.equal(
     output.stderr(),
-    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `npx --yes @embassys/ambassador@latest clean`\n",
+    "Ambassador could not open its local state. Check that its state directory is writable; if the state is partial, stop Ambassador and run `embassys clean`\n",
   );
 });
 

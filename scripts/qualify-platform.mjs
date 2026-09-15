@@ -16,7 +16,7 @@ if (!pnpm || !/pnpm\.(?:c?js|mjs)$/.test(pnpm))
   throw new Error("Run this script through pnpm qualify:platform.");
 const temporary = await mkdtemp(join(tmpdir(), "embassys-full-platform-"));
 const install = join(temporary, "installed");
-const tarball = join(temporary, "ambassador.tgz");
+const tarball = join(temporary, "embassys.tgz");
 const reportDirectory = join(root, ".build", "platform-qualification");
 const reportPath = join(reportDirectory, `${process.platform}-${process.arch}.json`);
 const report = {
@@ -59,8 +59,7 @@ try {
         environment.AMBASSADOR_PACKED_CLI = join(
           install,
           "node_modules",
-          "@embassys",
-          "ambassador",
+          "embassys",
           "dist",
           "cli.js",
         );
