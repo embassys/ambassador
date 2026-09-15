@@ -9,7 +9,7 @@ const unavailable: Record<string, string> = {
   stopped: "Start this instance's server to read its current status.",
   not_registered: "Open Account > Set up this device to register this instance.",
   expired:
-    "The saved credential has expired. Local history is still available; central identity recovery is not supported yet.",
+    "The saved credential has expired. Local history is still available. Open Account to recover this identity or set up this device.",
   unavailable:
     "Embassys could not load this information. Check the connection and try again. This does not mean there are no records.",
 };
@@ -61,8 +61,8 @@ export function Permissions({ instanceId, command }: { instanceId: string; comma
   return (
     <>
       <p className="body-note">
-        Permission records for this instance's agent. Decide requests through their email links.
-        Full audit history, use limits and revocation are not available here yet.
+        Permission records for this instance's agent. Use Inbox to answer requests and Access to
+        review account grants, revoke access or read permission history.
       </p>
       <div className="status-toolbar">
         <label>

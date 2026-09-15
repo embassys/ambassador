@@ -23,7 +23,7 @@ import { parseDesktopCommand } from "../../../src/desktop/protocol.ts";
 import { applicationMenu } from "../../src/application-menu.ts";
 import { checkControls } from "./controls-check.mjs";
 import {
-  communications,
+  communicationHistory,
   edgeRequests,
   histories,
   instanceId,
@@ -323,7 +323,34 @@ async function start() {
           result = reply({ kind: "people", contacts: people });
           break;
         case "owner_communications":
-          result = reply({ kind: "communications", communications });
+          result = reply({
+            kind: "communications",
+            ...communicationHistory,
+            ...(cmd.cursor
+              ? {
+                  items: [
+                    {
+                      ...communicationHistory.items[3],
+                      message_id: "00000000-0000-4000-8000-000000000056",
+                      sender: {
+                        agent_id: "00000000-0000-4000-8000-000000000094",
+                        display_name: "Casey Ellis",
+                        email: "casey@fixture.test",
+                        is_mine: false,
+                      },
+                      created_at: "2026-09-09T09:00:00Z",
+                      payload: {
+                        type: "action_response",
+                        action_type: "get_phone_number",
+                        result: { phone_number: "+44 7700 900222" },
+                      },
+                    },
+                  ],
+                  has_more: false,
+                  next_cursor: null,
+                }
+              : {}),
+          });
           break;
         case "owner_review": {
           const item = (

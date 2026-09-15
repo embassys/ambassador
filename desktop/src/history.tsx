@@ -1,21 +1,10 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  type ConversationPeer,
-  chronologicalItems,
-  incomingMessage,
-} from "../../src/desktop/chat.js";
-import type { ConversationPreview } from "../../src/desktop/conversation-preview.js";
+import { chronologicalItems, incomingMessage } from "../../src/desktop/chat.js";
 import type { TranscriptPage } from "../../src/visible-transcripts.js";
 import { DetailSheet, SavedContent, StructuredData } from "./details.js";
 
-export interface ConversationSession {
-  session_id: string;
-  agent_kind: string;
-  status: string;
-  last_used_at_ms: number;
-  preview?: ConversationPreview | undefined;
-  peer?: ConversationPeer | undefined;
-}
+export type ConversationSession =
+  import("../../src/desktop/account-conversations.js").AccountConversationSession;
 export type ConversationPage =
   | TranscriptPage
   | {
@@ -266,19 +255,32 @@ export function ConversationContent({
         <DetailSheet className="conversation-info" title="Conversation details">
           <p>{session?.preview?.title ?? "Saved conversation"}</p>
           <code>{sessionId}</code>
-          <p>
-            Saved locally for 30 days. Tool summaries are included; private reasoning is excluded. A
-            finished agent turn does not confirm an action was completed.
-          </p>
+          {session?.localSessionId !== null && (
+            <p>
+              Local transcripts are saved for 30 days. Tool summaries are included; private
+              reasoning is excluded. A finished agent turn does not confirm an action was completed.
+              Deleting local history leaves account messages intact.
+            </p>
+          )}
           {items.some((item) => item.kind === "turn" && item.status === "recording") && (
             <p>In progress or interrupted: the saved agent turn has no finish record.</p>
           )}
           <button type="button" className="quiet-button" onClick={reload}>
             Reload latest messages
           </button>
-          <button type="button" className="quiet-button destructive-text" onClick={remove}>
-            Delete local history…
-          </button>
+          {session?.retention && (
+            <p>
+              Account messages are read from Embassys. History before{" "}
+              {new Date(session.retention.complete_since).toLocaleDateString()} may be incomplete.
+              Only loaded pages are shown. Delivery status does not confirm that an action
+              completed.
+            </p>
+          )}
+          {session?.localSessionId !== null && (
+            <button type="button" className="quiet-button destructive-text" onClick={remove}>
+              Delete local history…
+            </button>
+          )}
         </DetailSheet>
       </div>
       {history.warnings.map((warning) => (
@@ -314,10 +316,21 @@ export function ConversationContent({
             const showDate = day !== previousDate;
             previousDate = day;
             const incoming = item.role === "user" ? incomingMessage(item.text) : undefined;
-            const side =
-              item.role === "agent" || item.role === "tool" ? "own" : (incoming?.side ?? "system");
-            const label =
-              side === "own"
+            const accountMessage = session?.accountMessages?.find(
+              (message) => `account:${message.message_id}` === item.id,
+            );
+            const side = accountMessage
+              ? accountMessage.sender?.agent_id === session?.accountLocalId
+                ? "own"
+                : "peer"
+              : item.role === "agent" || item.role === "tool"
+                ? "own"
+                : (incoming?.side ?? "system");
+            const label = accountMessage
+              ? accountMessage.sender?.display_name ||
+                accountMessage.sender?.email ||
+                "Deleted agent"
+              : side === "own"
                 ? ownLabel
                 : side === "peer"
                   ? `${peer?.name ?? "Other agent"}${peer?.email ? "’s agent" : ""}`

@@ -8,7 +8,8 @@
 4. [Architecture decisions](adr/README.md)
 
 The architecture and protocol define the accepted target. The implementation
-plan contains only work that is not complete.
+plan separates current implementation from outstanding work. Older status and
+release evidence is preserved in dated records.
 
 ## Other records
 
@@ -30,6 +31,8 @@ plan contains only work that is not complete.
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Run shared tests, native checks or full local platform flows | [CI and local testing](ci-and-local-testing.md) |
 | Check public downloads and the repaired 0.1.3 links | [September 15 release verification](release-verification-2026-09-15.md) |
+| Check account history, provider discovery and live Mac test status | [September 15 implementation and tests](account-history-and-mac-test-2026-09-15.md) |
+| Review the Inbox / Conversations / People sidebar and header controls | [Sidebar segments](sidebar-segments-2026-09-15.md) |
 | Review desktop buttons, Back and separate detail sheets | [Desktop controls](desktop-controls-2026-09-14.md) |
 | Review the desktop PR, Cowork discovery, OpenClaw display and real calendar invitation | [Desktop PR review](desktop-pr-review-2026-09-08.md) |
 | Review native owner approvals, answers, revocation and default waits | [Owner decision qualification](owner-decisions-qualification-2026-09-08.md) |

@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, requestItems} from './src/account.tsx'; import {Navigation, AppMenu, SettingsButton, ServiceStatus, serviceStatus, WorkspaceWelcome} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const welcome = () => renderToStaticMarkup(createElement(WorkspaceWelcome,{people:()=>{},agents:()=>{}})); export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; import {PeopleIntroduction, ContactImportGuide, PeopleList} from './src/people.tsx'; export const peopleList = contacts => renderToStaticMarkup(createElement(PeopleList,{contacts,busy:false,open:()=>{},copy:()=>{}})); export const peopleIntro = () => renderToStaticMarkup(createElement(PeopleIntroduction)); export const importGuide = () => renderToStaticMarkup(createElement(ContactImportGuide,{chooseFile:()=>{}})); export {onboardingKey} from './src/onboarding-state.ts'; export {prepareOnboardingAgent} from './src/onboarding-setup.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,requests,selectedRequest,selectRequest:()=>{},select:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, OwnerDecisionDialog, requestItems} from './src/account.tsx'; import {Navigation, SidebarHeader, AppMenu, SettingsButton, ServiceStatus, serviceStatus, WorkspaceWelcome} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const welcome = () => renderToStaticMarkup(createElement(WorkspaceWelcome,{people:()=>{},agents:()=>{}})); export const sidebarHeader = runtime => renderToStaticMarkup(createElement(SidebarHeader,{runtime,name:'Test installation',openSettings:()=>{},select:()=>{}})); import {BackButton} from './src/controls.tsx'; export const backButton = disabled => renderToStaticMarkup(createElement(BackButton,{onClick:()=>{},label:'Back to workspace',disabled})); export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; import {PeopleIntroduction, ContactImportGuide, PeopleList} from './src/people.tsx'; export const peopleList = contacts => renderToStaticMarkup(createElement(PeopleList,{contacts,busy:false,open:()=>{},copy:()=>{}})); export const peopleIntro = () => renderToStaticMarkup(createElement(PeopleIntroduction)); export const importGuide = () => renderToStaticMarkup(createElement(ContactImportGuide,{chooseFile:()=>{}})); export {onboardingKey} from './src/onboarding-state.ts'; export {prepareOnboardingAgent} from './src/onboarding-setup.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,section:page === "people" ? "people" : page === "conversations" ? "conversations" : "inbox",selectSection:()=>{},peopleView:"saved",selectPeopleView:()=>{},inboxCount:requests?.total ?? 0,requests,selectedRequest,selectRequest:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decisionDialog = (review,busy=false) => renderToStaticMarkup(createElement(OwnerDecisionDialog,{review,busy,submit:()=>{},cancel:()=>{},returnFocus:null,fallbackFocus:null})); export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -23,12 +23,15 @@ await build({
   jsx: "automatic",
 });
 const {
+  backButton,
+  sidebarHeader,
   peopleList,
   peopleIntro,
   importGuide,
   welcome,
   view,
   decision,
+  decisionDialog,
   account,
   nav,
   menu,
@@ -84,16 +87,45 @@ test("setup completion belongs to a signed-in account and selected installation"
   );
 });
 
-test("Inbox and Conversations are sidebar headings, without an aggregate Inbox page", () => {
-  const html = nav("attention");
-  assert.match(html, />Inbox</);
-  assert.match(html, /Conversations/);
-  assert.match(html, /<h2>Inbox<\/h2>/);
-  assert.match(html, /<h2>Conversations<\/h2>/);
-  assert.doesNotMatch(html, /inbox-nav-row|aria-current="page"/);
-  assert.doesNotMatch(html, />History</);
-  assert.match(nav("people"), /aria-current="page"[^>]*>[\s\S]*People/);
-  assert.ok(html.indexOf(">People<") < html.indexOf(">Inbox<"));
+test("icon-only Back keeps its destination label and disabled state", () => {
+  const html = backButton(false);
+  assert.match(html, /aria-label="Back to workspace"/);
+  assert.match(html, /title="Back to workspace"/);
+  assert.match(html, /<svg[^>]*aria-hidden="true"/);
+  assert.doesNotMatch(html, />Back</);
+  assert.doesNotMatch(html, /disabled/);
+  assert.match(backButton(true), /disabled/);
+});
+
+test("sidebar segments expose one section while keeping the inbox count visible", () => {
+  const requests = { total: 3, permission_requests: [], input_requests: [] };
+  const inbox = nav("attention", requests);
+  assert.match(inbox, /role="tablist" aria-label="Workspace sections"/);
+  assert.equal((inbox.match(/role="tab"/g) || []).length, 3);
+  assert.match(inbox, /aria-selected="true"[^>]*>Inbox/);
+  assert.match(inbox, /aria-label="3 pending requests"/);
+  assert.match(inbox, /aria-label="Inbox requests"/);
+  assert.doesNotMatch(inbox, /aria-label="Saved conversations"|aria-label="People views"/);
+  const conversations = nav("conversations", requests);
+  assert.match(conversations, /aria-selected="true"[^>]*>Conversations/);
+  assert.match(conversations, /aria-label="3 pending requests"/);
+  assert.match(conversations, /aria-label="Saved conversations"/);
+  assert.doesNotMatch(conversations, /aria-label="Inbox requests"/);
+  const people = nav("people");
+  assert.match(people, /aria-selected="true"[^>]*>People/);
+  assert.match(people, /aria-label="People views"/);
+  for (const label of ["Saved people", "Connected", "Invitations"])
+    assert.match(people, new RegExp(label));
+  assert.doesNotMatch(people, /aria-label="Inbox requests"|aria-label="Saved conversations"/);
+});
+
+test("the brand groups settings and truthful service status with accessible icon controls", () => {
+  const html = sidebarHeader({ state: "running" });
+  assert.match(html, /Embassys/);
+  assert.match(html, /Local service: Running/);
+  assert.match(html, /aria-label="Settings"/);
+  assert.match(sidebarHeader({ state: "stopped" }), /Local service: Paused/);
+  assert.match(sidebarHeader({ state: "running", notice: "Delivery paused" }), /Needs attention/);
   const tools = menu();
   for (const label of ["Connect agents", "Access"]) assert.match(tools, new RegExp(label));
   assert.match(tools, /popover="auto"/);
@@ -185,7 +217,7 @@ test("permission direction and central message limitations stay explicit", () =>
   assert.match(html, /revoked/);
   assert.match(html, /Uses remaining<\/dt><dd>0/);
   assert.match(
-    view({ kind: "communications", communications: [] }),
+    view({ kind: "communications", items: [] }),
     /does not confirm that an agent completed/,
   );
 });
@@ -381,7 +413,7 @@ test("sidebar requests preserve kind-qualified selection and unconfirmed submiss
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /aria-pressed="true"[^>]*>[\s\S]*What time/);
   assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
-  assert.ok(html.indexOf("What time?") < html.indexOf(">Conversations<"));
+  assert.doesNotMatch(html, /aria-label="Saved conversations"/);
   assert.match(html, /Awaiting confirmation/);
 });
 
@@ -432,8 +464,10 @@ test("People uses one list with direct copy actions and escaped contact names", 
   assert.doesNotMatch(html, /<script>|<aside|with-detail|aria-pressed/);
 });
 
-test("empty sidebar hints are short and distinct from navigation headings", () => {
-  const html = nav("attention");
+test("empty sidebar hints belong to the selected segment", () => {
+  assert.match(nav("attention"), /No requests yet/);
+  assert.doesNotMatch(nav("attention"), /No conversations yet/);
+  const html = nav("conversations");
   assert.match(html, /class="sidebar-empty"[^>]*>No conversations yet</);
   assert.doesNotMatch(html, /Conversations appear here when/);
 });
@@ -594,4 +628,30 @@ test("onboarding installs a first agent with no second email or premature provid
     }),
     /could not confirm/,
   );
+});
+
+test("owner decisions use a labelled modal with exact choices and no default approval", () => {
+  const review = {
+    review_id: "dialog-review",
+    target: {
+      kind: "input",
+      item: {
+        input_type: "buttons",
+        action_type: "get_phone_number",
+        prompt: "Which number?",
+        options: [{ label: "Work number only", value: "opaque:one-time" }],
+      },
+    },
+  };
+  const html = decisionDialog(review);
+  assert.match(html, /<dialog[^>]*class="owner-review-dialog"[^>]*aria-labelledby="([^"]+)"/);
+  assert.match(html, /<h2 id=/);
+  assert.doesNotMatch(html, /<dialog[^>]*open|checked=""/);
+  assert.match(html, /value="opaque:one-time"/);
+  assert.match(html, /aria-haspopup="dialog"[^>]*>[\s\S]*Request details/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Confirm answer/);
+  const pending = decisionDialog(review, true);
+  assert.match(pending, /<fieldset disabled=""/);
+  assert.match(pending, /<button[^>]*disabled=""[^>]*>Cancel/);
+  assert.match(pending, /Sending…/);
 });

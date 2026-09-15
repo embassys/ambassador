@@ -97,8 +97,8 @@ release's state.
 
 - Disconnect recovery now uses durable submission keys, message leases and
   retryable receipts. It cannot recover expired operations or replay a provider
-  prompt whose outcome is uncertain. Account-wide communication history is not
-  integrated yet; the app retains its local conversations.
+  prompt whose outcome is uncertain. The current development branch also reads account-wide messages without
+  consuming pending work. The published 0.1.4 app retains local conversations.
 - Native remote push needs configured server credentials and signed-device
   qualification. Running-app notifications remain available.
 - Fresh Cowork chats sometimes need "Use the Embassys connector." OpenClaw

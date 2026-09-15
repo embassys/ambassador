@@ -24,6 +24,15 @@ deployed-service and native evidence. Versioned release checks passed. Public do
 0.1.3 draft failure are recorded in [the September 15 release record](release-verification-2026-09-15.md).
 Earlier records below qualify their named behavior and dates.
 
+## September 15 development follow-up
+
+[Account history and Mac tests](account-history-and-mac-test-2026-09-15.md) records
+the new history integration, 608 passing repository tests, 47 desktop checks,
+native sample-data interactions and installed Codex/OpenClaw/Hermes connection
+checks. Live email onboarding stopped at test-mailbox authentication. Claude
+Code's provider login expired. These limits do not change the published release
+qualification and do not constitute a complete new live end-to-end pass.
+
 ## September 8 candidate checks
 
 The unpublished desktop branch was checked again on 2026-09-08 with the bundled

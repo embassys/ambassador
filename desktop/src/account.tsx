@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { permissionChoices } from "../../src/desktop/owner-choices.js";
 import type {
   OwnerCommand,
@@ -12,6 +12,7 @@ import type {
 import { BackButton } from "./controls.js";
 import type { RequestSource } from "./conversation-workspace.js";
 import { DetailSheet, StructuredData } from "./details.js";
+import { openModalReview } from "./modal-review.js";
 import { OwnerDevices } from "./owner-devices.js";
 
 export const notices: Record<OwnerIssue, string> = {
@@ -247,6 +248,7 @@ export function AccountData({
                   }
                   onClick={() => review(entry.kind, entry.item.id)}
                   aria-label={entry.kind === "permission" ? "Review request" : "Review question"}
+                  aria-haspopup="dialog"
                 >
                   Review
                 </button>
@@ -316,23 +318,27 @@ export function AccountData({
   return (
     <>
       <p className="account-limit">
-        Up to 200 recent central messages. Delivery status does not confirm that an agent completed
-        the work.
+        Account messages, newest first. Delivery status does not confirm that an agent completed the
+        work. Older messages may no longer be retained.
       </p>
+      {data.retention && (
+        <p className="account-limit">
+          History before {when(data.retention.complete_since)} may be incomplete. Only this page is
+          shown.
+        </p>
+      )}
       <section className="settings-section">
-        {data.communications.length === 0 && (
-          <p className="body-note">No messages in this snapshot.</p>
-        )}
-        {data.communications.map((item) => (
-          <article className="account-row" key={item.id}>
+        {data.items.length === 0 && <p className="body-note">No messages in this snapshot.</p>}
+        {data.items.map((item) => (
+          <article className="account-row" key={item.message_id}>
             <div className="account-row-heading">
-              <strong>{action(item.action_type || item.message_type)}</strong>
+              <strong>{action(item.action_type || item.message_type || "message")}</strong>
               <span className="subtle-tag">{action(item.status)}</span>
             </div>
             <p className="break">
-              {item.outbound
-                ? `To ${item.recipient_name || item.recipient_email || "unavailable agent"}`
-                : `From ${item.sender_name || item.sender_email || "unavailable agent"}`}
+              {item.direction === "outbound"
+                ? `To ${item.recipient.display_name || item.recipient.email || "unavailable agent"}`
+                : `From ${item.sender?.display_name || item.sender?.email || "Deleted agent"}`}
             </p>
             <time>{when(item.created_at)}</time>
             <Details value={item.payload} label="Message content" />
@@ -349,7 +355,9 @@ export function OwnerDecisionForm({
   submit,
   cancel,
   linkedConversation = false,
+  headingId,
 }: {
+  headingId?: string;
   linkedConversation?: boolean;
   review: OwnerReview;
   busy: boolean;
@@ -385,7 +393,7 @@ export function OwnerDecisionForm({
                 ? "Answer needed"
                 : "Permission request"}
           </p>
-          <h2>
+          <h2 id={headingId}>
             {revoked
               ? "Withdraw this access?"
               : target.kind === "input"
@@ -394,31 +402,27 @@ export function OwnerDecisionForm({
           </h2>
         </div>
       </header>
-      <dl className="request-facts">
-        {target.kind === "permission" && (
-          <div>
-            <dt>From</dt>
-            <dd>
-              {target.item.requester_name || target.item.requester_email || "Requester unavailable"}
-              {target.item.requester_name && target.item.requester_email && (
-                <span>{target.item.requester_email}</span>
-              )}
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt>Action</dt>
-          <dd>
-            <code>{target.item.action_type}</code>
-          </dd>
-        </div>
-        {target.kind !== "input" && (
+      {target.kind !== "input" && (
+        <dl className="request-facts">
+          {target.kind === "permission" && (
+            <div>
+              <dt>From</dt>
+              <dd>
+                {target.item.requester_name ||
+                  target.item.requester_email ||
+                  "Requester unavailable"}
+                {target.item.requester_name && target.item.requester_email && (
+                  <span>{target.item.requester_email}</span>
+                )}
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Expires</dt>
             <dd>{target.item.expires_at ? when(target.item.expires_at) : "No expiry provided"}</dd>
           </div>
-        )}
-      </dl>
+        </dl>
+      )}
       {target.kind === "permission" && (
         <p className="request-context-note">
           {target.kind === "permission" ? target.item.reason || "No reason supplied." : ""}
@@ -432,25 +436,34 @@ export function OwnerDecisionForm({
           )}
         </>
       ) : (
-        <>
-          {target.kind === "revoke" && (
-            <p>
-              Withdraw access from{" "}
-              {target.item.grantee_name || target.item.grantee_email || "this agent"}. This does not
-              undo completed actions.
-            </p>
-          )}
-          {target.item.scope != null && (
-            <section className="review-scope" aria-label="Permission scope">
-              <h3>Permission scope</h3>
-              <StructuredData value={target.item.scope} />
-            </section>
-          )}
-        </>
+        target.kind === "revoke" && (
+          <p>
+            Withdraw access from{" "}
+            {target.item.grantee_name || target.item.grantee_email || "this agent"}. This does not
+            undo completed actions.
+          </p>
+        )
       )}
+      <DetailSheet title="Request details">
+        <dl className="request-facts">
+          <div>
+            <dt>Action</dt>
+            <dd>
+              <code>{target.item.action_type}</code>
+            </dd>
+          </div>
+        </dl>
+        {target.kind !== "input" && target.item.scope != null && (
+          <section className="review-scope" aria-label="Permission scope">
+            <h3>Permission scope</h3>
+            <StructuredData value={target.item.scope} />
+          </section>
+        )}
+      </DetailSheet>
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          if (busy || (!revoked && !(typed ? answer.trim() : choice))) return;
           submit({
             type: "owner_submit",
             review_id: review.review_id,
@@ -496,7 +509,7 @@ export function OwnerDecisionForm({
         )}
         {target.kind === "permission" && ["accept", "allow_always"].includes(choice) && (
           <p className="body-note">
-            This choice grants ongoing access within the displayed scope and expiry.
+            This choice grants ongoing access within this request's scope and expiry.
           </p>
         )}
         <div className="account-actions owner-review-actions">
@@ -519,6 +532,52 @@ export function OwnerDecisionForm({
         </div>
       </form>
     </section>
+  );
+}
+
+export function OwnerDecisionDialog({
+  review,
+  busy,
+  submit,
+  cancel,
+  linkedConversation = false,
+  returnFocus,
+  fallbackFocus,
+}: {
+  review: OwnerReview;
+  busy: boolean;
+  submit(command: Omit<Extract<OwnerCommand, { type: "owner_submit" }>, "context">): void;
+  cancel(): void;
+  linkedConversation?: boolean;
+  returnFocus: HTMLElement | null;
+  fallbackFocus: HTMLElement | null;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const title = useId();
+  useLayoutEffect(() => {
+    if (dialog.current) return openModalReview(dialog.current, returnFocus, fallbackFocus);
+    return undefined;
+  }, [returnFocus, fallbackFocus]);
+  return (
+    <dialog
+      ref={dialog}
+      className="owner-review-dialog"
+      aria-labelledby={title}
+      onCancel={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busy) cancel();
+      }}
+    >
+      <OwnerDecisionForm
+        review={review}
+        headingId={title}
+        busy={busy}
+        submit={submit}
+        cancel={cancel}
+        linkedConversation={linkedConversation}
+      />
+    </dialog>
   );
 }
 
@@ -557,10 +616,7 @@ export function Account({
   const [busy, setBusy] = useState(false);
   const [decisionReview, setDecisionReview] = useState<OwnerReview>();
   const pageElement = useRef<HTMLDivElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Opening or closing a review resets scroll; background refreshes must not.
-  useEffect(() => {
-    if (section === "requests") pageElement.current?.scrollIntoView({ block: "start" });
-  }, [section, decisionReview?.review_id]);
+  const reviewTrigger = useRef<HTMLElement | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const submitting = useRef(false);
   const [operation, setOperation] = useState<OwnerCommand["type"]>();
@@ -725,7 +781,7 @@ export function Account({
   if (emptyLinkedRequests && !decisionReview && !confirmation && !error && !requestSource?.error)
     return null;
   return (
-    <div className="account-page" ref={pageElement}>
+    <div className="account-page" ref={pageElement} tabIndex={-1}>
       {section !== "profile" && owner.status !== "signed_in" ? (
         <section className="simple-empty">
           <h2>
@@ -945,11 +1001,13 @@ export function Account({
         </p>
       )}
       {owner.status === "signed_in" && decisionReview && (
-        <OwnerDecisionForm
+        <OwnerDecisionDialog
           key={decisionReview.review_id}
           review={decisionReview}
           linkedConversation={linkedConversation}
           busy={busy}
+          returnFocus={reviewTrigger.current}
+          fallbackFocus={pageElement.current}
           cancel={() => setDecisionReview(undefined)}
           submit={(command) => void run({ ...command, context: owner.context })}
         />
@@ -986,16 +1044,16 @@ export function Account({
               </p>
             ) : (
               data &&
-              !decisionReview &&
               !emptyLinkedRequests && (
                 <AccountData
                   data={data}
                   updated={fetchedAt}
                   busy={busy}
                   focusedRequest={focusedRequest}
-                  review={(kind, id) =>
-                    void run({ type: "owner_review", context: owner.context, kind, id })
-                  }
+                  review={(kind, id) => {
+                    reviewTrigger.current = document.activeElement as HTMLElement | null;
+                    void run({ type: "owner_review", context: owner.context, kind, id });
+                  }}
                 />
               )
             )}
@@ -1022,7 +1080,7 @@ export function Account({
           {data &&
             "next_cursor" in data &&
             data.next_cursor &&
-            ["requests", "permissions", "history"].includes(data.kind) && (
+            ["requests", "permissions", "history", "communications"].includes(data.kind) && (
               <button
                 className="quiet-button"
                 type="button"
@@ -1032,9 +1090,11 @@ export function Account({
                   void run(
                     data.kind === "permissions"
                       ? { type: "owner_permissions", context: owner.context, direction, cursor }
-                      : data.kind === "history"
-                        ? { type: "owner_history", context: owner.context, cursor }
-                        : { type: "owner_requests", context: owner.context, cursor },
+                      : data.kind === "communications"
+                        ? { type: "owner_communications", context: owner.context, cursor }
+                        : data.kind === "history"
+                          ? { type: "owner_history", context: owner.context, cursor }
+                          : { type: "owner_requests", context: owner.context, cursor },
                   );
                 }}
               >

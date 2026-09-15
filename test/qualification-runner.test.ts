@@ -215,3 +215,19 @@ test("live runner has fixed, separately confirmed real-OpenClaw modes", async ()
     "the live runner must not accept an arbitrary agent command",
   );
 });
+
+test("candidate archive permits the current package while retaining path and count bounds", async () => {
+  const { validateCandidateEntries } = await import(
+    new URL("../../scripts/qualification-archive.mjs", import.meta.url).href
+  );
+  const entries = Array.from({ length: 364 }, (_, i) => `package/dist/file-${i}.js`);
+  assert.equal(validateCandidateEntries(entries.join("\n")).length, 364);
+  for (const invalid of [
+    [...entries, "package/../../escape"],
+    [...entries, "/tmp/escape"],
+    [...entries, "package/file\\name"],
+    [...entries, entries[0]],
+    Array.from({ length: 1025 }, (_, i) => `package/${i}`),
+  ])
+    assert.throws(() => validateCandidateEntries(invalid.join("\n")));
+});

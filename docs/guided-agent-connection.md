@@ -44,11 +44,11 @@ install a skill into those separate products.
 
 ## Verification and current limits
 
-The device's existing agent credential is reused. First-time agent registration
-and owner login still require separate email codes. Logging in on a fresh device
-cannot recover a lost agent credential through the current API. That remains
-[API issue 7](https://github.com/embassys/agent2agent/issues/7), with identity
-recovery in issue 2.
+The app uses one owner email code. Connect then creates or resumes the verified
+agent and installs its execution credential on this device. An existing executor
+on another device requires an explicit transfer review. Retrying a connection
+check reuses the saved identity and never sends another registration code.
+Public CLI registration still uses its separate agent verification flow.
 
 The check uses a three-minute deadline, normal provider authentication and the
 compiled ACP command. It does not change the model, bypass tool approval or
@@ -74,6 +74,6 @@ On September 10 the released Mac app passed native registration and owner login
 against deployed central, Connect Claude Code, one-time provider approval and
 visible connection confirmation. Restart, cancellation/retry and sign-out also
 passed. The [illustrated qualification record](onboarding-qualification-2026-09-10.md)
-describes the 16 captures and remaining dialog polish. Native walkthroughs for
-the other three agents remain separate follow-ups.
+describes the 16 captures and remaining dialog polish. The September 14 native Claude Code walkthrough also passed the current one-code
+flow. Native walkthroughs for the other three agents remain separate follow-ups.
 The design and test boundaries are in [ADR 0077](adr/0077-guided-agent-connection-and-discovery.md).

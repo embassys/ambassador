@@ -31,7 +31,6 @@ export function BackButton({
       >
         <path d="m10 3-5 5 5 5" />
       </svg>
-      <span>Back</span>
     </button>
   );
 }

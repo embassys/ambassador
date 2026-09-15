@@ -215,9 +215,9 @@ h2 {
 .primary,
 .secondary,
 .danger {
-  border-radius: 6px;
-  padding: 6px 12px;
-  min-height: 29px;
+  border-radius: 8px;
+  padding: 5px 12px;
+  min-height: 27px;
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;
@@ -262,10 +262,10 @@ h2 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 4px 9px;
+  min-height: 26px;
+  padding: 3px 9px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--text);
   font-size: 12px;
@@ -783,7 +783,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   margin-right: auto;
 }
 .conversation-pagination .quiet-button {
-  padding: 4px;
+  padding: 3px 4px;
   font-size: 11px;
 }
 .conversation-pagination .secondary {
@@ -965,6 +965,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   font-size: 13px;
   font-weight: 400;
 }
+[data-platform="darwin"] :is(.primary, .secondary, .danger) {
+  min-height: 24px;
+  padding-block: 3px;
+}
 [data-platform="darwin"] .secondary,
 [data-platform="darwin"] .danger,
 [data-platform="darwin"] select {
@@ -1065,6 +1069,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   min-height: 32px;
   padding-inline: 13px;
   font-size: 13px;
+}
+[data-platform="win32"] :is(.primary, .secondary, .danger),
+[data-platform="linux"] :is(.primary, .secondary, .danger) {
+  min-height: 30px;
 }
 @media (max-width: 960px) {
   .toolbar-status {
@@ -2264,8 +2272,8 @@ input:not([type="checkbox"]):not([type="radio"]) {
 }
 .onboarding-content .primary,
 .onboarding-content .secondary {
-  min-height: 32px;
-  padding: 6px 16px;
+  min-height: 30px;
+  padding: 5px 16px;
 }
 
 /* Compact desktop toolbar, primary views and secondary navigation. */
@@ -2302,7 +2310,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   -webkit-app-region: no-drag;
 }
 .primary-nav button {
-  padding: 5px 18px;
+  padding: 4px 18px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -2322,7 +2330,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
 }
 .app-menu-trigger {
   width: 32px;
-  height: 30px;
+  height: 28px;
   display: grid;
   place-items: center;
   border: 0;
@@ -2349,7 +2357,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .app-menu-options button {
   display: block;
   width: 100%;
-  padding: 9px 12px;
+  padding: 8px 12px;
   border: 0;
   border-radius: 5px;
   background: transparent;
@@ -2865,7 +2873,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   border-radius: 6px;
 }
 [data-platform="darwin"] .primary-nav button {
-  padding: 4px 16px;
+  padding: 3px 16px;
   border-radius: 5px;
   font-size: 12px;
 }
@@ -2950,8 +2958,8 @@ input:not([type="checkbox"]):not([type="radio"]) {
 
 /* Conversation sidebar, September 11. Inbox holds requests without a saved link. */
 .conversation-sidebar {
-  width: 232px;
-  flex: 0 0 232px;
+  width: 272px;
+  flex: 0 0 272px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2965,12 +2973,12 @@ input:not([type="checkbox"]):not([type="radio"]) {
   background: #24242677;
 }
 .sidebar-brand {
-  height: 72px;
-  flex: 0 0 72px;
+  min-height: 88px;
+  flex: 0 0 88px;
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 0 16px 14px;
+  align-items: center;
+  gap: 9px;
+  padding: 28px 14px 12px;
   -webkit-app-region: drag;
   font-size: 13px;
 }
@@ -2985,9 +2993,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .conversation-nav {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 4px 9px 16px;
-  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 4px 10px 16px;
 }
 .conversation-nav .inbox-nav-heading {
   margin-top: 6px;
@@ -3145,7 +3154,6 @@ input:not([type="checkbox"]):not([type="radio"]) {
   flex: 1;
   min-height: 0;
 }
-.conversation-pane:has(.owner-review),
 .conversation-pane:has(.inbox-list) {
   min-height: auto;
 }
@@ -3174,16 +3182,13 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .conversation-pane .account-page .snapshot-note {
   display: none;
 }
-.conversation-pane .owner-review {
-  max-width: none;
-}
 .with-conversation-sidebar .inbox-row {
   grid-template-columns: 30px minmax(0, 1fr) auto;
 }
 @media (max-width: 760px) {
   .conversation-sidebar {
-    width: 198px;
-    flex-basis: 198px;
+    width: 252px;
+    flex-basis: 252px;
   }
   .with-conversation-sidebar.app-shell .simple-header {
     padding-inline: 18px;
@@ -3382,13 +3387,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   background: var(--canvas);
   border-bottom: 1px solid var(--soft-line);
 }
-.sidebar-brand {
-  gap: 7px;
-  padding-bottom: 13px;
-}
 .sidebar-brand img {
-  width: 19px;
-  height: 19px;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
 }
 .sidebar-brand strong {
   font-size: 13px;
@@ -3435,7 +3437,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .conversation-nav .session-row {
   min-height: 46px;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid transparent;
   box-shadow: none;
   transition:
@@ -3563,7 +3565,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
 }
 .chat-history-tools > button {
   font-size: 11px;
-  padding: 3px 0;
+  padding: 2px 0;
 }
 .chat-history-tools > button:disabled {
   color: var(--muted);
@@ -3626,7 +3628,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   margin: 5px 4px 0;
 }
 .chat-bubble {
-  border-radius: 17px 17px 17px 7px;
+  border-radius: 19px 19px 19px 9px;
   padding: 12px 16px;
   background: var(--chat-peer-fill);
   border: 1px solid var(--chat-peer-line);
@@ -3644,7 +3646,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   background: var(--chat-own-fill);
   color: var(--chat-own-ink);
   border-color: transparent;
-  border-radius: 17px 17px 7px 17px;
+  border-radius: 19px 19px 9px 19px;
   box-shadow: 0 1px 2px #00000008;
 }
 .chat-subject {
@@ -3701,7 +3703,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   align-items: end;
 }
 .chat-owner .chat-bubble {
-  border-radius: 17px 17px 7px 17px;
+  border-radius: 19px 19px 9px 19px;
   background: color-mix(in srgb, var(--accent) 5%, var(--panel));
 }
 .chat-tool {
@@ -3738,7 +3740,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
 .with-conversation-sidebar .inbox-row {
   padding: 15px 16px;
   gap: 12px;
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--panel);
   border: 1px solid var(--line);
   box-shadow: var(--chat-card-shadow);
@@ -3778,9 +3780,9 @@ input:not([type="checkbox"]):not([type="radio"]) {
   letter-spacing: -0.06px;
 }
 .with-conversation-sidebar .inbox-row > button {
-  min-height: 28px;
-  padding: 4px 12px;
-  border-radius: 7px;
+  min-height: 26px;
+  padding: 3px 12px;
+  border-radius: 9px;
   font-size: 12px;
   font-weight: 500;
   box-shadow: 0 1px 2px #00000008;
@@ -3795,7 +3797,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   gap: 16px;
   background: var(--chat-request-surface);
   border: 1px solid var(--chat-request-border);
-  border-radius: 18px;
+  border-radius: 20px;
   box-shadow: var(--chat-request-shadow);
   backdrop-filter: blur(10px);
 }
@@ -3818,13 +3820,13 @@ input:not([type="checkbox"]):not([type="radio"]) {
   grid-column: 2;
   align-self: start;
   margin-top: 21px;
-  min-height: 28px;
+  min-height: 26px;
   padding-inline: 12px;
   font-weight: 400;
 }
 [data-platform="darwin"] .chat-pending .inbox-row > button {
-  min-height: 26px;
-  padding: 3px 11px;
+  min-height: 24px;
+  padding: 2px 11px;
   border-radius: 6px;
   box-shadow: 0 1px 2px #00000014;
 }
@@ -3835,14 +3837,6 @@ input:not([type="checkbox"]):not([type="radio"]) {
     0 1px 2px #0003;
 }
 
-.chat-pending .owner-review {
-  margin: 0;
-  padding: 22px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-  box-shadow: var(--chat-card-shadow);
-}
 .owner-review-heading {
   gap: 12px;
   margin-bottom: 22px;
@@ -3908,10 +3902,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   gap: 8px;
 }
 .owner-review-actions button {
-  border-radius: 7px;
+  border-radius: 9px;
   padding-inline: 13px;
   font-size: 12px;
-  min-height: 29px;
+  min-height: 27px;
 }
 .chat-jump {
   position: sticky;
@@ -3919,7 +3913,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   align-self: center;
   font-size: 11px;
   font-weight: 500;
-  padding: 7px 12px;
+  padding: 6px 12px;
   border-radius: 20px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -3941,9 +3935,6 @@ input:not([type="checkbox"]):not([type="radio"]) {
   }
   .chat-text {
     font-size: 13px;
-  }
-  .chat-pending .owner-review {
-    padding: 17px;
   }
   .with-conversation-sidebar .inbox-row {
     padding: 13px 12px;
@@ -4110,8 +4101,8 @@ input:not([type="checkbox"]):not([type="radio"]) {
   justify-content: center;
   gap: 5px;
   flex-shrink: 0;
-  min-height: 28px;
-  padding: 4px 7px;
+  min-height: 26px;
+  padding: 3px 7px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -4199,7 +4190,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   flex-shrink: 0;
   font-size: 11px;
   color: var(--subtle);
-  padding: 5px 7px;
+  padding: 4px 7px;
   border-radius: 5px;
 }
 .person-copy:hover {
@@ -4331,7 +4322,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   padding: 0 20px 12px;
 }
 .people-tabs .quiet-button {
-  padding: 5px 10px;
+  padding: 4px 10px;
   border-radius: 7px;
   color: var(--muted);
 }
@@ -4347,10 +4338,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  min-height: 29px;
-  padding: 4px 9px;
+  min-height: 27px;
+  padding: 3px 9px;
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
-  border-radius: 7px;
+  border-radius: 10px;
   background: linear-gradient(var(--panel), color-mix(in srgb, var(--panel) 88%, var(--toolbar)));
   color: var(--text);
   font-size: 12px;
@@ -4360,6 +4351,12 @@ input:not([type="checkbox"]):not([type="radio"]) {
     inset 0 1px #ffffff12;
   white-space: nowrap;
   flex-shrink: 0;
+}
+.back-control {
+  width: 30px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
 }
 .back-control:hover,
 .toolbar-settings:hover {
@@ -4380,10 +4377,10 @@ input:not([type="checkbox"]):not([type="radio"]) {
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 32px;
-  padding: 6px 9px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--text) 4%, transparent);
   color: var(--subtle);
   text-align: left;
@@ -4420,7 +4417,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   margin: auto;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
-  border-radius: 13px;
+  border-radius: 16px;
   background: var(--panel);
   color: var(--text);
   box-shadow:
@@ -4437,6 +4434,48 @@ input:not([type="checkbox"]):not([type="radio"]) {
 }
 .detail-sheet::backdrop {
   background: #00000020;
+}
+.owner-review-dialog {
+  width: min(520px, calc(100vw - 40px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow:
+    0 24px 80px #00000030,
+    0 4px 16px #00000018;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.owner-review-dialog::backdrop {
+  background: #00000024;
+}
+.owner-review-dialog .owner-review {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.owner-review-dialog .owner-review-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 18px -24px -24px;
+  padding: 14px 24px;
+  background: var(--panel);
+}
+.owner-review-dialog .detail-sheet .request-facts {
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .detail-sheet-header {
   display: flex;
@@ -4512,9 +4551,9 @@ input:not([type="checkbox"]):not([type="radio"]) {
   margin-top: 8px;
 }
 .chat-pending .detail-trigger {
-  min-height: 26px;
+  min-height: 24px;
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 2px 8px;
 }
 .snapshot-note.detail-access {
   margin: 12px 0;
@@ -4526,7 +4565,7 @@ input:not([type="checkbox"]):not([type="radio"]) {
   margin-bottom: 4px;
 }
 .log-list .detail-trigger {
-  min-height: 36px;
+  min-height: 34px;
   color: var(--text);
 }
 .log-list .detail-meta {
@@ -4562,4 +4601,171 @@ input:not([type="checkbox"]):not([type="radio"]) {
   padding: 12px;
   background: var(--canvas);
   border-radius: 8px;
+}
+
+/* Sidebar section control and service identity, September 15. */
+.sidebar-identity {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  -webkit-app-region: no-drag;
+}
+.sidebar-header-actions .toolbar-settings,
+.sidebar-header-actions .app-menu-trigger {
+  width: 27px;
+  height: 25px;
+  min-height: 25px;
+  padding: 3px 4px;
+  color: var(--subtle);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+.sidebar-header-actions button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.service-status-inline {
+  align-self: stretch;
+  min-width: 0;
+  max-width: 100%;
+  -webkit-app-region: no-drag;
+}
+.service-status-inline button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 2px;
+  margin-left: -2px;
+  min-height: 18px;
+  width: max-content;
+  max-width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 450;
+  white-space: nowrap;
+}
+.service-status-inline button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.service-status-inline .service-indicator {
+  width: 5px;
+  height: 5px;
+}
+.service-status-inline [role="status"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-segments {
+  display: grid;
+  grid-template-columns: 0.85fr 1.4fr 0.8fr;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 3px;
+  margin: 0 0 15px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: inset 0 0 0.5px color-mix(in srgb, var(--text) 12%, transparent);
+  -webkit-app-region: no-drag;
+}
+.sidebar-segments [role="tab"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 25px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--subtle);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.15px;
+  white-space: nowrap;
+}
+.sidebar-segments [role="tab"]:hover {
+  color: var(--text);
+}
+.sidebar-segments [aria-selected="true"] {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+  box-shadow:
+    0 1px 3px #00000012,
+    0 0.5px 1px #0000000a;
+}
+.segment-count {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sidebar-panel {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.sidebar-panel .conversation-nav-heading {
+  margin-top: 0;
+}
+.people-nav {
+  display: grid;
+  gap: 3px;
+}
+.people-nav button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 31px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--subtle);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.people-nav button:hover {
+  background: var(--hover);
+}
+.people-nav button[aria-current="page"] {
+  background: var(--chat-sidebar-selection);
+  border-color: var(--chat-sidebar-selection-line);
+  color: var(--text);
+  box-shadow: 0 1px 3px #00000006;
+}
+[data-platform="win32"] .sidebar-brand,
+[data-platform="linux"] .sidebar-brand {
+  padding-top: 16px;
+  min-height: 76px;
+  flex-basis: 76px;
+}
+@media (forced-colors: active) {
+  .sidebar-segments {
+    border: 1px solid ButtonText;
+  }
+  .sidebar-segments [aria-selected="true"],
+  .people-nav button[aria-current="page"] {
+    border-color: Highlight;
+    outline: 1px solid Highlight;
+    color: HighlightText;
+    background: Highlight;
+  }
 }

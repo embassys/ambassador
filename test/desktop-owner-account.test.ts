@@ -1212,3 +1212,35 @@ test("one-code setup rejects mismatched or unverified agents and preserves the s
   );
   assert.equal((await s.request({ type: "owner_create_agent" })).issue, "request_unavailable");
 });
+
+test("owner communications use only bounded read-only history and reject stale contexts", async (t) => {
+  const s = await setup(t);
+  await s.login();
+  const payload = {
+    items: [],
+    has_more: false,
+    next_cursor: null,
+    retention: {
+      complete_since: "2026-09-01T00:00:00Z",
+      acked_messages_removed_after_days: 14,
+      dead_messages_removed_after_days: 90,
+      may_be_incomplete: true,
+    },
+  };
+  s.f.override((path) =>
+    path.startsWith("/api/owner/communications?") ? Response.json(payload) : undefined,
+  );
+  const start = s.f.calls.length;
+  const context = s.service.snapshot().context;
+  const result = await s.request({ type: "owner_communications", cursor: "a+b/c=" });
+  assert.equal(result.data?.kind, "communications");
+  assert.equal(s.f.calls.length, start + 1);
+  assert.equal(s.f.calls.at(-1)?.path, "/api/owner/communications?limit=50&cursor=a%2Bb%2Fc%3D");
+  assert.equal(s.f.calls.at(-1)?.init?.body, undefined);
+  assert.equal(
+    s.f.calls.some((c) => /poll_messages|ack_message/.test(c.path)),
+    false,
+  );
+  await s.request({ type: "owner_signout" });
+  await assert.rejects(s.service.command({ type: "owner_communications", context }));
+});
