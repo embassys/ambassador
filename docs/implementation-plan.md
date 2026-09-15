@@ -7,8 +7,9 @@ actions. Details, advanced options and device settings open in separate sheets;
 Back and Settings use compact neutral buttons. All 46 desktop view/artifact checks,
 typecheck, lint and the isolated Electron interaction walkthrough passed.
 See [the design and test record](desktop-controls-2026-09-14.md). These UI changes
-are being prepared for the owner-authorized public 0.1.4 release. The 0.1.3
-draft is also being checked so its previously shared download URLs can be restored.
+are merged in [PR 48](https://github.com/embassys/ambassador/pull/48) and published
+as [Embassys 0.1.4](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4).
+The original 0.1.3 download URLs are also restored. See [release verification](release-verification-2026-09-15.md).
 
 ## Central contract adoption, September 14
 
@@ -16,7 +17,8 @@ Implemented under [ADR 0082](adr/0082-current-central-recovery-and-owner-integra
 The [implementation and test record](central-adoption-2026-09-14.md) supersedes
 older statements below that issues 1–13 still require server implementation.
 Implementation and review are tracked in [PR 45](https://github.com/embassys/ambassador/pull/45).
-The paired 0.1.3 desktop / 0.2.20 npm release is authorized and in validation.
+Embassys 0.1.3 and Ambassador 0.2.20 are published and independently verified.
+Embassys 0.1.4 is the latest desktop release and uses the same gateway.
 API source remains unchanged.
 
 Completed:
@@ -65,10 +67,6 @@ Remaining:
   review and live queue-isolation qualification. It is no longer server-blocked.
 - [ ] Follow the separate DPoP wire/nonce decision in issue 14. Keep the current
   protocol until a coordinated change is accepted.
-- [ ] Complete the authorized paired release: Embassys 0.1.3 preview 1 and
-  Ambassador 0.2.20. Run versioned PR/main CI and verify published artifacts.
-  [PR review](desktop-pr-review-2026-09-14.md) records the integration checks.
-  Existing platform/provider qualification and signed distribution limits remain.
 - [ ] Update the local four-provider qualification script's 256-entry archive
   limit for the current 364-file package. Keep bounded extraction and artifact
   validation. The release used separate installed-candidate connection checks

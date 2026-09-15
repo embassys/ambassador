@@ -42,3 +42,6 @@ Validation on macOS with bundled Node 24.19.0:
 The captures use fictional requests, conversations, devices and setup instructions.
 They verify renderer behavior, not central delivery or provider setup. The Mac was
 locked during this run; OS title-bar and native-menu interaction were not retested.
+
+Published in [Embassys 0.1.4](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4)
+after PR 48 and all main release gates passed.

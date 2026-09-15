@@ -15,14 +15,14 @@ limits. Screenshots and exact operation evidence remain local in
 This strategy separates deterministic product behavior from third-party agent
 behavior.
 
-## September 14 release candidate
+## September 14 and 15 published releases
 
-The paired release targets Embassys 0.1.3 preview 1 and Ambassador 0.2.20.
+Embassys 0.1.3, Embassys 0.1.4 and Ambassador 0.2.20 are published.
 [Current central integration](central-adoption-2026-09-14.md) and
 [one-code Claude onboarding](one-code-onboarding-2026-09-14.md) record the latest
-deployed-service and native evidence. Versioned release checks and independent
-artifact verification are tracked in the current implementation plan and release
-notes. Earlier records below qualify their named behavior and dates.
+deployed-service and native evidence. Versioned release checks passed. Public download verification and the original
+0.1.3 draft failure are recorded in [the September 15 release record](release-verification-2026-09-15.md).
+Earlier records below qualify their named behavior and dates.
 
 ## September 8 candidate checks
 

@@ -8,10 +8,10 @@ authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | `Embassys-0.1.4-darwin-arm64-development.dmg` | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
-| Windows x64 | `Embassys-0.1.4-win32-x64-development.zip` | Experimental; automated packaged-runtime tests |
-| Linux x64 | `Embassys-0.1.4-linux-x64-development.tar.gz` | Experimental; automated packaged-runtime tests; sandbox setup may be required |
-| Linux ARM64, including the Raspberry Pi target below | `Embassys-0.1.4-linux-arm64-development.tar.gz` | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
+| Mac with Apple silicon, M1 or newer | [Embassys-0.1.4-darwin-arm64-development.dmg](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-darwin-arm64-development.dmg) | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
+| Windows x64 | [Embassys-0.1.4-win32-x64-development.zip](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-win32-x64-development.zip) | Experimental; automated packaged-runtime tests |
+| Linux x64 | [Embassys-0.1.4-linux-x64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-linux-x64-development.tar.gz) | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Linux ARM64, including the Raspberry Pi target below | [Embassys-0.1.4-linux-arm64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-linux-arm64-development.tar.gz) | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
 
 There is no Intel Mac or Windows ARM download in this release. These are
 unsigned development packages. Managed computers may refuse to run them.

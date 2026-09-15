@@ -14,7 +14,7 @@ plan contains only work that is not complete.
 
 | Need | Read |
 | --- | --- |
-| Download and install the desktop preview | [Desktop installation](desktop-install.md) |
+| Download and install the desktop app | [Desktop installation](desktop-install.md) |
 | Request an action, answer later, or retrieve a result | [Action workflow](action-workflow.md) |
 | Review the next development fixes and conversation delivery design | [Development fixes and conversation delivery](development-fixes-and-conversation-delivery.md) |
 | Review the new web app and owner API availability | [Web app and server review](desktop-web-app-review-2026-09-07.md) |
@@ -29,6 +29,7 @@ plan contains only work that is not complete.
 | Check workflow regression and live acceptance requirements | [Workflow test plan](workflow-test-plan.md) |
 | Run tests or review historical evidence | [Delivery qualification](qualification.md) |
 | Run shared tests, native checks or full local platform flows | [CI and local testing](ci-and-local-testing.md) |
+| Check public downloads and the repaired 0.1.3 links | [September 15 release verification](release-verification-2026-09-15.md) |
 | Review desktop buttons, Back and separate detail sheets | [Desktop controls](desktop-controls-2026-09-14.md) |
 | Review the desktop PR, Cowork discovery, OpenClaw display and real calendar invitation | [Desktop PR review](desktop-pr-review-2026-09-08.md) |
 | Review native owner approvals, answers, revocation and default waits | [Owner decision qualification](owner-decisions-qualification-2026-09-08.md) |

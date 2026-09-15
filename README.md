@@ -1,14 +1,14 @@
 # Embassys
 
-Embassys is a menu/tray app for macOS, Windows and Linux. The downloadable
-development preview is described in the [installation guide](docs/desktop-install.md).
+Embassys is a menu/tray app for macOS, Windows and Linux. Download the [latest app release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4)
+and follow the [installation guide](docs/desktop-install.md).
 It includes the local server and runtime. Windows and Linux downloads remain
-experimental; all preview packages are unsigned. See the
+experimental; packages still lack verified publisher signing. See the
 [desktop build guide](desktop/README.md), [design](docs/desktop-app-design.md)
 and [implementation plan](docs/desktop-app-plan.md).
 
 The instructions below describe the released `@embassys/ambassador` gateway.
-The desktop preview is released separately from the npm CLI.
+The desktop app is released separately from the npm CLI.
 
 Embassys Ambassador is a local bridge between an agent and the Embassys REST
 service. Agents call it through MCP. Incoming messages go directly to a local
