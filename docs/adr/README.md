@@ -127,3 +127,7 @@ protocol instead of creating an API generation number.
 - [0085 Account communication history](0085-account-communication-history.md)
 
 - [0086 Embassys npm package and command](0086-embassys-cli-package.md)
+
+- [0087 Usernames and accepted actions](0087-usernames-and-accepted-actions.md)
+
+- [0088 Release dependency maintenance](0088-release-dependency-maintenance.md)

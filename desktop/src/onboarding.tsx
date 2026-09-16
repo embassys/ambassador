@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { DeviceReview } from "../../src/desktop/owner-devices.js";
 import type { OwnerSnapshot } from "../../src/desktop/owner-protocol.js";
 import type {
@@ -12,6 +12,7 @@ import { BackButton } from "./controls.js";
 import { DetailSheet } from "./details.js";
 import { SettingsButton } from "./navigation.js";
 import { prepareOnboardingAgent } from "./onboarding-setup.js";
+import { updateOnboardingAgentChoice } from "./onboarding-state.js";
 
 type Instance = DesktopInstance & { runtime: GatewaySnapshot };
 type Call = (command: DesktopCommand) => Promise<unknown>;
@@ -44,7 +45,11 @@ function AgentSetup({
   }, [review]);
   const [registration, setRegistration] = useState<RegistrationSnapshot>();
   const [guides, setGuides] = useState<Guide[]>([]);
-  const [choice, setChoice] = useState(0);
+  const [selection, updateSelection] = useReducer(updateOnboardingAgentChoice, {
+    index: 0,
+    chosen: false,
+  });
+  const choice = selection.index;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -65,12 +70,13 @@ function AgentSetup({
         const value = state as RegistrationSnapshot;
         setRegistration(value);
         setGuides((setup as { guides: Guide[] }).guides);
-        setChoice(
-          Math.max(
+        updateSelection({
+          type: "loaded",
+          index: Math.max(
             0,
             agents.findIndex((agent) => agent.executor === value.executor),
           ),
-        );
+        });
       })
       .catch(() => {
         if (current) setError("Setup couldn't load. Check the server and try again.");
@@ -220,7 +226,7 @@ function AgentSetup({
                 aria-pressed={choice === index}
                 disabled={busy}
                 onClick={() => {
-                  setChoice(index);
+                  updateSelection({ type: "choose", index });
                   setMessage("");
                   setError("");
                 }}

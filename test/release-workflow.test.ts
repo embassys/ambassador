@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-test("main publishes the Embassys 0.2.21 candidate through npm OIDC after approval", async () => {
+test("main publishes the Embassys 0.2.22 candidate through npm OIDC after approval", async () => {
   const workflow = await readFile(join(process.cwd(), ".github", "workflows", "cli.yml"), "utf8");
 
   assert.match(workflow, /push:\n {4}branches: \[main\]/u);
@@ -38,7 +38,7 @@ test("main publishes the Embassys 0.2.21 candidate through npm OIDC after approv
     await readFile(join(process.cwd(), "package.json"), "utf8"),
   ) as Record<string, unknown>;
   assert.equal(packageJson.name, "embassys");
-  assert.equal(packageJson.version, "0.2.21");
+  assert.equal(packageJson.version, "0.2.22");
   assert.deepEqual(packageJson.engines, { node: ">=24.19.0" });
   assert.deepEqual(packageJson.publishConfig, { access: "public" });
 });

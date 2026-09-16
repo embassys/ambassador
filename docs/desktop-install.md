@@ -1,17 +1,17 @@
 # Install Embassys
 
 Download the application for your computer from the
-[Embassys 0.1.4 release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4).
+[Embassys 0.1.5 release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.5).
 Choose an application file in Assets, not GitHub's source-code archives. You do
 not need to install Node or build Embassys yourself. You do need an installed,
 authenticated agent to handle incoming requests.
 
 | Computer | Download | Qualification |
 | --- | --- | --- |
-| Mac with Apple silicon, M1 or newer | [Embassys-0.1.4-darwin-arm64-development.dmg](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-darwin-arm64-development.dmg) | Native Mac UI and live one-code Claude Code onboarding; earlier four-agent connection tests |
-| Windows x64 | [Embassys-0.1.4-win32-x64-development.zip](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-win32-x64-development.zip) | Experimental; automated packaged-runtime tests |
-| Linux x64 | [Embassys-0.1.4-linux-x64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-linux-x64-development.tar.gz) | Experimental; automated packaged-runtime tests; sandbox setup may be required |
-| Linux ARM64, including the Raspberry Pi target below | [Embassys-0.1.4-linux-arm64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.4/Embassys-0.1.4-linux-arm64-development.tar.gz) | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
+| Mac with Apple silicon, M1 or newer | [Embassys-0.1.5-darwin-arm64-development.dmg](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.5/Embassys-0.1.5-darwin-arm64-development.dmg) | Live one-code Codex onboarding, permission and owner-answer round trip; OpenClaw and Hermes Connect checks |
+| Windows x64 | [Embassys-0.1.5-win32-x64-development.zip](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.5/Embassys-0.1.5-win32-x64-development.zip) | Experimental; automated packaged-runtime tests |
+| Linux x64 | [Embassys-0.1.5-linux-x64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.5/Embassys-0.1.5-linux-x64-development.tar.gz) | Experimental; automated packaged-runtime tests; sandbox setup may be required |
+| Linux ARM64, including the Raspberry Pi target below | [Embassys-0.1.5-linux-arm64-development.tar.gz](https://github.com/embassys/ambassador/releases/download/desktop-v0.1.5/Embassys-0.1.5-linux-arm64-development.tar.gz) | Experimental; automated ARM64 runtime tests, physical Pi testing outstanding |
 
 There is no Intel Mac or Windows ARM download in this release. These are
 unsigned development packages. Managed computers may refuse to run them.
@@ -89,7 +89,7 @@ automatically. A connection does not grant access to actions or private data.
 Review permission requests, answer questions and manage grants in the app.
 
 The app and its bundled CLI can hand off the same installation. This release
-bundles Ambassador 0.2.20. The CLI is named `embassys` from 0.2.21 onward;
+bundles Embassys CLI 0.2.22. The CLI is named `embassys` from 0.2.21 onward;
 install it with `npm install -g embassys` and start it with `embassys`.
 Its state location and MCP connection names remain the same.
 Use the app's **Use the CLI**
@@ -100,8 +100,8 @@ release's state.
 
 - Disconnect recovery now uses durable submission keys, message leases and
   retryable receipts. It cannot recover expired operations or replay a provider
-  prompt whose outcome is uncertain. The current development branch also reads account-wide messages without
-  consuming pending work. The published 0.1.4 app retains local conversations.
+  prompt whose outcome is uncertain. Account-wide history reads do not consume pending work. Local conversations
+  and retained account messages appear in the sidebar.
 - Native remote push needs configured server credentials and signed-device
   qualification. Running-app notifications remain available.
 - Fresh Cowork chats sometimes need "Use the Embassys connector." OpenClaw
@@ -112,13 +112,14 @@ release's state.
   redaction. They expire after seven days while the app runs or logs are next
   opened, with a 1 GiB limit per instance. Clear logs and export are in Settings.
 - There are no automatic updates or a general state-migration guarantee.
-- The earlier four installed-agent tests used synthetic central data. Codex
-  required a model supported by its installed adapter; the test used `gpt-5.5`
-  with high reasoning. Embassys does not change the provider's model setting.
+- Codex uses the refreshed bundled adapter and passed a live test with the
+  existing `gpt-6-astra` setting. Embassys does not change provider models.
 - Native Claude Code one-code onboarding passed against deployed central on
   September 14, including setup approvals, restart and disconnect cleanup.
   Interrupted first-agent creation and stale registration recovery also passed
-  live. Native Codex, OpenClaw and Hermes button walkthroughs remain outstanding.
+  live. On September 16, native Codex onboarding and a real action round trip
+  passed, as did OpenClaw and Hermes Connect dialogs and identity checks. Claude
+  Code could not be requalified on that date because its provider login expired.
 
 Checksums and dependency inventories are attached beside the downloads. See the
 [work plan](implementation-plan.md) for the remaining reliability and platform

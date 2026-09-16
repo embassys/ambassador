@@ -1,11 +1,25 @@
 # Current work
 
+## September 16 release preparation
+
+[The release candidate](release-candidate-2026-09-16.md) prepares CLI 0.2.22 and
+desktop 0.1.5 on a separate branch. It includes the native-tested expired-code
+fix and a narrow Hono security patch. All 14 local Mac qualification stages and
+all ten platform CI jobs passed. The packaged Mac app's setup and service
+controls also passed native checks. The real MCP transport held a request for
+600.008 seconds and resumed the same operation on a later check without duplicate
+dispatch. Mailosaur access was restored on September 16. Deployed signup,
+accepted-action restrictions, existing-grant dispatch and read-only history
+isolation passed. A real Codex exchange through the packaged app passed owner
+approval, typed input and delivery of the exact result. All 14 final Mac stages passed again after the onboarding fixes and Codex
+adapter refresh. Final platform CI and publication remain outstanding.
+
 ## Current usernames and accepted requests, September 15
 
 The owner has requested live qualification, merge and a paired release.
 [The follow-up record](release-readiness-2026-09-15.md) tracks the current checks,
 corrected recovery guidance, fresh provider-source review and remaining external
-test prerequisites. Versions remain unchanged until live qualification can finish.
+test prerequisites. Published versions remain unchanged until live qualification can finish.
 
 Implemented under [ADR 0087](adr/0087-usernames-and-accepted-actions.md). CLI
 signup now asks for a username, catalog reads preserve review metadata, targeted
@@ -22,16 +36,15 @@ and immediate removal of stopped-provider questions from the owner's server inbo
 Existing exact grants remain usable after accepted-list changes, without sending
 another permission request. Central revocation, scope and use limits still apply.
 
-Remaining qualification: fresh live signup and protected availability calls need
-a working test inbox; the saved Mailosaur credential still returns HTTP 401 on
-September 16. Native Mac access is restored. The app's welcome and email screens
-were inspected, and two fresh Cowork tasks found Embassys after enabling its
-discovery skill. Native inspection also found stale code-entry guidance after
-an expired sign-in challenge; the account snapshot now requests a new code
-without sending another email automatically. Browser security policy blocked
-the separate local preview, which is not counted as a UI test. Server issue
-[22](https://github.com/embassys/agent2agent/issues/22) tracks owner username choice
-and roster visibility. This branch has not been released.
+Live signup and protected availability checks passed after Mailosaur access was
+restored on September 16. Native Mac access is restored. Two fresh Cowork tasks
+found Embassys after enabling its discovery skill. Native inspection found and
+fixed stale expired-code guidance, an agent-selection reset during first-device
+setup, and typed owner answers missing from the visible conversation. The Codex
+adapter was refreshed to support the owner's existing model. Browser security
+policy blocked the separate local preview, which is not counted as a UI test.
+Server issue [22](https://github.com/embassys/agent2agent/issues/22) tracks owner
+username choice and roster visibility. This branch has not been released.
 
 ## Embassys CLI name, September 15
 
@@ -127,17 +140,19 @@ Remaining:
 - [ ] Qualify signed native push with configured server credentials and actual
   devices. The live server reports no push credentials. Windows still needs an
   approved native WNS bridge; Linux uses running-app notifications.
-- [ ] Finish live queue-isolation qualification for account history under ADR 0085.
-  The client integration and independent server contract review are implemented;
-  the September 15 live run stopped at test-mailbox authentication.
+- [x] Live queue-isolation qualification passed on September 16. Reading a queued
+  action twice through owner history left it available to the ordinary receiver,
+  which stored, acknowledged and completed the same action.
 - [ ] Follow the separate DPoP wire/nonce decision in issue 14. Keep the current
   protocol until a coordinated change is accepted.
-- [ ] Finish the native Codex, OpenClaw and Hermes one-code button/dialog
-  walkthroughs after restoring test-mailbox access. Installed-agent connection
-  checks passed for all three. Claude Code needs its expired provider login
-  refreshed before another connection check. The old archive helper now accepts
-  the package; a complete delivery qualification still needs its documented
-  central/webhook fixtures and provider configuration.
+- [x] Native Codex, OpenClaw and Hermes Connect dialogs and fresh-session
+  identity checks passed on September 16. The one-code Codex onboarding flow
+  also completed a real incoming action through owner input and result delivery.
+  These checks do not qualify experimental native conversation return.
+- [ ] Claude Code needs its expired provider login refreshed for another live
+  connection test. Normal provider authentication remains unchanged.
+- [ ] Qualify the separate real-provider archive helper with its documented
+  central/webhook fixtures; its current-package parsing checks pass.
 
 After issue 15 was deployed, protected live tests passed leased redelivery,
 release/repeated acknowledgement, lost-response recovery for all four supported
@@ -174,10 +189,10 @@ Implemented under [ADR 0085](adr/0085-account-communication-history.md):
   rather than being presented as outstanding work.
 
 See [September 15 test evidence](account-history-and-mac-test-2026-09-15.md).
-The live Mac flow reached real email verification, but Mailosaur rejected the
-saved test credential with HTTP 401. The request for restored mailbox access or
-an owner-supplied test address is pending. This prevents claiming the full live
-flow or the remaining native provider walkthroughs passed.
+The September 15 live Mac flow stopped at a Mailosaur authentication failure.
+The owner restored access on September 16, and the live signup, protected API,
+account-history isolation and native Codex round trip subsequently passed. See
+the [current release record](release-candidate-2026-09-16.md).
 
 Provider limitations remain explicit. Fresh Sonnet 5 Cowork still needed a
 connector hint in the retest, then correctly sent setup to the app instead of
@@ -188,6 +203,9 @@ return. Foreground waits and durable later checks remain supported.
 
 ## Later work and external inputs
 
+- Group correlated account owner replies more clearly in history. The server
+  records them under the self identity pair, separate from the local peer chat.
+  Current delivery and action deduplication are unaffected.
 - Signed installers, notarization, automatic updates and launch-at-login
   qualification need release credentials and the chosen distribution channel.
 - Native push needs configured APNs/WNS credentials, signed device identities

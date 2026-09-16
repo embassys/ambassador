@@ -9,3 +9,14 @@ export function onboardingKey(
   if (owner.status !== "signed_in" || !identity || !instanceId) return undefined;
   return `embassys.onboarding.v1:${identity}:${instanceId}`;
 }
+
+export type OnboardingAgentChoice = { index: number; chosen: boolean };
+export type OnboardingAgentChoiceEvent = { type: "choose" | "loaded"; index: number };
+
+export function updateOnboardingAgentChoice(
+  state: OnboardingAgentChoice,
+  event: OnboardingAgentChoiceEvent,
+): OnboardingAgentChoice {
+  if (event.type === "loaded" && state.chosen) return state;
+  return { index: event.index, chosen: event.type === "choose" || state.chosen };
+}
