@@ -64,11 +64,66 @@ checks pass. Merging a new CLI version to main triggers npm publication.
    preserving normal provider authentication and exact offered options. Keep
    foreground waits as the supported path where native return remains unqualified.
 
-The saved Mailosaur key returns 401 on the actual message-search endpoint as well
-as the server-list endpoint. Safari has no signed-in Mailosaur session. The owner
-has been asked to restore access or supply an inbox whose codes they can provide.
-No signup is sent to an inaccessible inbox, no verification is bypassed, and
-fixture success is not reported as a deployed-service pass.
+## Deployed-service retest after mailbox repair
+
+Mailosaur authenticated message search returned HTTP 200 at 07:22 UTC on
+September 16. The following runs use disposable identities and synthetic data.
+
+- A clean-installed packed CLI passed real enrollment and email verification,
+  encrypted restart, DPoP positive/negative checks, permission email, exact
+  provider-tool approval choices, action/result delivery, durable custody before
+  acknowledgement, clean and credential-redaction checks. Its ACP peer is a
+  controlled test process, not a real provider.
+- Actual client classes passed chosen-username signup, reviewed catalog discovery,
+  unrestricted/selected/empty accepted lists, username lookup and both local and
+  server refusal outside a peer's list. An existing exact grant still dispatched
+  after closing new requests, without asking permission again.
+- Two owner-history reads over the same queued action preserved its message ID
+  and left it unacknowledged. Normal reception then stored, acknowledged and
+  completed it. Progress and retention metadata were checked.
+- The actual packaged Mac app completed one-code owner setup and Codex connection.
+  An incoming synthetic phone request was approved once in the native dialog.
+  Real Codex asked the owner for a number through Embassys; the typed answer
+  reached the requesting agent as the exact successful result. The final
+  conversation and onboarding steps have native screenshots.
+- OpenClaw and Hermes Connect dialogs passed, and fresh provider sessions
+  confirmed the same enrolled email through the actual local MCP service. These
+  checks do not qualify their experimental native conversation-return features.
+- In the final packaged app, the Accepted requests sheet saved a phone-only
+  list and then an empty list against production, showing the confirmed state
+  each time. Signing out cleared account views and Quit stopped the test server.
+- Claude Code still could not verify because its provider login expired. The
+  native UI kept the configured state and offered Test connection without
+  repeating signup. The September 14 live Claude onboarding evidence remains
+  separate from this unverified retry.
+
+The native run exposed two UI defects. Agent selection reset to Claude while
+first-device credential installation restarted the worker, even though Codex
+setup was in flight. The selection now survives late registration reads. Typed
+owner answers reached the agent but their text was absent from the conversation
+bubble; the renderer now includes it. Both fixes have failing-then-passing
+regression checks. The rebuilt native app also shows the exact synthetic answer
+in its saved conversation after restart.
+
+Bundled Codex 0.152.1 could not use the owner's existing `gpt-6-astra` setting.
+The approved wildcard dependency was refreshed to ACP 1.11.0 / Codex 0.153.4
+without changing the model, provider authentication or the minimum package age.
+The native connection and real action round trip passed after that refresh.
+The refreshed production audit has zero findings and all 248 signatures verify.
+
+The server also records owner answers as messages from an agent to itself.
+Account history displays that identity pair separately from the local peer
+conversation. This is a presentation limitation, not a duplicate action or a
+second result. Correlating those account records with their originating request
+needs a separate history presentation change; the current pair-based contract is
+preserved.
+
+The final Mac qualifier passed all 14 stages after these fixes: 634 repository
+tests with six expected skips, 55 desktop checks and two clean-install flows,
+plus all packaged runtime, archive, lifecycle and CLI/app handoff checks. The
+background app measured 186.7 MiB across five processes and 0.10% of one CPU core
+over ten seconds. Platform CI must also pass the final source before merge; the
+earlier candidate workflows do not qualify later edits.
 
 The production OpenAPI document still contains 71 paths and its schemas match
 the September 15 reviewed snapshot. Server main is still `d5365b7`. The last

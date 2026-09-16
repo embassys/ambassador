@@ -23,3 +23,14 @@ its dependencies through the existing package ranges, so qualify that installed
 graph separately as well. Full local platform checks and all platform CI gates
 must pass on the resulting release candidate. This maintenance does not replace
 the required deployed-service qualification.
+
+## Codex native qualification follow-up
+
+The live packaged-app test then reached Codex but failed because bundled Codex
+0.152.1 could not use the owner's existing `gpt-6-astra` selection. Refresh the
+already approved wildcard ACP dependency in the lockfile. The unchanged 24-hour
+minimum age selects `@agentclientprotocol/codex-acp` 1.11.0 with Codex 0.153.4;
+adapter 1.12.0 is still too new. No package name, direct requirement, ACP SDK
+version, provider model, authentication or approval policy changes. Retest the
+native connection, dependency audit, signatures and packaged platform gates
+before treating the refreshed adapter as qualified.

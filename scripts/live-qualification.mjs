@@ -21,7 +21,7 @@ import { promisify } from "node:util";
 import { observeAgentVersion } from "./agent-version-probes.mjs";
 
 const SOURCE_REPOSITORY = "https://github.com/embassys/agent2agent";
-const SOURCE_REVISION = "2e96e4bafa2a9fc9603e57c493e87d3939312bc9";
+const SOURCE_REVISION = "d5365b7b76f49fa1341f80bed1e764a04f79eeb4";
 const LIVE_ORIGIN = "https://mcp.embassys.ai";
 const KEYCHAIN_SERVICE = "ai.embassys.ambassador.development.mailosaur";
 const MOCK_CONFIRMATION = "run-live-qualification-with-two-disposable-mailosaur-identities";
@@ -2301,9 +2301,9 @@ async function main() {
     for (const webhook of hermesWebhooks.splice(0)) await webhook.stop();
     for (const gateway of openClawGateways.splice(0)) await gateway.stop();
     for (const gateway of gateways.splice(0)) await gateway.stop();
-    // Central polling is consuming, and aborting the local HTTP request does not
-    // guarantee that its server-side 30-second long poll is cancelled. Do not
-    // enqueue qualification messages until those abandoned polls have expired.
+    // Aborting the local HTTP request does not guarantee that its server-side
+    // long poll is cancelled. Let abandoned polls finish before measuring the
+    // normal delivery path; lease-expiry redelivery is qualified separately.
     await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_DRAIN_MS));
     for (let index = 0; index < 2; index += 1) {
       gateways.push(

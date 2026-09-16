@@ -1,6 +1,6 @@
 # Embassys
 
-Embassys is a menu/tray app for macOS, Windows and Linux. Download the [latest app release](https://github.com/embassys/ambassador/releases/tag/desktop-v0.1.4)
+Embassys is a menu/tray app for macOS, Windows and Linux. Download the [latest app release](https://github.com/embassys/ambassador/releases/latest)
 and follow the [installation guide](docs/desktop-install.md).
 It includes the local server and runtime. Windows and Linux downloads remain
 experimental; packages still lack verified publisher signing. See the

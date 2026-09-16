@@ -61,6 +61,21 @@ test("owner answers and status notifications are never attributed to the remote 
   assert.equal(incomingMessage("{broken").side, "system");
 });
 
+test("conversation shows typed owner answers as well as button choices", () => {
+  for (const [answer, expected] of [
+    [{ text: "+447700900123" }, "+447700900123"],
+    [{ value: "Work" }, "Work"],
+    [{ text: "", value: undefined }, ""],
+  ] as const) {
+    const result = incomingMessage(
+      JSON.stringify({ payload: { type: "owner_input", question: "Which one?", ...answer } }),
+    );
+    assert.equal(result.side, "owner");
+    assert.equal(result.text, "Which one?");
+    assert.equal(result.fields, expected);
+  }
+});
+
 test("refresh retains a bounded reading window, updates existing messages and clears missing history", () => {
   const page = (ids: string[]) => ({
     source: "archive" as const,

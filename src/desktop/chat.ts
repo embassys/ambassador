@@ -144,7 +144,7 @@ export function incomingMessage(text: string): {
         side: "owner",
         title: "Your answer",
         text: typeof message.question === "string" ? message.question : undefined,
-        fields: message.value,
+        fields: message.text ?? message.value,
       };
     if (message.type === "permission_outcome")
       return {

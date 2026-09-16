@@ -1,5 +1,9 @@
 # September 15 release follow-up
 
+This is the September 15 checkpoint. Mailosaur access was restored and the
+previously blocked live API, history and native Codex checks passed on September
+16. See the [current candidate record](release-candidate-2026-09-16.md).
+
 The owner requested the remaining live checks, review/merge/release, and work on
 Cowork discovery, OpenClaw display and Hermes return behavior. This records what
 can be completed without treating fixture checks as native or deployed tests.

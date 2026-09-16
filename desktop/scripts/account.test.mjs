@@ -9,7 +9,7 @@ import { build } from "esbuild";
 const root = await mkdtemp(join(tmpdir(), "embassys-account-ui-test-"));
 await build({
   stdin: {
-    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, OwnerDecisionDialog, requestItems} from './src/account.tsx'; import {Navigation, SidebarHeader, AppMenu, SettingsButton, ServiceStatus, serviceStatus, WorkspaceWelcome} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const welcome = () => renderToStaticMarkup(createElement(WorkspaceWelcome,{people:()=>{},agents:()=>{}})); export const sidebarHeader = runtime => renderToStaticMarkup(createElement(SidebarHeader,{runtime,name:'Test installation',openSettings:()=>{},select:()=>{}})); import {BackButton} from './src/controls.tsx'; export const backButton = disabled => renderToStaticMarkup(createElement(BackButton,{onClick:()=>{},label:'Back to workspace',disabled})); export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; import {PeopleIntroduction, ContactImportGuide, PeopleList} from './src/people.tsx'; export const peopleList = contacts => renderToStaticMarkup(createElement(PeopleList,{contacts,busy:false,open:()=>{},copy:()=>{}})); export const peopleIntro = () => renderToStaticMarkup(createElement(PeopleIntroduction)); export const importGuide = () => renderToStaticMarkup(createElement(ContactImportGuide,{chooseFile:()=>{}})); export {onboardingKey} from './src/onboarding-state.ts'; export {prepareOnboardingAgent} from './src/onboarding-setup.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,section:page === "people" ? "people" : page === "conversations" ? "conversations" : "inbox",selectSection:()=>{},peopleView:"saved",selectPeopleView:()=>{},inboxCount:requests?.total ?? 0,requests,selectedRequest,selectRequest:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decisionDialog = (review,busy=false) => renderToStaticMarkup(createElement(OwnerDecisionDialog,{review,busy,submit:()=>{},cancel:()=>{},returnFocus:null,fallbackFocus:null})); export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
+    contents: `import {createElement} from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {Account, AccountData, OwnerDecisionForm, OwnerDecisionDialog, requestItems} from './src/account.tsx'; import {Navigation, SidebarHeader, AppMenu, SettingsButton, ServiceStatus, serviceStatus, WorkspaceWelcome} from './src/navigation.tsx'; import {applicationMenu} from './src/application-menu.ts'; export {applicationMenu, serviceStatus}; export const welcome = () => renderToStaticMarkup(createElement(WorkspaceWelcome,{people:()=>{},agents:()=>{}})); export const sidebarHeader = runtime => renderToStaticMarkup(createElement(SidebarHeader,{runtime,name:'Test installation',openSettings:()=>{},select:()=>{}})); import {BackButton} from './src/controls.tsx'; export const backButton = disabled => renderToStaticMarkup(createElement(BackButton,{onClick:()=>{},label:'Back to workspace',disabled})); export const settingsButton = () => renderToStaticMarkup(createElement(SettingsButton,{open:()=>{}})); export const status = runtime => renderToStaticMarkup(createElement(ServiceStatus,{runtime,name:'Test installation',open:()=>{}})); import {Onboarding} from './src/onboarding.tsx'; import {PeopleIntroduction, ContactImportGuide, PeopleList} from './src/people.tsx'; export const peopleList = contacts => renderToStaticMarkup(createElement(PeopleList,{contacts,busy:false,open:()=>{},copy:()=>{}})); export const peopleIntro = () => renderToStaticMarkup(createElement(PeopleIntroduction)); export const importGuide = () => renderToStaticMarkup(createElement(ContactImportGuide,{chooseFile:()=>{}})); export {onboardingKey, updateOnboardingAgentChoice} from './src/onboarding-state.ts'; export {prepareOnboardingAgent} from './src/onboarding-setup.ts'; export {requestItems}; export const menu = () => renderToStaticMarkup(createElement(AppMenu,{select:()=>{}})); export const onboarding = owner => renderToStaticMarkup(createElement(Onboarding,{owner,call:async()=>{},changed:async()=>{},complete:()=>{},settings:()=>{}})); export const nav = (page, requests, selectedRequest) => renderToStaticMarkup(createElement(Navigation,{page,section:page === "people" ? "people" : page === "conversations" ? "conversations" : "inbox",selectSection:()=>{},peopleView:"saved",selectPeopleView:()=>{},inboxCount:requests?.total ?? 0,requests,selectedRequest,selectRequest:()=>{},sessions:[],selected:"",selectSession:()=>{}})); export {inboxEntries, selectInboxRequest} from './src/inbox-navigation.ts'; export const decisionDialog = (review,busy=false) => renderToStaticMarkup(createElement(OwnerDecisionDialog,{review,busy,submit:()=>{},cancel:()=>{},returnFocus:null,fallbackFocus:null})); export const decision = review => renderToStaticMarkup(createElement(OwnerDecisionForm,{review,busy:false,submit:()=>{},cancel:()=>{}})); export const view = (data, focusedRequest = false) => renderToStaticMarkup(createElement(AccountData, {data, focusedRequest})); export const account = (snapshot, section) => renderToStaticMarkup(createElement(Account, {snapshot,section,call:async()=>{},changed:async()=>{}}));`,
     resolveDir: process.cwd(),
     sourcefile: "account-test-entry.tsx",
   },
@@ -38,6 +38,7 @@ const {
   requestItems,
   onboarding,
   onboardingKey,
+  updateOnboardingAgentChoice,
   prepareOnboardingAgent,
   settingsButton,
   status,
@@ -654,4 +655,43 @@ test("owner decisions use a labelled modal with exact choices and no default app
   assert.match(pending, /<fieldset disabled=""/);
   assert.match(pending, /<button[^>]*disabled=""[^>]*>Cancel/);
   assert.match(pending, /Sending…/);
+});
+
+test("onboarding retains the chosen provider through installation restart and late setup reads", () => {
+  for (const index of [0, 1, 2, 3]) {
+    let choice = updateOnboardingAgentChoice(
+      { index: 0, chosen: false },
+      { type: "loaded", index: 0 },
+    );
+    choice = updateOnboardingAgentChoice(choice, { type: "choose", index });
+    // Installing execution credentials restarts the worker before its executor is saved.
+    choice = updateOnboardingAgentChoice(choice, { type: "loaded", index: 0 });
+    assert.equal(
+      choice.index,
+      index,
+      "A refresh must not change the provider used by Test connection.",
+    );
+    choice = updateOnboardingAgentChoice(choice, { type: "loaded", index: 3 });
+    assert.equal(choice.index, index, "A late response must not replace the owner's choice.");
+    choice = updateOnboardingAgentChoice(choice, { type: "choose", index: (index + 1) % 4 });
+    assert.equal(choice.index, (index + 1) % 4);
+  }
+});
+
+test("onboarding uses the saved executor until the owner chooses one, scoped to each setup", () => {
+  let choice = updateOnboardingAgentChoice(
+    { index: 0, chosen: false },
+    { type: "loaded", index: 2 },
+  );
+  assert.equal(choice.index, 2);
+  choice = updateOnboardingAgentChoice(choice, { type: "loaded", index: 3 });
+  assert.equal(choice.index, 3);
+  choice = updateOnboardingAgentChoice(choice, { type: "choose", index: 1 });
+  assert.equal(choice.index, 1);
+  // Onboarding's existing account/instance key creates fresh state for a different setup.
+  const other = updateOnboardingAgentChoice(
+    { index: 0, chosen: false },
+    { type: "loaded", index: 0 },
+  );
+  assert.equal(other.index, 0);
 });
