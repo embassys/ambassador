@@ -23,9 +23,13 @@ Existing exact grants remain usable after accepted-list changes, without sending
 another permission request. Central revocation, scope and use limits still apply.
 
 Remaining qualification: fresh live signup and protected availability calls need
-a working test inbox; the saved Mailosaur credential returns HTTP 401. Native
-Mac UI inspection needs an unlocked desktop. Browser security policy also blocked
-the local preview, so it is not counted as a UI test. Server issue
+a working test inbox; the saved Mailosaur credential still returns HTTP 401 on
+September 16. Native Mac access is restored. The app's welcome and email screens
+were inspected, and two fresh Cowork tasks found Embassys after enabling its
+discovery skill. Native inspection also found stale code-entry guidance after
+an expired sign-in challenge; the account snapshot now requests a new code
+without sending another email automatically. Browser security policy blocked
+the separate local preview, which is not counted as a UI test. Server issue
 [22](https://github.com/embassys/agent2agent/issues/22) tracks owner username choice
 and roster visibility. This branch has not been released.
 

@@ -425,6 +425,31 @@ test("a pending code email shows no failure until the request outcome is unknown
   assert.equal(s.service.snapshot().status, "signed_in");
 });
 
+test("expired sign-in challenges show a new-code prompt after restart without sending email", async (t) => {
+  const s = await setup(t);
+  await s.request({ type: "owner_request_code", email });
+  s.f.advance(599_999);
+  await s.restart();
+  assert.equal(s.service.snapshot().status, "code_sent");
+  s.f.advance(1);
+  assert.equal(s.service.snapshot().status, "reauth_required");
+  assert.equal(s.service.snapshot().issue, "code_expired");
+  assert.equal(s.service.snapshot().email, email);
+  await s.restart();
+  assert.equal(s.service.snapshot().status, "reauth_required");
+  assert.equal(s.f.calls.filter((c) => c.path === "/api/owner/start_sign_in").length, 1);
+  const verificationCalls = s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length;
+  await s.request({ type: "owner_verify", code: "314159" });
+  assert.equal(
+    s.f.calls.filter((c) => c.path === "/api/owner/verify_sign_in").length,
+    verificationCalls,
+  );
+  await s.request({ type: "owner_request_code", email });
+  assert.equal(s.service.snapshot().status, "code_sent");
+  await s.request({ type: "owner_verify", code: "314159" });
+  assert.equal(s.service.snapshot().status, "signed_in");
+});
+
 test("owner login rejects bad codes, bounds resend and exposes no session credentials", async (t) => {
   const s = await setup(t);
   assert.equal(s.service.snapshot().status, "signed_out");

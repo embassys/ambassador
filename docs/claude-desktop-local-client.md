@@ -42,9 +42,14 @@ Claude how to find the existing tools for registration checks, contact requests
 and meeting coordination. It does not create a connection or register an agent.
 
 Anthropic documents [uploading and enabling custom skills](https://support.claude.com/en/articles/12512180-using-skills-in-claude).
-This is a discovery workaround to qualify in the native client, not evidence
-that every fresh Cowork conversation finds the connector. If Claude still asks
-for a website, "Use the Embassys connector" remains the explicit fallback.
+On September 16, Claude Desktop 2.110.0 with Sonnet 5 High found the connector
+in two fresh Cowork tasks after this skill was uploaded and enabled. The prompts
+were "Am I registered with Embassys?" and "Can you get Alex's phone number from
+his agent?" Both loaded the skill, called `get_my_permissions` and directed the
+unenrolled test installation to setup in the Embassys app. Neither needed a
+website or connector hint. These tests qualify discovery and setup guidance,
+not a registered-account exchange or every future model response. If Claude
+still asks for a website, "Use the Embassys connector" remains the fallback.
 
 For a Mac app placed at `/Applications/Embassys.app`, the entry is:
 

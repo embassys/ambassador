@@ -181,6 +181,13 @@ export class OwnerAccount {
     if (this.#unavailable)
       return { context: this.#context, status: "unavailable", issue: "storage_unavailable" };
     const state = this.#state;
+    if (state.status === "code_sent" && state.expiresAt <= this.#now())
+      return {
+        context: this.#context,
+        status: "reauth_required",
+        email: state.email,
+        issue: "code_expired",
+      };
     if (state.status === "signed_in")
       return {
         context: this.#context,
