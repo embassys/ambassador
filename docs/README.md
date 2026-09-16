@@ -1,5 +1,6 @@
 # Documentation
 
+- [September 16 published release verification](release-verification-2026-09-16.md)
 - [September 16 release candidate and gates](release-candidate-2026-09-16.md)
 
 - [September 15 usernames and accepted-request adoption](central-adoption-2026-09-15.md)

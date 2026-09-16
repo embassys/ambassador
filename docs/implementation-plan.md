@@ -1,25 +1,26 @@
 # Current work
 
-## September 16 release preparation
+## September 16 release
 
-[The release candidate](release-candidate-2026-09-16.md) prepares CLI 0.2.22 and
-desktop 0.1.5 on a separate branch. It includes the native-tested expired-code
-fix and a narrow Hono security patch. All 14 local Mac qualification stages and
-all ten platform CI jobs passed. The packaged Mac app's setup and service
-controls also passed native checks. The real MCP transport held a request for
-600.008 seconds and resumed the same operation on a later check without duplicate
-dispatch. Mailosaur access was restored on September 16. Deployed signup,
-accepted-action restrictions, existing-grant dispatch and read-only history
-isolation passed. A real Codex exchange through the packaged app passed owner
-approval, typed input and delivery of the exact result. All 14 final Mac stages passed again after the onboarding fixes and Codex
-adapter refresh. Final platform CI and publication remain outstanding.
+[Embassys 0.1.5 and CLI 0.2.22 are released and verified](release-verification-2026-09-16.md).
+All 14 final Mac stages, every required PR/main CI gate, the fresh public CLI
+installation and all 16 anonymous desktop downloads passed. Mailosaur access is
+restored. Live signup, accepted-request restrictions, existing-grant dispatch,
+read-only history isolation and a real Codex owner-input/result exchange passed.
+Native OpenClaw and Hermes Connect checks also passed. Claude Code still needs
+its expired provider login refreshed for a fresh check.
+
+The release includes the expired-code, provider-selection and typed-answer UI
+fixes plus Hono and Codex adapter maintenance. The actual MCP transport held a
+600.008-second request and resumed the same operation without duplicate dispatch.
+See the [candidate evidence](release-candidate-2026-09-16.md) for test boundaries.
 
 ## Current usernames and accepted requests, September 15
 
 The owner has requested live qualification, merge and a paired release.
 [The follow-up record](release-readiness-2026-09-15.md) tracks the current checks,
 corrected recovery guidance, fresh provider-source review and remaining external
-test prerequisites. Published versions remain unchanged until live qualification can finish.
+test prerequisites. This work is now published in CLI 0.2.22 and desktop 0.1.5.
 
 Implemented under [ADR 0087](adr/0087-usernames-and-accepted-actions.md). CLI
 signup now asks for a username, catalog reads preserve review metadata, targeted
@@ -44,7 +45,7 @@ setup, and typed owner answers missing from the visible conversation. The Codex
 adapter was refreshed to support the owner's existing model. Browser security
 policy blocked the separate local preview, which is not counted as a UI test.
 Server issue [22](https://github.com/embassys/agent2agent/issues/22) tracks owner
-username choice and roster visibility. This branch has not been released.
+username choice and roster visibility. The client changes are released.
 
 ## Embassys CLI name, September 15
 

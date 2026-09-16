@@ -1,8 +1,10 @@
 # September 16 release candidate
 
 The owner requested all work and testing needed to make the release ready. The
-candidate versions are CLI `embassys@0.2.22` and desktop `0.1.5`. Public versions
-remain CLI 0.2.21 and desktop 0.1.4 until publication is verified.
+candidate versions are CLI `embassys@0.2.22` and desktop `0.1.5`. Both are now
+published and independently verified. See the
+[final release record](release-verification-2026-09-16.md). The sections below
+preserve the preparation and qualification evidence.
 
 ## Included work
 
@@ -122,8 +124,9 @@ The final Mac qualifier passed all 14 stages after these fixes: 634 repository
 tests with six expected skips, 55 desktop checks and two clean-install flows,
 plus all packaged runtime, archive, lifecycle and CLI/app handoff checks. The
 background app measured 186.7 MiB across five processes and 0.10% of one CPU core
-over ten seconds. Platform CI must also pass the final source before merge; the
-earlier candidate workflows do not qualify later edits.
+over ten seconds. All required PR and main CI jobs subsequently passed on the
+final source. The published package and desktop downloads also passed independent
+verification, recorded in the final release report.
 
 The production OpenAPI document still contains 71 paths and its schemas match
 the September 15 reviewed snapshot. Server main is still `d5365b7`. The last
