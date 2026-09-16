@@ -4,9 +4,12 @@
 
 [The release candidate](release-candidate-2026-09-16.md) prepares CLI 0.2.22 and
 desktop 0.1.5 on a separate branch. It includes the native-tested expired-code
-fix and a narrow Hono security patch. Complete platform and installed-artifact
-qualification is being run for this candidate. Production signup and protected
-API checks remain blocked by test-inbox access; publication is not complete.
+fix and a narrow Hono security patch. All 14 local Mac qualification stages and
+all ten platform CI jobs passed. The packaged Mac app's setup and service
+controls also passed native checks. The real MCP transport held a request for
+600.008 seconds and resumed the same operation on a later check without duplicate
+dispatch. Production signup and protected API checks remain blocked by test-inbox
+access; publication is not complete.
 
 ## Current usernames and accepted requests, September 15
 

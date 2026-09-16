@@ -18,11 +18,36 @@ remain CLI 0.2.21 and desktop 0.1.4 until publication is verified.
 
 ## Release gates
 
-Run the complete Mac qualifier on this candidate, including clean-installed CLI
-flows, archive extraction, bundled workers, packaged host lifecycle and CLI/app
-handoff. Run the shared core, independent Python REST fixture and platform/package
-CI checks on the same source. Verify production dependency advisories and registry
-signatures for both the frozen build and clean-installed CLI.
+The complete Mac qualifier passed all 14 stages on candidate `95c995e`. This
+includes 633 repository tests with six expected skips, 53 desktop tests, two
+clean-installed CLI checks, archive extraction, bundled workers, packaged host
+lifecycle and CLI/app handoff. There were no test failures.
+
+Both candidate workflows passed all ten required jobs:
+
+- [Core, independent Python REST fixture and native/installed packages](https://github.com/embassys/ambassador/actions/runs/35066701266)
+- [Desktop builds and distributions on Mac, Windows, Linux x64 and Linux ARM64](https://github.com/embassys/ambassador/actions/runs/35066701263)
+
+The frozen production audit reports no vulnerabilities and verifies all 248
+registry signatures. Clean-installed dependency audits and signatures also pass
+the platform gates. The background Mac app used 186 MiB across five processes
+and 0.00% idle CPU during the ten-second sample. This measures an unenrolled
+instance with no provider running.
+
+The actual packaged Mac app was checked through its native interface with an
+isolated profile. About shows version 0.1.5. The welcome and registration screens
+render, invalid email is rejected locally, Stop/Start changes the server state,
+Clean can be cancelled before stopping, and Escape closes the settings sheet
+with focus restored. Closing the window leaves MCP available; quitting stops
+the owned server. The temporary profile was removed. Screenshots and results
+are retained with the candidate evidence. No live registration or protected
+mutation was sent during this walkthrough.
+
+The wall-clock MCP check held the initial request for 600.008 seconds and
+returned its continuation. A later check resumed the same operation and
+dispatched it once after permission arrived. There was one permission request
+and one action call. This exercised the real SDK, Streamable HTTP and MessageBox
+with a controlled central fixture; it does not qualify every provider's timeout.
 
 Keep the release branch separate from main until the following deployed-service
 checks pass. Merging a new CLI version to main triggers npm publication.
