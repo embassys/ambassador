@@ -22,7 +22,7 @@ importers:
         version: 2.0.0
       '@modelcontextprotocol/node':
         specifier: 2.0.0
-        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.4)
+        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
@@ -877,8 +877,8 @@ packages:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
 
-  hono@4.13.4:
-    resolution: {integrity: sha512-AGEwKIyRMHRv1t8Wjwa3LHxQ61X5CqrdFT+4BRNTpqS5aJNnpl5WLjADb7vFlJzI/8uK7T5QLVApCMQKNa3LgQ==}
+  hono@4.13.5:
+    resolution: {integrity: sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==}
     engines: {node: '>=16.9.0'}
 
   http-errors@2.0.1:
@@ -1488,9 +1488,9 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@hono/node-server@1.19.17(hono@4.13.4)':
+  '@hono/node-server@1.19.17(hono@4.13.5)':
     dependencies:
-      hono: 4.13.4
+      hono: 4.13.5
 
   '@malept/cross-spawn-promise@2.0.0':
     dependencies:
@@ -1510,16 +1510,16 @@ snapshots:
     dependencies:
       zod: 4.4.3
 
-  '@modelcontextprotocol/node@2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.4)':
+  '@modelcontextprotocol/node@2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)':
     dependencies:
-      '@hono/node-server': 1.19.17(hono@4.13.4)
+      '@hono/node-server': 1.19.17(hono@4.13.5)
       '@modelcontextprotocol/server': 2.0.0
     optionalDependencies:
-      hono: 4.13.4
+      hono: 4.13.5
 
   '@modelcontextprotocol/sdk@1.30.0(zod@4.4.3)':
     dependencies:
-      '@hono/node-server': 1.19.17(hono@4.13.4)
+      '@hono/node-server': 1.19.17(hono@4.13.5)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -1529,7 +1529,7 @@ snapshots:
       eventsource-parser: 3.1.1
       express: 5.2.1
       express-rate-limit: 8.7.0(express@5.2.1)
-      hono: 4.13.4
+      hono: 4.13.5
       jose: 6.2.10
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -1937,7 +1937,7 @@ snapshots:
     dependencies:
       function-bind: 1.1.2
 
-  hono@4.13.4: {}
+  hono@4.13.5: {}
 
   http-errors@2.0.1:
     dependencies:

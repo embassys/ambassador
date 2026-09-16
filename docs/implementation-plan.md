@@ -1,11 +1,19 @@
 # Current work
 
+## September 16 release preparation
+
+[The release candidate](release-candidate-2026-09-16.md) prepares CLI 0.2.22 and
+desktop 0.1.5 on a separate branch. It includes the native-tested expired-code
+fix and a narrow Hono security patch. Complete platform and installed-artifact
+qualification is being run for this candidate. Production signup and protected
+API checks remain blocked by test-inbox access; publication is not complete.
+
 ## Current usernames and accepted requests, September 15
 
 The owner has requested live qualification, merge and a paired release.
 [The follow-up record](release-readiness-2026-09-15.md) tracks the current checks,
 corrected recovery guidance, fresh provider-source review and remaining external
-test prerequisites. Versions remain unchanged until live qualification can finish.
+test prerequisites. Published versions remain unchanged until live qualification can finish.
 
 Implemented under [ADR 0087](adr/0087-usernames-and-accepted-actions.md). CLI
 signup now asks for a username, catalog reads preserve review metadata, targeted

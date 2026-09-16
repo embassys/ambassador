@@ -1,5 +1,7 @@
 # Documentation
 
+- [September 16 release candidate and gates](release-candidate-2026-09-16.md)
+
 - [September 15 usernames and accepted-request adoption](central-adoption-2026-09-15.md)
 - [ADR 0087: Usernames and accepted actions](adr/0087-usernames-and-accepted-actions.md)
 - [September 15 release follow-up](release-readiness-2026-09-15.md)
